@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from langchain_openai import ChatOpenAI
@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 import os
 import logging
 import time
+import json
 from datetime import datetime
 from agents.nodes import build_workflow
 
@@ -30,6 +31,15 @@ load_dotenv()
 
 app = FastAPI()
 
+# Add CORS middleware to allow streaming from any origin
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # Initialize the ChatOpenAI client
 llm = ChatOpenAI(
     model="o4-mini-2025-04-16"
@@ -50,51 +60,91 @@ async def chat_message(chat_message: ChatMessage):
     request_id = f"req_{int(time.time())}_{hash(chat_message.message)%1000}"
     logger.info(f"[{request_id}] New chat message received: {chat_message.message[:50]}...")
     
+    # Get the existing HTML content from page.html
     try:
-        start_time = time.time()
-        logger.info(f"[{request_id}] Sending request to AI model")
+        with open("page.html", "r") as f:
+            existing_html_content = f.read()
+    except FileNotFoundError:
+        existing_html_content = ""
 
-        # Get the existing HTML content from page.html
+    # Define a generator function to stream the response
+    async def response_generator():
         try:
-            with open("page.html", "r") as f:
-                existing_html_content = f.read()
-        except FileNotFoundError:
-            existing_html_content = ""
-
-        ## New step: Figure out the user's intent, and then based on their response, call the appropriate function.
-        # Write AI response to page.html
-        graph = build_workflow()
-        output = graph.invoke({
-            "messages": [HumanMessage(content=chat_message.message)],
-            "initial_user_message": chat_message.message,
-            "existing_html_content": existing_html_content
-        })
-
-        langgraph_messages = output.get("messages", [])
-        # Convert LangChain message objects to JSON serializable format
-        serializable_messages = []
-        for msg in langgraph_messages:
-            serializable_messages.append({
-                "type": msg.__class__.__name__,
-                "content": msg.content
-            })
-
-        return JSONResponse(content={
-            "messages": serializable_messages,
-            "request_id": request_id,
-        })
-        
-    except Exception as e:
-        logger.error(f"[{request_id}] Error processing message: {str(e)}", exc_info=True)
-        return JSONResponse(
-            content={
-                "message": f"Error: {str(e)}",
+            logger.info(f"[{request_id}] Starting streaming response")
+            
+            # Initial response with request ID
+            yield json.dumps({
+                "type": "start",
                 "request_id": request_id
-            }, 
-            status_code=500
-        )
-    finally:
-        logger.info(f"[{request_id}] Request completed")
+            }) + "\n"
+            
+            # Build graph and create stream
+            graph = build_workflow()
+            stream = graph.stream({
+                "messages": [HumanMessage(content=chat_message.message)],
+                "initial_user_message": chat_message.message,
+                "existing_html_content": existing_html_content
+            }, stream_mode="updates")
+            
+            # Track the final state to serialize at the end
+            final_state = None
+            
+            # Stream each chunk
+            for chunk in stream:
+                if chunk is not None:
+                    # For each node output in the chunk
+                    for node, value in chunk.items():
+                        if value is not None:
+                            # Log the streaming output
+                            logger.info(f"[{request_id}] Stream update from {node}: {str(value)[:100]}...")
+                            
+                            # Send node update
+                            yield json.dumps({
+                                "type": "update",
+                                "node": node,
+                                "value": str(value)  # Convert value to string for safety
+                            }) + "\n"
+                    
+                    # Update our final state tracking
+                    final_state = chunk
+            
+            # After streaming completes, send the final serialized messages
+            if final_state and "messages" in final_state:
+                messages = final_state.get("messages", [])
+                serializable_messages = []
+                for msg in messages:
+                    serializable_messages.append({
+                        "type": msg.__class__.__name__,
+                        "content": msg.content
+                    })
+                
+                # Send the final compiled messages
+                yield json.dumps({
+                    "type": "final",
+                    "messages": serializable_messages,
+                    "request_id": request_id
+                }) + "\n"
+            
+            yield json.dumps({
+                "type": "end",
+                "request_id": request_id
+            }) + "\n"
+            
+        except Exception as e:
+            logger.error(f"[{request_id}] Error in stream: {str(e)}", exc_info=True)
+            yield json.dumps({
+                "type": "error",
+                "error": str(e),
+                "request_id": request_id
+            }) + "\n"
+        finally:
+            logger.info(f"[{request_id}] Stream completed")
+
+    # Return a streaming response
+    return StreamingResponse(
+        response_generator(),
+        media_type="text/event-stream"
+    )
 
 @app.get("/chat", response_class=HTMLResponse)
 async def chat():

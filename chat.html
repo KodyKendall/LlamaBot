@@ -177,6 +177,21 @@
             border: none;
             background-color: var(--chat-bg);
         }
+
+        /* New styles for streaming updates */
+        .stream-updates {
+            font-size: 0.8rem;
+            color: #8e8e8e;
+            margin-top: 5px;
+            font-style: italic;
+        }
+
+        .node-update {
+            margin-bottom: 3px;
+            padding: 2px 5px;
+            background: rgba(76, 175, 80, 0.1);
+            border-radius: 3px;
+        }
     </style>
 </head>
 <body>
@@ -213,12 +228,27 @@
                 spinner.style.display = 'block';
                 inputArea.classList.add('loading');
                 
+                // Add user message to the UI
                 const newMessage = document.createElement('div');
                 newMessage.className = 'message user-message';
                 newMessage.textContent = messageText;
                 messageHistory.appendChild(newMessage);
-
+                
+                // Clear input field
+                input.value = '';
+                
+                // Create a placeholder for the AI response
+                const aiResponsePlaceholder = document.createElement('div');
+                aiResponsePlaceholder.className = 'message ai-message';
+                
+                // Add a text node first so we can update it
+                const initialText = document.createTextNode('Waiting for response...');
+                aiResponsePlaceholder.appendChild(initialText);
+                
+                messageHistory.appendChild(aiResponsePlaceholder);
+                
                 try {
+                    // Set up fetch for streaming
                     const response = await fetch('http://localhost:8000/chat-message', {
                         method: 'POST',
                         headers: {
@@ -231,31 +261,90 @@
                         throw new Error(`HTTP error! status: ${response.status}`);
                     }
                     
-                    const data = await response.json();
+                    // Set up the reader for the stream
+                    const reader = response.body.getReader();
+                    const decoder = new TextDecoder();
+                    let buffer = '';
                     
-                    // Create and display server response
-                    const serverResponse = document.createElement('div');
-                    serverResponse.className = 'message ai-message';
-                    serverResponse.textContent = data.message;
-                    messageHistory.appendChild(serverResponse);
-
-                    // If the decision is WRITE_CODE, refresh the iframe
-                    if (data.decision === "WRITE_CODE") {
-                        setTimeout(() => {
-                            iframe.src = iframe.src;
-                        }, 100);
+                    // Process the stream
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        
+                        if (done) {
+                            break;
+                        }
+                        
+                        // Decode the chunk and add to buffer
+                        buffer += decoder.decode(value, { stream: true });
+                        
+                        // Process complete lines in the buffer
+                        const lines = buffer.split('\n');
+                        buffer = lines.pop() || ''; // Keep the last incomplete line in the buffer
+                        
+                        for (const line of lines) {
+                            if (line.trim() === '') continue;
+                            
+                            try {
+                                const data = JSON.parse(line);
+                                
+                                if (data.type === 'start') {
+                                    console.log('Stream started:', data.request_id);
+                                } 
+                                else if (data.type === 'update') {
+                                    console.log(`Update from ${data.node}:`, data.value);
+                                    
+                                    // Create or get the stream updates container
+                                    let streamUpdates = aiResponsePlaceholder.querySelector('.stream-updates');
+                                    if (!streamUpdates) {
+                                        streamUpdates = document.createElement('div');
+                                        streamUpdates.className = 'stream-updates';
+                                        aiResponsePlaceholder.appendChild(streamUpdates);
+                                    }
+                                    
+                                    // Create a new node update element
+                                    const nodeUpdate = document.createElement('div');
+                                    nodeUpdate.className = 'node-update';
+                                    nodeUpdate.textContent = `${data.node}: ${data.value.substring(0, 100)}${data.value.length > 100 ? '...' : ''}`;
+                                    streamUpdates.appendChild(nodeUpdate);
+                                    
+                                    // Update placeholder text to show we're receiving data
+                                    aiResponsePlaceholder.firstChild.textContent = 'Receiving updates...';
+                                    
+                                    // Scroll to the latest update
+                                    messageHistory.scrollTop = messageHistory.scrollHeight;
+                                } 
+                                else if (data.type === 'final') {
+                                    // Display the final message content
+                                    if (data.messages && data.messages.length > 0) {
+                                        const lastMessage = data.messages[data.messages.length - 1];
+                                        
+                                        // Replace the entire content of the placeholder
+                                        aiResponsePlaceholder.innerHTML = '';
+                                        aiResponsePlaceholder.textContent = lastMessage.content;
+                                    }
+                                    
+                                    // Refresh the iframe if HTML was updated
+                                    setTimeout(() => {
+                                        iframe.src = iframe.src;
+                                    }, 100);
+                                } 
+                                else if (data.type === 'error') {
+                                    aiResponsePlaceholder.textContent = `Error: ${data.error}`;
+                                    aiResponsePlaceholder.style.color = '#ff6b6b';
+                                }
+                            } catch (e) {
+                                console.error('Error parsing stream data:', e, line);
+                            }
+                        }
                     }
+                    
                 } catch (error) {
-                    const errorMessage = document.createElement('div');
-                    errorMessage.className = 'message ai-message';
-                    errorMessage.style.color = '#ff6b6b';
-                    errorMessage.textContent = `Error: ${error.message}`;
-                    messageHistory.appendChild(errorMessage);
+                    aiResponsePlaceholder.textContent = `Error: ${error.message}`;
+                    aiResponsePlaceholder.style.color = '#ff6b6b';
                 } finally {
                     spinner.style.display = 'none';
                     inputArea.classList.remove('loading');
                     messageHistory.scrollTop = messageHistory.scrollHeight;
-                    input.value = '';
                 }
             }
         }
