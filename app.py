@@ -84,7 +84,7 @@ async def chat_message(chat_message: ChatMessage):
                 "messages": [HumanMessage(content=chat_message.message)],
                 "initial_user_message": chat_message.message,
                 "existing_html_content": existing_html_content
-            }, stream_mode="updates")
+            }, stream_mode=["values", "updates", "messages"])
             
             # Track the final state to serialize at the end
             final_state = None
@@ -93,7 +93,22 @@ async def chat_message(chat_message: ChatMessage):
             for chunk in stream:
                 if chunk is not None:
                     # For each node output in the chunk
-                    for node, value in chunk.items():
+                    if isinstance(chunk, dict):
+                        # Handle dictionary format (most common)
+                        for node, value in chunk.items():
+                            if value is not None:
+                                # Log the streaming output
+                                logger.info(f"[{request_id}] Stream update from {node}: {str(value)[:100]}...")
+                                
+                                # Send node update
+                                yield json.dumps({
+                                    "type": "update",
+                                    "node": node,
+                                    "value": str(value)  # Convert value to string for safety
+                                }) + "\n"
+                    elif isinstance(chunk, tuple) and len(chunk) == 2:
+                        # Handle tuple format (node, value)
+                        node, value = chunk
                         if value is not None:
                             # Log the streaming output
                             logger.info(f"[{request_id}] Stream update from {node}: {str(value)[:100]}...")
@@ -104,15 +119,20 @@ async def chat_message(chat_message: ChatMessage):
                                 "node": node,
                                 "value": str(value)  # Convert value to string for safety
                             }) + "\n"
+                    else:
+                        # Handle other formats or just log
+                        logger.info(f"[{request_id}] Received chunk in unknown format: {type(chunk)}")
                     
-                    # Update our final state tracking
-                    final_state = chunk
+                    # Update our final state tracking - use the most recent complete state
+                    if isinstance(chunk, dict) and "messages" in chunk:
+                        final_state = chunk
             
             # After streaming completes, send the final serialized messages
             if final_state and "messages" in final_state:
                 messages = final_state.get("messages", [])
                 serializable_messages = []
                 for msg in messages:
+                    # Only extract the essential information we need
                     serializable_messages.append({
                         "type": msg.__class__.__name__,
                         "content": msg.content

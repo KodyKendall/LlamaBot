@@ -467,6 +467,12 @@
                                     // Get the nodes container
                                     const nodesContainer = aiResponsePlaceholder.querySelector('.nodes-container');
                                     
+                                    // Check if we have a valid node name
+                                    if (!data.node) {
+                                        console.error("Missing node name in update:", data);
+                                        return; // Skip this update
+                                    }
+                                    
                                     // If this is a new node, create its container
                                     if (!processedNodes.has(data.node)) {
                                         // If there was a previously active node, mark it as complete
@@ -494,21 +500,56 @@
                                     
                                     // Update the node's content with the latest data
                                     const nodeContent = aiResponsePlaceholder.querySelector(`#node-${data.node} .node-content`);
+                                    if (!nodeContent) {
+                                        console.error("Could not find node content element for:", data.node);
+                                        return; // Skip if we can't find the node content element
+                                    }
                                     
-                                    // Format the content based on the node type
+                                    // Parse the value to detect if it contains messages or other structured data
+                                    let parsedValue = data.value;
+                                    try {
+                                        // Check if the value is stringified JSON
+                                        if (data.value.startsWith('{') || data.value.startsWith('[')) {
+                                            const parsed = JSON.parse(data.value);
+                                            parsedValue = parsed;
+                                            
+                                            // Check if this contains messages
+                                            if (parsed.messages && Array.isArray(parsed.messages)) {
+                                                // Extract the last message content for display
+                                                const lastMsg = parsed.messages[parsed.messages.length - 1];
+                                                if (lastMsg && lastMsg.content) {
+                                                    // Update the main response area with the message content
+                                                    responseContent.innerHTML = lastMsg.content.replace(/\n/g, '<br>');
+                                                }
+                                            }
+                                        }
+                                    } catch (e) {
+                                        // Not valid JSON, continue with string value
+                                        console.log("Not JSON:", e);
+                                    }
+                                    
+                                    // Format the content based on the node type and structure
                                     const formattedValue = formatNodeValue(data.node, data.value);
                                     nodeContent.innerHTML = formattedValue;
                                     
+                                    // Check if this update contains an actual readable message to display
+                                    if (typeof parsedValue === 'string' && parsedValue.includes('HumanMessage(content=')) {
+                                        // Try to extract content from the string representation
+                                        const contentMatch = parsedValue.match(/content='([^']+)'/);
+                                        if (contentMatch && contentMatch[1]) {
+                                            // Display the extracted message content
+                                            responseContent.innerHTML = contentMatch[1].replace(/\n/g, '<br>');
+                                        }
+                                    }
                                     // For specific nodes, update the main response area with actual AI content
-                                    if (data.node === "respond_naturally") {
+                                    else if (data.node === "respond_naturally") {
                                         // For natural responses, directly show the AI's message as it comes in
-                                        debugger;
                                         responseContent.innerHTML = formattedValue;
                                     } else if (data.node === "write_html_code") {
                                         // For HTML code, show "Creating your page..."
                                         responseContent.textContent = "Creating your web page...";
-                                    } else {
-                                        // For other nodes, just show what step we're on
+                                    } else if (!responseContent.innerHTML.includes('<br>')) {
+                                        // Only update if we haven't already set content from a message
                                         responseContent.textContent = `Working on: ${formatNodeName(data.node)}`;
                                     }
                                     
@@ -536,14 +577,31 @@
                                     if (data.messages && data.messages.length > 0) {
                                         // Get the last message (most recent)
                                         const lastMessage = data.messages[data.messages.length - 1];
-                                        debugger;
-                                        // Extract the content
+                                        
+                                        // Extract the content - this should already be properly serialized from server
                                         if (lastMessage.content) {
                                             responseContent.innerHTML = lastMessage.content.replace(/\n/g, '<br>');
+                                        } else if (typeof lastMessage === 'string') {
+                                            // Handle case where it's a string
+                                            responseContent.innerHTML = lastMessage.replace(/\n/g, '<br>');
                                         } else {
-                                            // Fallback for other formats
-                                            responseContent.textContent = "Response received!";
-                                            console.log("Unexpected message format:", lastMessage);
+                                            // Try to stringify and extract what we can
+                                            try {
+                                                const messageStr = JSON.stringify(lastMessage);
+                                                if (messageStr.includes('content')) {
+                                                    const contentMatch = messageStr.match(/"content":"([^"]+)"/);
+                                                    if (contentMatch && contentMatch[1]) {
+                                                        responseContent.innerHTML = contentMatch[1].replace(/\\n/g, '<br>');
+                                                    } else {
+                                                        responseContent.innerHTML = messageStr;
+                                                    }
+                                                } else {
+                                                    responseContent.innerHTML = messageStr;
+                                                }
+                                            } catch (e) {
+                                                responseContent.textContent = "Received response, but couldn't format it properly.";
+                                                console.error("Error processing final message:", e);
+                                            }
                                         }
                                     }
                                     
@@ -590,12 +648,30 @@
         }
 
         function formatNodeValue(nodeName, value) {
+            // Check if value contains message objects (like HumanMessage instances)
+            if (value.includes('HumanMessage(content=')) {
+                // Try to extract the content
+                const contentMatch = value.match(/content='([^']+)'/);
+                if (contentMatch && contentMatch[1]) {
+                    return contentMatch[1].replace(/\n/g, '<br>');
+                }
+            }
+            
             // Try to determine if this is JSON
             try {
                 // If it looks like a stringified object or contains certain patterns
                 if ((value.startsWith('{') && value.endsWith('}')) || 
                     (value.startsWith('[') && value.endsWith(']'))) {
                     const parsed = JSON.parse(value);
+                    
+                    // Special handling for message objects in JSON
+                    if (parsed.messages && Array.isArray(parsed.messages)) {
+                        const lastMessage = parsed.messages[parsed.messages.length - 1];
+                        if (lastMessage && lastMessage.content) {
+                            return lastMessage.content.replace(/\n/g, '<br>');
+                        }
+                    }
+                    
                     return `<pre>${JSON.stringify(parsed, null, 2)}</pre>`;
                 }
             } catch (e) {
