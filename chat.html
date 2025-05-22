@@ -401,7 +401,7 @@
                             <path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22Z" stroke="#4CAF50" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                             <path d="M12 6V12L16 14" stroke="#4CAF50" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                         </svg>
-                        <span>View processing details</span>
+                        <span>Thinking...</span>
                     </div>
                     <div class="nodes-container"></div>
                 `;
@@ -452,6 +452,9 @@
                         const lines = buffer.split('\n');
                         buffer = lines.pop() || ''; // Keep the last incomplete line in the buffer
                         
+                        console.log("Just got lines");
+                        console.log(lines);
+
                         for (const line of lines) {
                             if (line.trim() === '') continue;
                             
