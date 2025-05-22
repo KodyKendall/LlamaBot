@@ -192,6 +192,151 @@
             background: rgba(76, 175, 80, 0.1);
             border-radius: 3px;
         }
+
+        /* Enhanced streaming styles */
+        .workflow-progress {
+            margin-top: 12px;
+            font-size: 0.8rem;
+            color: rgba(255, 255, 255, 0.7);
+            border-top: 1px dashed rgba(255, 255, 255, 0.1);
+            padding-top: 8px;
+        }
+        
+        .workflow-progress-title {
+            display: flex;
+            align-items: center;
+            margin-bottom: 6px;
+            font-weight: 500;
+            color: var(--accent-color);
+            font-size: 0.75rem;
+            cursor: pointer;
+        }
+        
+        .workflow-progress-title:after {
+            content: "▼";
+            font-size: 8px;
+            margin-left: auto;
+            transition: transform 0.2s;
+        }
+        
+        .workflow-progress.collapsed .workflow-progress-title:after {
+            transform: rotate(-90deg);
+        }
+        
+        .workflow-progress.collapsed .nodes-container {
+            display: none;
+        }
+        
+        .node {
+            margin-bottom: 8px;
+            border-left: 2px solid rgba(76, 175, 80, 0.3);
+            padding-left: 8px;
+        }
+        
+        .node-header {
+            display: flex;
+            align-items: center;
+            font-weight: 500;
+            margin-bottom: 4px;
+        }
+        
+        .node-header .node-badge {
+            background: rgba(76, 175, 80, 0.2);
+            border-radius: 12px;
+            padding: 2px 8px;
+            font-size: 0.7rem;
+            margin-right: 6px;
+            color: var(--accent-color);
+        }
+        
+        .node-header .node-title {
+            font-size: 0.8rem;
+        }
+        
+        .node-content {
+            font-size: 0.8rem;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 6px;
+            padding: 6px 8px;
+            margin-left: 4px;
+            color: rgba(255, 255, 255, 0.8);
+            white-space: pre-wrap;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        
+        .node-active {
+            border-left-color: var(--accent-color);
+        }
+        
+        .node-complete {
+            border-left-color: rgba(76, 175, 80, 0.7);
+        }
+        
+        .typing-indicator {
+            display: inline-flex;
+            align-items: center;
+            margin-left: 4px;
+        }
+        
+        .typing-indicator span {
+            height: 4px;
+            width: 4px;
+            margin: 0 1px;
+            background: var(--accent-color);
+            display: block;
+            border-radius: 50%;
+            opacity: 0.6;
+        }
+        
+        .typing-indicator span:nth-child(1) {
+            animation: bounce 1s infinite 0s;
+        }
+        
+        .typing-indicator span:nth-child(2) {
+            animation: bounce 1s infinite 0.2s;
+        }
+        
+        .typing-indicator span:nth-child(3) {
+            animation: bounce 1s infinite 0.4s;
+        }
+        
+        @keyframes bounce {
+            0%, 60%, 100% { transform: translateY(0); }
+            30% { transform: translateY(-4px); }
+        }
+        
+        .ai-response-content {
+            margin-bottom: 12px;
+            line-height: 1.5;
+            font-size: 0.95rem;
+            color: var(--text-color);
+            white-space: pre-wrap;
+        }
+
+        .typing-dots span {
+            opacity: 0;
+            animation: typingDot 1.4s infinite;
+            display: inline-block;
+        }
+
+        .typing-dots span:nth-child(1) {
+            animation-delay: 0s;
+        }
+
+        .typing-dots span:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+
+        .typing-dots span:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+
+        @keyframes typingDot {
+            0% { opacity: 0; }
+            50% { opacity: 1; }
+            100% { opacity: 0; }
+        }
     </style>
 </head>
 <body>
@@ -237,15 +382,41 @@
                 // Clear input field
                 input.value = '';
                 
-                // Create a placeholder for the AI response
+                // Create a placeholder for the AI response with better structure
                 const aiResponsePlaceholder = document.createElement('div');
                 aiResponsePlaceholder.className = 'message ai-message';
                 
-                // Add a text node first so we can update it
-                const initialText = document.createTextNode('Waiting for response...');
-                aiResponsePlaceholder.appendChild(initialText);
+                // Create a container for the actual AI response content (this is the main visible part)
+                const responseContent = document.createElement('div');
+                responseContent.className = 'ai-response-content';
+                responseContent.innerHTML = 'I\'m working on your request<span class="typing-dots"><span>.</span><span>.</span><span>.</span></span>';
+                aiResponsePlaceholder.appendChild(responseContent);
+                
+                // Add placeholder for workflow visualization (collapsible)
+                const workflowProgress = document.createElement('div');
+                workflowProgress.className = 'workflow-progress collapsed'; // Start collapsed
+                workflowProgress.innerHTML = `
+                    <div class="workflow-progress-title">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22Z" stroke="#4CAF50" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                            <path d="M12 6V12L16 14" stroke="#4CAF50" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                        <span>View processing details</span>
+                    </div>
+                    <div class="nodes-container"></div>
+                `;
+                aiResponsePlaceholder.appendChild(workflowProgress);
+                
+                // Add click handler to toggle workflow details
+                workflowProgress.querySelector('.workflow-progress-title').addEventListener('click', () => {
+                    workflowProgress.classList.toggle('collapsed');
+                });
                 
                 messageHistory.appendChild(aiResponsePlaceholder);
+                
+                // Track the nodes we've seen
+                const processedNodes = new Set();
+                let currentActiveNode = null;
                 
                 try {
                     // Set up fetch for streaming
@@ -293,34 +464,87 @@
                                 else if (data.type === 'update') {
                                     console.log(`Update from ${data.node}:`, data.value);
                                     
-                                    // Create or get the stream updates container
-                                    let streamUpdates = aiResponsePlaceholder.querySelector('.stream-updates');
-                                    if (!streamUpdates) {
-                                        streamUpdates = document.createElement('div');
-                                        streamUpdates.className = 'stream-updates';
-                                        aiResponsePlaceholder.appendChild(streamUpdates);
+                                    // Get the nodes container
+                                    const nodesContainer = aiResponsePlaceholder.querySelector('.nodes-container');
+                                    
+                                    // If this is a new node, create its container
+                                    if (!processedNodes.has(data.node)) {
+                                        // If there was a previously active node, mark it as complete
+                                        if (currentActiveNode) {
+                                            currentActiveNode.classList.remove('node-active');
+                                            currentActiveNode.classList.add('node-complete');
+                                        }
+                                        
+                                        const nodeElement = document.createElement('div');
+                                        nodeElement.className = 'node node-active';
+                                        nodeElement.id = `node-${data.node}`;
+                                        currentActiveNode = nodeElement;
+                                        
+                                        nodeElement.innerHTML = `
+                                            <div class="node-header">
+                                                <span class="node-badge">${processedNodes.size + 1}</span>
+                                                <span class="node-title">${formatNodeName(data.node)}</span>
+                                            </div>
+                                            <div class="node-content"></div>
+                                        `;
+                                        
+                                        nodesContainer.appendChild(nodeElement);
+                                        processedNodes.add(data.node);
                                     }
                                     
-                                    // Create a new node update element
-                                    const nodeUpdate = document.createElement('div');
-                                    nodeUpdate.className = 'node-update';
-                                    nodeUpdate.textContent = `${data.node}: ${data.value.substring(0, 100)}${data.value.length > 100 ? '...' : ''}`;
-                                    streamUpdates.appendChild(nodeUpdate);
+                                    // Update the node's content with the latest data
+                                    const nodeContent = aiResponsePlaceholder.querySelector(`#node-${data.node} .node-content`);
                                     
-                                    // Update placeholder text to show we're receiving data
-                                    aiResponsePlaceholder.firstChild.textContent = 'Receiving updates...';
+                                    // Format the content based on the node type
+                                    const formattedValue = formatNodeValue(data.node, data.value);
+                                    nodeContent.innerHTML = formattedValue;
+                                    
+                                    // For specific nodes, update the main response area with actual AI content
+                                    if (data.node === "respond_naturally") {
+                                        // For natural responses, directly show the AI's message as it comes in
+                                        debugger;
+                                        responseContent.innerHTML = formattedValue;
+                                    } else if (data.node === "write_html_code") {
+                                        // For HTML code, show "Creating your page..."
+                                        responseContent.textContent = "Creating your web page...";
+                                    } else {
+                                        // For other nodes, just show what step we're on
+                                        responseContent.textContent = `Working on: ${formatNodeName(data.node)}`;
+                                    }
                                     
                                     // Scroll to the latest update
                                     messageHistory.scrollTop = messageHistory.scrollHeight;
                                 } 
                                 else if (data.type === 'final') {
+                                    // Mark the last active node as complete
+                                    if (currentActiveNode) {
+                                        currentActiveNode.classList.remove('node-active');
+                                        currentActiveNode.classList.add('node-complete');
+                                    }
+                                    
+                                    // Change the workflow progress title to "Completed"
+                                    const progressTitle = aiResponsePlaceholder.querySelector('.workflow-progress-title');
+                                    progressTitle.innerHTML = `
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                            <path d="M22 11.0857V12.0057C21.9988 14.1621 21.3005 16.2604 20.0093 17.9875C18.7182 19.7147 16.9033 20.9782 14.8354 21.5896C12.7674 22.201 10.5573 22.1276 8.53447 21.3803C6.51168 20.633 4.78465 19.2518 3.61096 17.4428C2.43727 15.6338 1.87979 13.4938 2.02168 11.342C2.16356 9.19029 2.99721 7.14205 4.39828 5.5028C5.79935 3.86354 7.69279 2.72111 9.79619 2.24587C11.8996 1.77063 14.1003 1.98806 16.07 2.86572" stroke="#4CAF50" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                                            <path d="M22 4L12 14.01L9 11.01" stroke="#4CAF50" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                                        </svg>
+                                        <span>Processing complete</span>
+                                    `;
+                                    
                                     // Display the final message content
                                     if (data.messages && data.messages.length > 0) {
+                                        // Get the last message (most recent)
                                         const lastMessage = data.messages[data.messages.length - 1];
-                                        
-                                        // Replace the entire content of the placeholder
-                                        aiResponsePlaceholder.innerHTML = '';
-                                        aiResponsePlaceholder.textContent = lastMessage.content;
+                                        debugger;
+                                        // Extract the content
+                                        if (lastMessage.content) {
+                                            responseContent.innerHTML = lastMessage.content.replace(/\n/g, '<br>');
+                                        } else {
+                                            // Fallback for other formats
+                                            responseContent.textContent = "Response received!";
+                                            console.log("Unexpected message format:", lastMessage);
+                                        }
                                     }
                                     
                                     // Refresh the iframe if HTML was updated
@@ -355,6 +579,60 @@
                 sendMessage();
             }
         });
+
+        // Add these helper functions at the end of your script
+        function formatNodeName(nodeName) {
+            // Convert camelCase or snake_case to Title Case with spaces
+            return nodeName
+                .replace(/_/g, ' ')
+                .replace(/([A-Z])/g, ' $1')
+                .replace(/^\w/, c => c.toUpperCase());
+        }
+
+        function formatNodeValue(nodeName, value) {
+            // Try to determine if this is JSON
+            try {
+                // If it looks like a stringified object or contains certain patterns
+                if ((value.startsWith('{') && value.endsWith('}')) || 
+                    (value.startsWith('[') && value.endsWith(']'))) {
+                    const parsed = JSON.parse(value);
+                    return `<pre>${JSON.stringify(parsed, null, 2)}</pre>`;
+                }
+            } catch (e) {
+                // Not JSON or couldn't parse, continue with normal formatting
+            }
+            
+            // For route_initial_user_message node, show a special display
+            if (nodeName === 'route_initial_user_message') {
+                return `<div>Determined intent: <strong>${value}</strong></div>`;
+            }
+            
+            // For design_and_plan node, format as bullet points if possible
+            if (nodeName === 'design_and_plan') {
+                // Check if it contains list-like patterns
+                if (value.includes('\n-') || value.includes('\n•') || value.includes('\n1.')) {
+                    return value
+                        .split('\n')
+                        .map(line => {
+                            if (line.trim().startsWith('-') || line.trim().startsWith('•') || /^\d+\./.test(line.trim())) {
+                                return `<li>${line.trim().replace(/^[-•]\s*/, '')}</li>`;
+                            }
+                            return line;
+                        })
+                        .join('\n')
+                        .replace(/<li>/g, '<ul><li>')
+                        .replace(/<\/li>\n<li>/g, '</li><li>')
+                        .replace(/<\/li>\n/g, '</li></ul>\n');
+                }
+            }
+            
+            // Default handling: escape HTML and preserve line breaks
+            return value
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/\n/g, '<br>');
+        }
     </script>
 </body>
 </html>
