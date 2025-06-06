@@ -140,8 +140,13 @@ class ApiService {
 
   // Generate conversation summary from messages
   generateConversationSummary(conversation: Conversation): ConversationSummary {
-    const messages = conversation.state[0]?.messages || [];
-    const firstUserMessage = messages.find(msg => msg.type === 'human');
+
+    //conversation -> {thread_id: 'thread_1749166123102_bs0r18', state: Array(8)}state: (8) [{…}, Array(0), {…}, {…}, '2025-06-06T22:56:21.161474+00:00', {…}, Array(0), Array(0)]0: messages: (6) [{…}, {…}, {…}, {…}, {…}, {…}]0: {content: "What's my name?", additional_kwargs: {…}, response_metadata: {…}, type: 'human', name: null, …}1: {content: 'I’m not sure what your name is—could you please tell me?', additional_kwargs: {…}, response_metadata: {…}, type: 'ai', name: null, …}2: {content: 'Can you hear me?', additional_kwargs: {…}, response_metadata: {…}, type: 'human', name: null, …}3: {content: 'I can “hear” you in the sense that I see and process your messages here. How can I help?', additional_kwargs: {…}, response_metadata: {…}, type: 'ai', name: null, …}4: {content: 'Give me an epic and long poem in shakespeare fashion', additional_kwargs: {…}, response_metadata: {…}, type: 'human', name: null, …}5: {content: 'Hearken, O gentle souls, and lend thine ear  \nTo a…flame,  \nThat noble hearts enshrine undying name.', additional_kwargs: {…}, response_metadata: {…}, type: 'ai', name: null, …}length: 6[[Prototype]]: Array(0)[[Prototype]]: Object1: []2: {configurable: {…}}3: {step: 7, source: 'loop', writes: {…}, parents: {…}, thread_id: 'thread_1749166123102_bs0r18'}parents: {}source: "loop"step: 7thread_id: "thread_1749166123102_bs0r18"writes: {software_developer_assistant: {…}}[[Prototype]]: Object4: "2025-06-06T22:56:21.161474+00:00"5: {configurable: {…}}6: []7: []length: 8[[Prototype]]: Array(0)thread_id: "thread_1749166123102_bs0r18"[[Prototype]]: Object
+    //conversation.state -> this is a langgraph state object from graph.get_state(). 
+    const conversation_state:any = conversation.state; //this is a StateSnapshot object: https://github.com/langchain-ai/langgraph/blob/main/libs/langgraph/langgraph/types.py#L211
+    const timestamp = conversation_state.created_at; //lame way to do this, but it's the only way I can think of to get the timestamp
+    const messages = conversation_state.values.messages || [];
+    const firstUserMessage = messages.find((msg:any) => msg.type === 'human');
     const lastMessage = messages[messages.length - 1];
     
     let title = 'New Conversation';
@@ -165,7 +170,7 @@ class ApiService {
       title,
       preview,
       lastMessage: lastMessage?.content,
-      timestamp: new Date(), // You might want to extract actual timestamp
+      timestamp: new Date(timestamp),
       messageCount: messages.length,
     };
   }

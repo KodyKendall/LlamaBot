@@ -299,7 +299,12 @@ async def threads():
     for thread_id in unique_thread_ids:
         graph = build_workflow(checkpointer=checkpointer)
         config = {"configurable": {"thread_id": thread_id}}
-        state_history.append({"thread_id": thread_id, "state": graph.get_state(config=config)})
+        state = graph.get_state(config=config)  # this is a StateSnapshot object: https://github.com/langchain-ai/langgraph/blob/main/libs/langgraph/langgraph/types.py#L211
+        # StateSnapshot inherits from NamedTuple. NamedTuples serialize as an array by default, so we use _asdict to return keys for easier understanding on the client side.
+        # Convert StateSnapshot NamedTuple to dict for proper JSON serialization
+        state_dict = state._asdict() if hasattr(state, '_asdict') else state
+        state_history.append({"thread_id": thread_id, "state": state_dict})
+
     return state_history
 
 @app.get("/chat-history/{thread_id}")
