@@ -10,7 +10,9 @@ import os
 import logging
 import time
 import json
+import importlib
 from datetime import datetime
+from pathlib import Path
 from agents.react_agent.nodes import build_workflow
 from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.checkpoint.memory import MemorySaver
@@ -46,6 +48,67 @@ app.add_middleware(
 
 # Mount static directories
 app.mount("/assets", StaticFiles(directory="../assets"), name="assets")
+
+# Global variable to track loaded artifacts
+loaded_artifacts = {}
+
+# Dynamic artifact loading function
+def load_artifacts():
+    """Dynamically discover and load artifact modules"""
+    artifacts_dir = Path("artifacts")
+    
+    if not artifacts_dir.exists():
+        logger.info("No artifacts directory found, skipping artifact loading")
+        return
+    
+    for item in artifacts_dir.iterdir():
+        if item.is_dir() and not item.name.startswith('.'):
+            module_name = f"artifacts.{item.name}"
+            init_file = item / "__init__.py"
+            
+            if init_file.exists():
+                try:
+                    logger.info(f"Loading artifact module: {module_name}")
+                    module = importlib.import_module(module_name)
+                    
+                    artifact_info = {
+                        "module_name": module_name,
+                        "static_mounted": False,
+                        "router_included": False,
+                        "metadata": None
+                    }
+                    
+                    # Get artifact metadata if available
+                    if hasattr(module, 'get_artifact_info'):
+                        artifact_info["metadata"] = module.get_artifact_info()
+                    
+                    # Mount static files if the function exists
+                    if hasattr(module, 'mount_static_files'):
+                        logger.info(f"Mounting static files for {module_name}")
+                        success = module.mount_static_files(app)
+                        artifact_info["static_mounted"] = success
+                    
+                    # Include router if it exists
+                    if hasattr(module, 'router'):
+                        prefix = f"/api/{item.name}"
+                        logger.info(f"Including router for {module_name} with prefix {prefix}")
+                        app.include_router(module.router, prefix=prefix)
+                        artifact_info["router_included"] = True
+                        artifact_info["api_prefix"] = prefix
+                    
+                    loaded_artifacts[item.name] = artifact_info
+                    logger.info(f"Successfully loaded artifact: {module_name}")
+                    
+                except Exception as e:
+                    logger.error(f"Failed to load artifact {module_name}: {e}")
+                    loaded_artifacts[item.name] = {
+                        "module_name": module_name,
+                        "error": str(e),
+                        "status": "failed"
+                    }
+
+# Load all artifacts dynamically
+load_artifacts()
 
 # Initialize the ChatOpenAI client
 llm = ChatOpenAI(
@@ -207,6 +270,16 @@ async def chat():
 async def page():
     with open("../page.html") as f:
         return f.read()
+
+@app.get("/artifacts/{project_name}/page", response_class=HTMLResponse)
+async def artifact_page(project_name: str):
+    """Serve the page.html file for a specific artifact project"""
+    artifact_path = Path(f"artifacts/{project_name}/page.html")
+    if artifact_path.exists():
+        with open(artifact_path) as f:
+            return f.read()
+    else:
+        return HTMLResponse("Artifact page not found", status_code=404)
     
 @app.get("/conversations", response_class=HTMLResponse)
 async def conversations():
@@ -244,3 +317,12 @@ async def available_agents():
     with open("../langgraph.json", "r") as f:
         langgraph_json = json.load(f)
     return {"agents": list(langgraph_json["graphs"].keys())}
+
+@app.get("/artifacts", response_class=JSONResponse)
+async def list_artifacts():
+    """List all loaded artifact modules and their status"""
+    return {
+        "artifacts": loaded_artifacts,
+        "count": len(loaded_artifacts),
+        "loaded_successfully": len([a for a in loaded_artifacts.values() if "error" not in a])
+    }

@@ -1,0 +1,8 @@
+* { box-sizing: border-box; margin: 0; padding: 0; font-family: Arial, sans-serif; }
+body { display: flex; flex-direction: column; align-items: center; padding: 20px; background: #f0f0f0; }
+h1 { margin-bottom: 10px; }
+canvas { background: #000; border: 2px solid #333; }
+p { margin: 10px 0; }
+#score { margin-top: 10px; font-size: 18px; }
+.snake-cell { background: #0f0; }
+.food { background: #f00; }
