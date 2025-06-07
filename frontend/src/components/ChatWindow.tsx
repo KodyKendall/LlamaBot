@@ -338,22 +338,13 @@ export const ChatWindow: React.FC = () => {
   const messagesEndRef = React.useRef<HTMLDivElement>(null);
   const dropdownRef = React.useRef<HTMLDivElement>(null);
   const [isAgentDropdownOpen, setIsAgentDropdownOpen] = React.useState(false);
-  const [showSystemMessages, setShowSystemMessages] = React.useState(true);
-
-  // Filter messages based on user preference
-  const filteredMessages = React.useMemo(() => {
-    if (showSystemMessages) {
-      return currentMessages;
-    }
-    return currentMessages.filter(msg => msg.type === 'user' || msg.type === 'ai');
-  }, [currentMessages, showSystemMessages]);
 
   // Group messages with their associated tool calls
   const groupedMessages = React.useMemo(() => {
     const groups: Array<{ message: UIMessage; toolMessages: UIMessage[] }> = [];
     
-    for (let i = 0; i < filteredMessages.length; i++) {
-      const message = filteredMessages[i];
+    for (let i = 0; i < currentMessages.length; i++) {
+      const message = currentMessages[i];
       
       if (message.type === 'tool' || message.type === 'function') {
         // Skip tool messages in this loop - they'll be attached to AI messages
@@ -365,9 +356,9 @@ export const ChatWindow: React.FC = () => {
       // If this is an AI message, look for tool messages that follow it
       if (message.type === 'ai') {
         let j = i + 1;
-        while (j < filteredMessages.length && 
-               (filteredMessages[j].type === 'tool' || filteredMessages[j].type === 'function')) {
-          toolMessages.push(filteredMessages[j]);
+        while (j < currentMessages.length && 
+               (currentMessages[j].type === 'tool' || currentMessages[j].type === 'function')) {
+          toolMessages.push(currentMessages[j]);
           j++;
         }
       }
@@ -376,14 +367,6 @@ export const ChatWindow: React.FC = () => {
     }
     
     return groups;
-  }, [filteredMessages]);
-
-  // Get message counts for display
-  const messageCounts = React.useMemo(() => {
-    const total = currentMessages.length;
-    const chatOnly = currentMessages.filter(msg => msg.type === 'user' || msg.type === 'ai').length;
-    const systemTool = total - chatOnly;
-    return { total, chatOnly, systemTool };
   }, [currentMessages]);
 
   // Auto-scroll to bottom when new messages arrive
@@ -443,27 +426,6 @@ export const ChatWindow: React.FC = () => {
           <h1 className="text-xl font-semibold text-dark-text">LlamaBot</h1>
           
           <div className="ml-auto flex items-center gap-4">
-            {/* Message Filter Toggle */}
-            <button
-              onClick={() => setShowSystemMessages(!showSystemMessages)}
-              className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors ${
-                showSystemMessages 
-                  ? 'bg-dark-accent text-white' 
-                  : 'bg-dark-input border border-dark-border text-dark-text hover:border-dark-accent'
-              }`}
-              title={showSystemMessages ? 'Hide system/tool messages' : 'Show system/tool messages'}
-            >
-              <Settings className="w-4 h-4" />
-              <span>
-                {showSystemMessages ? 'All' : 'Chat'}
-                {messageCounts.total > 0 && (
-                  <span className="ml-1 text-xs opacity-70">
-                    ({showSystemMessages ? messageCounts.total : messageCounts.chatOnly})
-                  </span>
-                )}
-              </span>
-            </button>
-
             {/* Agent Selector */}
             <div className="relative" ref={dropdownRef}>
               <button
@@ -550,27 +512,6 @@ export const ChatWindow: React.FC = () => {
         )}
         
         <div className="ml-auto flex items-center gap-4">
-          {/* Message Filter Toggle */}
-          <button
-            onClick={() => setShowSystemMessages(!showSystemMessages)}
-            className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors ${
-              showSystemMessages 
-                ? 'bg-dark-accent text-white' 
-                : 'bg-dark-input border border-dark-border text-dark-text hover:border-dark-accent'
-            }`}
-            title={showSystemMessages ? 'Hide system/tool messages' : 'Show system/tool messages'}
-          >
-            <Settings className="w-4 h-4" />
-            <span>
-              {showSystemMessages ? 'All' : 'Chat'}
-              {messageCounts.total > 0 && (
-                <span className="ml-1 text-xs opacity-70">
-                  ({showSystemMessages ? messageCounts.total : messageCounts.chatOnly})
-                </span>
-              )}
-            </span>
-          </button>
-
           {/* Agent Selector */}
           <div className="relative" ref={dropdownRef}>
             <button
