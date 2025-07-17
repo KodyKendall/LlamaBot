@@ -2,14 +2,17 @@
 Tests for the agents functionality.
 """
 import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import patch, MagicMock, AsyncMock, mock_open, call
 import json
 import requests
 import logging
+import subprocess
+import glob
 
 from agents.base_agent import BaseAgent
 from agents.llamabot_v1.nodes import run_rails_console_command, LlamaBotState
 from agents.llamapress.nodes import write_html_page, LlamaPressState
+from agents.terminal_agent.nodes import list_directory, run_command, TerminalAgentState, read_file, write_file, get_current_directory, search_files
 from langgraph.checkpoint.memory import MemorySaver
 
 
@@ -52,10 +55,11 @@ class TestLlamaBotV1Nodes:
         }
         mock_post.return_value = mock_response
         
-        # Create test state with all required fields
+        # Create test state with all required fields including available_routes
         state = {
             'api_token': 'test_token_123',
             'agent_prompt': 'Test prompt',
+            'available_routes': 'test/routes',
             'messages': []
         }
         
@@ -93,10 +97,11 @@ class TestLlamaBotV1Nodes:
         mock_response.text = "Unauthorized"
         mock_post.return_value = mock_response
         
-        # Create test state with all required fields
+        # Create test state with all required fields including available_routes
         state = {
             'api_token': 'invalid_token',
             'agent_prompt': 'Test prompt',
+            'available_routes': 'test/routes',
             'messages': []
         }
         
@@ -120,10 +125,11 @@ class TestLlamaBotV1Nodes:
         mock_getenv.return_value = "http://test-server.com"
         mock_post.side_effect = requests.exceptions.ConnectionError("Connection failed")
         
-        # Create test state with all required fields
+        # Create test state with all required fields including available_routes
         state = {
             'api_token': 'test_token',
             'agent_prompt': 'Test prompt',
+            'available_routes': 'test/routes',
             'messages': []
         }
         
@@ -149,10 +155,11 @@ class TestLlamaBotV1Nodes:
         mock_response.text = "Unauthorized"
         mock_post.return_value = mock_response
         
-        # Create test state with empty api_token to simulate missing token
+        # Create test state with empty api_token but with all other required fields
         state = {
             'api_token': '',  # Use empty string instead of None
             'agent_prompt': 'Test prompt',
+            'available_routes': 'test/routes',
             'messages': []
         }
         
@@ -384,6 +391,287 @@ class TestLlamaPressNodes:
         mock_logger.info.assert_any_call("Page ID: test_page")
         expected_keys = ['api_token', 'agent_prompt', 'page_id', 'current_page_html', 'selected_element', 'javascript_console_errors', 'messages']
         mock_logger.info.assert_any_call(f"State keys: {expected_keys}")
+
+
+class TestTerminalAgentNodes:
+    """Test Terminal Agent node functionality."""
+    
+    def test_read_file_tool_success(self):
+        """Test the read_file tool with successful file reading."""
+        # Create test state with all required fields
+        state = {
+            'agent_prompt': 'Test prompt',
+            'current_directory': '/test/dir',
+            'last_command_output': None,
+            'command_history': [],
+            'session_context': None,
+            'original_request': None,
+            'messages': []
+        }
+        
+        # Mock file content
+        with patch('builtins.open', mock_open(read_data="test file content")):
+            result = read_file.invoke({
+                'file_path': 'test.txt',
+                'state': state
+            })
+        
+        # Verify the result
+        assert 'Successfully read file:' in result
+        assert 'test file content' in result
+    
+    def test_read_file_tool_not_found(self):
+        """Test the read_file tool with file not found."""
+        # Create test state with all required fields
+        state = {
+            'agent_prompt': 'Test prompt',
+            'current_directory': '/test/dir',
+            'last_command_output': None,
+            'command_history': [],
+            'session_context': None,
+            'original_request': None,
+            'messages': []
+        }
+        
+        # Mock FileNotFoundError
+        with patch('builtins.open', side_effect=FileNotFoundError()):
+            result = read_file.invoke({
+                'file_path': 'nonexistent.txt',
+                'state': state
+            })
+        
+        # Verify error handling
+        assert 'Error: File not found:' in result
+        assert 'nonexistent.txt' in result
+    
+    def test_write_file_tool_success(self):
+        """Test the write_file tool with successful file writing."""
+        # Create test state with all required fields
+        state = {
+            'agent_prompt': 'Test prompt',
+            'current_directory': '/test/dir',
+            'last_command_output': None,
+            'command_history': [],
+            'session_context': None,
+            'original_request': None,
+            'messages': []
+        }
+        
+        # Mock successful file writing
+        with patch('builtins.open', mock_open()) as mock_file:
+            with patch('os.makedirs'):
+                result = write_file.invoke({
+                    'file_path': 'test.txt',
+                    'content': 'test content',
+                    'state': state
+                })
+        
+        # Verify the file was written (check for the specific call we expect)
+        expected_call = call('/test/dir/test.txt', 'w', encoding='utf-8')
+        assert expected_call in mock_file.call_args_list
+        assert 'Successfully wrote 12 characters to file:' in result
+    
+    @patch('os.listdir')
+    @patch('os.path.exists')
+    @patch('os.path.isdir')
+    @patch('os.stat')
+    def test_list_directory_tool_success(self, mock_stat, mock_isdir, mock_exists, mock_listdir):
+        """Test the list_directory tool with successful directory listing."""
+        # Setup mocks
+        mock_exists.return_value = True
+        mock_isdir.return_value = True
+        mock_listdir.return_value = ['file1.txt', 'dir1']
+        
+        # Mock stat for different file types
+        def stat_side_effect(path):
+            mock_stat_obj = MagicMock()
+            if 'dir1' in path:
+                mock_stat_obj.st_size = 0
+                mock_isdir.return_value = True
+            else:
+                mock_stat_obj.st_size = 1024
+                mock_isdir.return_value = False
+            return mock_stat_obj
+        
+        mock_stat.side_effect = stat_side_effect
+        
+        # Create test state with all required fields
+        state = {
+            'agent_prompt': 'Test prompt',
+            'current_directory': '/test/dir',
+            'last_command_output': None,
+            'command_history': [],
+            'session_context': None,
+            'original_request': None,
+            'messages': []
+        }
+        
+        # Execute function
+        result = list_directory.invoke({
+            'state': state,
+            'path': '/test/path'
+        })
+        
+        # Verify the result
+        assert 'Contents of /test/path:' in result
+        assert 'file1.txt' in result
+        assert 'dir1' in result
+    
+    @patch('subprocess.run')
+    def test_run_command_tool_success(self, mock_run):
+        """Test the run_command tool with successful command execution."""
+        # Setup mock
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = "command output"
+        mock_result.stderr = ""
+        mock_run.return_value = mock_result
+        
+        # Create test state with all required fields
+        state = {
+            'agent_prompt': 'Test prompt',
+            'current_directory': '/test/dir',
+            'last_command_output': None,
+            'command_history': [],
+            'session_context': None,
+            'original_request': None,
+            'messages': []
+        }
+        
+        # Execute function
+        result = run_command.invoke({
+            'command': 'ls -la',
+            'state': state
+        })
+        
+        # Verify the command was executed
+        mock_run.assert_called_once()
+        assert 'Command: ls -la' in result
+        assert 'Exit code: 0' in result
+        assert 'command output' in result
+    
+    def test_run_command_tool_blocked_command(self):
+        """Test the run_command tool with blocked dangerous command."""
+        # Create test state with all required fields
+        state = {
+            'agent_prompt': 'Test prompt',
+            'current_directory': '/test/dir',
+            'last_command_output': None,
+            'command_history': [],
+            'session_context': None,
+            'original_request': None,
+            'messages': []
+        }
+        
+        # Execute function with dangerous command
+        result = run_command.invoke({
+            'command': 'rm -rf /',
+            'state': state
+        })
+        
+        # Verify the command was blocked
+        assert 'Error: Command blocked for security reasons' in result
+    
+    @patch('subprocess.run')
+    def test_run_command_tool_timeout(self, mock_run):
+        """Test the run_command tool with command timeout."""
+        # Setup mock to raise timeout
+        mock_run.side_effect = subprocess.TimeoutExpired('test_cmd', 30)
+        
+        # Create test state with all required fields
+        state = {
+            'agent_prompt': 'Test prompt',
+            'current_directory': '/test/dir',
+            'last_command_output': None,
+            'command_history': [],
+            'session_context': None,
+            'original_request': None,
+            'messages': []
+        }
+        
+        # Execute function
+        result = run_command.invoke({
+            'command': 'long_running_command',
+            'state': state
+        })
+        
+        # Verify timeout handling
+        assert 'Error: Command timed out after 30 seconds' in result
+    
+    def test_get_current_directory_tool(self):
+        """Test the get_current_directory tool."""
+        # Create test state with all required fields
+        state = {
+            'agent_prompt': 'Test prompt',
+            'current_directory': '/test/dir',
+            'last_command_output': None,
+            'command_history': [],
+            'session_context': None,
+            'original_request': None,
+            'messages': []
+        }
+        
+        # Execute function
+        result = get_current_directory.invoke({
+            'state': state
+        })
+        
+        # Verify the result
+        assert 'Current directory: /test/dir' in result
+    
+    @patch('glob.glob')
+    def test_search_files_tool_success(self, mock_glob):
+        """Test the search_files tool with successful file search."""
+        # Setup mock
+        mock_glob.return_value = ['/test/dir/file1.txt', '/test/dir/subdir/file2.txt']
+        
+        # Create test state with all required fields
+        state = {
+            'agent_prompt': 'Test prompt',
+            'current_directory': '/test/dir',
+            'last_command_output': None,
+            'command_history': [],
+            'session_context': None,
+            'original_request': None,
+            'messages': []
+        }
+        
+        # Execute function
+        result = search_files.invoke({
+            'pattern': '*.txt',
+            'state': state
+        })
+        
+        # Verify the result
+        assert 'Found 2 files matching' in result
+        assert 'file1.txt' in result
+        assert 'subdir/file2.txt' in result
+    
+    @patch('glob.glob')
+    def test_search_files_tool_no_matches(self, mock_glob):
+        """Test the search_files tool with no matching files."""
+        # Setup mock
+        mock_glob.return_value = []
+        
+        # Create test state with all required fields
+        state = {
+            'agent_prompt': 'Test prompt',
+            'current_directory': '/test/dir',
+            'last_command_output': None,
+            'command_history': [],
+            'session_context': None,
+            'original_request': None,
+            'messages': []
+        }
+        
+        # Execute function
+        result = search_files.invoke({
+            'pattern': '*.xyz',
+            'state': state
+        })
+        
+        # Verify the result
+        assert 'No files found matching pattern' in result
 
 
 class TestWorkflowBuilding:
