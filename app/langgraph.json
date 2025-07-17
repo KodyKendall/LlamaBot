@@ -2,7 +2,7 @@
     "dependencies": ["."],
     "graphs": {
       "llamabot": "./agents/llamabot_v1/nodes.py:build_workflow",
-      "llamapress": "./agents/llamapress/nodes.py:build_workflow"
+      "llamapress": "./agents/llamapress/nodes.py:build_workflow",
+      "terminal_agent": "./agents/terminal_agent/nodes.py:build_workflow"
     }
   }
-  
