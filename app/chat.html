@@ -477,12 +477,12 @@
                 
                 try {
                     // Set up fetch for streaming
-                    const response = await fetch('/chat-message', {
+                    const response = await fetch('/llamabot-chat-message', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
                         },
-                        body: JSON.stringify({ message: messageText })
+                        body: JSON.stringify({ message: messageText, agent_name: 'llamabot' })
                     });
                     
                     if (!response.ok) {
