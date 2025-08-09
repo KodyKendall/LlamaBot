@@ -185,13 +185,93 @@
         .iframe-section {
             width: 66.67%;
             height: 100%;
+            padding: 1.5rem;
+            background-color: var(--bg-color);
+            display: flex;
+            flex-direction: column;
         }
 
-        .iframe-section iframe {
+        /* Browser window container */
+        .browser-window {
+            width: 100%;
+            height: 100%;
+            background-color: var(--chat-bg);
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            border: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Browser title bar */
+        .browser-titlebar {
+            height: 40px;
+            background-color: #3a3a3a;
+            display: flex;
+            align-items: center;
+            padding: 0 1rem;
+            gap: 0.5rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        /* Browser window controls (red, yellow, green dots) */
+        .browser-controls {
+            display: flex;
+            gap: 8px;
+        }
+
+        .browser-control {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+
+        .browser-control:hover {
+            opacity: 0.8;
+        }
+
+        .browser-control.close {
+            background-color: #ff5f57;
+        }
+
+        .browser-control.minimize {
+            background-color: #ffbd2e;
+        }
+
+        .browser-control.maximize {
+            background-color: #28c940;
+        }
+
+        /* URL bar */
+        .browser-urlbar {
+            flex-grow: 1;
+            height: 28px;
+            background-color: #2a2a2a;
+            border: 1px solid #1a1a1a;
+            border-radius: 6px;
+            padding: 0 12px;
+            display: flex;
+            align-items: center;
+            color: #888;
+            font-size: 0.85rem;
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+
+        /* Browser content area */
+        .browser-content {
+            flex-grow: 1;
+            position: relative;
+            background-color: white;
+        }
+
+        .browser-content iframe {
             width: 100%;
             height: 100%;
             border: none;
-            background-color: var(--chat-bg);
+            background-color: white;
         }
 
         /* Streaming message styles */
@@ -293,7 +373,21 @@
         </div>
     </div>
     <div class="iframe-section">
-        <iframe src="/page" title="Content Frame"></iframe>
+        <div class="browser-window">
+            <div class="browser-titlebar">
+                <div class="browser-controls">
+                    <div class="browser-control close"></div>
+                    <div class="browser-control minimize"></div>
+                    <div class="browser-control maximize"></div>
+                </div>
+                <div class="browser-urlbar">
+                    <span>localhost:8000/page</span>
+                </div>
+            </div>
+            <div class="browser-content">
+                <iframe src="/page" title="Content Frame"></iframe>
+            </div>
+        </div>
     </div>
 
     <script>
