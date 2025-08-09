@@ -277,6 +277,7 @@
             flex-grow: 1;
             position: relative;
             background-color: white;
+            overflow: hidden;
         }
 
         .browser-content iframe {
@@ -426,6 +427,9 @@
                                     currentAiMessage = addMessage('', 'ai');
                                 }
                                 currentAiMessage.innerHTML = '🎨 Generating your page...';
+                                
+                                // Create the overlay with animation
+                                createStreamingOverlay();
                             }
                             
                             // Check for HTML end tag
@@ -446,6 +450,9 @@
                                 
                                 // Do final flush
                                 flushToIframe();
+                                
+                                // Remove the overlay
+                                removeStreamingOverlay();
                                 
                                 // Reset buffers for next generation
                                 htmlFragmentBuffer = '';
@@ -529,6 +536,9 @@
                     clearTimeout(iframeFlushTimer);
                     iframeFlushTimer = null;
                 }
+                
+                // Remove any existing overlay
+                removeStreamingOverlay();
                 
                 // Add user message to chat
                 addMessage(message, 'user');
@@ -642,6 +652,90 @@
                 }
             } catch (e) {
                 console.log('Error updating iframe (normal during streaming):', e);
+            }
+        }
+        
+        // Function to create overlay with Lottie animation
+        function createStreamingOverlay() {
+            // Check if overlay already exists
+            if (document.getElementById('streamingOverlay')) {
+                return;
+            }
+            
+            // Get the browser content div that contains the iframe
+            const browserContent = document.querySelector('.browser-content');
+            if (!browserContent) return;
+            
+            // Create overlay div
+            const overlay = document.createElement('div');
+            overlay.id = 'streamingOverlay';
+            overlay.style.position = 'absolute';
+            overlay.style.top = '0';
+            overlay.style.left = '0';
+            overlay.style.width = '100%';
+            overlay.style.height = '100%';
+            overlay.style.background = 'rgba(0, 0, 0, 0.4)';
+            overlay.style.display = 'flex';
+            overlay.style.flexDirection = 'column';
+            overlay.style.alignItems = 'center';
+            overlay.style.zIndex = '10';
+            overlay.style.borderRadius = '8px';
+            
+            // Create text for overlay
+            const overlayText = document.createElement('div');
+            overlayText.textContent = 'Your Page is Being Built!';
+            overlayText.style.color = 'white';
+            overlayText.style.fontSize = '2.5rem';
+            overlayText.style.fontWeight = 'bold';
+            overlayText.style.fontFamily = 'Arial, sans-serif';
+            overlayText.style.textShadow = '2px 2px 4px rgba(0,0,0,0.5)';
+
+            // Create text container for the top
+            const textContainer = document.createElement('div');
+            textContainer.style.padding = '30px';
+            textContainer.style.width = '100%';
+            textContainer.style.textAlign = 'center';
+
+            // Create Lottie container
+            const lottieContainer = document.createElement('div');
+            lottieContainer.id = 'lottieAnimation';
+            lottieContainer.style.width = '300px';
+            lottieContainer.style.height = '300px';
+            lottieContainer.style.position = 'absolute';
+            lottieContainer.style.top = '50%';
+            lottieContainer.style.left = '50%';
+            lottieContainer.style.transform = 'translate(-50%, -50%)';
+
+            // Add script for Lottie if not already present
+            if (!document.querySelector('script[src*="lottie-player"]')) {
+                const lottieScript = document.createElement('script');
+                lottieScript.src = "https://unpkg.com/@dotlottie/player-component@latest/dist/dotlottie-player.js";
+                document.head.appendChild(lottieScript);
+            }
+
+            // Create Lottie player element
+            const lottiePlayer = document.createElement('dotlottie-player');
+            lottiePlayer.src = "https://llamapress-ai-image-uploads.s3.us-west-2.amazonaws.com/hffa8kqjfn9yzfx28pogpvqhn7cd"; // Builder Image
+            lottiePlayer.background = "transparent";
+            lottiePlayer.speed = "1";
+            lottiePlayer.style.width = "300px";
+            lottiePlayer.style.height = "300px";
+            lottiePlayer.setAttribute("autoplay", "");
+            lottiePlayer.setAttribute("loop", "");
+
+            // Append all elements
+            textContainer.appendChild(overlayText);
+            lottieContainer.appendChild(lottiePlayer);
+            overlay.appendChild(textContainer);
+            overlay.appendChild(lottieContainer);
+            browserContent.appendChild(overlay);
+        }
+        
+        // Function to remove overlay
+        function removeStreamingOverlay() {
+            const overlay = document.getElementById('streamingOverlay');
+            if (overlay) {
+                overlay.remove();
             }
         }
 
