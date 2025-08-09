@@ -3,173 +3,164 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Field Rocket</title>
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:400,500,600,700&display=swap">
+    <title>LlamaPress - AI Webpage Builder</title>
     <style>
-        /* Reset & Foundation */
-        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: 'Inter', sans-serif; line-height: 1.6; color: #333; background: #fff; }
-        a { color: inherit; text-decoration: none; }
-        img { max-width: 100%; display: block; }
-        ul { list-style: none; }
-        /* Layout */
-        header { background: #fff; border-bottom: 1px solid #eee; }
-        nav { max-width: 1200px; margin: 0 auto; padding: 1rem; display: flex; justify-content: space-between; align-items: center; }
-        nav .logo { display: flex; align-items: center; gap: 0.5rem; }
-        nav .logo img { height: 40px; }
-        nav .links { display: flex; gap: 1rem; align-items: center; }
-        nav .links a { font-weight: 500; }
-        .btn { display: inline-block; background: #0070f3; color: #fff; padding: 0.75rem 1.5rem; border-radius: 8px; font-weight: 600; }
-        section { max-width: 1200px; margin: 0 auto; padding: 4rem 1rem; }
-        section h1, section h2 { text-align: center; margin-bottom: 2rem; }
-        .features ul { display: flex; justify-content: center; gap: 2rem; flex-wrap: wrap; margin-bottom: 1.5rem; }
-        .features ul li { background: #f5f5f5; padding: 1rem 1.5rem; border-radius: 8px; }
-        .flex { display: flex; gap: 2rem; flex-wrap: wrap; }
-        .center { justify-content: center; }
-        .card { background: #fff; border: 1px solid #eee; border-radius: 8px; padding: 1.5rem; text-align: center; flex: 1; min-width: 250px; }
-        footer { background: #f9f9f9; padding: 2rem 1rem; }
-        footer .footer-container { max-width: 1200px; margin: 0 auto; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 1rem; }
-        footer p, footer span { margin: 0; }
-        /* Responsive */
-        @media(max-width: 768px) {
-            nav .links { display: none; }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.6;
+            color: #1e293b;
+            background: #ffffff;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        header {
+            border-bottom: 1px solid #e2e8f0;
+            padding: 1.5rem 0;
+        }
+        
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 0 2rem;
+        }
+        
+        nav {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .logo {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: #1e293b;
+        }
+        
+        .nav-items {
+            display: flex;
+            gap: 2rem;
+            font-size: 0.875rem;
+            color: #64748b;
+        }
+        
+        main {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            padding: 4rem 0;
+        }
+        
+        .hero {
+            text-align: center;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            font-size: 3rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            letter-spacing: -0.02em;
+        }
+        
+        .subtitle {
+            font-size: 1.25rem;
+            color: #64748b;
+            margin-bottom: 3rem;
+        }
+        
+        .cta-button {
+            display: inline-block;
+            padding: 0.875rem 2.5rem;
+            background: #4f46e5;
+            color: white;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: 500;
+            transition: background 0.15s ease;
+        }
+        
+        .cta-button:hover {
+            background: #4338ca;
+        }
+        
+        .demo-box {
+            margin-top: 4rem;
+            padding: 2rem;
+            background: #f8fafc;
+            border-radius: 8px;
+            border: 1px solid #e2e8f0;
+        }
+        
+        .demo-text {
+            color: #64748b;
+            font-size: 0.875rem;
+            margin-bottom: 1rem;
+        }
+        
+        footer {
+            border-top: 1px solid #e2e8f0;
+            padding: 2rem 0;
+            text-align: center;
+            font-size: 0.875rem;
+            color: #94a3b8;
+        }
+        
+        @media (max-width: 768px) {
+            h1 {
+                font-size: 2rem;
+            }
+            
+            .nav-items {
+                display: none;
+            }
+            
+            main {
+                padding: 2rem 0;
+            }
         }
     </style>
 </head>
 <body>
-    <!-- Header / Navigation -->
     <header>
-        <nav>
-            <div class="logo">
-                <a href="https://fieldrocket.us"><img src="https://app.fieldrocket.us/rails/active_storage/blobs/redirect/eyJfcmFpbHMiOnsibWVzc2FnZSI6IkJBaHBBbWNkIiwiZXhwIjpudWxsLCJwdXIiOiJibG9iX2lkIn19--20600e8719c5434763a3421a2e79c95aa8e25bd9/field-rocket-logo%20(1).png" alt="Field Rocket Logo"></a>
-                <a href="https://fieldrocket.us"><span>Field Rocket</span></a>
-            </div>
-            <div class="links">
-                <a href="https://fieldrocket.us/our-contractors/">Our Contractors</a>
-                <a href="https://fieldrocket.us/features-services/">Solutions</a>
-                <a href="https://fieldrocket.us/pricing/">Pricing</a>
-                <a href="https://app.fieldrocket.us">Sign In</a>
-                <a href="https://app.fieldrocket.us/get_started" class="btn">Get Started</a>
-            </div>
-        </nav>
+        <div class="container">
+            <nav>
+                <div class="logo">LlamaPress</div>
+                <div class="nav-items">
+                    <span>Free</span>
+                    <span>Open Source</span>
+                    <span>Easy</span>
+                </div>
+            </nav>
+        </div>
     </header>
-
-    <!-- Hero Section -->
-    <section class="hero">
-        <h1>Launch, Grow, &amp; Manage Your Service Business with Our Free App</h1>
-        <div class="features">
-            <ul>
-                <li>Build Your Reputation</li>
-                <li>Get Free Leads &amp; Land Jobs</li>
-                <li>Get Paid from Customers</li>
-            </ul>
-        </div>
-        <p style="text-align:center; font-size:1.1rem;">Ready To Grow?</p>
-        <div style="text-align:center; margin-bottom:2rem;"><a href="https://app.fieldrocket.us/get_started" class="btn">GET STARTED HERE</a></div>
-        <div class="flex center">
-            <div>
-                <img src="https://fieldrocket.us/wp-content/uploads/2023/02/fieldrocket-header-ken-van-768x1024.png" alt="Ken Kendall">
-                <p>Ken Kendall</p>
-                <p>Perform Heating &amp; Cooling – Bountiful, UT</p>
+    
+    <main>
+        <div class="container">
+            <div class="hero">
+                <h1>Your Awesome Web Page</h1>
+                <p class="subtitle">Create webpages using natural language. No code required.</p>
+                <a href="#" class="cta-button">Start Building</a>
+                
+                <div class="demo-box">
+                    <p class="demo-text">This page was built with LlamaPress. Send a message to change it.</p>
+                </div>
             </div>
         </div>
-    </section>
-
-    <!-- How It Works -->
-    <section>
-        <h2>How Field Rocket Lands You New Jobs:</h2>
-        <div class="flex center">
-            <div class="card">
-                <h3>Step 1:</h3>
-                <p>Invoice Your Jobs, Describe Your Work</p>
-                <img src="https://fieldrocket.us/wp-content/uploads/2023/07/iPhone14-frame-invoicing-estimate-518x1024.png" alt="Step 1">
-            </div>
-            <div class="card">
-                <h3>Step 2:</h3>
-                <p>Manage Your Estimates</p>
-                <img src="https://fieldrocket.us/wp-content/uploads/2024/02/image-selection2-2-510x1024.png" alt="Step 2">
-            </div>
-            <div class="card">
-                <h3>Step 3:</h3>
-                <p>Publish Completed Jobs</p>
-                <img src="https://fieldrocket.us/wp-content/uploads/2024/02/taylorsville-budget-furnace-iphone-frame-518x1024.png" alt="Step 3">
-            </div>
-            <div class="card">
-                <h3>Step 4:</h3>
-                <p>Get New Leads</p>
-                <img src="https://fieldrocket.us/wp-content/uploads/2024/02/job-requests-leads-iphone-14-518x1024.png" alt="Step 4">
-            </div>
-        </div>
-    </section>
-
-    <!-- Call to Action -->
-    <section>
-        <p style="text-align:center; font-size:1.1rem;">Ready To Grow?</p>
-        <div style="text-align:center;"><a href="https://app.fieldrocket.us/get_started" class="btn">GET STARTED HERE</a></div>
-    </section>
-
-    <!-- Testimonials -->
-    <section>
-        <h2>Testimonials</h2>
-        <div class="flex center">
-            <div class="card">
-                <div style="font-size:1.5rem; margin-bottom:1rem;">★★★★★</div>
-                <p>Since using Field Rocket, my business has tripled in size. I would be lost without it, I use it for running my business day to day. Before, my scheduling was a mess, but now I feel more in control.</p>
-                <img src="https://fieldrocket.us/wp-content/uploads/2023/07/161211_Family_339-1-e1690495016460.jpg" alt="Mark Anderson">
-                <p>Mark Anderson</p>
-                <p>Owner, Utah Valley Plumbing</p>
-            </div>
-            <div class="card">
-                <div style="font-size:1.5rem; margin-bottom:1rem;">★★★★★</div>
-                <p>Everything has come a million miles from where it was before Field Rocket. Back in the day, there was a lot of manual entry, and now with our business doubling in size, roughly 100% from last year, Field Rocket has made things WAY easier.</p>
-                <img src="https://fieldrocket.us/wp-content/uploads/2023/07/trevor-taylor-utah-treeco.png" alt="Trevor Taylor">
-                <p>Trevor Taylor</p>
-                <p>Owner, Utah Tree Co</p>
-            </div>
-            <div class="card">
-                <div style="font-size:1.5rem; margin-bottom:1rem;">★★★★★</div>
-                <p>The pictures, the scheduling, and the company-wide text messages are an absolute game changer. I don’t know how we lived so long without them. It would be really hard to go back to the old way.</p>
-                <img src="https://fieldrocket.us/wp-content/uploads/2023/07/Matt-Christensen.png" alt="Matt C.">
-                <p>Matt C.</p>
-                <p>Contractor</p>
-            </div>
-        </div>
-    </section>
-
-    <!-- Success Stories -->
-    <section>
-        <h2>Success Stories:</h2>
-        <div class="flex center">
-            <div class="card">
-                <img src="https://fieldrocket.us/wp-content/uploads/2023/10/utah-stumpx-sandy-lehi-stump-removal-1024x563.jpeg" alt="Spencer's Stump Removal">
-                <a href="/our-contractors">See How Spencer uses Field Rocket…</a>
-            </div>
-            <div class="card">
-                <img src="https://fieldrocket.us/wp-content/uploads/2024/02/cincinnati-pool-divers-fieldrocket-logo-1024x1024.png" alt="Joe's Pool Diving">
-                <a href="/capturing-closing-leads-with-field-rocket/">See How Joe’s Pool Diving Business…</a>
-            </div>
-            <div class="card">
-                <img src="https://fieldrocket.us/wp-content/uploads/2024/02/river-air-van-background-removed.png" alt="River Air LLC">
-                <a href="https://www.riverairllc.com">See How River Air LLC Launched their HVAC Business…</a>
-            </div>
-        </div>
-    </section>
-
-    <!-- Footer -->
+    </main>
+    
     <footer>
-        <div class="footer-container">
-            <p>The Easiest Way for Residential Contractors to Connect with Their Customers</p>
-            <div>
-                <a href="https://apps.apple.com/us/app/field-rocket/id1602587569" style="margin-right:1rem;">Download on iOS</a>
-                <a href="https://play.google.com/store/apps/details?id=com.getservicerocket.mobile&hl=en_US&gl=US">Download on Android</a>
-            </div>
-            <p>Copyright © all rights reserved by <span>Field Rocket</span></p>
+        <div class="container">
+            <p>AI-powered webpage builder</p>
         </div>
     </footer>
-
-    <!-- Placeholder for analytics or custom JS -->
-    <script>
-        // Custom JS can be added here
-    </script>
 </body>
 </html>
