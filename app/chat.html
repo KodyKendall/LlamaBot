@@ -101,6 +101,12 @@
             border-bottom-left-radius: 4px;
         }
 
+        .message.error-message {
+            background-color: rgba(255, 99, 71, 0.2);
+            border: 1px solid rgba(255, 99, 71, 0.5);
+            color: #ff6b6b;
+        }
+
         /* Input area */
         .input-area {
             padding: 1rem;
@@ -124,7 +130,7 @@
             transition: border-color 0.2s;
             resize: none;
             min-height: 2.5rem;
-            max-height: 12rem; /* Roughly 10 lines */
+            max-height: 12rem;
             overflow-y: auto;
             line-height: 1.2;
             white-space: pre-wrap;
@@ -139,6 +145,8 @@
         .button-row {
             display: flex;
             justify-content: flex-end;
+            align-items: center;
+            gap: 0.5rem;
         }
 
         .input-area button {
@@ -150,83 +158,145 @@
             cursor: pointer;
             transition: background-color 0.2s;
             font-weight: 500;
-            align-self: flex-end;
         }
 
-        .input-area button:hover {
+        .input-area button:hover:not(:disabled) {
             background-color: var(--button-hover);
         }
 
-        /* Loading Spinner */
-        .loading-spinner {
-            display: none;
-            margin: 1rem auto;
-            width: 30px;
-            height: 30px;
-            border: 2px solid var(--border-color);
+        .input-area button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Connection status */
+        .connection-status {
+            font-size: 0.75rem;
+            color: var(--status-color);
+            display: flex;
+            align-items: center;
+            gap: 0.25rem;
+        }
+
+        .connection-status.connected {
+            color: var(--accent-color);
+        }
+
+        .connection-status.disconnected {
+            color: #ff6b6b;
+        }
+
+        .status-dot {
+            width: 6px;
+            height: 6px;
             border-radius: 50%;
-            border-top-color: var(--accent-color);
-            animation: spin 0.8s linear infinite;
-        }
-
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-
-        /* Disable input and button while loading */
-        .input-area.loading textarea,
-        .input-area.loading button {
-            opacity: 0.7;
-            pointer-events: none;
+            background-color: currentColor;
         }
 
         /* IFrame section (right 2/3) */
         .iframe-section {
             width: 66.67%;
             height: 100%;
+            padding: 1.5rem;
+            background-color: var(--bg-color);
+            display: flex;
+            flex-direction: column;
         }
 
-        .iframe-section iframe {
+        /* Browser window container */
+        .browser-window {
+            width: 100%;
+            height: 100%;
+            background-color: var(--chat-bg);
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            border: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Browser title bar */
+        .browser-titlebar {
+            height: 40px;
+            background-color: #3a3a3a;
+            display: flex;
+            align-items: center;
+            padding: 0 1rem;
+            gap: 0.5rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        /* Browser window controls (red, yellow, green dots) */
+        .browser-controls {
+            display: flex;
+            gap: 8px;
+        }
+
+        .browser-control {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+
+        .browser-control:hover {
+            opacity: 0.8;
+        }
+
+        .browser-control.close {
+            background-color: #ff5f57;
+        }
+
+        .browser-control.minimize {
+            background-color: #ffbd2e;
+        }
+
+        .browser-control.maximize {
+            background-color: #28c940;
+        }
+
+        /* URL bar */
+        .browser-urlbar {
+            flex-grow: 1;
+            height: 28px;
+            background-color: #2a2a2a;
+            border: 1px solid #1a1a1a;
+            border-radius: 6px;
+            padding: 0 12px;
+            display: flex;
+            align-items: center;
+            color: #888;
+            font-size: 0.85rem;
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+
+        /* Browser content area */
+        .browser-content {
+            flex-grow: 1;
+            position: relative;
+            background-color: white;
+            overflow: hidden;
+        }
+
+        .browser-content iframe {
             width: 100%;
             height: 100%;
             border: none;
-            background-color: var(--chat-bg);
+            background-color: white;
         }
 
-        /* Streaming message styles */
-        .ai-response {
-            position: relative;
-        }
-
-        .ai-response-content {
-            white-space: pre-wrap;
-        }
-        
-        .ai-message-status {
-            font-size: 0.7rem;
-            color: var(--status-color);
-            margin-top: 6px;
-            display: flex;
-            align-items: center;
-            gap: 5px;
-        }
-
-        .ai-message-status svg {
-            width: 12px;
-            height: 12px;
-        }
-
-        /* Typing animation */
+        /* Loading animation */
         .typing-indicator {
             display: inline-flex;
             align-items: center;
+            gap: 0.25rem;
         }
         
         .typing-indicator span {
             width: 4px;
             height: 4px;
-            margin: 0 1px;
             background-color: var(--accent-color);
             border-radius: 50%;
             opacity: 0.6;
@@ -241,564 +311,452 @@
             0%, 60%, 100% { transform: translateY(0); }
             30% { transform: translateY(-4px); }
         }
-
-        /* Workflow node styles */
-        .workflow-details {
-            margin-top: 6px;
-            font-size: 0.75rem;
-            color: rgba(255, 255, 255, 0.6);
-            cursor: pointer;
-            user-select: none;
-        }
-
-        .workflow-details-content {
-            margin-top: 6px;
-            padding: 6px;
-            background-color: rgba(0, 0, 0, 0.2);
-            border-radius: 4px;
-            display: none;
-        }
-
-        .workflow-details.expanded .workflow-details-content {
-            display: block;
-        }
-
-        .workflow-node {
-            margin-bottom: 5px;
-            padding-left: 8px;
-            border-left: 2px solid var(--accent-color);
-        }
-
-        .node-title {
-            font-weight: 500;
-            color: var(--accent-color);
-        }
     </style>
 </head>
 <body>
     <div class="chat-section">
         <div class="chat-header">
             <img src="https://service-jobs-images.s3.us-east-2.amazonaws.com/7rl98t1weu387r43il97h6ipk1l7" alt="LlamaBot Logo">
-            <h1>LlamaBot</h1>
+            <h1>Leonardo</h1>
         </div>
-        <div class="message-history">
-            <div class="message ai-message">Hi! I'm LlamaBot. How can I help you today?</div>
-            <div class="loading-spinner"></div>
+        <div class="message-history" id="message-history">
+            <div class="message ai-message">Hi! I'm Leonardo. What are we building today?</div>
         </div>
         <div class="input-area">
             <textarea placeholder="Type your message..." id="messageInput"></textarea>
             <div class="button-row">
-                <button onclick="sendMessage()">Send</button>
+                <div class="connection-status disconnected" id="connectionStatus">
+                    <span class="status-dot"></span>
+                    <span>Disconnected</span>
+                </div>
+                <button id="sendButton" disabled>Send</button>
             </div>
         </div>
     </div>
     <div class="iframe-section">
-        <iframe src="/page" title="Content Frame"></iframe>
+        <div class="browser-window">
+            <div class="browser-titlebar">
+                <div class="browser-controls">
+                    <div class="browser-control close"></div>
+                    <div class="browser-control minimize"></div>
+                    <div class="browser-control maximize"></div>
+                </div>
+                <div class="browser-urlbar">
+                    <span>localhost:8000/page</span>
+                </div>
+            </div>
+            <div class="browser-content">
+                <iframe src="/page" title="Content Frame" id="contentFrame"></iframe>
+            </div>
+        </div>
     </div>
 
     <script>
-        // Add these declarations at the top level, outside any function
-        let htmlPreviewContent = '';
-        let lastSentPosition = 0;
-        const CONTENT_CHUNK_SIZE = 80; // Send 80 characters at a time
+        // WebSocket connection management
+        let socket = null;
+        let currentThreadId = null;
+        let currentAiMessage = null;
+        
+        // HTML streaming variables
+        let htmlFragmentBuffer = '';
+        let fullMessageBuffer = '';
+        let htmlChunksStartedStreaming = false;
+        let htmlChunksEndedStreaming = false;
+        let iframeFlushTimer = null;
+        const IFRAME_REFRESH_MS = 500; // Update iframe every 500ms
 
-        async function sendMessage() {
-            const input = document.getElementById('messageInput');
-            const messageText = input.value.trim();
-            
-            if (messageText) {
-                const messageHistory = document.querySelector('.message-history');
-                const inputArea = document.querySelector('.input-area');
-                const spinner = document.querySelector('.loading-spinner');
-                const iframe = document.querySelector('.iframe-section iframe');
-                
-                // Reset buffer for new message
-                htmlPreviewContent = '';
-                lastSentPosition = 0;
-                
-                // Show loading state
-                spinner.style.display = 'block';
-                inputArea.classList.add('loading');
-                
-                // Add user message to the UI
-                const newMessage = document.createElement('div');
-                newMessage.className = 'message user-message';
-                newMessage.textContent = messageText;
-                messageHistory.appendChild(newMessage);
-                
-                // Clear input field
-                input.value = '';
-                
-                // Create a placeholder for the AI response
-                const aiResponse = document.createElement('div');
-                aiResponse.className = 'message ai-message';
-                
-                // Create the content container
-                const responseContent = document.createElement('div');
-                responseContent.className = 'ai-response-content';
-                responseContent.innerHTML = '<div class="typing-indicator"><span></span><span></span><span></span></div>';
-                aiResponse.appendChild(responseContent);
-                
-                // Create status indicator
-                const statusIndicator = document.createElement('div');
-                statusIndicator.className = 'ai-message-status';
-                statusIndicator.innerHTML = 'Processing...';
-                aiResponse.appendChild(statusIndicator);
-                
-                // Create workflow details section (collapsed by default)
-                const workflowDetails = document.createElement('div');
-                workflowDetails.className = 'workflow-details';
-                workflowDetails.innerHTML = '▶ View processing details';
-                
-                // Create workflow content container
-                const workflowContent = document.createElement('div');
-                workflowContent.className = 'workflow-details-content';
-                workflowDetails.appendChild(workflowContent);
-                
-                // Add click handler to toggle workflow details
-                workflowDetails.addEventListener('click', function() {
-                    this.classList.toggle('expanded');
-                    if (this.classList.contains('expanded')) {
-                        this.childNodes[0].textContent = '▼ Hide processing details';
-                    } else {
-                        this.childNodes[0].textContent = '▶ View processing details';
-                    }
-                });
-                
-                aiResponse.appendChild(workflowDetails);
-                messageHistory.appendChild(aiResponse);
-                
-                // Track active nodes and processed steps
-                const processedNodes = new Map();
-                let activeStep = '';
-                
-                let shouldAutoScroll = true;
+        // Initialize WebSocket connection
+        function initWebSocket() {
+            const wsUrl = `ws://${window.location.host}/ws`;
+            socket = new WebSocket(wsUrl);
 
-                // Add event listener to detect manual scrolling
-                messageHistory.addEventListener('scroll', function() {
-                    // Check if user is near bottom (within 50px)
-                    const isNearBottom = messageHistory.scrollHeight - messageHistory.scrollTop - messageHistory.clientHeight < 50;
-                    shouldAutoScroll = isNearBottom;
-                });
+            socket.onopen = function() {
+                console.log('WebSocket connected');
+                updateConnectionStatus(true);
+                document.getElementById('sendButton').disabled = false;
+            };
+
+            socket.onclose = function() {
+                console.log('WebSocket disconnected');
+                updateConnectionStatus(false);
+                document.getElementById('sendButton').disabled = true;
                 
-                try {
-                    // Set up fetch for streaming
-                    const response = await fetch('/chat-message', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({ message: messageText })
-                    });
-                    
-                    if (!response.ok) {
-                        throw new Error(`HTTP error! status: ${response.status}`);
-                    }
-                    
-                    // Set up the reader for the stream
-                    const reader = response.body.getReader();
-                    const decoder = new TextDecoder();
-                    let buffer = '';
-                    
-                    // Process the stream
-                    while (true) {
-                        const { done, value } = await reader.read();
-                        
-                        if (done) {
-                            break;
+                // Attempt to reconnect after 3 seconds
+                setTimeout(initWebSocket, 3000);
+            };
+
+            socket.onerror = function(error) {
+                console.error('WebSocket error:', error);
+                addMessage('Connection error. Please refresh the page.', 'error');
+            };
+
+            socket.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                console.log('Received:', data);
+                
+                // Handle streaming AI messages
+                if (data.type === 'AIMessageChunk') {
+                    if (data.content) {
+                        // Handle regular text content
+                        if (!currentAiMessage) {
+                            currentAiMessage = addMessage('', 'ai');
                         }
-                        
-                        // Decode the chunk and add to buffer
-                        buffer += decoder.decode(value, { stream: true });
-                        
-                        // Process complete lines in the buffer
-                        const lines = buffer.split('\n');
-                        buffer = lines.pop() || ''; // Keep the last incomplete line in the buffer
-                        
-                        for (const line of lines) {
-                            if (line.trim() === '') continue;
+                        // Check if we still have the typing indicator and remove it
+                        if (currentAiMessage.querySelector('.typing-indicator')) {
+                            currentAiMessage.innerHTML = '';
+                        }
+                        currentAiMessage.innerHTML += data.content;
+                        scrollToBottom();
+                    } else if (data.content === '' || data.content === null) {
+                        // Handle tool call chunks
+                        if (data.base_message && data.base_message.tool_call_chunks && data.base_message.tool_call_chunks[0]) {
+                            let tool_call_data = data.base_message.tool_call_chunks[0].args;
                             
+                            // Buffer the tool call data
+                            htmlFragmentBuffer += tool_call_data;
+                            fullMessageBuffer += tool_call_data;
                             
-                            try {
-                                const data = JSON.parse(line);
+                            // Check for HTML start tag
+                            let htmlTagIndex = htmlFragmentBuffer.indexOf('<html');
+                            if (htmlTagIndex !== -1 && !htmlChunksStartedStreaming) {
+                                htmlChunksStartedStreaming = true;
+                                htmlFragmentBuffer = htmlFragmentBuffer.substring(htmlTagIndex);
                                 
-                                if (data.type === 'start') {
-                                    console.log('Thinking...', data.request_id);
-                                    statusIndicator.innerHTML = 'Thinking...';
-                                } 
-                                else if (data.type === 'update') {
-                                    // Format the node name for display
-                                    const nodeName = data.node.replace(/_/g, ' ').replace(/([A-Z])/g, ' $1')
-                                        .replace(/^\w/, c => c.toUpperCase());
-                                    
-                                    // Check if this is a message chunk update (streaming tokens)
-                                    if (data.node === 'messages') {
-                                        // Try to extract the message content from the AIMessageChunk
-                                        const messageChunkMatch = data.value.match(/AIMessageChunk\(content='([^']*)'/);
-                                        if (messageChunkMatch) {
-                                            // Even if the content is empty, we get the match object
-                                            const chunkContent = messageChunkMatch[1] ? messageChunkMatch[1].replace(/\\n/g, '\n') : '';
-                                            
-                                            // Get the langgraph_node info to know which node is generating this content
-                                            const nodeInfoMatch = data.value.match(/'langgraph_node':\s*'([^']+)'/);
-                                            const currentNode = nodeInfoMatch ? nodeInfoMatch[1] : null;
-                                            
-                                            // If we still have the typing indicator, remove it first
-                                            if (responseContent.querySelector('.typing-indicator')) {
-                                                responseContent.innerHTML = '';
-                                            }
-                                            
-                                            // Append the new content to the response area
-                                            responseContent.innerHTML += chunkContent;
-                                            
-                                            // Update status to show current node
-                                            if (currentNode) {
-                                                statusIndicator.innerHTML = `
-                                                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
-                                                    </svg>
-                                                    ${formatNodeName(currentNode)} is responding...
-                                                `;
-                                            }
-                                            
-                                            // Scroll to the bottom of the message history
-                                            messageHistory.scrollTop = messageHistory.scrollHeight;
-                                            return; // Skip the rest of the processing for this node
-                                        }
-                                    }
-                                    
-                                    // Update status to show current step
-                                    statusIndicator.innerHTML = `Thinking.. ${nodeName}...`;
-                                    activeStep = data.node;
-                                    
-                                    // Create or update the node in workflow details
-                                    if (!processedNodes.has(data.node)) {
-                                        console.log('Adding new node:', data.node);
-                                        const nodeEl = document.createElement('div');
-                                        nodeEl.className = 'workflow-node';
-                                        nodeEl.innerHTML = `<div class="node-title">${nodeName}</div><div class="node-content"></div>`;
-                                        workflowContent.appendChild(nodeEl);
-                                        processedNodes.set(data.node, nodeEl);
-                                    }
-                                    
-                                    // Update node content by appending rather than replacing
-                                    const nodeEl = processedNodes.get(data.node);
-                                    const nodeContent = nodeEl.querySelector('.node-content');
-                                    
-                                    // We'll store the full content in a data attribute to avoid truncation issues when appending
-                                    if (!nodeContent.hasAttribute('data-full-content')) {
-                                        nodeContent.setAttribute('data-full-content', '');
-                                    }
-                                    
-                                    // Append the new value to our stored full content
-                                    const currentFullContent = nodeContent.getAttribute('data-full-content');
-                                    const newFullContent = currentFullContent + data.value;
-                                    // console.log('Received data from stream:', data.value);
-                                    console.log('Got data from stream:', data);
-                                    nodeContent.setAttribute('data-full-content', newFullContent);
-                                    
-                                    // Update the displayed content (show full content, not truncated)
-                                    nodeContent.textContent = newFullContent;
-                                    
-                                    // If this is respond_naturally, update the main response content
-                                    if (data.node === 'respond_naturally') {
-                                        // Remove typing indicator if present
-                                        if (responseContent.querySelector('.typing-indicator')) {
-                                            responseContent.innerHTML = '';
-                                        }
-                                        // Append the new content
-                                        const currentContent = responseContent.innerHTML;
-                                        // Handle case where current content already has HTML
-                                        if (currentContent.includes('<br>') || currentContent.includes('</')) {
-                                            // We have HTML, so just append the new value as HTML
-                                            responseContent.innerHTML = currentContent + data.value.replace(/\n/g, '<br>');
-                                        } else {
-                                            // Plain text so far, add new content and convert newlines
-                                            responseContent.innerHTML = (currentContent + data.value).replace(/\n/g, '<br>');
-                                        }
-                                    }
-                                    
-                                    // Check if this is a write_html_code node
-                                    if (data.node === 'write_html_code') {
-                                        // If we don't already have a code display, create one
-                                        let codeDisplay = responseContent.querySelector('pre.code-display');
-                                        if (!codeDisplay) {
-                                            // Create formatted code display
-                                            if (responseContent.querySelector('.typing-indicator')) {
-                                                responseContent.innerHTML = '';
-                                            }
-                                            responseContent.innerHTML += `
-                                                <div style="margin-bottom: 8px;">I'm creating the HTML for your page:</div>
-                                                <pre class="code-display" style="background-color: rgba(0, 0, 0, 0.2); border-radius: 4px; padding: 12px; margin-top: 8px; max-height: 300px; overflow: auto; font-family: monospace; font-size: 0.85rem; white-space: pre; counter-reset: line; color: #e0e0e0; border: 1px solid rgba(255, 255, 255, 0.1);"><code></code></pre>
-                                            `;
-                                            codeDisplay = responseContent.querySelector('pre.code-display');
-                                        }
-                                        
-                                        // Get the code element
-                                        const codeElement = codeDisplay.querySelector('code');
-                                        
-                                        // Append the new content
-                                        codeElement.textContent += data.value;
-                                        
-                                        // Add to HTML preview content
-                                        htmlPreviewContent += data.value;
-                                        
-                                        console.log('HTML content updated, length:', htmlPreviewContent.length, 'Last sent:', lastSentPosition);
-                                        
-                                        // Start or continue processing preview
-                                        if (!window.processingPreview) {
-                                            window.processingPreview = true;
-                                            console.log('Starting preview processing');
-                                            processPreviewContent();
-                                        }
-                                        
-                                        // Scroll the code block to the bottom
-                                        codeDisplay.scrollTop = codeDisplay.scrollHeight;
-                                        
-                                        // Update status to show "Writing code..."
-                                        statusIndicator.innerHTML = `
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                                <polyline points="16 18 22 12 16 6"></polyline>
-                                                <polyline points="8 6 2 12 8 18"></polyline>
-                                            </svg>
-                                            Writing HTML code...
-                                        `;
-                                    }
-                                    
-                                    // Always scroll to the bottom of the message history
-                                    if (shouldAutoScroll) {
-                                        messageHistory.scrollTop = messageHistory.scrollHeight;
-                                    }
-                                } 
-                                else if (data.type === 'final') {
-                                    // Update status to show completion
-                                    statusIndicator.innerHTML = `
-                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                            <polyline points="20 6 9 17 4 12"></polyline>
-                                        </svg>
-                                        Complete
-                                    `;
-
-                                    //close the live preview
-                                    hideLivePreview();
-                                    
-                                    // Display the final message content
-                                    if (data.messages && data.messages.length > 0) {
-                                        const lastMessage = data.messages[data.messages.length - 1];
-                                        
-                                        // Remove typing indicator if present
-                                        if (responseContent.querySelector('.typing-indicator')) {
-                                            responseContent.innerHTML = '';
-                                        }
-                                        
-                                        responseContent.innerHTML = lastMessage.content.replace(/\n/g, '<br>');
-                                    }
-                                    
-                                    // Refresh the iframe if HTML was updated
-                                    setTimeout(() => {
-                                        iframe.src = iframe.src;
-                                    }, 100);
-
-                                    //close the live preview
-                                    hideLivePreview();
-                                    console.log('Stream ended:', data.request_id);
-                                    
-                                    // Update status to show completion with check mark
-                                    statusIndicator.innerHTML = `
-                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                            <polyline points="20 6 9 17 4 12"></polyline>
-                                        </svg>
-                                        Complete
-                                    `;
-                                    
-                                    // Make sure the message content is visible and not just a typing indicator
-                                    if (responseContent.querySelector('.typing-indicator')) {
-                                        // If we somehow reached the end without receiving a final message content,
-                                        // replace the typing indicator with a completed message
-                                        responseContent.innerHTML = "I've processed your request.";
-                                    }
-                                    
-                                    // Reset HTML preview content
-                                    htmlPreviewContent = '';
-                                    lastSentPosition = 0;
-                                    window.processingPreview = false;
-                                    
-                                    // Hide the preview overlay
-                                    hideLivePreview();
-                                    
-                                    // Refresh the iframe to show any HTML changes
-                                    setTimeout(() => {
-                                        iframe.src = iframe.src;
-                                    }, 100);
+                                // Show loading state in AI message
+                                if (!currentAiMessage) {
+                                    currentAiMessage = addMessage('', 'ai');
                                 }
-                                else if (data.type === 'error') {
-                                    statusIndicator.innerHTML = `Error: ${data.error}`;
-                                    statusIndicator.style.color = '#ff6b6b';
+                                currentAiMessage.innerHTML = '🎨 Generating your page...';
+                                
+                                // Create the overlay with animation
+                                createStreamingOverlay();
+                            }
+                            
+                            // Check for HTML end tag
+                            let endingHtmlTagIndex = fullMessageBuffer.indexOf('</html>');
+                            if (endingHtmlTagIndex !== -1 && !htmlChunksEndedStreaming) {
+                                htmlChunksEndedStreaming = true;
+                                
+                                // Update AI message to show completion
+                                if (currentAiMessage) {
+                                    currentAiMessage.innerHTML = '✨ Page generated successfully!';
                                 }
-                            } catch (e) {
-                                console.error('Error parsing stream data:', e, line);
+                                
+                                // Clear any pending flush timer
+                                if (iframeFlushTimer) {
+                                    clearTimeout(iframeFlushTimer);
+                                    iframeFlushTimer = null;
+                                }
+                                
+                                // Do final flush
+                                flushToIframe();
+                                
+                                // Remove the overlay
+                                removeStreamingOverlay();
+                                
+                                // Reset buffers for next generation
+                                htmlFragmentBuffer = '';
+                                fullMessageBuffer = '';
+                                htmlChunksStartedStreaming = false;
+                                htmlChunksEndedStreaming = false;
+                            }
+                            
+                            // If HTML streaming is active, schedule iframe update
+                            if (htmlChunksStartedStreaming && !htmlChunksEndedStreaming) {
+                                // Clean the fragment
+                                let cleanedFragment = htmlFragmentBuffer
+                                    .replace(/\\n/g, '\n')
+                                    .replace(/\\"/g, '"')
+                                    .replace(/\\t/g, '\t');
+                                
+                                // Schedule iframe update if not already scheduled
+                                if (!iframeFlushTimer) {
+                                    iframeFlushTimer = setTimeout(() => {
+                                        flushToIframe();
+                                        iframeFlushTimer = null;
+                                    }, IFRAME_REFRESH_MS);
+                                }
+                                
+                                // Clear the fragment buffer for next chunk
+                                htmlFragmentBuffer = '';
                             }
                         }
                     }
-                    
-                } catch (error) {
-                    statusIndicator.innerHTML = `Error: ${error.message}`;
-                    statusIndicator.style.color = '#ff6b6b';
-                } finally {
-                    spinner.style.display = 'none';
-                    inputArea.classList.remove('loading');
-                    messageHistory.scrollTop = messageHistory.scrollHeight;
                 }
+                // Handle complete AI messages
+                else if (data.type === 'ai') {
+                    // If we were streaming, finalize that message
+                    currentAiMessage = null;
+                    
+                    // There's no need to add ai content, since we streamed it live into a response message bubble
+                    // Otherwise, check for tool calls
+                    if (data.tool_calls && data.tool_calls.length > 0) {
+                        handleToolCall(data.tool_calls[0], data.base_message);
+                    }
+                    
+                    // Refresh iframe after AI responds
+                    refreshIframe();
+                }
+                // Handle tool responses
+                else if (data.type === 'tool') {
+                    addMessage(data.content, 'tool', data.base_message);
+                }
+                // Handle errors
+                else if (data.type === 'error') {
+                    addMessage(data.content, 'error');
+                }
+            };
+        }
+
+        function updateConnectionStatus(connected) {
+            const status = document.getElementById('connectionStatus');
+            if (connected) {
+                status.className = 'connection-status connected';
+                status.innerHTML = '<span class="status-dot"></span><span>Connected</span>';
+            } else {
+                status.className = 'connection-status disconnected';
+                status.innerHTML = '<span class="status-dot"></span><span>Disconnected</span>';
             }
         }
 
-        // Allow Enter key to send message, Shift+Enter for new line
-        document.getElementById('messageInput').addEventListener('keydown', function(e) {
-            if (e.key === 'Enter') {
-                if (e.shiftKey) {
-                    // Allow default behavior (new line) when Shift+Enter
-                    return;
-                } else {
-                    // Prevent default and send message when just Enter
-                    e.preventDefault();
-                    sendMessage();
+        function sendMessage() {
+            const input = document.getElementById('messageInput');
+            const message = input.value.trim();
+            
+            if (message && socket && socket.readyState === WebSocket.OPEN) {
+                // Reset any previous AI message reference
+                currentAiMessage = null;
+                
+                // Reset HTML streaming state
+                htmlFragmentBuffer = '';
+                fullMessageBuffer = '';
+                htmlChunksStartedStreaming = false;
+                htmlChunksEndedStreaming = false;
+                if (iframeFlushTimer) {
+                    clearTimeout(iframeFlushTimer);
+                    iframeFlushTimer = null;
                 }
+                
+                // Remove any existing overlay
+                removeStreamingOverlay();
+                
+                // Add user message to chat
+                addMessage(message, 'user');
+                
+                // Clear input
+                input.value = '';
+                input.style.height = 'auto';
+                
+                // Generate thread ID if needed
+                if (!currentThreadId) {
+                    const now = new Date();
+                    currentThreadId = now.getFullYear() + '-' + 
+                                    String(now.getMonth() + 1).padStart(2, '0') + '-' + 
+                                    String(now.getDate()).padStart(2, '0') + '_' + 
+                                    String(now.getHours()).padStart(2, '0') + '-' + 
+                                    String(now.getMinutes()).padStart(2, '0') + '-' + 
+                                    String(now.getSeconds()).padStart(2, '0');
+                }
+
+                // Show typing indicator
+                currentAiMessage = addMessage('<div class="typing-indicator"><span></span><span></span><span></span></div>', 'ai');
+
+                // Send message via WebSocket
+                const messageData = {
+                    message: message,
+                    thread_id: currentThreadId,
+                    agent_name: 'default'
+                };
+                
+                socket.send(JSON.stringify(messageData));
+            }
+        }
+
+        function addMessage(content, type, baseMessage = null) {
+            const messageHistory = document.getElementById('message-history');
+            const messageDiv = document.createElement('div');
+            
+            // Set appropriate class based on message type
+            if (type === 'user') {
+                messageDiv.className = 'message user-message';
+                messageDiv.textContent = content;
+            } else if (type === 'ai') {
+                messageDiv.className = 'message ai-message';
+                messageDiv.innerHTML = content;
+            } else if (type === 'tool') {
+                messageDiv.className = 'message ai-message';
+                messageDiv.innerHTML = `🔨 ${content}`;
+            } else if (type === 'error') {
+                messageDiv.className = 'message error-message';
+                messageDiv.textContent = content;
+            }
+            
+            messageHistory.appendChild(messageDiv);
+            scrollToBottom();
+            
+            return messageDiv;
+        }
+
+        function handleToolCall(toolCall, baseMessage) {
+            const functionName = toolCall.name || (toolCall.function && toolCall.function.name);
+            const functionArgs = toolCall.args || (toolCall.function && JSON.parse(toolCall.function.arguments));
+            
+            const messageDiv = addMessage('', 'ai');
+            
+            if (functionName === 'write_html_code') {
+                messageDiv.innerHTML = `📝 Writing HTML code...`;
+            } else {
+                messageDiv.innerHTML = `🔨 Using tool: ${functionName}`;
+            }
+        }
+
+        function scrollToBottom() {
+            const messageHistory = document.getElementById('message-history');
+            messageHistory.scrollTop = messageHistory.scrollHeight;
+        }
+
+        function refreshIframe() {
+            const iframe = document.getElementById('contentFrame');
+            // Small delay to ensure any server-side changes are complete
+            setTimeout(() => {
+                iframe.src = iframe.src;
+            }, 100);
+        }
+        
+        // Function to update iframe with buffered HTML content
+        function flushToIframe() {
+            try {
+                const iframe = document.getElementById('contentFrame');
+                const cleanedHTML = fullMessageBuffer
+                    .replace(/\\n/g, '\n')
+                    .replace(/\\"/g, '"')
+                    .replace(/\\t/g, '\t')
+                    .replace(/\\r/g, '\r');
+                
+                // Write to iframe
+                const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+                if (iframeDoc) {
+                    iframeDoc.open();
+                    iframeDoc.write(cleanedHTML);
+                    iframeDoc.close();
+                    
+                    // Auto-scroll iframe to bottom
+                    setTimeout(() => {
+                        if (iframeDoc.documentElement) {
+                            iframeDoc.documentElement.scrollTop = iframeDoc.documentElement.scrollHeight;
+                        }
+                        if (iframeDoc.body) {
+                            iframeDoc.body.scrollTop = iframeDoc.body.scrollHeight;
+                        }
+                    }, 100);
+                }
+            } catch (e) {
+                console.log('Error updating iframe (normal during streaming):', e);
+            }
+        }
+        
+        // Function to create overlay with Lottie animation
+        function createStreamingOverlay() {
+            // Check if overlay already exists
+            if (document.getElementById('streamingOverlay')) {
+                return;
+            }
+            
+            // Get the browser content div that contains the iframe
+            const browserContent = document.querySelector('.browser-content');
+            if (!browserContent) return;
+            
+            // Create overlay div
+            const overlay = document.createElement('div');
+            overlay.id = 'streamingOverlay';
+            overlay.style.position = 'absolute';
+            overlay.style.top = '0';
+            overlay.style.left = '0';
+            overlay.style.width = '100%';
+            overlay.style.height = '100%';
+            overlay.style.background = 'rgba(0, 0, 0, 0.4)';
+            overlay.style.display = 'flex';
+            overlay.style.flexDirection = 'column';
+            overlay.style.alignItems = 'center';
+            overlay.style.zIndex = '10';
+            overlay.style.borderRadius = '8px';
+            
+            // Create text for overlay
+            const overlayText = document.createElement('div');
+            overlayText.textContent = 'Your Page is Being Built!';
+            overlayText.style.color = 'white';
+            overlayText.style.fontSize = '2.5rem';
+            overlayText.style.fontWeight = 'bold';
+            overlayText.style.fontFamily = 'Arial, sans-serif';
+            overlayText.style.textShadow = '2px 2px 4px rgba(0,0,0,0.5)';
+
+            // Create text container for the top
+            const textContainer = document.createElement('div');
+            textContainer.style.padding = '30px';
+            textContainer.style.width = '100%';
+            textContainer.style.textAlign = 'center';
+
+            // Create Lottie container
+            const lottieContainer = document.createElement('div');
+            lottieContainer.id = 'lottieAnimation';
+            lottieContainer.style.width = '300px';
+            lottieContainer.style.height = '300px';
+            lottieContainer.style.position = 'absolute';
+            lottieContainer.style.top = '50%';
+            lottieContainer.style.left = '50%';
+            lottieContainer.style.transform = 'translate(-50%, -50%)';
+
+            // Add script for Lottie if not already present
+            if (!document.querySelector('script[src*="lottie-player"]')) {
+                const lottieScript = document.createElement('script');
+                lottieScript.src = "https://unpkg.com/@dotlottie/player-component@latest/dist/dotlottie-player.js";
+                document.head.appendChild(lottieScript);
+            }
+
+            // Create Lottie player element
+            const lottiePlayer = document.createElement('dotlottie-player');
+            lottiePlayer.src = "https://llamapress-ai-image-uploads.s3.us-west-2.amazonaws.com/hffa8kqjfn9yzfx28pogpvqhn7cd"; // Builder Image
+            lottiePlayer.background = "transparent";
+            lottiePlayer.speed = "1";
+            lottiePlayer.style.width = "300px";
+            lottiePlayer.style.height = "300px";
+            lottiePlayer.setAttribute("autoplay", "");
+            lottiePlayer.setAttribute("loop", "");
+
+            // Append all elements
+            textContainer.appendChild(overlayText);
+            lottieContainer.appendChild(lottiePlayer);
+            overlay.appendChild(textContainer);
+            overlay.appendChild(lottieContainer);
+            browserContent.appendChild(overlay);
+        }
+        
+        // Function to remove overlay
+        function removeStreamingOverlay() {
+            const overlay = document.getElementById('streamingOverlay');
+            if (overlay) {
+                overlay.remove();
+            }
+        }
+
+        // Event listeners
+        document.getElementById('sendButton').addEventListener('click', sendMessage);
+        
+        document.getElementById('messageInput').addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
             }
         });
 
-        // Auto-resize textarea as content grows
+        // Auto-resize textarea
         document.getElementById('messageInput').addEventListener('input', function() {
-            // Reset height to auto to get the correct scrollHeight
             this.style.height = 'auto';
-            // Set height to scrollHeight, but respect max-height set in CSS
             this.style.height = this.scrollHeight + 'px';
         });
 
-        // Replace handleFragment with this new function
-        function updateLivePreview(codeSnippet) {
-            let previewOverlay = document.getElementById('livePreviewOverlay');
-            if (!previewOverlay) {
-                // Create overlay container with basic styles
-                previewOverlay = document.createElement('div');
-                previewOverlay.id = 'livePreviewOverlay';
-                previewOverlay.style.position = 'fixed';
-                previewOverlay.style.top = '0';
-                previewOverlay.style.left = '0';
-                previewOverlay.style.width = '100%';
-                previewOverlay.style.height = '100%';
-                previewOverlay.style.backgroundColor = 'rgba(0, 0, 0, 0.6)';
-                previewOverlay.style.display = 'flex';
-                previewOverlay.style.alignItems = 'center';
-                previewOverlay.style.justifyContent = 'center';
-                previewOverlay.style.zIndex = '10000';
-
-                // Create the preview container
-                const previewContainer = document.createElement('div');
-                previewContainer.style.width = '75%';
-                previewContainer.style.height = '85%';
-                previewContainer.style.backgroundColor = '#fff';
-                previewContainer.style.borderRadius = '10px';
-                previewContainer.style.position = 'relative';
-
-                // Create the preview frame
-                const previewFrame = document.createElement('iframe');
-                previewFrame.id = 'previewFrame';
-                previewFrame.style.width = '100%';
-                previewFrame.style.height = '100%';
-                previewFrame.style.border = 'none';
-                previewFrame.style.borderRadius = '10px';
-
-                // Create overlay div
-                const overlay = document.createElement('div');
-                overlay.style.position = 'absolute';
-                overlay.style.top = '0';
-                overlay.style.left = '0';
-                overlay.style.width = '100%';
-                overlay.style.height = '100%';
-                overlay.style.background = 'rgba(0, 0, 0, 0.45)';
-                overlay.style.display = 'flex';
-                overlay.style.alignItems = 'center';
-                overlay.style.justifyContent = 'center';
-                overlay.style.borderRadius = '10px';
-                overlay.style.zIndex = '1';
-
-                // Create text for overlay
-                const overlayText = document.createElement('div');
-                overlayText.style.color = 'white';
-                overlayText.style.fontSize = '40px';
-                overlayText.style.fontWeight = 'bold';
-                overlayText.style.fontFamily = 'Arial, sans-serif';
-                overlayText.style.textAlign = 'center';
-                overlayText.style.padding = '20px';
-
-                // Append all elements
-                overlay.appendChild(overlayText);
-                previewContainer.appendChild(previewFrame);
-                previewContainer.appendChild(overlay);
-                previewOverlay.appendChild(previewContainer);
-                document.body.appendChild(previewOverlay);
-
-                // Add a content property to store HTML
-                previewOverlay.htmlContent = '';
-            }
-
-            previewOverlay.style.display = 'flex';
-            const previewFrame = document.getElementById('previewFrame');
-            
-            if (typeof codeSnippet === 'string') {
-                // Append the new code to our content
-                previewOverlay.htmlContent += codeSnippet;
-                
-                try {
-                    const frameDoc = previewFrame.contentDocument;
-                    frameDoc.open();
-                    frameDoc.write(previewOverlay.htmlContent);
-                    frameDoc.close();
-                    
-                    // Auto-scroll
-                    if (frameDoc.documentElement) {
-                        frameDoc.documentElement.scrollTop = frameDoc.documentElement.scrollHeight;
-                    }
-                    if (frameDoc.body) {
-                        frameDoc.body.scrollTop = frameDoc.body.scrollHeight;
-                    }
-                } catch (e) {
-                    console.log('Error updating live preview:', e);
-                }
-            } else {
-                console.error('Invalid content type:', codeSnippet);
-            }
-        }
-
-        // Replace processHtmlBuffer with this
-        function processPreviewContent() {
-            console.log('Processing content, position:', lastSentPosition, 'of', htmlPreviewContent.length);
-            if (htmlPreviewContent.length > lastSentPosition) {
-                const chunk = htmlPreviewContent.substring(lastSentPosition, lastSentPosition + CONTENT_CHUNK_SIZE);
-                lastSentPosition += chunk.length;
-                console.log('Sending chunk of length:', chunk.length);
-                updateLivePreview(chunk);
-                
-                // If there's more to process, schedule the next chunk
-                if (htmlPreviewContent.length > lastSentPosition) {
-                    setTimeout(processPreviewContent, 60); // Process every 60ms for a smooth effect
-                } else {
-                    window.processingPreview = false;
-                    console.log('Content processing complete');
-                }
-            } else {
-                window.processingPreview = false;
-                console.log('No more content to process');
-            }
-        }
-
-        // Replace hideFragmentModal with this
-        function hideLivePreview() {
-            const previewOverlay = document.getElementById('livePreviewOverlay');
-            if (previewOverlay) {
-                previewOverlay.style.display = 'none';
-            }
-        }
+        // Initialize WebSocket on page load
+        initWebSocket();
     </script>
 </body>
 </html>
