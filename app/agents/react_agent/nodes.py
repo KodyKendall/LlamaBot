@@ -28,16 +28,16 @@ APP_DIR = PROJECT_ROOT / 'app'
 HTML_OUTPUT_PATH = APP_DIR / 'page.html'
 
 @tool
-def write_html(html_code: str) -> str:
+def write_html_page(full_html_document: str) -> str:
     """
     Write HTML code to a file.
     """
     with open(HTML_OUTPUT_PATH, "w", encoding='utf-8') as f:
-        f.write(html_code)
+        f.write(full_html_document)
     return f"HTML code written to {HTML_OUTPUT_PATH.relative_to(PROJECT_ROOT)}"
 
 # Global tools list
-tools = [write_html]
+tools = [write_html_page]
 
 # System message
 sys_msg = SystemMessage(content="""You are a helpful software_developer_assistant tasked with writing HTML, CSS, and JavaScript code. 
