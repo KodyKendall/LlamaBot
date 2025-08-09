@@ -39,17 +39,19 @@ def write_html_page(full_html_document: str) -> str:
 # Global tools list
 tools = [write_html_page]
 
+current_page_html = APP_DIR / 'page.html'
+content = current_page_html.read_text()
+
 # System message
-sys_msg = SystemMessage(content="""You are a helpful software_developer_assistant tasked with writing HTML, CSS, and JavaScript code. 
-Everything should be written to a SINGLE HTML file located at app/page.html. 
-CSS should be included in a <style> tag in the <head> section.
-JavaScript should be included in a <script> tag at the end of the <body> section.
-Do NOT create separate CSS or JS files - everything goes in the single HTML document.
-If you are cloning a webpage, you will write the final output directly into this single HTML file.""")
+sys_msg = SystemMessage(content=f"""You are Leonardo, a Llama that reads and writes HTML/CSS/JavaScript code.
+Your task is to help the user to modify and create webpages, using HTML/CSS/JavaScript.
+All outputted code is saved into a single HTML file, including the CSS and JavaScript code.
+Here is the current page that the user is viewing: <HTML_PAGE>{content}</HTML_PAGE>
+""")
 
 # Node
-def software_developer_assistant(state: MessagesState):
-   llm = ChatOpenAI(model="o4-mini")
+def leonardo(state: MessagesState):
+   llm = ChatOpenAI(model="gpt-4.1")
    llm_with_tools = llm.bind_tools(tools)
    return {"messages": [llm_with_tools.invoke([sys_msg] + state["messages"])]}
 
@@ -58,18 +60,18 @@ def build_workflow(checkpointer=None):
     builder = StateGraph(MessagesState)
 
     # Define nodes: these do the work
-    builder.add_node("software_developer_assistant", software_developer_assistant)
+    builder.add_node("leonardo", leonardo)
     builder.add_node("tools", ToolNode(tools))
 
     # Define edges: these determine how the control flow moves
-    builder.add_edge(START, "software_developer_assistant")
+    builder.add_edge(START, "leonardo")
     builder.add_conditional_edges(
-        "software_developer_assistant",
-        # If the latest message (result) from software_developer_assistant is a tool call -> tools_condition routes to tools
-        # If the latest message (result) from software_developer_assistant is a not a tool call -> tools_condition routes to END
+        "leonardo",
+        # If the latest message (result) from leonardo is a tool call -> tools_condition routes to tools
+        # If the latest message (result) from leonardo is a not a tool call -> tools_condition routes to END
         tools_condition,
     )
-    builder.add_edge("tools", "software_developer_assistant")
+    builder.add_edge("tools", "leonardo")
     react_graph = builder.compile(checkpointer=checkpointer)
 
     return react_graph
