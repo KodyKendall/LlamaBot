@@ -355,6 +355,14 @@
         let socket = null;
         let currentThreadId = null;
         let currentAiMessage = null;
+        
+        // HTML streaming variables
+        let htmlFragmentBuffer = '';
+        let fullMessageBuffer = '';
+        let htmlChunksStartedStreaming = false;
+        let htmlChunksEndedStreaming = false;
+        let iframeFlushTimer = null;
+        const IFRAME_REFRESH_MS = 500; // Update iframe every 500ms
 
         // Initialize WebSocket connection
         function initWebSocket() {
@@ -386,16 +394,87 @@
                 console.log('Received:', data);
                 
                 // Handle streaming AI messages
-                if (data.type === 'AIMessageChunk' && data.content) {
-                    if (!currentAiMessage) {
-                        currentAiMessage = addMessage('', 'ai');
+                if (data.type === 'AIMessageChunk') {
+                    if (data.content) {
+                        // Handle regular text content
+                        if (!currentAiMessage) {
+                            currentAiMessage = addMessage('', 'ai');
+                        }
+                        // Check if we still have the typing indicator and remove it
+                        if (currentAiMessage.querySelector('.typing-indicator')) {
+                            currentAiMessage.innerHTML = '';
+                        }
+                        currentAiMessage.innerHTML += data.content;
+                        scrollToBottom();
+                    } else if (data.content === '' || data.content === null) {
+                        // Handle tool call chunks
+                        if (data.base_message && data.base_message.tool_call_chunks && data.base_message.tool_call_chunks[0]) {
+                            let tool_call_data = data.base_message.tool_call_chunks[0].args;
+                            
+                            // Buffer the tool call data
+                            htmlFragmentBuffer += tool_call_data;
+                            fullMessageBuffer += tool_call_data;
+                            
+                            // Check for HTML start tag
+                            let htmlTagIndex = htmlFragmentBuffer.indexOf('<html');
+                            if (htmlTagIndex !== -1 && !htmlChunksStartedStreaming) {
+                                htmlChunksStartedStreaming = true;
+                                htmlFragmentBuffer = htmlFragmentBuffer.substring(htmlTagIndex);
+                                
+                                // Show loading state in AI message
+                                if (!currentAiMessage) {
+                                    currentAiMessage = addMessage('', 'ai');
+                                }
+                                currentAiMessage.innerHTML = '🎨 Generating your page...';
+                            }
+                            
+                            // Check for HTML end tag
+                            let endingHtmlTagIndex = fullMessageBuffer.indexOf('</html>');
+                            if (endingHtmlTagIndex !== -1 && !htmlChunksEndedStreaming) {
+                                htmlChunksEndedStreaming = true;
+                                
+                                // Update AI message to show completion
+                                if (currentAiMessage) {
+                                    currentAiMessage.innerHTML = '✨ Page generated successfully!';
+                                }
+                                
+                                // Clear any pending flush timer
+                                if (iframeFlushTimer) {
+                                    clearTimeout(iframeFlushTimer);
+                                    iframeFlushTimer = null;
+                                }
+                                
+                                // Do final flush
+                                flushToIframe();
+                                
+                                // Reset buffers for next generation
+                                htmlFragmentBuffer = '';
+                                fullMessageBuffer = '';
+                                htmlChunksStartedStreaming = false;
+                                htmlChunksEndedStreaming = false;
+                            }
+                            
+                            // If HTML streaming is active, schedule iframe update
+                            if (htmlChunksStartedStreaming && !htmlChunksEndedStreaming) {
+                                // Clean the fragment
+                                let cleanedFragment = htmlFragmentBuffer
+                                    .replace(/\\n/g, '\n')
+                                    .replace(/\\"/g, '"')
+                                    .replace(/\\t/g, '\t');
+                                
+                                // Schedule iframe update if not already scheduled
+                                if (!iframeFlushTimer) {
+                                    iframeFlushTimer = setTimeout(() => {
+                                        flushToIframe();
+                                        iframeFlushTimer = null;
+                                    }, IFRAME_REFRESH_MS);
+                                }
+                                
+                                // Clear the fragment buffer for next chunk
+                                htmlFragmentBuffer = '';
+                            }
+                        }
                     }
-                    // Check if we still have the typing indicator and remove it
-                    if (currentAiMessage.querySelector('.typing-indicator')) {
-                        currentAiMessage.innerHTML = '';
-                    }
-                    currentAiMessage.innerHTML += data.content;
-                    scrollToBottom();
                 }
                 // Handle complete AI messages
                 else if (data.type === 'ai') {
@@ -440,6 +519,16 @@
             if (message && socket && socket.readyState === WebSocket.OPEN) {
                 // Reset any previous AI message reference
                 currentAiMessage = null;
+                
+                // Reset HTML streaming state
+                htmlFragmentBuffer = '';
+                fullMessageBuffer = '';
+                htmlChunksStartedStreaming = false;
+                htmlChunksEndedStreaming = false;
+                if (iframeFlushTimer) {
+                    clearTimeout(iframeFlushTimer);
+                    iframeFlushTimer = null;
+                }
                 
                 // Add user message to chat
                 addMessage(message, 'user');
@@ -522,6 +611,38 @@
             setTimeout(() => {
                 iframe.src = iframe.src;
             }, 100);
+        }
+        
+        // Function to update iframe with buffered HTML content
+        function flushToIframe() {
+            try {
+                const iframe = document.getElementById('contentFrame');
+                const cleanedHTML = fullMessageBuffer
+                    .replace(/\\n/g, '\n')
+                    .replace(/\\"/g, '"')
+                    .replace(/\\t/g, '\t')
+                    .replace(/\\r/g, '\r');
+                
+                // Write to iframe
+                const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+                if (iframeDoc) {
+                    iframeDoc.open();
+                    iframeDoc.write(cleanedHTML);
+                    iframeDoc.close();
+                    
+                    // Auto-scroll iframe to bottom
+                    setTimeout(() => {
+                        if (iframeDoc.documentElement) {
+                            iframeDoc.documentElement.scrollTop = iframeDoc.documentElement.scrollHeight;
+                        }
+                        if (iframeDoc.body) {
+                            iframeDoc.body.scrollTop = iframeDoc.body.scrollHeight;
+                        }
+                    }, 100);
+                }
+            } catch (e) {
+                console.log('Error updating iframe (normal during streaming):', e);
+            }
         }
 
         // Event listeners
