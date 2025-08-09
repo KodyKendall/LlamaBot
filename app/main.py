@@ -2,7 +2,19 @@ from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+
+import os
+import logging
+import time
+import json
 import asyncio
+from datetime import datetime
+
+from psycopg_pool import AsyncConnectionPool
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from psycopg_pool import ConnectionPool
+from pydantic import BaseModel
+from dotenv import load_dotenv
 
 from langchain_core.load import dumpd
 from langchain_openai import ChatOpenAI
@@ -13,20 +25,6 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.checkpoint.base import CheckpointTuple
 from langgraph.checkpoint.postgres import PostgresSaver
 
-from psycopg_pool import AsyncConnectionPool
-from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-
-from psycopg_pool import ConnectionPool
-
-from pydantic import BaseModel
-from dotenv import load_dotenv
-
-import os
-import logging
-import time
-import json
-
-from datetime import datetime
 from app.agents.react_agent.nodes import build_workflow
 from app.agents.llamabot_v1.nodes import build_workflow as build_workflow_llamabot_v1
 from app.websocket.web_socket_connection_manager import WebSocketConnectionManager
@@ -60,8 +58,6 @@ app.add_middleware(
 )
 
 # Mount static directories
-# app.mount("/assets", StaticFiles(directory="../assets"), name="assets")
-# app.mount("/examples", StaticFiles(directory="../examples"), name="examples")
 
 # Initialize the ChatOpenAI client
 llm = ChatOpenAI(
@@ -72,12 +68,6 @@ client = Client(api_key=os.getenv("LANGSMITH_API_KEY"))
 
 # This is responsible for holding and managing all active websocket connections.
 manager = WebSocketConnectionManager(app) 
-
-# Pydantic model for chat request
-class ChatMessage(BaseModel):
-    message: str
-    thread_id: str = None  # Optional thread_id parameter
-    agent: str = None  # Optional agent parameter
 
 # Application state to hold persistent checkpointer, important for session-based persistence.
 app.state.checkpointer = None
@@ -165,7 +155,6 @@ async def root():
 @app.get("/hello", response_class=JSONResponse)
 async def hello():
     return {"message": "Hello, World! 🦙💬"}
-
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
@@ -296,6 +285,6 @@ async def chat_history(thread_id: str):
 @app.get("/available-agents", response_class=JSONResponse)
 async def available_agents():
     # map from langgraph.json to a list of agent names
-    with open("../langgraph.json", "r") as f:
+    with open("langgraph.json", "r") as f:
         langgraph_json = json.load(f)
     return {"agents": list(langgraph_json["graphs"].keys())}
