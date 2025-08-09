@@ -3,7 +3,8 @@
     "graphs": {
       "llamabot": "./agents/llamabot_v1/nodes.py:build_workflow",
       "llamapress": "./agents/llamapress/nodes.py:build_workflow",
-      "public_leonardo": "./agents/public_leonardo/nodes.py:build_workflow"
+      "public_leonardo": "./agents/public_leonardo/nodes.py:build_workflow",
+      "default": "./agents/react_agent/nodes.py:build_workflow"
     }
   }
   
