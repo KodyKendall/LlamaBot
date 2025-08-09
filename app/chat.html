@@ -390,6 +390,10 @@
                     if (!currentAiMessage) {
                         currentAiMessage = addMessage('', 'ai');
                     }
+                    // Check if we still have the typing indicator and remove it
+                    if (currentAiMessage.querySelector('.typing-indicator')) {
+                        currentAiMessage.innerHTML = '';
+                    }
                     currentAiMessage.innerHTML += data.content;
                     scrollToBottom();
                 }
@@ -398,12 +402,9 @@
                     // If we were streaming, finalize that message
                     currentAiMessage = null;
                     
-                    // If there's content, add the message
-                    if (data.content) {
-                        addMessage(data.content, 'ai', data.base_message);
-                    }
+                    // There's no need to add ai content, since we streamed it live into a response message bubble
                     // Otherwise, check for tool calls
-                    else if (data.tool_calls && data.tool_calls.length > 0) {
+                    if (data.tool_calls && data.tool_calls.length > 0) {
                         handleToolCall(data.tool_calls[0], data.base_message);
                     }
                     
@@ -437,6 +438,9 @@
             const message = input.value.trim();
             
             if (message && socket && socket.readyState === WebSocket.OPEN) {
+                // Reset any previous AI message reference
+                currentAiMessage = null;
+                
                 // Add user message to chat
                 addMessage(message, 'user');
                 
