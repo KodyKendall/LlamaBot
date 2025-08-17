@@ -1,0 +1,12 @@
+08/08/2025, 10PM:
+- Route home page to the /chat page. 
+- Fix broken chat experience.
+- Use websocket route for chat.html, rather than the POST request with SSE
+
+08/16/2025: 11:49AM:
+- TODO: Need to add playwright install into Dockerfile so playwright is in image by default. (Not working currently)
+
+08/17/2025, 11:32AM:
+- Add a comment with placeholder iframe in chat.html for localhost:3000 where we'll be able to view an iFrame wrapping a Ruby on Rails application, so that Leonardo can build and iterate on Rails apps from within the LlamaBot chat interface.
+- This plans for future relases where Leonardo will be able to develop Ruby Rails applications within the browser interface in a hosted environment. (Similar to Lovable, Bolt.new, Base44, etc.)
+- (Starting with LlamaPress Ruby on Rails app, open source Rails project to LlamaBot)

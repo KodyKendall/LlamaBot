@@ -6,6 +6,8 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# RUN playwright install --with-deps chromium
+
 # Copy the rest of the app
 COPY . .
 
@@ -26,4 +28,4 @@ EXPOSE 8000
 CMD ["bash", "-c", "if [ ! -z \"$DB_URI\" ]; then python init_pg_checkpointer.py; fi && uvicorn main:app --host 0.0.0.0 --port 8000"]
 
 # docker buildx build --file Dockerfile --platform linux/amd64,linux/arm64 --tag kody06/llamabot-backend:latest --push .
-# docker buildx build --file Dockerfile --platform linux/amd64,linux/arm64 --tag kody06/llamabot:0.1.15 --push .
+# docker buildx build --file Dockerfile --platform linux/amd64,linux/arm64 --tag kody06/llamabot:0.1.16 --push .

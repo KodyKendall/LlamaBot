@@ -39,3 +39,5 @@ env/
 # Docker
 Dockerfile
 .dockerignore 
+
+app/agents/private/*
