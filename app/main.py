@@ -25,8 +25,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.checkpoint.base import CheckpointTuple
 from langgraph.checkpoint.postgres import PostgresSaver
 
-from app.agents.react_agent.nodes import build_workflow
-from app.agents.llamabot_v1.nodes import build_workflow as build_workflow_llamabot_v1
+from app.agents.llamabot.nodes import build_workflow
 from app.websocket.web_socket_connection_manager import WebSocketConnectionManager
 from app.websocket.web_socket_handler import WebSocketHandler
 from app.websocket.request_handler import RequestHandler
