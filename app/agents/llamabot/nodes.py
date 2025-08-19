@@ -36,21 +36,76 @@ def write_html_page(full_html_document: str) -> str:
         f.write(full_html_document)
     return f"HTML code written to {HTML_OUTPUT_PATH.relative_to(PROJECT_ROOT)}"
 
+@tool
+def read_rails_file(filepath: str) -> str:
+    """Read the contents of a Rails file."""
+    # Construct the full path
+    full_path = APP_DIR / "rails" / filepath
+    
+    # Check if file exists
+    if not full_path.exists():
+        return f"File not found: {filepath}"
+    
+    # Read the file contents
+    try:
+        # Option 1: Using pathlib (recommended)
+        contents = full_path.read_text()
+        
+        # Option 2: Using traditional open()
+        # with open(full_path, 'r') as f:
+        #     contents = f.read()
+        
+        return contents
+    except Exception as e:
+        return f"Error reading file: {e}"
+
+@tool 
+def list_directory_contents(directory: str = "") -> str:
+    """
+    List the contents of a directory.
+    If directory is empty, lists the rails root directory.
+    """
+    # Build path - if directory is empty, just use rails root
+    dir_path = APP_DIR / "rails" / directory if directory else APP_DIR / "rails"
+    
+    if not dir_path.exists():
+        return f"Directory not found: {dir_path}"
+    
+    return os.listdir(dir_path)
+
+@tool 
+def write_to_file(filepath: str, content: str) -> str:
+    """
+    Write content to a file.
+    """
+    full_path = APP_DIR / "rails" / filepath
+    if not full_path.exists():
+        return f"File not found: {filepath}"
+
+    with open(full_path, "w", encoding='utf-8') as f:
+        f.write(content)
+
+    return f"Content written to {full_path}"
+
 # Global tools list
-tools = [write_html_page]
+tools = [list_directory_contents, read_rails_file, write_to_file]
+
+# System message
+sys_msg = SystemMessage(content=f"""You are Leonardo, 
+a Llama that can read and write changes to a Ruby on Rails application.
+Your task is to help the user with their Ruby on Rails application, 
+by answering questions, making modifications, etc.
+You can list the contents of the Rails directory to explore the app.
+You can read the contents of existing files in the Rails directory, to understand the app.
+You can write content to existing files in the Rails directory, to make changes to the app.
+""")
 
 current_page_html = APP_DIR / 'page.html'
 content = current_page_html.read_text()
 
-# System message
-sys_msg = SystemMessage(content=f"""You are Leonardo, a Llama that reads and writes HTML/CSS/JavaScript code.
-Your task is to help the user to modify and create webpages, using HTML/CSS/JavaScript.
-All outputted code is saved into a single HTML file, including the CSS and JavaScript code.
-Here is the current page that the user is viewing: <HTML_PAGE>{content}</HTML_PAGE>
-""")
-
 # Node
 def leonardo(state: MessagesState):
+#    read_rails_file("app/agents/llamabot/nodes.py") # Testing.
    llm = ChatOpenAI(model="gpt-4.1")
    llm_with_tools = llm.bind_tools(tools)
    return {"messages": [llm_with_tools.invoke([sys_msg] + state["messages"])]}
