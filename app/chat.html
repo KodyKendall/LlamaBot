@@ -346,15 +346,17 @@
                 </div>
             </div>
             <div class="browser-content">
-                <!-- <iframe src="/page" title="Content Frame" id="contentFrame"></iframe> -->
-                <iframe src="http://localhost:3000" title="Content Frame" id="contentFrame"></iframe>
+                <iframe src="/page" title="Content Frame" id="contentFrame"></iframe>
+                <!-- <iframe src="http://localhost:3000" title="Content Frame" id="contentFrame"></iframe> -->
             </div>
         </div>
     </div>
 
     <script>
         // AGENT = {NAME: 'llamabot', TYPE: 'default'};
-        AGENT = {NAME: 'rails_agent', TYPE: 'deep_agent'};
+        // AGENT = {NAME: 'deep_research', TYPE: 'deep_agent'}; // uses create_react_agent which I believe is why we have to case into content in AIMessageChunk differently 
+        AGENT = {NAME: 'rails_agent', TYPE: 'default'};
+
 
         // WebSocket connection management
         let socket = null;
