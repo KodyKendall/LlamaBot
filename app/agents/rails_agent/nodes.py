@@ -21,82 +21,74 @@ from openai import OpenAI
 from app.agents.utils.images import encode_image
 
 from app.agents.rails_agent.state import RailsAgentState
+from app.agents.rails_agent.tools import write_todos, write_file, read_file, ls, edit_file, internet_search
+from app.agents.rails_agent.prompts import RAILS_AGENT_PROMPT
+
 
 # Define base paths relative to project root
 SCRIPT_DIR = Path(__file__).parent.resolve()
 PROJECT_ROOT = SCRIPT_DIR.parent.parent.parent  # Go up to LlamaBot root
 APP_DIR = PROJECT_ROOT / 'app'
 
-@tool
-def read_rails_file(filepath: str) -> str:
-    """Read the contents of a Rails file."""
-    # Construct the full path
-    full_path = APP_DIR / "rails" / filepath
+# @tool
+# def read_rails_file(filepath: str) -> str:
+#     """Read the contents of a Rails file."""
+#     # Construct the full path
+#     full_path = APP_DIR / "rails" / filepath
     
-    # Check if file exists
-    if not full_path.exists():
-        return f"File not found: {filepath}"
+#     # Check if file exists
+#     if not full_path.exists():
+#         return f"File not found: {filepath}"
     
-    # Read the file contents
-    try:
-        # Option 1: Using pathlib (recommended)
-        contents = full_path.read_text()
+#     # Read the file contents
+#     try:
+#         # Option 1: Using pathlib (recommended)
+#         contents = full_path.read_text()
         
-        # Option 2: Using traditional open()
-        # with open(full_path, 'r') as f:
-        #     contents = f.read()
+#         # Option 2: Using traditional open()
+#         # with open(full_path, 'r') as f:
+#         #     contents = f.read()
         
-        return contents
-    except Exception as e:
-        return f"Error reading file: {e}"
+#         return contents
+#     except Exception as e:
+#         return f"Error reading file: {e}"
 
-@tool 
-def list_directory_contents(directory: str = "") -> str:
-    """
-    List the contents of a directory.
-    If directory is empty, lists the rails root directory.
-    """
-    # Build path - if directory is empty, just use rails root
-    dir_path = APP_DIR / "rails" / directory if directory else APP_DIR / "rails"
+# @tool 
+# def list_directory_contents(directory: str = "") -> str:
+#     """
+#     List the contents of a directory.
+#     If directory is empty, lists the rails root directory.
+#     """
+#     # Build path - if directory is empty, just use rails root
+#     dir_path = APP_DIR / "rails" / directory if directory else APP_DIR / "rails"
     
-    if not dir_path.exists():
-        return f"Directory not found: {dir_path}"
+#     if not dir_path.exists():
+#         return f"Directory not found: {dir_path}"
     
-    return os.listdir(dir_path)
+#     return os.listdir(dir_path)
 
-@tool 
-def write_to_file(filepath: str, content: str) -> str:
-    """
-    Write content to a file.
-    """
-    full_path = APP_DIR / "rails" / filepath
-    if not full_path.exists():
-        return f"File not found: {filepath}"
+# @tool 
+# def write_to_file(filepath: str, content: str) -> str:
+#     """
+#     Write content to a file.
+#     """
+#     full_path = APP_DIR / "rails" / filepath
+#     if not full_path.exists():
+#         return f"File not found: {filepath}"
 
-    with open(full_path, "w", encoding='utf-8') as f:
-        f.write(content)
+#     with open(full_path, "w", encoding='utf-8') as f:
+#         f.write(content)
 
-    return f"Content written to {full_path}"
+#     return f"Content written to {full_path}"
 
 # Global tools list
-tools = [list_directory_contents, read_rails_file, write_to_file]
+tools = [write_todos, read_file, ls, internet_search]#, write_file, edit_file]
 
 # System message
-sys_msg = SystemMessage(content=f"""You are Leonardo, 
-a Llama that can read and write changes to a Ruby on Rails application.
-Your task is to help the user with their Ruby on Rails application, 
-by answering questions, making modifications, etc.
-You can list the contents of the Rails directory to explore the app.
-You can read the contents of existing files in the Rails directory, to understand the app.
-You can write content to existing files in the Rails directory, to make changes to the app.
-""")
+sys_msg = SystemMessage(content=RAILS_AGENT_PROMPT)
 
 current_page_html = APP_DIR / 'page.html'
 content = current_page_html.read_text()
-
-class Todo(TypedDict):
-    task: str
-    status: Literal["pending", "in_progress", "completed"]
 
 # Node
 def leonardo(state: RailsAgentState):

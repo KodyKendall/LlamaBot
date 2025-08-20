@@ -4,6 +4,7 @@ from langchain_core.messages import ToolMessage
 from typing import Annotated
 from langgraph.prebuilt import InjectedState
 from tavily import TavilyClient
+import os
 
 from app.agents.rails_agent.prompts import (
     WRITE_TODOS_DESCRIPTION,
@@ -34,11 +35,19 @@ def write_todos(
         }
     )
 
-
-def ls(state: Annotated[RailsAgentState, InjectedState]) -> list[str]:
-    """List all files"""
-    return list(state.get("files", {}).keys())
-
+@tool
+def ls(directory: str = "") -> list[str]:
+    """
+    List the contents of a directory.
+    If directory is empty, lists the rails root directory.
+    """
+    # Build path - if directory is empty, just use rails root
+    dir_path = APP_DIR / "rails" / directory if directory else APP_DIR / "rails"
+    
+    if not dir_path.exists():
+        return f"Directory not found: {dir_path}"
+    
+    return os.listdir(dir_path)
 
 @tool(description=TOOL_DESCRIPTION)
 def read_file(
@@ -48,12 +57,18 @@ def read_file(
     limit: int = 2000,
 ) -> str:
     """Read file."""
-    mock_filesystem = state.get("files", {})
-    if file_path not in mock_filesystem:
+    # Construct the full path
+    full_path = APP_DIR / "rails" / file_path
+    
+    # Check if file exists
+    if not full_path.exists():
         return f"Error: File '{file_path}' not found"
-
-    # Get file content
-    content = mock_filesystem[file_path]
+    
+    # Read the file contents
+    try:
+        content = full_path.read_text()
+    except Exception as e:
+        return f"Error reading file: {e}"
 
     # Handle empty file
     if not content or content.strip() == "":
@@ -86,6 +101,7 @@ def read_file(
     return "\n".join(result_lines)
 
 
+@tool(description="Write to a file.")
 def write_file(
     file_path: str,
     content: str,
@@ -93,6 +109,22 @@ def write_file(
     tool_call_id: Annotated[str, InjectedToolCallId],
 ) -> Command:
     """Write to a file."""
+    full_path = APP_DIR / "rails" / file_path
+    try:
+        full_path.parent.mkdir(parents=True, exist_ok=True)
+        full_path.write_text(content)
+    except Exception as e:
+        return Command(
+            update={
+                "messages": [
+                    ToolMessage(
+                        f"Error writing file {file_path}: {e}",
+                        tool_call_id=tool_call_id,
+                    )
+                ]
+            }
+        )
+
     files = state.get("files", {})
     files[file_path] = content
     return Command(
@@ -104,6 +136,7 @@ def write_file(
         }
     )
 
+
 @tool(description=EDIT_DESCRIPTION)
 def edit_file(
     file_path: str,
@@ -113,43 +146,69 @@ def edit_file(
     tool_call_id: Annotated[str, InjectedToolCallId],
     replace_all: bool = False,
 ) -> Command:
-    """Write to a file."""
-    mock_filesystem = state.get("files", {})
-    # Check if file exists in mock filesystem
-    if file_path not in mock_filesystem:
-        return f"Error: File '{file_path}' not found"
+    """Perform string replacement in a file."""
+    full_path = APP_DIR / "rails" / file_path
 
-    # Get current file content
-    content = mock_filesystem[file_path]
+    if not full_path.exists():
+        error_message = f"Error: File '{file_path}' not found"
+        return Command(
+            update={
+                "messages": [ToolMessage(error_message, tool_call_id=tool_call_id)]
+            }
+        )
+    try:
+        content = full_path.read_text()
+    except Exception as e:
+        error_message = f"Error reading file '{file_path}': {e}"
+        return Command(
+            update={
+                "messages": [ToolMessage(error_message, tool_call_id=tool_call_id)]
+            }
+        )
 
-    # Check if old_string exists in the file
     if old_string not in content:
-        return f"Error: String not found in file: '{old_string}'"
+        error_message = f"Error: String not found in file: '{old_string}'"
+        return Command(
+            update={
+                "messages": [ToolMessage(error_message, tool_call_id=tool_call_id)]
+            }
+        )
 
-    # If not replace_all, check for uniqueness
     if not replace_all:
         occurrences = content.count(old_string)
         if occurrences > 1:
-            return f"Error: String '{old_string}' appears {occurrences} times in file. Use replace_all=True to replace all instances, or provide a more specific string with surrounding context."
-        elif occurrences == 0:
-            return f"Error: String not found in file: '{old_string}'"
+            error_message = f"Error: String '{old_string}' appears {occurrences} times in file. Use replace_all=True to replace all instances, or provide a more specific string with surrounding context."
+            return Command(
+                update={
+                    "messages": [
+                        ToolMessage(error_message, tool_call_id=tool_call_id)
+                    ]
+                }
+            )
 
-    # Perform the replacement
     if replace_all:
         new_content = content.replace(old_string, new_string)
         replacement_count = content.count(old_string)
         result_msg = f"Successfully replaced {replacement_count} instance(s) of the string in '{file_path}'"
     else:
-        new_content = content.replace(
-            old_string, new_string, 1
-        )  # Replace only first occurrence
+        new_content = content.replace(old_string, new_string, 1)
         result_msg = f"Successfully replaced string in '{file_path}'"
 
-    # Update the mock filesystem
-    mock_filesystem[file_path] = new_content
+    try:
+        full_path.write_text(new_content)
+    except Exception as e:
+        error_message = f"Error writing to file '{file_path}': {e}"
+        return Command(
+            update={
+                "messages": [ToolMessage(error_message, tool_call_id=tool_call_id)]
+            }
+        )
+
+    files = state.get("files", {})
+    files[file_path] = new_content
     return Command(
         update={
-            "files": mock_filesystem,
+            "files": files,
             "messages": [ToolMessage(result_msg, tool_call_id=tool_call_id)],
         }
     )
