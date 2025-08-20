@@ -3,14 +3,16 @@ from langgraph.types import Command
 from langchain_core.messages import ToolMessage
 from typing import Annotated
 from langgraph.prebuilt import InjectedState
+from tavily import TavilyClient
 
-from deepagents.prompts import (
+from app.agents.rails_agent.prompts import (
     WRITE_TODOS_DESCRIPTION,
     EDIT_DESCRIPTION,
     TOOL_DESCRIPTION,
+    INTERNET_SEARCH_DESCRIPTION,
 )
 
-from deepagents.state import Todo, DeepAgentState
+from app.agents.rails_agent.state import Todo, RailsAgentState
 
 from pathlib import Path
 
@@ -33,7 +35,7 @@ def write_todos(
     )
 
 
-def ls(state: Annotated[DeepAgentState, InjectedState]) -> list[str]:
+def ls(state: Annotated[RailsAgentState, InjectedState]) -> list[str]:
     """List all files"""
     return list(state.get("files", {}).keys())
 
@@ -41,7 +43,7 @@ def ls(state: Annotated[DeepAgentState, InjectedState]) -> list[str]:
 @tool(description=TOOL_DESCRIPTION)
 def read_file(
     file_path: str,
-    state: Annotated[DeepAgentState, InjectedState],
+    state: Annotated[RailsAgentState, InjectedState],
     offset: int = 0,
     limit: int = 2000,
 ) -> str:
@@ -87,7 +89,7 @@ def read_file(
 def write_file(
     file_path: str,
     content: str,
-    state: Annotated[DeepAgentState, InjectedState],
+    state: Annotated[RailsAgentState, InjectedState],
     tool_call_id: Annotated[str, InjectedToolCallId],
 ) -> Command:
     """Write to a file."""
@@ -102,13 +104,12 @@ def write_file(
         }
     )
 
-
 @tool(description=EDIT_DESCRIPTION)
 def edit_file(
     file_path: str,
     old_string: str,
     new_string: str,
-    state: Annotated[DeepAgentState, InjectedState],
+    state: Annotated[RailsAgentState, InjectedState],
     tool_call_id: Annotated[str, InjectedToolCallId],
     replace_all: bool = False,
 ) -> Command:
@@ -152,3 +153,19 @@ def edit_file(
             "messages": [ToolMessage(result_msg, tool_call_id=tool_call_id)],
         }
     )
+
+tavily_client = TavilyClient(api_key=os.environ["TAVILY_API_KEY"])
+@tool(description=INTERNET_SEARCH_DESCRIPTION)
+# Search tool to use to do research
+def internet_search(
+    query: str,
+    max_results: int = 5,
+    include_raw_content: bool = False,
+):
+    search_docs = tavily_client.search(
+        query,
+        max_results=max_results,
+        include_raw_content=include_raw_content,
+        topic="general",
+    )
+    return search_docs

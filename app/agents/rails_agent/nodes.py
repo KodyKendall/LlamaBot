@@ -20,6 +20,8 @@ from app.agents.utils.playwright_screenshot import capture_page_and_img_src
 from openai import OpenAI
 from app.agents.utils.images import encode_image
 
+from app.agents.rails_agent.state import RailsAgentState
+
 # Define base paths relative to project root
 SCRIPT_DIR = Path(__file__).parent.resolve()
 PROJECT_ROOT = SCRIPT_DIR.parent.parent.parent  # Go up to LlamaBot root
@@ -95,9 +97,6 @@ content = current_page_html.read_text()
 class Todo(TypedDict):
     task: str
     status: Literal["pending", "in_progress", "completed"]
-
-def RailsAgentState(MessagesState):
-    todos: Optional[List[Todo]] = None
 
 # Node
 def leonardo(state: RailsAgentState):
