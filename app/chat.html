@@ -353,6 +353,9 @@
     </div>
 
     <script>
+        // AGENT = {NAME: 'llamabot', TYPE: 'default'};
+        AGENT = {NAME: 'rails_agent', TYPE: 'deep_agent'};
+
         // WebSocket connection management
         let socket = null;
         let currentThreadId = null;
@@ -406,7 +409,13 @@
                         if (currentAiMessage.querySelector('.typing-indicator')) {
                             currentAiMessage.innerHTML = '';
                         }
-                        currentAiMessage.innerHTML += data.content;
+                        if (AGENT.TYPE === 'deep_agent') { //follows deep_research data content structure for AIMessageChunks.
+                            if (data.content && data.content.length > 0) { // it's strange how this different deep agent requires this changed structure/format.
+                                currentAiMessage.innerHTML += data.content[0].text;
+                            }
+                        } else {
+                            currentAiMessage.innerHTML += data.content;
+                        }
                         scrollToBottom();
                     } else if (data.content === '' || data.content === null) {
                         // Handle tool call chunks
@@ -566,7 +575,8 @@
                 const messageData = {
                     message: message,
                     thread_id: currentThreadId,
-                    agent_name: 'llamabot'
+                    agent_name: AGENT.NAME
+
                 };
                 
                 socket.send(JSON.stringify(messageData));
