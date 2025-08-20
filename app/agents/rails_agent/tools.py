@@ -11,11 +11,15 @@ from app.agents.rails_agent.prompts import (
     EDIT_DESCRIPTION,
     TOOL_DESCRIPTION,
     INTERNET_SEARCH_DESCRIPTION,
+    LIST_DIRECTORY_DESCRIPTION,
 )
 
 from app.agents.rails_agent.state import Todo, RailsAgentState
 
 from pathlib import Path
+import subprocess
+import json
+import re
 
 # Define base paths relative to project root
 SCRIPT_DIR = Path(__file__).parent.resolve()
@@ -35,17 +39,17 @@ def write_todos(
         }
     )
 
-@tool
+@tool(description=LIST_DIRECTORY_DESCRIPTION)
 def ls(directory: str = "") -> list[str]:
     """
     List the contents of a directory.
-    If directory is empty, lists the rails root directory.
+    If directory string is empty, lists the root directory.
     """
     # Build path - if directory is empty, just use rails root
     dir_path = APP_DIR / "rails" / directory if directory else APP_DIR / "rails"
     
     if not dir_path.exists():
-        return f"Directory not found: {dir_path}"
+        return f"Directory not found: {directory}"
     
     return os.listdir(dir_path)
 
@@ -125,11 +129,8 @@ def write_file(
             }
         )
 
-    files = state.get("files", {})
-    files[file_path] = content
     return Command(
         update={
-            "files": files,
             "messages": [
                 ToolMessage(f"Updated file {file_path}", tool_call_id=tool_call_id)
             ],
@@ -146,7 +147,6 @@ def edit_file(
     tool_call_id: Annotated[str, InjectedToolCallId],
     replace_all: bool = False,
 ) -> Command:
-    """Perform string replacement in a file."""
     full_path = APP_DIR / "rails" / file_path
 
     if not full_path.exists():
@@ -204,26 +204,23 @@ def edit_file(
             }
         )
 
-    files = state.get("files", {})
-    files[file_path] = new_content
     return Command(
         update={
-            "files": files,
             "messages": [ToolMessage(result_msg, tool_call_id=tool_call_id)],
         }
     )
 
-@tool(description="Search all files in the rails directory for a substring")
+@tool(description="Search all files in the project directory for a substring")
 def search_file(
     substring: str, tool_call_id: Annotated[str, InjectedToolCallId]
 ) -> Command:
-    """Search all files in the rails directory for a substring."""
+    """Search all files in the directory for a substring."""
     full_path = APP_DIR / "rails"
     matches = []
     
     # Check if the rails directory exists
     if not full_path.exists():
-        result_msg = f"Rails directory not found: {full_path}"
+        result_msg = f"Project directory not found"
         return Command(
             update={
                 "messages": [ToolMessage(result_msg, tool_call_id=tool_call_id)],
@@ -249,7 +246,7 @@ def search_file(
         else:
             result_msg = f"Substring '{substring}' found in {len(matches)} files:\n" + "\n".join(f"- {match}" for match in matches)
     else:
-        result_msg = f"Substring '{substring}' not found in any files in the rails directory"
+        result_msg = f"Substring '{substring}' not found in any files in the directory"
     
     return Command(
         update={
@@ -297,6 +294,82 @@ def list_all_files_recursive(directory: Path):
 
     walk_directory(directory)
 
+# Rails container configuration
+RAILS_CONT = "rails-agent-llamapress-1"
+WORKDIR = "/rails"  # path that contains bin/rails inside the Rails container
+
+def rails_api_sh(snippet: str, workdir: str = WORKDIR) -> str:
+    """Execute a command in the Rails Docker container via Docker API."""
+    try:
+        # Create the exec payload
+        payload = {
+            "AttachStdout": True,
+            "AttachStderr": True,
+            "Tty": True,
+            "Cmd": ["/bin/sh", "-lc", snippet],
+            "WorkingDir": workdir
+        }
+        
+        # Create exec instance using curl
+        create_cmd = [
+            "curl", "--silent", "--show-error", "--fail-with-body",
+            "--unix-socket", "/var/run/docker.sock",
+            "-H", "Content-Type: application/json",
+            "--data-binary", json.dumps(payload),
+            f"http://localhost/containers/{RAILS_CONT}/exec"
+        ]
+        
+        create_result = subprocess.run(create_cmd, capture_output=True, text=True, timeout=30)
+        if create_result.returncode != 0:
+            return f"CREATE-EXEC ERROR: {create_result.stderr or create_result.stdout}"
+        
+        # Parse exec ID
+        try:
+            exec_data = json.loads(create_result.stdout)
+            exec_id = exec_data["Id"]
+        except (KeyError, json.JSONDecodeError) as e:
+            return f"BAD CREATE RESPONSE: {create_result.stdout}"
+        
+        # Validate exec ID format (64 character hex string)
+        if not re.match(r'^[0-9a-f]{64}$', exec_id):
+            return f"No exec Id parsed; aborting. Got: {exec_id}"
+        
+        # Start exec instance using curl
+        start_cmd = [
+            "curl", "-N", "--silent", "--show-error", "--fail-with-body",
+            "--unix-socket", "/var/run/docker.sock",
+            "-H", "Content-Type: application/json",
+            "-d", '{"Detach":false,"Tty":true}',
+            f"http://localhost/exec/{exec_id}/start"
+        ]
+        
+        start_result = subprocess.run(start_cmd, capture_output=True, text=True, timeout=60)
+        if start_result.returncode != 0:
+            return f"START-EXEC ERROR: {start_result.stderr or start_result.stdout}"
+        
+        return start_result.stdout
+        
+    except subprocess.TimeoutExpired:
+        return "Command timed out"
+    except Exception as e:
+        return f"Unexpected error: {str(e)}"
+
+@tool(description="Execute a bash command in operating system that Rails is running in")
+def bash_command(
+    command: str, 
+    tool_call_id: Annotated[str, InjectedToolCallId],
+    workdir: str = WORKDIR
+) -> Command:
+    """Execute a bash command in the Rails Docker container."""
+    result = rails_api_sh(command, workdir)
+    
+    return Command(
+        update={
+            "messages": [
+                ToolMessage(f"Command output:\n{result}", tool_call_id=tool_call_id)
+            ],
+        }
+    )
 
 tavily_client = TavilyClient(api_key=os.environ["TAVILY_API_KEY"])
 @tool(description=INTERNET_SEARCH_DESCRIPTION)

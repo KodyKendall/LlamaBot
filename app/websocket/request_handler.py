@@ -56,7 +56,8 @@ class RequestHandler:
                     "configurable": {
                         "thread_id": f"{message.get('thread_id')}",
                         "recursion_limit": 100
-                    }
+                    },
+                    "recursion_limit": 100
                 }
 
                 async for chunk in app.astream(state, config=config, stream_mode=["updates", "messages"], subgraphs=True):

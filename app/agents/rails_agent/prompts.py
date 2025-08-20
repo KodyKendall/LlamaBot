@@ -426,6 +426,7 @@ Usage:
 - Only use emojis if the user explicitly requests it. Avoid adding emojis to files unless asked.
 - The edit will FAIL if `old_string` is not unique in the file. Either provide a larger string with more surrounding context to make it unique or use `replace_all` to change every instance of `old_string`. 
 - Use `replace_all` for replacing and renaming strings across the file. This parameter is useful if you want to rename a variable for instance."""
+
 TOOL_DESCRIPTION = """Reads a file from the local filesystem. You can access any file directly by using this tool.
 Assume this tool is able to read all files on the machine. If the User provides a path to a file assume that path is valid. It is okay to read a file that does not exist; an error will be returned.
 
@@ -438,18 +439,16 @@ Usage:
 - You have the capability to call multiple tools in a single response. It is always better to speculatively read multiple files as a batch that are potentially useful. 
 - If you read a file that exists but has empty contents you will receive a system reminder warning in place of file contents."""
 
-base_prompt = """You have access to a number of standard tools
-## `write_todos`
-
-You have access to the `write_todos` tools to help you manage and plan tasks. Use these tools VERY frequently to ensure that you are tracking your tasks and giving the user visibility into your progress.
-These tools are also EXTREMELY helpful for planning tasks, and for breaking down larger complex tasks into smaller steps. If you do not use this tool when planning, you may forget to do important tasks - and that is unacceptable.
-
-It is critical that you mark todos as completed as soon as you are done with a task. Do not batch up multiple tasks before marking them as completed.
-## `task`
-- When doing web search, prefer to use the `task` tool in order to reduce context usage."""
-
 INTERNET_SEARCH_DESCRIPTION="""
    Usage:
    - The query parameter must be a string that is a valid search query.
    - You can use this tool to search the internet for information.
+"""
+
+LIST_DIRECTORY_DESCRIPTION = """
+List the contents of a directory. This is a tool that you can use to list the contents of your current directory, 
+or a directory that you specify. Never include "/" in the directory string at the beginning. We are only interested in the contents of the CURRENT directory, not directories above it.
+The folders inside this current directory should be roughly map to a light version of a Rails directory, including: app, config, and db. 
+
+To confirm this, just list the contents of the current directory without a folder name as an argument.
 """
