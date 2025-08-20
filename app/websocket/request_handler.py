@@ -54,7 +54,8 @@ class RequestHandler:
                 app, state = self.get_langgraph_app_and_state(message)
                 config = {
                     "configurable": {
-                        "thread_id": f"{message.get('thread_id')}"
+                        "thread_id": f"{message.get('thread_id')}",
+                        "recursion_limit": 100
                     }
                 }
 

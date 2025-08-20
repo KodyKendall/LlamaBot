@@ -213,6 +213,91 @@ def edit_file(
         }
     )
 
+@tool(description="Search all files in the rails directory for a substring")
+def search_file(
+    substring: str, tool_call_id: Annotated[str, InjectedToolCallId]
+) -> Command:
+    """Search all files in the rails directory for a substring."""
+    full_path = APP_DIR / "rails"
+    matches = []
+    
+    # Check if the rails directory exists
+    if not full_path.exists():
+        result_msg = f"Rails directory not found: {full_path}"
+        return Command(
+            update={
+                "messages": [ToolMessage(result_msg, tool_call_id=tool_call_id)],
+            }
+        )
+    
+    # Recursively iterate through all files in subdirectories
+    for file_path in full_path.rglob("*"):
+        if file_path.is_file():  # Only check actual files, not directories
+            try:
+                content = file_path.read_text()
+                if substring in content:
+                    # Get relative path from rails directory for cleaner output
+                    relative_path = file_path.relative_to(full_path)
+                    matches.append(str(relative_path))
+            except (UnicodeDecodeError, PermissionError, OSError):
+                # Skip files that can't be read (binary files, permission issues, etc.)
+                continue
+
+    if matches:
+        if len(matches) == 1:
+            result_msg = f"Substring '{substring}' found in 1 file:\n- {matches[0]}"
+        else:
+            result_msg = f"Substring '{substring}' found in {len(matches)} files:\n" + "\n".join(f"- {match}" for match in matches)
+    else:
+        result_msg = f"Substring '{substring}' not found in any files in the rails directory"
+    
+    return Command(
+        update={
+            "messages": [ToolMessage(result_msg, tool_call_id=tool_call_id)],
+        }
+    )
+
+
+def list_all_files_recursive(directory: Path):
+    """
+    Example function showing different ways to recursively iterate through all files
+    """
+    print(f"Files in {directory} and all subdirectories:")
+
+    # Method 1: Using pathlib.Path.rglob() (recommended for most cases)
+    print("\n1. Using pathlib.rglob():")
+    for file_path in directory.rglob("*"):
+        if file_path.is_file():
+            print(f"  {file_path.relative_to(directory)}")
+
+    # Method 2: Using os.walk()
+    print("\n2. Using os.walk():")
+    for root, dirs, files in os.walk(directory):
+        for file in files:
+            file_path = Path(root) / file
+            print(f"  {file_path.relative_to(directory)}")
+
+    # Method 3: Using glob.glob() with recursive pattern
+    print("\n3. Using glob.glob() with recursive pattern:")
+    import glob
+    for file_path in glob.glob(str(directory / "**" / "*"), recursive=True):
+        file_path = Path(file_path)
+        if file_path.is_file():
+            print(f"  {file_path.relative_to(directory)}")
+
+    # Method 4: Using pathlib with custom recursion
+    print("\n4. Using custom recursion:")
+    def walk_directory(path: Path, prefix=""):
+        for item in path.iterdir():
+            if item.is_file():
+                print(f"  {prefix}{item.name}")
+            elif item.is_dir():
+                print(f"  {prefix}{item.name}/")
+                walk_directory(item, prefix + "  ")
+
+    walk_directory(directory)
+
+
 tavily_client = TavilyClient(api_key=os.environ["TAVILY_API_KEY"])
 @tool(description=INTERNET_SEARCH_DESCRIPTION)
 # Search tool to use to do research

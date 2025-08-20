@@ -21,7 +21,7 @@ from openai import OpenAI
 from app.agents.utils.images import encode_image
 
 from app.agents.rails_agent.state import RailsAgentState
-from app.agents.rails_agent.tools import write_todos, write_file, read_file, ls, edit_file, internet_search
+from app.agents.rails_agent.tools import write_todos, write_file, read_file, ls, edit_file, search_file, internet_search
 from app.agents.rails_agent.prompts import RAILS_AGENT_PROMPT
 
 
@@ -82,7 +82,7 @@ APP_DIR = PROJECT_ROOT / 'app'
 #     return f"Content written to {full_path}"
 
 # Global tools list
-tools = [write_todos, read_file, ls, internet_search]#, write_file, edit_file]
+tools = [write_todos, read_file, ls, internet_search, search_file, write_file, edit_file]
 
 # System message
 sys_msg = SystemMessage(content=RAILS_AGENT_PROMPT)

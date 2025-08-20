@@ -216,6 +216,33 @@
             flex-direction: column;
         }
 
+        /* Browser tabs */
+        .browser-tabs {
+            display: flex;
+            align-items: flex-end;
+            margin-left: 10px;
+        }
+
+        .tab {
+            padding: 8px 15px;
+            cursor: pointer;
+            background-color: #2d2d2d;
+            border: 1px solid var(--border-color);
+            border-bottom: none;
+            border-radius: 6px 6px 0 0;
+            margin-right: 2px;
+            color: var(--text-color);
+            opacity: 0.7;
+            position: relative;
+            bottom: -1px;
+        }
+
+        .tab.active {
+            background-color: var(--chat-bg);
+            border-bottom: 1px solid var(--chat-bg);
+            opacity: 1;
+        }
+
         /* Browser title bar */
         .browser-titlebar {
             height: 40px;
@@ -223,7 +250,13 @@
             display: flex;
             align-items: center;
             padding: 0 1rem;
-            gap: 0.5rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        /* Browser address bar */
+        .browser-addressbar {
+            padding: 5px 1rem;
+            background-color: #3a3a3a;
             border-bottom: 1px solid var(--border-color);
         }
 
@@ -270,6 +303,7 @@
             color: #888;
             font-size: 0.85rem;
             font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            width: 100%;
         }
 
         /* Browser content area */
@@ -280,11 +314,16 @@
             overflow: hidden;
         }
 
-        .browser-content iframe {
+        .content-iframe {
+            display: none;
             width: 100%;
             height: 100%;
             border: none;
             background-color: white;
+        }
+
+        .content-iframe.active {
+            display: block;
         }
 
         /* Loading animation */
@@ -341,13 +380,19 @@
                     <div class="browser-control minimize"></div>
                     <div class="browser-control maximize"></div>
                 </div>
+                <div class="browser-tabs">
+                    <div class="tab active" data-target="contentFrame">Rendered Page</div>
+                    <div class="tab" data-target="liveSiteFrame">Live Site</div>
+                </div>
+            </div>
+            <div class="browser-addressbar">
                 <div class="browser-urlbar">
                     <span>localhost:3000</span>
                 </div>
             </div>
             <div class="browser-content">
-                <iframe src="/page" title="Content Frame" id="contentFrame"></iframe>
-                <!-- <iframe src="http://localhost:3000" title="Content Frame" id="contentFrame"></iframe> -->
+                <iframe src="/page" title="Content Frame" id="contentFrame" class="content-iframe active"></iframe>
+                <iframe src="http://localhost:3000" title="Live Site Frame" id="liveSiteFrame" class="content-iframe"></iframe>
             </div>
         </div>
     </div>
@@ -760,6 +805,23 @@
                 e.preventDefault();
                 sendMessage();
             }
+        });
+
+        // Tab switching logic
+        const tabs = document.querySelectorAll('.tab');
+        const iframes = document.querySelectorAll('.content-iframe');
+
+        tabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                // Deactivate all tabs and iframes
+                tabs.forEach(t => t.classList.remove('active'));
+                iframes.forEach(i => i.classList.remove('active'));
+
+                // Activate clicked tab and corresponding iframe
+                tab.classList.add('active');
+                const targetIframeId = tab.dataset.target;
+                document.getElementById(targetIframeId).classList.add('active');
+            });
         });
 
         // Auto-resize textarea
