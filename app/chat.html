@@ -873,6 +873,12 @@
             }
         }
 
+        async function fetchThreads() {
+            const response = await fetch('/threads');
+            const threads = await response.json();
+            console.log(threads);
+        }
+
         // Event listeners
         document.getElementById('sendButton').addEventListener('click', sendMessage);
         
@@ -950,6 +956,8 @@
 
         // Initialize WebSocket on page load
         initWebSocket();
+
+        fetchThreads();
     </script>
 </body>
 </html>
