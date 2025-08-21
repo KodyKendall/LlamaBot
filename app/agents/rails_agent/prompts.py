@@ -450,5 +450,7 @@ List the contents of a directory. This is a tool that you can use to list the co
 or a directory that you specify. Never include "/" in the directory string at the beginning. We are only interested in the contents of the CURRENT directory, not directories above it.
 The folders inside this current directory should be roughly map to a light version of a Rails directory, including: app, config, and db. 
 
+NEVER include a leading slash "/"  at the beginning of the directory string.
+
 To confirm this, just list the contents of the current directory without a folder name as an argument.
 """

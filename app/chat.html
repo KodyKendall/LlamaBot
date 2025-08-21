@@ -912,9 +912,6 @@
                                     String(now.getSeconds()).padStart(2, '0');
                 }
 
-                // Show typing indicator
-                currentAiMessage = addMessage('<div class="typing-indicator"><span></span><span></span><span></span></div>', 'ai');
-
                 // Send message via WebSocket
                 const messageData = {
                     message: message,
@@ -1154,6 +1151,10 @@
                 const threads = await response.json();
                 console.log(threads);
                 
+                // threads[0].state[4] is a date.
+                // SORT based on this.
+                threads.sort((a, b) => new Date(b.state[4]) - new Date(a.state[4])); // Sort by date, newest first.
+                
                 // Update menu items with thread titles
                 populateMenuWithThreads(threads);
             } catch (error) {
@@ -1210,6 +1211,12 @@
                 const menuItem = document.createElement('div');
                 menuItem.className = 'menu-item';
                 menuItem.textContent = title;
+                
+                // holding off on displaying a date for now. We don't display a date. (ChatGPT doesn't, so why should we?)
+                // date = thread.state[4];
+                // formattedDate = new Date(date).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+                // menuItem.textContent += ` - ${formattedDate}`;
+                
                 menuItem.onclick = () => handleThreadClick(thread.thread_id, title);
                 
                 menuItems.appendChild(menuItem);

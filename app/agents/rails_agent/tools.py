@@ -61,6 +61,9 @@ def ls(directory: str = "") -> list[str]:
     List the contents of a directory.
     If directory string is empty, lists the root directory.
     """
+    if directory.startswith("/"): # we NEVER want to include a leading slash "/"  at the beginning of the directory string. It's all relative in our docker container.
+        directory = directory[1:]
+
     # Build path - if directory is empty, just use rails root
     dir_path = APP_DIR / "rails" / directory if directory else APP_DIR / "rails"
     
