@@ -1195,21 +1195,23 @@
 
         // Refresh button functionality
         document.getElementById('refreshButton').addEventListener('click', function() {
-            const liveSiteFrame = document.getElementById('liveSiteFrame');
-            if (liveSiteFrame) {
-                // Add a small loading animation by rotating the icon
-                const button = this;
-                const svg = button.querySelector('svg');
-                svg.style.animation = 'spin 0.5s linear';
-                
-                // Reload the iframe
-                liveSiteFrame.src = liveSiteFrame.src;
-                
-                // Remove animation after it completes
-                setTimeout(() => {
-                    svg.style.animation = '';
-                }, 500);
-            }
+            // Add a small loading animation by rotating the icon
+            const button = this;
+            const svg = button.querySelector('svg');
+            svg.style.animation = 'spin 0.5s linear';
+            
+            // Get all iframes and refresh them
+            const iframes = document.querySelectorAll('iframe');
+            iframes.forEach(iframe => {
+                if (iframe.src) {
+                    iframe.src = iframe.src;
+                }
+            });
+            
+            // Remove animation after it completes
+            setTimeout(() => {
+                svg.style.animation = '';
+            }, 500);
         });
 
         // Back button functionality
