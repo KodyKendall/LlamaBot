@@ -68,6 +68,154 @@
             color: var(--text-color);
         }
 
+        /* Hamburger menu styles */
+        .hamburger-menu {
+            width: 32px;
+            height: 32px;
+            background: none;
+            border: none;
+            cursor: pointer;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            gap: 4px;
+            padding: 6px;
+            border-radius: 6px;
+            transition: background-color 0.2s ease;
+            position: relative;
+            z-index: 1001;
+        }
+
+        .hamburger-menu:hover {
+            background-color: var(--hover-bg);
+        }
+
+        .hamburger-menu span {
+            width: 20px;
+            height: 2px;
+            background-color: var(--text-color);
+            border-radius: 1px;
+            transition: all 0.3s ease;
+        }
+
+        .hamburger-menu.active span:nth-child(1) {
+            transform: rotate(45deg) translate(5px, 5px);
+        }
+
+        .hamburger-menu.active span:nth-child(2) {
+            opacity: 0;
+        }
+
+        .hamburger-menu.active span:nth-child(3) {
+            transform: rotate(-45deg) translate(7px, -6px);
+        }
+
+        /* Menu drawer styles */
+        .menu-drawer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 280px;
+            height: 100%;
+            background-color: var(--chat-bg);
+            border-right: 1px solid var(--border-color);
+            box-shadow: 2px 0 12px rgba(0, 0, 0, 0.15);
+            z-index: 1000;
+            transform: translateX(-100%);
+            transition: transform 0.3s ease;
+            overflow: hidden;
+        }
+
+        .menu-drawer.open {
+            transform: translateX(0);
+        }
+
+        .drawer-content {
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .drawer-header {
+            height: var(--header-height);
+            padding: 0.8rem 1rem;
+            background-color: var(--chat-bg);
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .drawer-header h3 {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: var(--text-color);
+            margin: 0;
+        }
+
+        .close-drawer {
+            background: none;
+            border: none;
+            font-size: 1.5rem;
+            cursor: pointer;
+            color: var(--text-color);
+            width: 32px;
+            height: 32px;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background-color 0.2s ease;
+        }
+
+        .close-drawer:hover {
+            background-color: var(--hover-bg);
+        }
+
+        .menu-items {
+            flex: 1;
+            padding: 1rem 0;
+            overflow-y: auto;
+        }
+
+        .menu-item {
+            padding: 12px 20px;
+            cursor: pointer;
+            color: var(--text-color);
+            border-bottom: 1px solid var(--border-color);
+            transition: background-color 0.2s ease;
+            font-size: 0.95rem;
+        }
+
+        .menu-item:last-child {
+            border-bottom: none;
+        }
+
+        .menu-item:hover {
+            background-color: var(--hover-bg);
+        }
+
+        /* Overlay for when drawer is open */
+        .menu-drawer::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(0, 0, 0, 0.5);
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.3s ease, visibility 0.3s ease;
+            z-index: -1;
+        }
+
+        .menu-drawer.open::before {
+            opacity: 1;
+            visibility: visible;
+        }
+
         /* Message history area */
         .message-history {
             flex-grow: 1;
@@ -416,8 +564,29 @@
 <body>
     <div class="chat-section">
         <div class="chat-header">
+            <button class="hamburger-menu" id="hamburgerMenu">
+                <span></span>
+                <span></span>
+                <span></span>
+            </button>
             <img src="https://service-jobs-images.s3.us-east-2.amazonaws.com/7rl98t1weu387r43il97h6ipk1l7" alt="LlamaBot Logo">
             <h1>Leonardo</h1>
+        </div>
+        
+        <!-- Slide-out drawer -->
+        <div class="menu-drawer" id="menuDrawer">
+            <div class="drawer-content">
+                <div class="drawer-header">
+                    <!-- <button class="close-drawer" id="closeDrawer">&times;</button> -->
+                </div>
+                <div class="menu-items">
+                    <div class="menu-item" onclick="handleMenuClick('Item 1')">Item 1</div>
+                    <div class="menu-item" onclick="handleMenuClick('Item 2')">Item 2</div>
+                    <div class="menu-item" onclick="handleMenuClick('Item 3')">Item 3</div>
+                    <div class="menu-item" onclick="handleMenuClick('Item 4')">Item 4</div>
+                    <div class="menu-item" onclick="handleMenuClick('Item 5')">Item 5</div>
+                </div>
+            </div>
         </div>
         <div class="message-history" id="message-history">
             <div class="message ai-message">Hi! I'm Leonardo. What are we building today?</div>
@@ -952,6 +1121,52 @@
         document.getElementById('messageInput').addEventListener('input', function() {
             this.style.height = 'auto';
             this.style.height = this.scrollHeight + 'px';
+        });
+
+        // Hamburger menu functionality
+        function toggleMenu() {
+            const hamburger = document.getElementById('hamburgerMenu');
+            const drawer = document.getElementById('menuDrawer');
+            
+            hamburger.classList.toggle('active');
+            drawer.classList.toggle('open');
+        }
+
+        function handleMenuClick(itemName) {
+            alert(`You clicked: ${itemName}`);
+            closeMenu();
+        }
+
+        function closeMenu() {
+            const hamburger = document.getElementById('hamburgerMenu');
+            const drawer = document.getElementById('menuDrawer');
+            
+            hamburger.classList.remove('active');
+            drawer.classList.remove('open');
+        }
+
+        // Initialize hamburger menu event listeners
+        document.addEventListener('DOMContentLoaded', function() {
+            const hamburgerMenu = document.getElementById('hamburgerMenu');
+            const closeDrawer = document.getElementById('closeDrawer');
+            
+            if (hamburgerMenu) {
+                hamburgerMenu.addEventListener('click', toggleMenu);
+            }
+            
+            if (closeDrawer) {
+                closeDrawer.addEventListener('click', closeMenu);
+            }
+        });
+
+        // Close menu when clicking outside
+        document.addEventListener('click', function(event) {
+            const hamburger = document.getElementById('hamburgerMenu');
+            const drawer = document.getElementById('menuDrawer');
+            
+            if (!hamburger.contains(event.target) && !drawer.contains(event.target)) {
+                closeMenu();
+            }
         });
 
         // Initialize WebSocket on page load
