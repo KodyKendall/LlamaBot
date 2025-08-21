@@ -84,7 +84,7 @@
             border-radius: 6px;
             transition: background-color 0.2s ease;
             position: relative;
-            z-index: 1001;
+            z-index: 1001; /* Higher than drawer */
         }
 
         .hamburger-menu:hover {
@@ -121,7 +121,7 @@
             background-color: var(--chat-bg);
             border-right: 1px solid var(--border-color);
             box-shadow: 2px 0 12px rgba(0, 0, 0, 0.15);
-            z-index: 1000;
+            z-index: 999; /* Lower than hamburger menu */
             transform: translateX(-100%);
             transition: transform 0.3s ease;
             overflow: hidden;
@@ -140,11 +140,12 @@
         .drawer-header {
             height: var(--header-height);
             padding: 0.8rem 1rem;
+            padding-left: 60px; /* Make space for hamburger button */
             background-color: var(--chat-bg);
             border-bottom: 1px solid var(--border-color);
             display: flex;
             align-items: center;
-            justify-content: space-between;
+            justify-content: flex-start; /* Align to left instead of space-between */
         }
 
         .drawer-header h3 {
@@ -577,14 +578,11 @@
         <div class="menu-drawer" id="menuDrawer">
             <div class="drawer-content">
                 <div class="drawer-header">
+                    <h3>Conversations</h3>
                     <!-- <button class="close-drawer" id="closeDrawer">&times;</button> -->
                 </div>
                 <div class="menu-items">
-                    <div class="menu-item" onclick="handleMenuClick('Item 1')">Item 1</div>
-                    <div class="menu-item" onclick="handleMenuClick('Item 2')">Item 2</div>
-                    <div class="menu-item" onclick="handleMenuClick('Item 3')">Item 3</div>
-                    <div class="menu-item" onclick="handleMenuClick('Item 4')">Item 4</div>
-                    <div class="menu-item" onclick="handleMenuClick('Item 5')">Item 5</div>
+                    <!-- Thread items will be populated dynamically -->
                 </div>
             </div>
         </div>
@@ -1043,9 +1041,170 @@
         }
 
         async function fetchThreads() {
-            const response = await fetch('/threads');
-            const threads = await response.json();
-            console.log(threads);
+            try {
+                // Show loading state
+                showThreadsLoading();
+                
+                const response = await fetch('/threads');
+                const threads = await response.json();
+                console.log(threads);
+                
+                // Update menu items with thread titles
+                populateMenuWithThreads(threads);
+            } catch (error) {
+                console.error('Error fetching threads:', error);
+                showThreadsError();
+            }
+        }
+
+        function showThreadsLoading() {
+            const menuItems = document.querySelector('.menu-items');
+            menuItems.innerHTML = `
+                <div class="menu-item" style="opacity: 0.6; cursor: default;">
+                    <div class="typing-indicator" style="justify-content: center;">
+                        <span></span><span></span><span></span>
+                    </div>
+                    Loading conversations...
+                </div>
+            `;
+        }
+
+        function showThreadsError() {
+            const menuItems = document.querySelector('.menu-items');
+            menuItems.innerHTML = `
+                <div class="menu-item" style="opacity: 0.6; cursor: default; color: #ff6b6b;">
+                    Failed to load conversations
+                </div>
+                <div class="menu-item" onclick="fetchThreads()" style="color: var(--accent-color); cursor: pointer;">
+                    🔄 Retry
+                </div>
+            `;
+        }
+
+        function populateMenuWithThreads(threads) {
+            const menuItems = document.querySelector('.menu-items');
+            
+            // Clear existing menu items
+            menuItems.innerHTML = '';
+            
+            if (!threads || threads.length === 0) {
+                // Show empty state
+                const emptyItem = document.createElement('div');
+                emptyItem.className = 'menu-item';
+                emptyItem.style.opacity = '0.6';
+                emptyItem.textContent = 'No conversations yet';
+                menuItems.appendChild(emptyItem);
+                return;
+            }
+            
+            // Generate conversation titles and add menu items
+            threads.forEach((thread, index) => {
+                const messages = thread.state[0]?.messages || [];
+                const { title } = generateConversationSummary(messages);
+                
+                const menuItem = document.createElement('div');
+                menuItem.className = 'menu-item';
+                menuItem.textContent = title;
+                menuItem.onclick = () => handleThreadClick(thread.thread_id, title);
+                
+                menuItems.appendChild(menuItem);
+            });
+        }
+
+        function generateConversationSummary(messages) {
+            if (!messages || messages.length === 0) {
+                return { title: 'New Conversation' };
+            }
+            
+            // Find first user message for title
+            const firstUserMessage = messages.find(msg => msg.type === 'human');
+            let title = 'New Conversation';
+            
+            if (firstUserMessage && firstUserMessage.content) {
+                // Use first 50 characters of first user message as title
+                title = firstUserMessage.content.substring(0, 50);
+                if (firstUserMessage.content.length > 50) {
+                    title += '...';
+                }
+            }
+            
+            return { title };
+        }
+
+        async function handleThreadClick(threadId, title) {
+            console.log(`Loading thread: ${threadId} - ${title}`);
+            
+            try {
+                // Set current thread ID
+                currentThreadId = threadId;
+                
+                // Fetch thread messages
+                const response = await fetch(`/chat-history/${threadId}`);
+                const threadData = await response.json();
+                
+                // Clear current chat and load thread messages
+                loadThreadMessages(threadData);
+                
+                // Close the menu
+                closeMenu();
+                
+            } catch (error) {
+                console.error('Error loading thread:', error);
+                alert('Failed to load conversation. Please try again.');
+            }
+        }
+
+        function loadThreadMessages(threadData) {
+            const messageHistory = document.getElementById('message-history');
+            
+            // Clear current messages
+            messageHistory.innerHTML = '';
+            
+            // Get messages from thread state
+            const messages = threadData[0]?.messages || [];
+            
+            if (messages.length === 0) {
+                // Show default message if no messages
+                messageHistory.innerHTML = '<div class="message ai-message">Hi! I\'m Leonardo. What are we building today?</div>';
+                return;
+            }
+            
+            // Process and display messages
+            messages.forEach(message => {
+                let messageType, content;
+                
+                if (message.type === 'human') {
+                    messageType = 'user';
+                    content = message.content;
+                } else if (message.type === 'ai') {
+                    messageType = 'ai';
+                    content = message.content;
+                } else {
+                    // Skip other message types for now
+                    return;
+                }
+                
+                const messageDiv = document.createElement('div');
+                messageDiv.className = `message ${messageType}-message`;
+                
+                if (messageType === 'user') {
+                    messageDiv.textContent = content;
+                } else {
+                    messageDiv.innerHTML = escapeHtml(content).replace(/\n/g, '<br>');
+                }
+                
+                messageHistory.appendChild(messageDiv);
+            });
+            
+            // Scroll to bottom
+            scrollToBottom();
+        }
+
+        // Helper function to escape HTML to prevent XSS
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
         }
 
         // Event listeners
@@ -1132,10 +1291,7 @@
             drawer.classList.toggle('open');
         }
 
-        function handleMenuClick(itemName) {
-            alert(`You clicked: ${itemName}`);
-            closeMenu();
-        }
+
 
         function closeMenu() {
             const hamburger = document.getElementById('hamburgerMenu');
