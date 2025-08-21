@@ -567,6 +567,10 @@
             0%, 60%, 100% { transform: translateY(0); }
             30% { transform: translateY(-4px); }
         }
+        
+        .hidden {
+            display: none !important;
+        }
     </style>
 </head>
 <body>
@@ -603,6 +607,9 @@
                     <span class="status-dot"></span>
                     <span>Disconnected</span>
                 </div>
+                <span id="thinkingIndicator" class="typing-indicator hidden">
+                    <span></span><span></span><span></span>
+                </span>
                 <button id="sendButton" disabled>Send</button>
             </div>
         </div>
@@ -796,6 +803,7 @@
                     }
                 }
                 else {
+                    debugger;
                     addMessage(data.content, data.type);
                 }
             };
@@ -835,6 +843,7 @@
                 
                 // Add user message to chat
                 addMessage(message, 'human');
+                document.getElementById('thinkingIndicator').classList.remove('hidden'); // show thinking indicator
                 
                 // Clear input
                 input.value = '';
@@ -881,7 +890,8 @@
             if (type === 'human') {
                 messageDiv.className = 'message user-message';
                 messageDiv.textContent = content;
-            } else if (type === 'ai') {
+            }
+            else if (type === 'ai') {
                 // console.log('ai content', content);
                 messageDiv.className = 'message ai-message';
                 messageDiv.innerHTML = content;
@@ -892,17 +902,24 @@
                         messageDiv.id = baseMessage.tool_calls[0].id;
                     }
                 }
-            } else if (type === 'tool') {
+            } 
+            else if (type === 'tool') {
                 const messageDiv = document.getElementById(baseMessage.tool_call_id);
                 if (messageDiv) {
                     messageDiv.className = 'message tool-message';
                     messageDiv.innerHTML += `🔨 ${content}`;
                 }
-            } else if (type === 'error') {
+            } 
+            else if (type === 'error') {
                 messageDiv.className = 'message error-message';
                 messageDiv.textContent = content;
             }
-            
+            else if (type === 'end') {
+                console.log('end of stream');
+                // STOP thinking indicator.
+                document.getElementById('thinkingIndicator').classList.add('hidden'); // stop thinking indicator
+                return; // Don't append anything for end messages
+            }
             messageHistory.appendChild(messageDiv);
             scrollToBottom();
             

@@ -141,8 +141,6 @@ class RequestHandler:
                                         }
                                         
                                         await websocket.send_json(llamapress_user_interface_json)
-                                break
-                        
                         logger.info(f"LangGraph Output (State Update): {chunk}")
 
                         # chunk will look like this:
@@ -150,6 +148,12 @@ class RequestHandler:
 
                     else:
                         logger.info(f"Workflow output: {chunk}")
+
+                print("🎏🎏🎏 LangGraph astream is finished!")
+                if self._is_websocket_open(websocket):
+                    await websocket.send_json({
+                        "type": "end"
+                    })
 
             except CancelledError as e:
                 logger.info("handle_request was cancelled")
