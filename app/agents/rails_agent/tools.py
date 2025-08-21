@@ -33,37 +33,19 @@ APP_DIR = PROJECT_ROOT / 'app'
 # Single HTML output file
 HTML_OUTPUT_PATH = APP_DIR / 'page.html'
 
-@tool(description="Write the requirements in HTML format (making it easy for user to view), for the user to see based on the current state of the project.")
-def write_todo_message_to_user(message_to_user: str) -> str:
-    """
-    This is used for writing a nice, readable, and up to date requirements.txt file for the user to see based on the current state of the project.
-    This will be with Tailwind CSS, and will be displayed in an iframe in the user's browser, starting with <!DOCTYPE html> <html> and ending with </html>.
-    Make it look nice, and use the current state of the project to update the readme.
-    """
-
-    env = Environment(loader=FileSystemLoader(APP_DIR / 'agents' / 'rails_agent' / 'templates'))
-    template = env.get_template("todo.html")
-
-    html = template.render(message=message_to_user)
-
-    with open(HTML_OUTPUT_PATH, "w", encoding='utf-8') as f:
-        f.write(html)
-    return f"HTML code written to {HTML_OUTPUT_PATH.relative_to(PROJECT_ROOT)}"
-
-@tool(description="Read the requirements file and return the contents")
-def read_requirements_txt() -> str:
-    """
-    Read the requirements.txt file and return the contents.
-    """
-    with open(HTML_OUTPUT_PATH, "r", encoding='utf-8') as f:
-        raw_html_content = f.read()
-        parsed_html_content = BeautifulSoup(raw_html_content, 'html.parser')
-        return parsed_html_content.get_text()
-
 @tool(description=WRITE_TODOS_DESCRIPTION)
 def write_todos(
     todos: list[Todo], tool_call_id: Annotated[str, InjectedToolCallId]
 ) -> Command:
+    
+    env = Environment(loader=FileSystemLoader(APP_DIR / 'agents' / 'rails_agent' / 'templates'))
+    template = env.get_template("todo.html")
+
+    html = template.render(todos=todos)
+
+    with open(HTML_OUTPUT_PATH, "w", encoding='utf-8') as f:
+        f.write(html)
+
     return Command(
         update={
             "todos": todos,
