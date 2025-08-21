@@ -726,6 +726,10 @@
         let iframeFlushTimer = null;
         const IFRAME_REFRESH_MS = 500; // Update iframe every 500ms
 
+        // Scroll management variables
+        let isUserAtBottom = true;
+        let scrollThreshold = 50; // pixels from bottom to consider "at bottom"
+
         // Initialize WebSocket connection
         function initWebSocket() {
             const wsUrl = `ws://${window.location.host}/ws`;
@@ -773,6 +777,7 @@
                         } else {
                             currentAiMessage.innerHTML += data.content;
                         }
+                        checkIfUserAtBottom();
                         scrollToBottom();
                     } else if (data.content === '' || data.content === null) { //this is the tool call arguments streaming back from LLM.
                         // Handle tool call chunks
@@ -973,7 +978,16 @@
                 return; // Don't append anything for end messages
             }
             messageHistory.appendChild(messageDiv);
-            scrollToBottom();
+            
+            // For user messages, always scroll to bottom (force = true)
+            // For other messages, only scroll if user is at bottom
+            const forceScroll = (type === 'human');
+            if (forceScroll) {
+                scrollToBottom(true);
+            } else {
+                checkIfUserAtBottom();
+                scrollToBottom();
+            }
             
             return messageDiv;
         }
@@ -1014,9 +1028,25 @@
             }
         }
 
-        function scrollToBottom() {
+        function checkIfUserAtBottom() {
             const messageHistory = document.getElementById('message-history');
-            messageHistory.scrollTop = messageHistory.scrollHeight;
+            const scrollTop = messageHistory.scrollTop;
+            const scrollHeight = messageHistory.scrollHeight;
+            const clientHeight = messageHistory.clientHeight;
+            
+            // Check if user is within threshold pixels of the bottom
+            isUserAtBottom = (scrollTop + clientHeight >= scrollHeight - scrollThreshold);
+            return isUserAtBottom;
+        }
+
+        function scrollToBottom(force = false) {
+            const messageHistory = document.getElementById('message-history');
+            
+            // Only scroll if user is at bottom or force is true
+            if (force || isUserAtBottom) {
+                messageHistory.scrollTop = messageHistory.scrollHeight;
+                isUserAtBottom = true;
+            }
         }
 
         function refreshIframe() {
@@ -1287,8 +1317,8 @@
                 addMessage(message.content, message.type, message);
             });
             
-            // Scroll to bottom
-            scrollToBottom();
+            // Scroll to bottom when loading a conversation (force = true)
+            scrollToBottom(true);
         }
 
         // Helper function to escape HTML to prevent XSS
@@ -1416,6 +1446,11 @@
             if (!hamburger.contains(event.target) && !drawer.contains(event.target)) {
                 closeMenu();
             }
+        });
+
+        // Add scroll event listener to track user scroll position
+        document.getElementById('message-history').addEventListener('scroll', function() {
+            checkIfUserAtBottom();
         });
 
         // Initialize WebSocket on page load
