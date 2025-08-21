@@ -5,6 +5,7 @@ from typing import Annotated
 from langgraph.prebuilt import InjectedState
 from tavily import TavilyClient
 import os
+from bs4 import BeautifulSoup
 
 from app.agents.rails_agent.prompts import (
     WRITE_TODOS_DESCRIPTION,
@@ -25,6 +26,30 @@ import re
 SCRIPT_DIR = Path(__file__).parent.resolve()
 PROJECT_ROOT = SCRIPT_DIR.parent.parent.parent  # Go up to LlamaBot root
 APP_DIR = PROJECT_ROOT / 'app'
+
+# Single HTML output file
+HTML_OUTPUT_PATH = APP_DIR / 'page.html'
+
+@tool(description="Write the requirements in HTML format (making it easy for user to view), for the user to see based on the current state of the project.")
+def write_requirements_txt(full_html_document: str) -> str:
+    """
+    This is used for writing a nice, readable, and up to date requirements.txt file for the user to see based on the current state of the project.
+    This will be with Tailwind CSS, and will be displayed in an iframe in the user's browser, starting with <!DOCTYPE html> <html> and ending with </html>.
+    Make it look nice, and use the current state of the project to update the readme.
+    """
+    with open(HTML_OUTPUT_PATH, "w", encoding='utf-8') as f:
+        f.write(full_html_document)
+    return f"HTML code written to {HTML_OUTPUT_PATH.relative_to(PROJECT_ROOT)}"
+
+@tool(description="Read the requirements file and return the contents")
+def read_requirements_txt() -> str:
+    """
+    Read the requirements.txt file and return the contents.
+    """
+    with open(HTML_OUTPUT_PATH, "r", encoding='utf-8') as f:
+        raw_html_content = f.read()
+        parsed_html_content = BeautifulSoup(raw_html_content, 'html.parser')
+        return parsed_html_content.get_text()
 
 @tool(description=WRITE_TODOS_DESCRIPTION)
 def write_todos(
