@@ -44,6 +44,7 @@ class RequestHandler:
         """Check if the WebSocket connection is still open"""
         return websocket.client_state == WebSocketState.CONNECTED
 
+    # This is a the main function that handles incoming WebSocket requests. This will build the LangGraph workflow, and invoke it from a checkpointed state.
     async def handle_request(self, message: dict, websocket: WebSocket):
         """Handle incoming WebSocket requests with proper locking and cancellation"""
         ws_id = id(websocket)
@@ -91,6 +92,10 @@ class RequestHandler:
                         for agent_key, agent_data in state_object.items():
                             did_agent_have_a_message_for_us = isinstance(agent_data, dict) and 'messages' in agent_data
                             if did_agent_have_a_message_for_us:
+
+                                #agent_data is a just the state dictionary. 
+                                # We can access state objects by using agent_data['key']. 
+
                                 messages = agent_data['messages'] #Question: is this ALL messages coming through, or just the latest AI message?
 
                                 # Safe check for tool calls with better error handling
@@ -128,7 +133,7 @@ class RequestHandler:
 
                                         # NOTE: This JSON object is a standardized format that we've been using for all our front-ends.  
                                         # Eventually, we might want to just rely on the base_message data shape as the source of truth for all front-ends.
-                                        llamapress_user_interface_json = {
+                                        llamapress_user_interface_json = { # we're forcing this shape to match a BaseMessage type.
                                             "type": message.type if hasattr(message, 'type') else "ai",
                                             "content": messages_as_string[-1] if messages_as_string else "",
                                             "tool_calls": tool_calls,
@@ -165,6 +170,7 @@ class RequestHandler:
                     })
                 raise e
 
+    # 08/21/2025: Is this being used at all..?
     async def get_chat_history(self, thread_id: str):
         # For chat history, we don't need a specific agent, just get any workflow to access the checkpointer
         # This is a bit of a hack - we should refactor this to not need the workflow for just getting history
@@ -177,6 +183,7 @@ class RequestHandler:
             logger.error(f"Error getting chat history: {e}")
             return None
 
+    # 08/21/2025: Duplicated code from main.py. Is this getting used?
     def get_or_create_checkpointer(self):
         """Get persistent checkpointer, creating once if needed"""
 
@@ -285,6 +292,8 @@ class RequestHandler:
         
         return app, state
     
+    # This method resolves an agent name to a workflow with the checkpointer.
+    # Super important for routing to the right agent workflow for websockets requests.
     def get_app_from_workflow_string(self, workflow_string: str):
         # Split the path into module path and function name
         module_path, function_name = workflow_string.split(':')

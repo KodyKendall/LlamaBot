@@ -269,7 +269,7 @@ async def threads():
     for thread_id in unique_thread_ids:
         graph = build_workflow(checkpointer=checkpointer)
         config = {"configurable": {"thread_id": thread_id}}
-        state_history.append({"thread_id": thread_id, "state": graph.get_state(config=config)})
+        state_history.append({"thread_id": thread_id, "state": graph.get_state(config=config)}) #graph.get_state returns a StateSnapshot object, which inherits from Named Tuple. Serializes into an Array.
     return state_history
 
 @app.get("/chat-history/{thread_id}")
@@ -277,7 +277,7 @@ async def chat_history(thread_id: str):
     checkpointer = get_or_create_checkpointer()
     graph = build_workflow(checkpointer=checkpointer)
     config = {"configurable": {"thread_id": thread_id}}
-    state_history = graph.get_state(config=config)
+    state_history = graph.get_state(config=config) #graph.get_state returns a StateSnapshot object, which inherits from a Named Tuple. Serializes into an Array.
     print(state_history)
     return state_history
 
