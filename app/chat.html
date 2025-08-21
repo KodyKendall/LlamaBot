@@ -257,6 +257,59 @@
             border-bottom-left-radius: 4px;
         }
 
+        .tool-collapsible {
+            cursor: pointer;
+            user-select: none;
+            padding: 8px 12px;
+            border-radius: 4px;
+            background-color: var(--message-tool-bg);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            margin-bottom: 4px;
+        }
+
+        .tool-collapsible:hover {
+            background-color: rgba(45, 95, 173, 0.8);
+        }
+
+        .tool-collapsible::before {
+            content: "▶ ";
+            font-size: 12px;
+            transition: transform 0.2s ease;
+            display: inline-block;
+        }
+
+        .tool-collapsible.expanded::before {
+            transform: rotate(90deg);
+        }
+
+        .tool-content {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease;
+            padding: 0 12px;
+            background-color: rgba(0, 0, 0, 0.2);
+            border-radius: 4px;
+            margin-top: 4px;
+        }
+
+        .tool-content.expanded {
+            max-height: 500px;
+            padding: 8px 12px;
+            overflow-y: auto;
+        }
+
+        .tool-summary {
+            font-weight: bold;
+            color: rgba(255, 255, 255, 0.9);
+        }
+
+        .tool-details {
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 0.9em;
+            margin-top: 4px;
+            word-break: break-word;
+        }
+
         .message.error-message {
             background-color: rgba(255, 99, 71, 0.2);
             border: 1px solid rgba(255, 99, 71, 0.5);
@@ -803,7 +856,6 @@
                     }
                 }
                 else {
-                    debugger;
                     addMessage(data.content, data.type);
                 }
             };
@@ -898,7 +950,8 @@
                 if (content == '' || content == null) {
                     if (baseMessage && baseMessage.tool_calls && baseMessage.tool_calls.length > 0) {
                         messageDiv.className = 'message tool-message';
-                        messageDiv.innerHTML = "🔨" + baseMessage.tool_calls[0].name;
+                        const toolCall = baseMessage.tool_calls[0];
+                        messageDiv.innerHTML = createCollapsibleToolMessage(toolCall.name, JSON.stringify(toolCall.args), '');
                         messageDiv.id = baseMessage.tool_calls[0].id;
                     }
                 }
@@ -907,7 +960,8 @@
                 const messageDiv = document.getElementById(baseMessage.tool_call_id);
                 if (messageDiv) {
                     messageDiv.className = 'message tool-message';
-                    messageDiv.innerHTML += `🔨 ${content}`;
+                    // Update the collapsible content with the tool response
+                    updateCollapsibleToolMessage(messageDiv, content);
                 }
             } 
             else if (type === 'error') {
@@ -924,6 +978,42 @@
             scrollToBottom();
             
             return messageDiv;
+        }
+
+        function createCollapsibleToolMessage(toolName, toolArgs, toolResult) {
+            const uniqueId = 'tool_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+            return `
+                <div class="tool-collapsible" onclick="toggleToolCollapsible('${uniqueId}')">
+                    <span class="tool-summary">🔨 ${toolName}</span>
+                </div>
+                <div class="tool-content" id="${uniqueId}">
+                    <div class="tool-details">
+                        <strong>Arguments:</strong><br>
+                        <pre style="margin: 4px 0; font-size: 0.85em; white-space: pre-wrap;">${toolArgs}</pre>
+                        ${toolResult ? `<strong>Result:</strong><br><pre style="margin: 4px 0; font-size: 0.85em; white-space: pre-wrap;">${toolResult}</pre>` : ''}
+                    </div>
+                </div>
+            `;
+        }
+
+        function updateCollapsibleToolMessage(messageDiv, toolResult) {
+            const toolContent = messageDiv.querySelector('.tool-content .tool-details');
+            if (toolContent) {
+                // Check if result already exists to avoid duplication
+                if (!toolContent.innerHTML.includes('<strong>Result:</strong>')) {
+                    toolContent.innerHTML += `<br><strong>Result:</strong><br><pre style="margin: 4px 0; font-size: 0.85em; white-space: pre-wrap;">${toolResult}</pre>`;
+                }
+            }
+        }
+
+        function toggleToolCollapsible(contentId) {
+            const collapsible = document.querySelector(`[onclick="toggleToolCollapsible('${contentId}')"]`);
+            const content = document.getElementById(contentId);
+            
+            if (collapsible && content) {
+                collapsible.classList.toggle('expanded');
+                content.classList.toggle('expanded');
+            }
         }
 
         function scrollToBottom() {
