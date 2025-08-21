@@ -760,7 +760,7 @@
                     if (data.content) { //this is the regular ai text content streaming back from LLM
                         // Handle regular text content
                         if (!currentAiMessage) {
-                            currentAiMessage = addMessage('', 'ai');
+                            currentAiMessage = addMessage('', 'ai', data);
                         }
                         // Check if we still have the typing indicator and remove it
                         if (currentAiMessage.querySelector('.typing-indicator')) {
@@ -791,7 +791,7 @@
                                 
                                 // Show loading state in AI message
                                 if (!currentAiMessage) {
-                                    currentAiMessage = addMessage('', 'ai');
+                                    currentAiMessage = addMessage('', 'ai', data);
                                 }
                                 currentAiMessage.innerHTML = '🎨 Generating your page...';
                                 
@@ -856,7 +856,7 @@
                     }
                 }
                 else {
-                    addMessage(data.content, data.type);
+                    addMessage(data.content, data.type, data.base_message);
                 }
             };
         }
@@ -894,7 +894,7 @@
                 removeStreamingOverlay();
                 
                 // Add user message to chat
-                addMessage(message, 'human');
+                addMessage(message, 'human', null);
                 document.getElementById('thinkingIndicator').classList.remove('hidden'); // show thinking indicator
                 
                 // Clear input
@@ -954,6 +954,7 @@
                 }
             } 
             else if (type === 'tool') {
+                debugger;
                 const messageDiv = document.getElementById(baseMessage.tool_call_id);
                 if (messageDiv) {
                     messageDiv.className = 'message tool-message';
