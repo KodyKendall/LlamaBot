@@ -30,6 +30,7 @@ httpx==0.28.1
 httpx-sse==0.4.0
 idna==3.10
 iniconfig==2.1.0
+Jinja2==3.1.6
 jiter==0.9.0
 jsonpatch==1.33
 jsonpointer==3.0.0
@@ -54,6 +55,7 @@ langgraph-supervisor==0.0.28
 langsmith==0.4.8
 -e git+https://github.com/KodyKendall/LlamaBot.git@38d6daa5795f32b6f63637bc02baee53e0ac8dfd#egg=LlamaBot
 markdown-it-py==3.0.0
+MarkupSafe==3.0.2
 marshmallow==3.26.1
 mcp==1.9.2
 mdurl==0.1.2

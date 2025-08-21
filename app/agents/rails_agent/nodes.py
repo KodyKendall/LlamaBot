@@ -21,7 +21,7 @@ from openai import OpenAI
 from app.agents.utils.images import encode_image
 
 from app.agents.rails_agent.state import RailsAgentState
-from app.agents.rails_agent.tools import write_todos, write_file, read_file, ls, edit_file, search_file, internet_search, bash_command, write_requirements_txt, read_requirements_txt
+from app.agents.rails_agent.tools import write_todos, write_file, read_file, ls, edit_file, search_file, internet_search, bash_command, write_todo_message_to_user, read_requirements_txt
 from app.agents.rails_agent.prompts import RAILS_AGENT_PROMPT
 
 
@@ -31,7 +31,7 @@ PROJECT_ROOT = SCRIPT_DIR.parent.parent.parent  # Go up to LlamaBot root
 APP_DIR = PROJECT_ROOT / 'app'
 
 # Global tools list
-tools = [write_todos, read_file, ls, internet_search, search_file, write_file, edit_file, bash_command, write_requirements_txt, read_requirements_txt]
+tools = [write_todos, read_file, ls, internet_search, search_file, write_file, edit_file, bash_command, write_todo_message_to_user, read_requirements_txt]
 
 # System message
 sys_msg = SystemMessage(content=RAILS_AGENT_PROMPT)

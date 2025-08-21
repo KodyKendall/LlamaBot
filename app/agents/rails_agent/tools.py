@@ -22,6 +22,9 @@ import subprocess
 import json
 import re
 
+from jinja2 import Environment, FileSystemLoader
+
+
 # Define base paths relative to project root
 SCRIPT_DIR = Path(__file__).parent.resolve()
 PROJECT_ROOT = SCRIPT_DIR.parent.parent.parent  # Go up to LlamaBot root
@@ -31,14 +34,20 @@ APP_DIR = PROJECT_ROOT / 'app'
 HTML_OUTPUT_PATH = APP_DIR / 'page.html'
 
 @tool(description="Write the requirements in HTML format (making it easy for user to view), for the user to see based on the current state of the project.")
-def write_requirements_txt(full_html_document: str) -> str:
+def write_todo_message_to_user(message_to_user: str) -> str:
     """
     This is used for writing a nice, readable, and up to date requirements.txt file for the user to see based on the current state of the project.
     This will be with Tailwind CSS, and will be displayed in an iframe in the user's browser, starting with <!DOCTYPE html> <html> and ending with </html>.
     Make it look nice, and use the current state of the project to update the readme.
     """
+
+    env = Environment(loader=FileSystemLoader(APP_DIR / 'agents' / 'rails_agent' / 'templates'))
+    template = env.get_template("todo.html")
+
+    html = template.render(message=message_to_user)
+
     with open(HTML_OUTPUT_PATH, "w", encoding='utf-8') as f:
-        f.write(full_html_document)
+        f.write(html)
     return f"HTML code written to {HTML_OUTPUT_PATH.relative_to(PROJECT_ROOT)}"
 
 @tool(description="Read the requirements file and return the contents")
