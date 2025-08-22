@@ -374,13 +374,13 @@ def rails_api_sh(snippet: str, workdir: str = WORKDIR) -> str:
     except Exception as e:
         return f"Unexpected error: {str(e)}"
 
-@tool(description="Execute a bash command in operating system that Rails is running in")
-def bash_command(
+@tool(description="Execute a bundle exec command in operating system that Rails is running in, in order to use Rails tools. ALWAYS prepend the command with `bundle exec` to make sure we use the right Rails runtime environment.")
+def bundle_exec_command(
     command: str, 
     tool_call_id: Annotated[str, InjectedToolCallId],
     workdir: str = WORKDIR
 ) -> Command:
-    """Execute a bash command in the Rails Docker container."""
+    """Execute a bundle exec command in the Rails Docker container."""
     result = rails_api_sh(command, workdir)
     
     return Command(
@@ -532,6 +532,84 @@ def git_status(
     # Parse log into JSON
     log_json = "[" + log.strip().rstrip(",") + "]"
     commits = json.loads(log_json) if log_json.strip("[]") else []
+    
+    # Pre-fetch commit diffs for all commits
+    commit_diffs = {}
+    for commit in commits:
+        commit_hash = commit['hash']
+        try:
+            # Get commit diff
+            diff_output = run_git(f"show --no-merges {commit_hash}")
+            
+            # Parse the diff into structured data using the same function from get_commit_diff
+            def parse_commit_diff(diff_output: str) -> list:
+                """Parse git diff output into structured file changes."""
+                files = []
+                current_file = None
+                current_diff_lines = []
+                
+                lines = diff_output.splitlines()
+                
+                for line in lines:
+                    if line.startswith('diff --git'):
+                        # Save previous file if exists
+                        if current_file:
+                            current_file['diff'] = '\n'.join(current_diff_lines)
+                            files.append(current_file)
+                        
+                        # Start new file
+                        # Extract file paths from "diff --git a/path b/path"
+                        parts = line.split(' ')
+                        if len(parts) >= 4:
+                            old_path = parts[2][2:]  # Remove 'a/' prefix
+                            new_path = parts[3][2:]  # Remove 'b/' prefix
+                            
+                            current_file = {
+                                'path': new_path if new_path != '/dev/null' else old_path,
+                                'old_path': old_path if old_path != '/dev/null' else None,
+                                'new_path': new_path if new_path != '/dev/null' else None,
+                                'status': 'Modified',
+                                'status_code': 'M.'
+                            }
+                            current_diff_lines = [line]
+                        else:
+                            current_diff_lines = [line]
+                    elif line.startswith('new file mode'):
+                        if current_file:
+                            current_file['status'] = 'Added'
+                            current_file['status_code'] = 'A.'
+                        current_diff_lines.append(line)
+                    elif line.startswith('deleted file mode'):
+                        if current_file:
+                            current_file['status'] = 'Deleted'
+                            current_file['status_code'] = 'D.'
+                        current_diff_lines.append(line)
+                    elif line.startswith('rename from') or line.startswith('rename to'):
+                        if current_file:
+                            current_file['status'] = 'Renamed'
+                            current_file['status_code'] = 'R.'
+                        current_diff_lines.append(line)
+                    else:
+                        current_diff_lines.append(line)
+                
+                # Don't forget the last file
+                if current_file:
+                    current_file['diff'] = '\n'.join(current_diff_lines)
+                    files.append(current_file)
+                
+                return files
+            
+            commit_files = parse_commit_diff(diff_output)
+            commit_diffs[commit_hash] = {
+                'files': commit_files,
+                'subject': commit['subject'],
+                'author': commit['author'],
+                'date': commit['date']
+            }
+        except Exception as e:
+            # If we can't get the diff for a commit, skip it but don't fail
+            print(f"Warning: Could not get diff for commit {commit_hash}: {e}")
+            continue
 
     def format_diff(diff_text: str) -> str:
         """Format diff text with HTML classes for syntax highlighting."""
@@ -563,7 +641,10 @@ def git_status(
         status=status.splitlines(),
         commits=commits,
         changed_files=changed_files,
-        format_diff=format_diff
+        format_diff=format_diff,
+        commit_mode=False,
+        selected_commit=None,
+        commit_diffs=commit_diffs
     )
 
     with open(GIT_HTML_OUTPUT_PATH, "w", encoding="utf-8") as f:
@@ -579,26 +660,41 @@ def git_status(
             ],
         }
     )
-    # result = subprocess.run(["/bin/sh", "-lc", "git -C /app/app/rails status"], capture_output=True, text=True, timeout=30)
-    # print(result.stdout)
+
+
+@tool(description="Commit the changes to the git repository")
+def git_commit(
+    message: str,
+    tool_call_id: Annotated[str, InjectedToolCallId],
+) -> Command:
+    """Commit the changes to the git repository."""
+    # First add all changes
+    add_result = subprocess.run(["/bin/sh", "-lc", "git -C /app/app/rails add ."], capture_output=True, text=True, timeout=30)
     
-    # env = Environment(loader=FileSystemLoader(APP_DIR / 'agents' / 'rails_agent' / 'templates'))
-    # template = env.get_template("git-status.html")
-
-    # html = template.render(status=result.stdout.split("\n"))
-
-    # with open(GIT_HTML_OUTPUT_PATH, "w", encoding='utf-8') as f:
-    #     f.write(html)
-
-    # return Command(
-    #     update={
-    #         "messages": [ToolMessage(f"Git status:\n{result.stdout}", tool_call_id=tool_call_id)],
-    #     }
-    # )
-
-    # result = rails_api_sh("git status")
-    # return Command(
-    #     update={
-    #         "messages": [ToolMessage(f"Git status:\n{result}", tool_call_id=tool_call_id)],
-    #     }
-    # )
+    # Then commit the changes - use subprocess list format to avoid shell escaping issues
+    commit_result = subprocess.run(["git", "-C", "/app/app/rails", "commit", "-m", message], capture_output=True, text=True, timeout=30)
+    
+    # Combine the output from both commands
+    output = f"Git add:\n{add_result.stdout}"
+    if add_result.stderr:
+        output += f"\nGit add errors:\n{add_result.stderr}"
+    
+    output += f"\n\nGit commit:\n{commit_result.stdout}"
+    if commit_result.stderr:
+        output += f"\nGit commit errors:\n{commit_result.stderr}"
+    
+    # After committing, automatically run git status to show the current state
+    try:
+        status_command = git_status(tool_call_id)
+        # Extract the git status message from the status command
+        status_messages = status_command.update.get("messages", [])
+        if status_messages:
+            output += f"\n\n--- Post-commit Git Status ---\n{status_messages[0].content}"
+    except Exception as e:
+        output += f"\n\nError getting post-commit git status: {str(e)}"
+    
+    return Command(
+        update={
+            "messages": [ToolMessage(output, tool_call_id=tool_call_id)],
+        }
+    )
