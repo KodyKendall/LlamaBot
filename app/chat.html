@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>LlamaBot Chat Interface</title>
+    <!-- Add marked.js for markdown parsing -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <style>
         /* Dark theme variables */
         :root {
@@ -624,6 +626,118 @@
         .hidden {
             display: none !important;
         }
+
+        /* Markdown formatting styles for AI messages */
+        .message.ai-message h1,
+        .message.ai-message h2,
+        .message.ai-message h3,
+        .message.ai-message h4,
+        .message.ai-message h5,
+        .message.ai-message h6 {
+            margin: 0.5em 0 0.3em 0;
+            color: var(--text-color);
+            font-weight: 600;
+        }
+
+        .message.ai-message h1 { font-size: 1.4em; }
+        .message.ai-message h2 { font-size: 1.3em; }
+        .message.ai-message h3 { font-size: 1.2em; }
+        .message.ai-message h4 { font-size: 1.1em; }
+        .message.ai-message h5 { font-size: 1.05em; }
+        .message.ai-message h6 { font-size: 1em; }
+
+        .message.ai-message p {
+            margin: 0.5em 0;
+            line-height: 1.5;
+        }
+
+        .message.ai-message ul,
+        .message.ai-message ol {
+            margin: 0.5em 0;
+            padding-left: 1.5em;
+        }
+
+        .message.ai-message li {
+            margin: 0.2em 0;
+            line-height: 1.4;
+        }
+
+        .message.ai-message blockquote {
+            margin: 0.5em 0;
+            padding: 0.5em 1em;
+            border-left: 3px solid var(--accent-color);
+            background-color: rgba(76, 175, 80, 0.1);
+            font-style: italic;
+        }
+
+        .message.ai-message code {
+            background-color: rgba(255, 255, 255, 0.1);
+            padding: 0.1em 0.3em;
+            border-radius: 3px;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 0.9em;
+        }
+
+        .message.ai-message pre {
+            background-color: rgba(255, 255, 255, 0.05);
+            padding: 1em;
+            border-radius: 6px;
+            overflow-x: auto;
+            margin: 0.5em 0;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .message.ai-message pre code {
+            background-color: transparent;
+            padding: 0;
+            font-size: 0.85em;
+        }
+
+        .message.ai-message strong,
+        .message.ai-message b {
+            font-weight: 600;
+            color: var(--text-color);
+        }
+
+        .message.ai-message em,
+        .message.ai-message i {
+            font-style: italic;
+            color: rgba(224, 224, 224, 0.9);
+        }
+
+        .message.ai-message a {
+            color: var(--accent-color);
+            text-decoration: none;
+        }
+
+        .message.ai-message a:hover {
+            text-decoration: underline;
+        }
+
+        .message.ai-message hr {
+            border: none;
+            height: 1px;
+            background-color: var(--border-color);
+            margin: 1em 0;
+        }
+
+        .message.ai-message table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 0.5em 0;
+        }
+
+        .message.ai-message th,
+        .message.ai-message td {
+            border: 1px solid var(--border-color);
+            padding: 0.5em;
+            text-align: left;
+        }
+
+        .message.ai-message th {
+            background-color: rgba(255, 255, 255, 0.05);
+            font-weight: 600;
+        }
     </style>
 </head>
 <body>
@@ -717,6 +831,7 @@
         let socket = null;
         let currentThreadId = null;
         let currentAiMessage = null;
+        let currentAiMessageBuffer = ''; // Buffer to accumulate streaming content for markdown parsing
         
         // HTML streaming variables
         let htmlFragmentBuffer = '';
@@ -729,6 +844,36 @@
         // Scroll management variables
         let isUserAtBottom = true;
         let scrollThreshold = 50; // pixels from bottom to consider "at bottom"
+
+        // Configure marked.js for better security and formatting
+        marked.setOptions({
+            breaks: true,
+            gfm: true,
+            sanitize: false, // We'll handle XSS prevention differently
+            smartLists: true,
+            smartypants: true
+        });
+
+        // Function to parse markdown to HTML
+        function parseMarkdown(text) {
+            if (!text) return '';
+            
+            try {
+                // Parse markdown to HTML
+                let html = marked.parse(text);
+                
+                // Basic XSS prevention - remove script tags and event handlers
+                html = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+                html = html.replace(/\son\w+="[^"]*"/gi, '');
+                html = html.replace(/\son\w+='[^']*'/gi, '');
+                
+                return html;
+            } catch (error) {
+                console.error('Markdown parsing error:', error);
+                // Fallback to plain text with line breaks
+                return text.replace(/\n/g, '<br>');
+            }
+        }
 
         // Initialize WebSocket connection
         function initWebSocket() {
@@ -765,6 +910,7 @@
                         // Handle regular text content
                         if (!currentAiMessage) {
                             currentAiMessage = addMessage('', 'ai', data);
+                            currentAiMessageBuffer = ''; // Reset buffer for new AI message
                         }
                         // Check if we still have the typing indicator and remove it
                         if (currentAiMessage.querySelector('.typing-indicator')) {
@@ -772,10 +918,12 @@
                         }
                         if (AGENT.TYPE === 'deep_agent') { //follows deep_research data content structure for AIMessageChunks.
                             if (data.content && data.content.length > 0) { // it's strange how this different deep agent requires this changed structure/format.
-                                currentAiMessage.innerHTML += data.content[0].text;
+                                currentAiMessageBuffer += data.content[0].text;
+                                currentAiMessage.innerHTML = parseMarkdown(currentAiMessageBuffer);
                             }
                         } else {
-                            currentAiMessage.innerHTML += data.content;
+                            currentAiMessageBuffer += data.content;
+                            currentAiMessage.innerHTML = parseMarkdown(currentAiMessageBuffer);
                         }
                         checkIfUserAtBottom();
                         scrollToBottom();
@@ -884,6 +1032,7 @@
             if (message && socket && socket.readyState === WebSocket.OPEN) {
                 // Reset any previous AI message reference
                 currentAiMessage = null;
+                currentAiMessageBuffer = ''; // Reset markdown buffer for new message
                 
                 // Reset HTML streaming state
                 htmlFragmentBuffer = '';
@@ -948,7 +1097,9 @@
             else if (type === 'ai') {
                 // console.log('ai content', content);
                 messageDiv.className = 'message ai-message';
-                messageDiv.innerHTML = content;
+                
+                messageDiv.innerHTML = parseMarkdown(content);
+
                 if (content == '' || content == null) {
                     if (baseMessage && baseMessage.tool_calls && baseMessage.tool_calls.length > 0) {
                         messageDiv.className = 'message tool-message';
