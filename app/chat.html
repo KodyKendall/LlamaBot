@@ -952,14 +952,18 @@
                 if (content == '' || content == null) {
                     if (baseMessage && baseMessage.tool_calls && baseMessage.tool_calls.length > 0) {
                         messageDiv.className = 'message tool-message';
+                        
                         const toolCall = baseMessage.tool_calls[0];
-                        messageDiv.innerHTML = createCollapsibleToolMessage(toolCall.name, JSON.stringify(toolCall.args), '');
+                        let firstArgument = toolCall.args[Object.keys(toolCall.args)[0]]
+                        let toolCallName = toolCall.name + ' ' + firstArgument;
+                        // debugger; //TODO: I want to make it so that it formats it with the first argument without the label.
+
+                        messageDiv.innerHTML = createCollapsibleToolMessage(toolCallName, JSON.stringify(toolCall.args), '');
                         messageDiv.id = baseMessage.tool_calls[0].id;
                     }
                 }
             } 
             else if (type === 'tool') {
-                debugger;
                 const messageDiv = document.getElementById(baseMessage.tool_call_id);
                 if (messageDiv) {
                     messageDiv.className = 'message tool-message';
