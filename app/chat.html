@@ -1106,10 +1106,9 @@
                         
                         const toolCall = baseMessage.tool_calls[0];
                         let firstArgument = toolCall.args[Object.keys(toolCall.args)[0]]
-                        let toolCallName = toolCall.name + ' ' + firstArgument;
                         // debugger; //TODO: I want to make it so that it formats it with the first argument without the label.
 
-                        messageDiv.innerHTML = createCollapsibleToolMessage(toolCallName, JSON.stringify(toolCall.args), '');
+                        messageDiv.innerHTML = createCollapsibleToolMessage(toolCall.name, firstArgument,JSON.stringify(toolCall.args), '');
                         messageDiv.id = baseMessage.tool_calls[0].id;
                     }
                 }
@@ -1147,11 +1146,12 @@
             return messageDiv;
         }
 
-        function createCollapsibleToolMessage(toolName, toolArgs, toolResult) {
+        function createCollapsibleToolMessage(toolName, firstArgument, toolArgs, toolResult) {
             const uniqueId = 'tool_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+            // <span class="tool-summary">${toolName == 'write_todos' ? '📝' : toolName == 'ls' ? '📁' : toolName == 'read_file' ? '📄' : toolName == 'edit_file' || toolName == 'write_file' ? '✏️': toolName == 'search_file' || toolName == 'internet_search' ? '🔍' : toolName == 'bash_command' ? '⚡' : '🔨'} ${toolName} ${firstArgument}</span>
             return `
                 <div class="tool-collapsible" onclick="toggleToolCollapsible('${uniqueId}')">
-                    <span class="tool-summary">🔨 ${toolName}</span>
+                    <span class="tool-summary">🔨${toolName} ${firstArgument}</span>
                 </div>
                 <div class="tool-content" id="${uniqueId}">
                     <div class="tool-details">
