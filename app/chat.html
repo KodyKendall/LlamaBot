@@ -229,6 +229,7 @@
             display: flex;
             flex-direction: column;
             gap: 1rem;
+            position: relative; /* Make this the positioning context for the scroll button */
         }
 
         .message {
@@ -738,6 +739,51 @@
             background-color: rgba(255, 255, 255, 0.05);
             font-weight: 600;
         }
+
+        /* Floating scroll-to-bottom button */
+        .scroll-to-bottom {
+            position: fixed;
+            bottom: 120px; /* Above the input area */
+            right: calc(66.67% + 20px); /* Position within chat section, 20px from right edge */
+            width: 28px;
+            height: 28px;
+            background-color: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+            transition: all 0.2s ease;
+            z-index: 1000;
+            opacity: 0; /* Hide by default */
+            visibility: hidden; /* Hide by default */
+            transform: translateY(10px);
+            backdrop-filter: blur(10px);
+        }
+
+        .scroll-to-bottom.visible {
+            opacity: 0.8;
+            visibility: visible;
+            transform: translateY(0);
+        }
+
+        .scroll-to-bottom:hover {
+            background-color: rgba(255, 255, 255, 0.2);
+            border-color: rgba(255, 255, 255, 0.3);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            opacity: 1;
+        }
+
+        .scroll-to-bottom svg {
+            width: 14px;
+            height: 14px;
+            fill: rgba(255, 255, 255, 0.8);
+            stroke: rgba(255, 255, 255, 0.8);
+            pointer-events: none;
+        }
     </style>
 </head>
 <body>
@@ -766,6 +812,12 @@
         </div>
         <div class="message-history" id="message-history">
             <div class="message ai-message">Hi! I'm Leonardo. What are we building today?</div>
+            <!-- Floating scroll-to-bottom button -->
+            <button class="scroll-to-bottom" id="scrollToBottomBtn" title="Scroll to bottom">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M6 9l6 6 6-6"/>
+                </svg>
+            </button>
         </div>
         <div class="input-area">
             <textarea placeholder="Type your message..." id="messageInput"></textarea>
@@ -1131,7 +1183,13 @@
                 document.getElementById('thinkingIndicator').classList.add('hidden'); // stop thinking indicator
                 return; // Don't append anything for end messages
             }
-            messageHistory.appendChild(messageDiv);
+            // Insert message before the scroll button if it exists
+            const scrollButton = document.getElementById('scrollToBottomBtn');
+            if (scrollButton) {
+                messageHistory.insertBefore(messageDiv, scrollButton);
+            } else {
+                messageHistory.appendChild(messageDiv);
+            }
             
             // For user messages, always scroll to bottom (force = true)
             // For other messages, only scroll if user is at bottom
@@ -1191,6 +1249,10 @@
             
             // Check if user is within threshold pixels of the bottom
             isUserAtBottom = (scrollTop + clientHeight >= scrollHeight - scrollThreshold);
+            
+            // Show/hide scroll-to-bottom button
+            updateScrollToBottomButton();
+            
             return isUserAtBottom;
         }
 
@@ -1201,7 +1263,27 @@
             if (force || isUserAtBottom) {
                 messageHistory.scrollTop = messageHistory.scrollHeight;
                 isUserAtBottom = true;
+                // Update button visibility after scrolling
+                updateScrollToBottomButton();
             }
+        }
+
+        function updateScrollToBottomButton() {
+            const scrollButton = document.getElementById('scrollToBottomBtn');
+            if (scrollButton) {
+                if (!isUserAtBottom) {
+                    scrollButton.classList.add('visible');
+                } else {
+                    scrollButton.classList.remove('visible');
+                }
+            }
+        }
+
+        function scrollToBottomManually() {
+            const messageHistory = document.getElementById('message-history');
+            messageHistory.scrollTop = messageHistory.scrollHeight;
+            isUserAtBottom = true;
+            updateScrollToBottomButton();
         }
 
         function refreshIframe() {
@@ -1455,15 +1537,24 @@
         function loadThreadMessages(threadData) {
             const messageHistory = document.getElementById('message-history');
             
-            // Clear current messages
+            // Clear current messages but preserve the scroll button
+            const scrollButton = document.getElementById('scrollToBottomBtn');
             messageHistory.innerHTML = '';
+            
+            // Re-add the scroll button
+            if (scrollButton) {
+                messageHistory.appendChild(scrollButton);
+            }
             
             // Get messages from thread state
             const messages = threadData[0]?.messages || [];
             
             if (messages.length === 0) {
                 // Show default message if no messages
-                messageHistory.innerHTML = '<div class="message ai-message">Hi! I\'m Leonardo. What are we building today?</div>';
+                const defaultMessage = document.createElement('div');
+                defaultMessage.className = 'message ai-message';
+                defaultMessage.textContent = "Hi! I'm Leonardo. What are we building today?";
+                messageHistory.insertBefore(defaultMessage, scrollButton);
                 return;
             }
             
@@ -1485,6 +1576,9 @@
 
         // Event listeners
         document.getElementById('sendButton').addEventListener('click', sendMessage);
+        
+        // Scroll-to-bottom button event listener
+        document.getElementById('scrollToBottomBtn').addEventListener('click', scrollToBottomManually);
         
         document.getElementById('messageInput').addEventListener('keydown', function(e) {
             if (e.key === 'Enter' && !e.shiftKey) {
