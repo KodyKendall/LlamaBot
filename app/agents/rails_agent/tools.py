@@ -40,7 +40,7 @@ def write_todos(
 ) -> Command:
     
     env = Environment(loader=FileSystemLoader(APP_DIR / 'agents' / 'rails_agent' / 'templates'))
-    template = env.get_template("todo.html")
+    template = env.get_template("todo.html.j2")
 
     html = template.render(todos=todos)
 
@@ -557,7 +557,7 @@ def git_status(
 
     # Render with Jinja
     env = Environment(loader=FileSystemLoader(APP_DIR / 'agents' / 'rails_agent' / 'templates'))
-    template = env.get_template("git-status.html")
+    template = env.get_template("git-status.html.j2")
 
     html = template.render(
         status=status.splitlines(),
