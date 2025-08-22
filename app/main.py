@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -251,6 +251,19 @@ async def page():
     with open("page.html") as f:
         return f.read()
     
+@app.get("/agent_page/{agent_name}", response_class=HTMLResponse)
+async def agent_page(agent_name: str):
+    from pathlib import Path
+    # Get the absolute path to the project root
+    project_root = Path(__file__).parent.parent
+    page_path = project_root / "app" / "agents" / agent_name / "page.html"
+    
+    if not page_path.exists():
+        raise HTTPException(status_code=404, detail=f"Page not found for agent: {agent_name}")
+    
+    with open(page_path) as f:
+        return f.read()
+
 @app.get("/conversations", response_class=HTMLResponse)
 async def conversations():
     with open("conversations.html") as f:

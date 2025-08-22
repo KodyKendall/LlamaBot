@@ -32,6 +32,7 @@ APP_DIR = PROJECT_ROOT / 'app'
 
 # Single HTML output file
 HTML_OUTPUT_PATH = APP_DIR / 'page.html'
+GIT_HTML_OUTPUT_PATH = APP_DIR / 'agents' / 'rails_agent' / 'page.html'
 
 @tool(description=WRITE_TODOS_DESCRIPTION)
 def write_todos(
@@ -405,3 +406,199 @@ def internet_search(
         topic="general",
     )
     return search_docs
+
+@tool(description="Check the status of the git repository to see latest changes & uncommitted changes")
+def git_status(
+    tool_call_id: Annotated[str, InjectedToolCallId],
+) -> Command:
+    
+    """Get the status of the git repository."""
+    def run_git(cmd: str) -> str:
+        result = subprocess.run(
+            ["/bin/sh", "-lc", f"git -C /app/app/rails {cmd}"],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"Git command failed: {cmd}\n{result.stderr}")
+        return result.stdout.strip()
+    
+    def parse_git_status(status_output: str) -> list:
+        """Parse git status --porcelain=v2 output into structured file changes."""
+        files = []
+        lines = status_output.splitlines()
+        
+        for line in lines:
+            if line.startswith('# '):
+                continue  # Skip branch info
+            
+            if line.startswith('1 ') or line.startswith('2 '):
+                # Format: 1 <XY> <sub> <mH> <mI> <mW> <hH> <hI> <path>
+                # or:     2 <XY> <sub> <mH> <mI> <mW> <hH> <hI> <X><score> <path><sep><origPath>
+                parts = line.split(' ', 8)
+                if len(parts) >= 9:
+                    xy = parts[1]  # Status codes
+                    path = parts[8]
+                    
+                    # Handle renames (type 2)
+                    if line.startswith('2 '):
+                        # For renames, path contains both old and new names
+                        if '\t' in path:
+                            new_path, old_path = path.split('\t', 1)
+                            path = f"{old_path} → {new_path}"
+                    
+                    # Map status codes to readable names
+                    status_map = {
+                        'M.': 'Modified',
+                        '.M': 'Modified (worktree)',
+                        'MM': 'Modified (both)',
+                        'A.': 'Added',
+                        '.A': 'Added (worktree)',
+                        'AA': 'Added (both)',
+                        'D.': 'Deleted',
+                        '.D': 'Deleted (worktree)',
+                        'DD': 'Deleted (both)',
+                        'R.': 'Renamed',
+                        '.R': 'Renamed (worktree)',
+                        'C.': 'Copied',
+                        '.C': 'Copied (worktree)',
+                        'U.': 'Unmerged',
+                        '.U': 'Unmerged (worktree)',
+                        '??': 'Untracked'
+                    }
+                    
+                    status_desc = status_map.get(xy, f'Unknown ({xy})')
+                    files.append({
+                        'path': path,
+                        'status': status_desc,
+                        'status_code': xy
+                    })
+            elif line.startswith('? '):
+                # Untracked file
+                path = line[2:]  # Remove '? ' prefix
+                files.append({
+                    'path': path,
+                    'status': 'Untracked',
+                    'status_code': '??'
+                })
+        
+        return files
+    
+    # Collect data
+    status = run_git("status --porcelain=v2 --branch")
+    log = run_git(
+        "log -n 10 --pretty=format:'{\"hash\":\"%H\",\"author\":\"%an\",\"date\":\"%ad\",\"subject\":\"%s\"},'"
+    )
+    
+    # Parse changed files
+    changed_files = parse_git_status(status)
+    
+    # Get individual diffs for each changed file
+    for file_info in changed_files:
+        file_path = file_info['path']
+        
+        # Skip untracked files for diff (they don't have diffs)
+        if file_info['status_code'] == '??':
+            file_info['diff'] = f"New file: {file_path}"
+            continue
+        
+        # Handle renamed files
+        if '→' in file_path:
+            # For renames, get diff of the new file name
+            new_path = file_path.split(' → ')[1]
+            try:
+                diff_output = run_git(f"diff HEAD -- '{new_path}'")
+                if not diff_output:
+                    # If no diff with HEAD, try staged diff
+                    diff_output = run_git(f"diff --cached -- '{new_path}'")
+            except:
+                diff_output = f"Could not get diff for renamed file: {file_path}"
+        else:
+            try:
+                # Try to get diff for the file
+                diff_output = run_git(f"diff HEAD -- '{file_path}'")
+                if not diff_output:
+                    # If no diff with HEAD, try staged diff
+                    diff_output = run_git(f"diff --cached -- '{file_path}'")
+                if not diff_output and file_info['status_code'].endswith('M'):
+                    # For worktree modifications, try diff without HEAD
+                    diff_output = run_git(f"diff -- '{file_path}'")
+            except:
+                diff_output = f"Could not get diff for file: {file_path}"
+        
+        file_info['diff'] = diff_output if diff_output else f"No changes to display for {file_path}"
+
+    # Parse log into JSON
+    log_json = "[" + log.strip().rstrip(",") + "]"
+    commits = json.loads(log_json) if log_json.strip("[]") else []
+
+    def format_diff(diff_text: str) -> str:
+        """Format diff text with HTML classes for syntax highlighting."""
+        if not diff_text:
+            return ""
+        
+        lines = diff_text.splitlines()
+        formatted_lines = []
+        
+        for line in lines:
+            if line.startswith('+++') or line.startswith('---'):
+                formatted_lines.append(f'<span class="diff-header">{line}</span>')
+            elif line.startswith('@@'):
+                formatted_lines.append(f'<span class="diff-header">{line}</span>')
+            elif line.startswith('+'):
+                formatted_lines.append(f'<span class="diff-line-add">{line}</span>')
+            elif line.startswith('-'):
+                formatted_lines.append(f'<span class="diff-line-remove">{line}</span>')
+            else:
+                formatted_lines.append(f'<span class="diff-line-context">{line}</span>')
+        
+        return '\n'.join(formatted_lines)
+
+    # Render with Jinja
+    env = Environment(loader=FileSystemLoader(APP_DIR / 'agents' / 'rails_agent' / 'templates'))
+    template = env.get_template("git-status.html")
+
+    html = template.render(
+        status=status.splitlines(),
+        commits=commits,
+        changed_files=changed_files,
+        format_diff=format_diff
+    )
+
+    with open(GIT_HTML_OUTPUT_PATH, "w", encoding="utf-8") as f:
+        f.write(html)
+
+    return Command(
+        update={
+            "messages": [
+                ToolMessage(
+                    f"Git status:\n{status}\n\nChanged files: {len(changed_files)}\nCommits:\n{json.dumps(commits, indent=2)}",
+                    tool_call_id=tool_call_id,
+                )
+            ],
+        }
+    )
+    # result = subprocess.run(["/bin/sh", "-lc", "git -C /app/app/rails status"], capture_output=True, text=True, timeout=30)
+    # print(result.stdout)
+    
+    # env = Environment(loader=FileSystemLoader(APP_DIR / 'agents' / 'rails_agent' / 'templates'))
+    # template = env.get_template("git-status.html")
+
+    # html = template.render(status=result.stdout.split("\n"))
+
+    # with open(GIT_HTML_OUTPUT_PATH, "w", encoding='utf-8') as f:
+    #     f.write(html)
+
+    # return Command(
+    #     update={
+    #         "messages": [ToolMessage(f"Git status:\n{result.stdout}", tool_call_id=tool_call_id)],
+    #     }
+    # )
+
+    # result = rails_api_sh("git status")
+    # return Command(
+    #     update={
+    #         "messages": [ToolMessage(f"Git status:\n{result}", tool_call_id=tool_call_id)],
+    #     }
+    # )
