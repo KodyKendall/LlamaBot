@@ -931,7 +931,12 @@
 
         // Initialize WebSocket connection
         function initWebSocket() {
-            const wsUrl = `ws://${window.location.host}/ws`;
+            let wsUrl = `ws://${window.location.host}/ws`;
+            if (window.location.protocol === 'https:') {
+                wsUrl = `wss://${window.location.host}/ws`;
+                document.getElementById('liveSiteFrame').src = 'https://rails.' + window.location.host;
+            }
+
             socket = new WebSocket(wsUrl);
 
             socket.onopen = function() {
