@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import Message from './components/Chat/Message';
 
 function App() {
   // State management
@@ -40,6 +41,38 @@ function App() {
   const generateMessageId = () => {
     messageIdCounterRef.current += 1;
     return `msg-${Date.now()}-${messageIdCounterRef.current}-${Math.random().toString(36).substr(2, 9)}`;
+  };
+
+  // Shared helper to create message objects
+  const createMessageObject = (type, content, baseMessage = null, toolResult = null) => {
+    // Check for tool calls in different possible locations
+    const toolCalls = baseMessage?.tool_calls || 
+                     baseMessage?.base_message?.tool_calls || 
+                     baseMessage?.additional_kwargs?.tool_calls;
+    
+    if (type === 'ai' && toolCalls) {
+      // Handle AI messages with tool calls - create collapsible tool message
+      
+      // Only create tool message if tool_calls array exists and has elements
+      if (toolCalls && toolCalls.length > 0) {
+        return {
+          id: toolCalls[0]?.id || generateMessageId(),
+          type: 'tool',
+          content: '',
+          baseMessage: { tool_calls: toolCalls },
+          toolResult: toolResult
+        };
+      }
+    }
+    
+    // Default case for regular messages
+    return {
+      id: generateMessageId(),
+      type: type,
+      content: content,
+      baseMessage: baseMessage,
+      toolResult: toolResult
+    };
   };
 
   // WebSocket connection
@@ -167,11 +200,20 @@ function App() {
         scrollToBottom();
       } else if (data.content === '' || data.content === null) {
         // Handle tool call chunks
-        if (data.base_message && data.base_message.tool_call_chunks && data.base_message.tool_call_chunks[0]) {
-          let tool_call_data = data.base_message.tool_call_chunks[0].args;
+        if (data.base_message && data.base_message.tool_call_chunks && data.base_message.tool_call_chunks.length > 0 && data.base_message.tool_call_chunks[0]) {
+          let tool_call_data = data.base_message.tool_call_chunks[0].args || '';
           
-          htmlFragmentBufferRef.current += tool_call_data;
-          fullMessageBufferRef.current += tool_call_data;
+          // Check if this is a regular tool call (not HTML generation)
+          if (typeof tool_call_data === 'string' && !tool_call_data.includes('<html')) {
+            // Handle regular tool calls
+            if (data.base_message.tool_calls && data.base_message.tool_calls.length > 0) {
+              addMessage('', 'ai', data.base_message);
+            }
+          } else {
+            // Handle HTML generation tool calls
+            htmlFragmentBufferRef.current += tool_call_data;
+            fullMessageBufferRef.current += tool_call_data;
+          }
           
           let htmlTagIndex = htmlFragmentBufferRef.current.indexOf('<html');
           if (htmlTagIndex !== -1 && !htmlChunksStartedStreamingRef.current) {
@@ -231,6 +273,8 @@ function App() {
       }
     } else if (data.type === 'ai') {
       if (data.tool_calls && data.tool_calls.length > 0) {
+        addMessage(data.content, data.type, data);
+      } else {
         addMessage(data.content, data.type, data.base_message);
       }
     } else if (data.type === 'end') {
@@ -247,20 +291,20 @@ function App() {
       return;
     }
 
-    const newMessage = {
-      id: generateMessageId(),
-      type: type,
-      content: content,
-      baseMessage: baseMessage
-    };
-
-    if (type === 'tool' && baseMessage?.tool_call_id) {
-      setMessages(prev => prev.map(msg => 
-        msg.baseMessage?.tool_calls?.[0]?.id === baseMessage.tool_call_id
-          ? { ...msg, toolResult: content }
-          : msg
-      ));
+    // Handle tool messages with collapsible structure
+    if (type === 'tool') {
+      // Try to match by tool_call_id or by looking for the tool call in existing messages
+      setMessages(prev => prev.map(msg => {
+        const toolCallId = baseMessage?.tool_call_id || baseMessage?.tool_call?.id;
+        const matchesById = msg.id === toolCallId || msg.baseMessage?.tool_calls?.[0]?.id === toolCallId;
+        
+        if (matchesById) {
+          return { ...msg, toolResult: content };
+        }
+        return msg;
+      }));
     } else {
+      const newMessage = createMessageObject(type, content, baseMessage);
       setMessages(prev => [...prev, newMessage]);
     }
 
@@ -357,16 +401,25 @@ function App() {
       const threadData = await response.json();
       
       const threadMessages = threadData[0]?.messages || [];
-      const formattedMessages = threadMessages.map(msg => ({
-        id: generateMessageId(),
-        type: msg.type,
-        content: msg.content,
-        baseMessage: msg
-      }));
       
-      setMessages(formattedMessages.length > 0 ? formattedMessages : [
-        { id: generateMessageId(), type: 'ai', content: "Hi! I'm Leonardo. What are we building today?" }
-      ]);
+      // Clear existing messages and add each message using addMessage
+      setMessages([]);
+      
+      if (threadMessages.length > 0) {
+        threadMessages.forEach(msg => {
+          // Use shared helper for consistency
+          const newMessage = createMessageObject(
+            msg.type, 
+            msg.content, 
+            msg, 
+            msg.tool_results?.[0] || null
+          );
+          setMessages(prev => [...prev, newMessage]);
+        });
+      } else {
+        // Add default welcome message
+        setMessages([createMessageObject('ai', "Hi! I'm Leonardo. What are we building today?")]);
+      }
       
       setIsMenuOpen(false);
       scrollToBottom(true);
@@ -472,26 +525,6 @@ function App() {
     }
   };
 
-  const parseMarkdown = (text) => {
-    if (!text) return '';
-    
-    try {
-      // Using marked.js from CDN
-      if (window.marked) {
-        let html = window.marked.parse(text);
-        // Basic XSS prevention
-        html = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
-        html = html.replace(/\son\w+="[^"]*"/gi, '');
-        html = html.replace(/\son\w+='[^']*'/gi, '');
-        return html;
-      }
-      return text.replace(/\n/g, '<br>');
-    } catch (error) {
-      console.error('Markdown parsing error:', error);
-      return text.replace(/\n/g, '<br>');
-    }
-  };
-
   const refreshIframes = () => {
     const liveSiteFrame = document.getElementById('liveSiteFrame');
     const contentFrame = document.getElementById('contentFrame');
@@ -567,8 +600,16 @@ function App() {
         {/* Menu Drawer */}
         <div className={`absolute top-0 left-0 w-[280px] h-full bg-gray-800 border-r border-gray-700 shadow-lg z-[999] transform transition-transform menu-drawer ${isMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}>
           <div className="h-full flex flex-col">
-            <div className="h-[60px] px-4 py-3 pl-[60px] bg-gray-800 border-b border-gray-700 flex items-center">
+            <div className="h-[60px] px-4 py-3 pl-[60px] bg-gray-800 border-b border-gray-700 flex items-center justify-between">
               <h3 className="text-xl font-semibold">Conversations</h3>
+              <button 
+                className="w-8 h-8 flex items-center justify-center rounded hover:bg-gray-700 transition-colors text-gray-300 hover:text-white"
+                onClick={() => setIsMenuOpen(false)}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5">
+                  <path d="M18 6L6 18M6 6l12 12"/>
+                </svg>
+              </button>
             </div>
             <div className="flex-1 py-4 overflow-y-auto">
               {threads.length === 0 ? (
@@ -598,36 +639,10 @@ function App() {
           onScroll={checkIfUserAtBottom}
         >
           {messages.map((message) => (
-            <div 
+            <Message 
               key={message.id}
-              className={`p-3 rounded-xl max-w-[85%] break-words relative text-sm ${
-                message.type === 'human' ? 'bg-gray-700 self-end rounded-br-sm' :
-                message.type === 'ai' ? 'bg-gray-600 self-start rounded-bl-sm' :
-                message.type === 'tool' ? 'bg-blue-700 self-start rounded-bl-sm' :
-                message.type === 'error' ? 'bg-red-900/20 border border-red-500/50 text-red-400' : ''
-              }`}
-            >
-              {message.type === 'ai' ? (
-                <div dangerouslySetInnerHTML={{ __html: parseMarkdown(message.content) }} />
-              ) : message.baseMessage?.tool_calls ? (
-                <div>
-                  <div className="font-bold mb-1">
-                    🔨 {message.baseMessage.tool_calls[0].name}
-                  </div>
-                  <pre className="text-xs whitespace-pre-wrap">
-                    {JSON.stringify(message.baseMessage.tool_calls[0].args, null, 2)}
-                  </pre>
-                  {message.toolResult && (
-                    <div className="mt-2 pt-2 border-t border-gray-600">
-                      <strong>Result:</strong>
-                      <pre className="text-xs whitespace-pre-wrap mt-1">{message.toolResult}</pre>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                message.content
-              )}
-            </div>
+              message={message}
+            />
           ))}
           
           {/* Scroll to bottom button */}
