@@ -1294,7 +1294,7 @@
             }
         }
 
-        function sendMessage() {
+        function sendMessage(debugInfo=null) {
             const input = document.getElementById('messageInput');
             const message = input.value.trim();
             
@@ -1339,8 +1339,8 @@
                 const messageData = {
                     message: message,
                     thread_id: currentThreadId,
+                    debug_info: debugInfo,
                     agent_name: AGENT.NAME
-
                 };
                 
                 socket.send(JSON.stringify(messageData));
@@ -1374,10 +1374,12 @@
                         messageDiv.className = 'message tool-message';
                         
                         const toolCall = baseMessage.tool_calls[0];
-                        let firstArgument = toolCall.args[Object.keys(toolCall.args)[0]]
+                        let firstArgument = toolCall.args[Object.keys(toolCall.args)[0]];
                         // debugger; //TODO: I want to make it so that it formats it with the first argument without the label.
-
-                        messageDiv.innerHTML = createCollapsibleToolMessage(toolCall.name, firstArgument,JSON.stringify(toolCall.args), '');
+                        if (firstArgument == undefined) {
+                            firstArgument = '';
+                        }
+                        messageDiv.innerHTML = createCollapsibleToolMessage(toolCall.name, firstArgument ,JSON.stringify(toolCall.args), '');
                         messageDiv.id = baseMessage.tool_calls[0].id;
                     }
                 }
@@ -1792,7 +1794,7 @@
         }
 
         // Event listeners
-        document.getElementById('sendButton').addEventListener('click', sendMessage);
+        document.getElementById('sendButton').addEventListener('click', sendMessageWithDebugInfo);
         
         // Scroll-to-bottom button event listener
         document.getElementById('scrollToBottomBtn').addEventListener('click', scrollToBottomManually);
@@ -1800,9 +1802,16 @@
         document.getElementById('messageInput').addEventListener('keydown', function(e) {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
-                sendMessage();
+                sendMessageWithDebugInfo();
             }
         });
+
+        function sendMessageWithDebugInfo() {
+            // sendMessage();
+            const debugInfo = getRailsDebugInfo((debugInfoJson) => {
+                sendMessage(debugInfoJson);
+            });
+        }
 
         // Refresh button functionality
         document.getElementById('refreshButton').addEventListener('click', function() {
@@ -1973,6 +1982,33 @@
 
         // Initialize mobile view on page load
         initializeMobileView();
+
+        function getRailsDebugInfo(callback) {
+            const iframe = document.getElementById('liveSiteFrame');
+            if (iframe && iframe.contentWindow) {
+                iframe.contentWindow.postMessage({ type: "get_debug_info" }, "*");
+            }
+            window.callback = callback;
+        }
+
+        // Listen for messages coming back from the iframe
+        window.addEventListener("message", (event) => {
+            // console.log("Message from rails:", event.data);
+            if (event.data.source === "llamapress") {
+                //todo: think about attack vectors & patch.
+
+                // console.log("Message:", event.data);
+                // let allowedUrl = `${window.location.host}`;
+                // if (window.location.protocol === 'https:') {
+                //     allowedUrl = `rails.${window.location.host}`;
+                // }
+                if(window.callback){
+                    window.callback(event.data);
+                }
+                // if (event.origin === allowedUrl){
+                // }
+            }
+        });
 
         // Initialize WebSocket on page load
         initWebSocket();

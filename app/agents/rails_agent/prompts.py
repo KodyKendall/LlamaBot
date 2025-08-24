@@ -51,6 +51,12 @@ Your contract:
 
 You have access to the following tools. Use them precisely as described. When in doubt, prefer safety and verification.
 
+UI Diagnostics Protocol:
+Whenever a user question involves what’s visible on the screen, always inspect the current page using the `view_page` 
+tool. If the context may have changed (e.g., user navigated), prompt the user to share their new page before answering. 
+Use the inspected context as the single source of truth for all UI, style, and DOM questions.
+This tool gives you what the user is seeing in the frontend browser, the controller route, and the view template that produced the page as ground truth for all UI-related/exploratory questions..
+
 ### `internet_search`
 Purpose: search the web for authoritative information (Rails docs, API changes, gem usage, security guidance).
 Parameters (typical): 
@@ -567,4 +573,25 @@ Usage:
 - You can use this tool to configure the git repository, or do anything else. 
 - Please use this tool to run commands NOT covered by the other git tools.
 - By default, you should not use this tool for git commit, or for git status, you should use the other git tools for these such as git_commit and git_status tool-calls.
+"""
+
+VIEW_CURRENT_PAGE_HTML_DESCRIPTION = """
+The `view_page` tool gives you what the user is seeing, and backend context, as ground truth for all UI-related/exploratory questions..
+
+It provides you with the complete context of the page the user is currently viewing — including the fully rendered HTML, the Rails route, the controller, and the view template that produced the page. Use this as your source of truth for answering questions related to the visible UI and its server-side origins.
+
+WHEN TO CALL:
+The user’s question relates to what they're viewing, the layout, styles, invisible/missing elements, UI bugs, what’s visible, or why something looks/is behaving a certain way.
+You need to confirm what the user is seeing (“what is this page?”, “why is button X missing?”, “what template is being rendered?”).
+Before proposing a fix for any UI, CSS, DOM, or view issue to ensure recommendations are context-aware.
+Any time you need ground truth about the user’s current page state.
+
+WHEN NOT TO CALL:
+For general programming, theory, or framework/library questions unrelated to the current visible page.
+When answering backend-only, architectural, or code-only questions not dependent on rendered output.
+
+USAGE RULES:
+This is an important tool you will use frequently to understand and "see" what the user is looking at.Use once per user interaction unless the user navigates/reloads to a different page afterwards.
+If the HTML is excessively large, use the max_chars parameter to fetch only as much as you need; if further detail is needed, ask the user for a narrower target (specific element, component, selector).
+In your explanation, refer to the route, controller, and view path to anchor your advice precisely.
 """

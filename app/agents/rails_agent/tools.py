@@ -18,6 +18,7 @@ from app.agents.rails_agent.prompts import (
     GIT_COMMIT_DESCRIPTION,
     GIT_COMMAND_DESCRIPTION,
     SEARCH_FILE_DESCRIPTION,
+    VIEW_CURRENT_PAGE_HTML_DESCRIPTION,
 )
 
 from app.agents.rails_agent.state import Todo, RailsAgentState
@@ -750,4 +751,13 @@ def git_command(
         update={
             "messages": [ToolMessage(output, tool_call_id=tool_call_id)],
         }
+    )
+
+@tool(description=VIEW_CURRENT_PAGE_HTML_DESCRIPTION)
+def view_page(state: Annotated[RailsAgentState, InjectedState], tool_call_id: Annotated[str, InjectedToolCallId]):
+    debug_info = state.get("debug_info")
+    return Command(
+        update={
+            "messages": [ToolMessage(debug_info, tool_call_id=tool_call_id)],
+    }
     )

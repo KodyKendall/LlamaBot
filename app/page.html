@@ -2,165 +2,84 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LlamaPress - AI Webpage Builder</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif;
-            line-height: 1.6;
-            color: #1e293b;
-            background: #ffffff;
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-        }
-        
-        header {
-            border-bottom: 1px solid #e2e8f0;
-            padding: 1.5rem 0;
-        }
-        
-        .container {
-            max-width: 1000px;
-            margin: 0 auto;
-            padding: 0 2rem;
-        }
-        
-        nav {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        .logo {
-            font-size: 1.5rem;
-            font-weight: 600;
-            color: #1e293b;
-        }
-        
-        .nav-items {
-            display: flex;
-            gap: 2rem;
-            font-size: 0.875rem;
-            color: #64748b;
-        }
-        
-        main {
-            flex: 1;
-            display: flex;
-            align-items: center;
-            padding: 4rem 0;
-        }
-        
-        .hero {
-            text-align: center;
-            max-width: 600px;
-            margin: 0 auto;
-        }
-        
-        h1 {
-            font-size: 3rem;
-            font-weight: 600;
-            margin-bottom: 1rem;
-            letter-spacing: -0.02em;
-        }
-        
-        .subtitle {
-            font-size: 1.25rem;
-            color: #64748b;
-            margin-bottom: 3rem;
-        }
-        
-        .cta-button {
-            display: inline-block;
-            padding: 0.875rem 2.5rem;
-            background: #4f46e5;
-            color: white;
-            border-radius: 8px;
-            text-decoration: none;
-            font-weight: 500;
-            transition: background 0.15s ease;
-        }
-        
-        .cta-button:hover {
-            background: #4338ca;
-        }
-        
-        .demo-box {
-            margin-top: 4rem;
-            padding: 2rem;
-            background: #f8fafc;
-            border-radius: 8px;
-            border: 1px solid #e2e8f0;
-        }
-        
-        .demo-text {
-            color: #64748b;
-            font-size: 0.875rem;
-            margin-bottom: 1rem;
-        }
-        
-        footer {
-            border-top: 1px solid #e2e8f0;
-            padding: 2rem 0;
-            text-align: center;
-            font-size: 0.875rem;
-            color: #94a3b8;
-        }
-        
-        @media (max-width: 768px) {
-            h1 {
-                font-size: 2rem;
-            }
-            
-            .nav-items {
-                display: none;
-            }
-            
-            main {
-                padding: 2rem 0;
-            }
-        }
-    </style>
+    <title>TODO List</title>
+    <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body>
-    <header>
-        <div class="container">
-            <nav>
-                <div class="logo">LlamaPress</div>
-                <div class="nav-items">
-                    <span>Free</span>
-                    <span>Open Source</span>
-                    <span>Easy</span>
-                </div>
-            </nav>
-        </div>
-    </header>
-    
-    <main>
-        <div class="container">
-            <div class="hero">
-                <h1>Your Awesome Web Page</h1>
-                <p class="subtitle">Create webpages using natural language. No code required.</p>
-                <a href="#" class="cta-button">Start Building</a>
+<body class="min-h-screen bg-gray-100">
+    <div class="max-w-3xl mx-auto p-8">
+        <h1 class="text-4xl font-semibold mb-8 text-center text-slate-800">Agent's Tasks</h1>
+
+        <!-- In Progress -->
+        <div class="mb-8">
+            <div class="text-xl font-semibold mb-4 flex items-center gap-2">
+                <span>In Progress</span>
+                <span class="px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800">
+                    1
+                </span>
+            </div>
+            <div class="flex flex-col gap-3">
                 
-                <div class="demo-box">
-                    <p class="demo-text">This page was built with LlamaPress. Send a message to change it.</p>
+                <div class="bg-white p-4 rounded-md shadow flex items-center gap-4">
+                    <div class="w-5 h-5 border-2 border-gray-300 rounded"></div>
+                    <span class="flex-1 text-base">Commit changes to git with a clear message when new homepage is present and correct.</span>
                 </div>
+                
             </div>
         </div>
-    </main>
-    
-    <footer>
-        <div class="container">
-            <p>AI-powered webpage builder</p>
+
+        <!-- Pending -->
+        <div class="mb-8">
+            <div class="text-xl font-semibold mb-4 flex items-center gap-2">
+                <span>Pending</span>
+                <span class="px-3 py-1 rounded-full text-sm font-medium bg-amber-100 text-amber-800">
+                    0
+                </span>
+            </div>
+            <div class="flex flex-col gap-3">
+                
+            </div>
         </div>
-    </footer>
+
+        <!-- Completed -->
+        <div class="mb-8">
+            <div class="text-xl font-semibold mb-4 flex items-center gap-2">
+                <span>Completed</span>
+                <span class="px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800">
+                    3
+                </span>
+            </div>
+            <div class="flex flex-col gap-3">
+                
+                <div class="bg-white p-4 rounded-md shadow flex items-center gap-4">
+                    <div class="w-5 h-5 border-2 border-green-500 rounded bg-green-500 flex items-center justify-center">
+                        <svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
+                        </svg>
+                    </div>
+                    <span class="flex-1 text-base line-through text-gray-400">Summarize requirements and goals for a simple signed-in homepage for a journal app in project TODOs (no backend functionality, just frontpage).</span>
+                </div>
+                
+                <div class="bg-white p-4 rounded-md shadow flex items-center gap-4">
+                    <div class="w-5 h-5 border-2 border-green-500 rounded bg-green-500 flex items-center justify-center">
+                        <svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
+                        </svg>
+                    </div>
+                    <span class="flex-1 text-base line-through text-gray-400">Draft an improved HTML layout for app/views/public/home.html.erb with: (a) Welcome headline, (b) New Journal Entry button (nonfunctional placeholder), (c) Placeholder journal entries list, (d) Placeholder Chat with AI button/area. Acceptance Criteria: User visiting '/' while signed in sees these sections clearly on page.</span>
+                </div>
+                
+                <div class="bg-white p-4 rounded-md shadow flex items-center gap-4">
+                    <div class="w-5 h-5 border-2 border-green-500 rounded bg-green-500 flex items-center justify-center">
+                        <svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
+                        </svg>
+                    </div>
+                    <span class="flex-1 text-base line-through text-gray-400">Review the home.html.erb implementation for design, language, and clarity. Confirm presence of all required elements.</span>
+                </div>
+                
+            </div>
+        </div>
+
+    </div>
 </body>
 </html>

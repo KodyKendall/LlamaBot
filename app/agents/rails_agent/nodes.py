@@ -21,7 +21,7 @@ from openai import OpenAI
 from app.agents.utils.images import encode_image
 
 from app.agents.rails_agent.state import RailsAgentState
-from app.agents.rails_agent.tools import write_todos, write_file, read_file, ls, edit_file, search_file, internet_search, bash_command, git_status, git_commit, git_command
+from app.agents.rails_agent.tools import write_todos, write_file, read_file, ls, edit_file, search_file, internet_search, bash_command, git_status, git_commit, git_command, view_page
 from app.agents.rails_agent.prompts import RAILS_AGENT_PROMPT
 
 
@@ -31,7 +31,7 @@ PROJECT_ROOT = SCRIPT_DIR.parent.parent.parent  # Go up to LlamaBot root
 APP_DIR = PROJECT_ROOT / 'app'
 
 # Global tools list
-tools = [write_todos, read_file, ls, internet_search, search_file, write_file, edit_file, bash_command, git_status, git_commit, git_command]
+tools = [write_todos, read_file, ls, internet_search, search_file, write_file, edit_file, bash_command, git_status, git_commit, git_command, view_page]
 
 # System message
 sys_msg = SystemMessage(content=RAILS_AGENT_PROMPT)
@@ -44,7 +44,13 @@ def leonardo(state: RailsAgentState):
 #    read_rails_file("app/agents/llamabot/nodes.py") # Testing.
    llm = ChatOpenAI(model="gpt-4.1")
    llm_with_tools = llm.bind_tools(tools)
-   return {"messages": [llm_with_tools.invoke([sys_msg] + state["messages"])]}
+   view_path = state.get('debug_info').get('view_path')
+   if view_path:
+        messages = [sys_msg] + state["messages"] + [SystemMessage(content="The user is currently viewing their Ruby on Rails webpage route at: " + view_path)]
+   else:
+        messages = [sys_msg] + state["messages"]
+
+   return {"messages": [llm_with_tools.invoke(messages)]}
 
 def build_workflow(checkpointer=None):
     # Graph
