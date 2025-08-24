@@ -13,6 +13,11 @@ from app.agents.rails_agent.prompts import (
     TOOL_DESCRIPTION,
     INTERNET_SEARCH_DESCRIPTION,
     LIST_DIRECTORY_DESCRIPTION,
+    BASH_COMMAND_FOR_RAILS_DESCRIPTION,
+    GIT_STATUS_DESCRIPTION,
+    GIT_COMMIT_DESCRIPTION,
+    GIT_COMMAND_DESCRIPTION,
+    SEARCH_FILE_DESCRIPTION,
 )
 
 from app.agents.rails_agent.state import Todo, RailsAgentState
@@ -58,10 +63,6 @@ def write_todos(
 
 @tool(description=LIST_DIRECTORY_DESCRIPTION)
 def ls(directory: str = "") -> list[str]:
-    """
-    List the contents of a directory.
-    If directory string is empty, lists the root directory.
-    """
     if directory.startswith("/"): # we NEVER want to include a leading slash "/"  at the beginning of the directory string. It's all relative in our docker container.
         directory = directory[1:]
 
@@ -80,7 +81,6 @@ def read_file(
     offset: int = 0,
     limit: int = 2000,
 ) -> str:
-    """Read file."""
     # Construct the full path
     full_path = APP_DIR / "rails" / file_path
     
@@ -230,7 +230,7 @@ def edit_file(
         }
     )
 
-@tool(description="Search all files in the project directory for a substring")
+@tool(description=SEARCH_FILE_DESCRIPTION)
 def search_file(
     substring: str, tool_call_id: Annotated[str, InjectedToolCallId]
 ) -> Command:
@@ -316,7 +316,11 @@ def list_all_files_recursive(directory: Path):
 
 # Rails container configuration
 RAILS_CONT = "rails-agent-llamapress-1"
+# RAILS_CONT = "llamapress2-llamapress-12"
+
 WORKDIR = "/rails"  # path that contains bin/rails inside the Rails container
+
+#TODO: This RAILS_CONT is causing problems. Because in our production, it's llamapress-1
 
 def rails_api_sh(snippet: str, workdir: str = WORKDIR) -> str:
     """Execute a command in the Rails Docker container via Docker API."""
@@ -374,13 +378,12 @@ def rails_api_sh(snippet: str, workdir: str = WORKDIR) -> str:
     except Exception as e:
         return f"Unexpected error: {str(e)}"
 
-@tool(description="Execute a bundle exec command in operating system that Rails is running in, in order to use Rails tools. ALWAYS prepend the command with `bundle exec` to make sure we use the right Rails runtime environment.")
-def bundle_exec_command(
+@tool(description=BASH_COMMAND_FOR_RAILS_DESCRIPTION)
+def bash_command(
     command: str, 
     tool_call_id: Annotated[str, InjectedToolCallId],
     workdir: str = WORKDIR
 ) -> Command:
-    """Execute a bundle exec command in the Rails Docker container."""
     result = rails_api_sh(command, workdir)
     
     return Command(
@@ -407,7 +410,7 @@ def internet_search(
     )
     return search_docs
 
-@tool(description="Check the status of the git repository to see latest changes & uncommitted changes")
+@tool(description=GIT_STATUS_DESCRIPTION)
 def git_status(
     tool_call_id: Annotated[str, InjectedToolCallId],
 ) -> Command:
@@ -662,7 +665,7 @@ def git_status(
     )
 
 
-@tool(description="Commit the changes to the git repository")
+@tool(description=GIT_COMMIT_DESCRIPTION)
 def git_commit(
     message: str,
     tool_call_id: Annotated[str, InjectedToolCallId],
@@ -693,6 +696,24 @@ def git_commit(
     except Exception as e:
         output += f"\n\nError getting post-commit git status: {str(e)}"
     
+    return Command(
+        update={
+            "messages": [ToolMessage(output, tool_call_id=tool_call_id)],
+        }
+    )
+
+@tool(description=GIT_COMMAND_DESCRIPTION)
+def git_command(
+    command: str,
+    tool_call_id: Annotated[str, InjectedToolCallId],
+) -> Command:
+    """Configure the git repository."""
+    git_result = subprocess.run(["/bin/sh", "-lc", f"git -C /app/app/rails {command}"], capture_output=True, text=True, timeout=30)
+
+    output = f"Git command:\n{command}\n\nGit result:\n{git_result.stdout}"
+    if git_result.stderr:
+        output += f"\nGit command errors:\n{git_result.stderr}"
+
     return Command(
         update={
             "messages": [ToolMessage(output, tool_call_id=tool_call_id)],

@@ -432,7 +432,9 @@ Usage:
 - ALWAYS prefer editing existing files. NEVER write new files unless explicitly required.
 - Only use emojis if the user explicitly requests it. Avoid adding emojis to files unless asked.
 - The edit will FAIL if `old_string` is not unique in the file. Either provide a larger string with more surrounding context to make it unique or use `replace_all` to change every instance of `old_string`. 
-- Use `replace_all` for replacing and renaming strings across the file. This parameter is useful if you want to rename a variable for instance."""
+- Use `replace_all` for replacing and renaming strings across the file. This parameter is useful if you want to rename a variable for instance.
+- You may need to escape quotes in the old_string to match properly, especially for longer multi-line strings.
+"""
 
 TOOL_DESCRIPTION = """Reads a file from the local filesystem. You can access any file directly by using this tool.
 Assume this tool is able to read all files on the machine. If the User provides a path to a file assume that path is valid. It is okay to read a file that does not exist; an error will be returned.
@@ -460,4 +462,82 @@ The folders inside this current directory should be roughly map to a light versi
 NEVER include a leading slash "/"  at the beginning of the directory string.
 
 To confirm this, just list the contents of the current directory without a folder name as an argument.
+"""
+
+SEARCH_FILE_DESCRIPTION = """
+Use this tool to search the entire project for a substring, in order to find files that contain the substring.
+This is extremely useful when the user is asking you to make changes, but you're not sure what files to edit.
+
+This is great for researching and exploring the project, finding relevant parts of the code, and trying to answer questions about key implementation details of the project.
+
+Usage:
+- The substring parameter must be a string that is a valid search query.
+- You can use this tool to search the contents of a file for a substring.
+"""
+
+BASH_COMMAND_FOR_RAILS_DESCRIPTION = """
+Use this tool to execute a bash command in the Rails Docker container, especially for running Rails commands, such as :
+`rails db:migrate`, `rails db:seed`, `rails scaffold`, `rails db:migrate:status`, etc.
+
+This puts you in the same environment as the Rails container, so you can use the same commands as the developer would use.
+
+Usage:
+- The command parameter must be a string that is a valid bash command.
+- You can use this tool to execute any bash command in the Rails Docker container.
+"""
+
+GIT_STATUS_DESCRIPTION = """
+Use this tool to check the status of the git repository.
+
+Usage:
+- You can use this tool to check the status of the git repository.
+"""
+
+GIT_COMMIT_DESCRIPTION = """
+Use this tool to commit the changes to the git repository.
+
+Usage:
+- The message parameter must be a string that is a valid git commit message.
+- You can use this tool to commit the changes to the git repository.
+"""
+
+GIT_COMMAND_DESCRIPTION = """
+Use this tool if you need to configure the git repository, such as setting the author name and email, etc.
+
+This takes an input argument of the string arguments to pass to the git command.
+
+For example, if you need to run "git config", then you would pass the following string to the tool:
+<EXAMPLE_INPUT>
+config --global user.name "Leonardo"
+</EXAMPLE_INPUT>
+
+If you need to run "git add", then you would pass the following string to the tool:
+<EXAMPLE_INPUT>
+add .
+</EXAMPLE_INPUT>
+
+If you need to run "git commit", then you would pass the following string to the tool:
+<EXAMPLE_INPUT>
+commit -m "Add new feature"
+</EXAMPLE_INPUT>
+
+Please note that the author information should be set, if it's not, then please set it to the following.
+
+<CONFIGURE_USER_INFO>
+config --global user.name "Leonardo"
+config --global user.email "leonardo@llamapress.ai"
+</CONFIGURE_USER_INFO>
+
+If there are issues with the git repository directory, you can use this tool to mark the safe directory inside our docker container, which may be necessary.
+
+Here is the command to do so: 
+<COMMAND_TO_MARK_SAFE_DIRECTORY>
+config --global --add safe.directory /app/app/rails
+</COMMAND_TO_MARK_SAFE_DIRECTORY>
+
+Usage:
+- The command parameter must be a string that is a valid git command argument.
+- You can use this tool to configure the git repository, or do anything else. 
+- Please use this tool to run commands NOT covered by the other git tools.
+- By default, you should not use this tool for git commit, or for git status, you should use the other git tools for these such as git_commit and git_status tool-calls.
 """
