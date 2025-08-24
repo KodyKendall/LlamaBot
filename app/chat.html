@@ -925,9 +925,15 @@
                 padding: 6px 12px;
             }
 
-            /* Hide browser controls on mobile for more space */
+            /* Keep browser addressbar visible on mobile to show refresh button */
             .browser-addressbar {
-                display: none;
+                padding: 5px 8px; /* Slightly reduce padding for mobile */
+            }
+            
+            /* Adjust URL bar for mobile */
+            .browser-urlbar {
+                font-size: 0.8rem; /* Slightly smaller font on mobile */
+                height: 26px; /* Slightly smaller height */
             }
         }
 
@@ -958,6 +964,22 @@
             .tab {
                 font-size: 0.8rem;
                 padding: 4px 8px;
+            }
+            
+            /* Ensure navigation buttons remain visible and usable on small screens */
+            .browser-controls-right {
+                gap: 2px; /* Reduce gap between buttons */
+            }
+            
+            .nav-button {
+                min-width: 22px;
+                height: 22px;
+                padding: 3px;
+            }
+            
+            .nav-button svg {
+                width: 12px;
+                height: 12px;
             }
         }
     </style>
