@@ -1,26 +1,25 @@
-import React, { useState, useEffect, useRef } from 'react';
-import Message from './components/Chat/Message';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import MessageWindow from './components/Chat/MessageWindow';
 
 function App() {
   // State management
   const [socket, setSocket] = useState(null);
   const [currentThreadId, setCurrentThreadId] = useState(null);
+  
   const [messages, setMessages] = useState([
     { id: `msg-${Date.now()}-${Math.random()}`, type: 'ai', content: "Hi! I'm Leonardo. What are we building today?" }
   ]);
-  const [inputMessage, setInputMessage] = useState('');
+
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(true);
   const [isThinking, setIsThinking] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [threads, setThreads] = useState([]);
+  
   const [activeTab, setActiveTab] = useState('liveSiteFrame');
   const [currentMobileView, setCurrentMobileView] = useState('chat');
-  const [isUserAtBottom, setIsUserAtBottom] = useState(true);
-  const [showScrollButton, setShowScrollButton] = useState(false);
 
   // Refs
-  const messageHistoryRef = useRef(null);
   const currentAiMessageRef = useRef(null);
   const currentAiMessageBufferRef = useRef('');
   const htmlFragmentBufferRef = useRef('');
@@ -30,147 +29,116 @@ function App() {
   const iframeFlushTimerRef = useRef(null);
   const contentFrameRef = useRef(null);
   const socketRef = useRef(null);
-  const messageIdCounterRef = useRef(0);
 
   // Constants
   const AGENT = { NAME: 'rails_agent', TYPE: 'default' };
   const IFRAME_REFRESH_MS = 500;
-  const scrollThreshold = 50;
 
-  // Generate unique message ID
-  const generateMessageId = () => {
-    messageIdCounterRef.current += 1;
-    return `msg-${Date.now()}-${messageIdCounterRef.current}-${Math.random().toString(36).substr(2, 9)}`;
-  };
+  // Helper functions
+  const createStreamingOverlay = useCallback(() => {
+    // This would be handled by state in React
+    console.log('Creating streaming overlay');
+  }, []);
 
-  // Shared helper to create message objects
-  const createMessageObject = (type, content, baseMessage = null, toolResult = null) => {
-    // Check for tool calls in different possible locations
-    const toolCalls = baseMessage?.tool_calls || 
-                     baseMessage?.base_message?.tool_calls || 
-                     baseMessage?.additional_kwargs?.tool_calls;
-    
-    if (type === 'ai' && toolCalls) {
-      // Handle AI messages with tool calls - create collapsible tool message
+  const removeStreamingOverlay = useCallback(() => {
+    // This would be handled by state in React
+    console.log('Removing streaming overlay');
+  }, []);
+
+  const flushToIframe = useCallback(() => {
+    try {
+      const iframe = contentFrameRef.current;
+      if (!iframe) return;
       
-      // Only create tool message if tool_calls array exists and has elements
-      if (toolCalls && toolCalls.length > 0) {
-        return {
-          id: toolCalls[0]?.id || generateMessageId(),
-          type: 'tool',
-          content: '',
-          baseMessage: { tool_calls: toolCalls },
-          toolResult: toolResult
-        };
-      }
-    }
-    
-    // Default case for regular messages
-    return {
-      id: generateMessageId(),
-      type: type,
-      content: content,
-      baseMessage: baseMessage,
-      toolResult: toolResult
-    };
-  };
-
-  // WebSocket connection
-  useEffect(() => {
-    // Add a small delay to ensure the backend is ready
-    const timer = setTimeout(() => {
-      const ws = initWebSocket();
-      fetchThreads();
-      initializeMobileView();
-    }, 1000); // 1 second delay
-    
-    window.addEventListener('resize', handleResize);
-    return () => {
-      clearTimeout(timer);
-      window.removeEventListener('resize', handleResize);
-      if (socketRef.current) socketRef.current.close();
-    };
-  }, []); // Empty dependency array - only run once
-
-  const initWebSocket = () => {
-    // Close existing connection if any
-    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-      socketRef.current.close();
-    }
-
-    // Backend is running in Docker on port 8000
-    let wsUrl = 'ws://localhost:8000/ws';
-    if (window.location.protocol === 'https:') {
-      wsUrl = 'wss://localhost:8000/ws';
-    }
-
-    const ws = new WebSocket(wsUrl);
-    socketRef.current = ws;
-
-    // Add connection timeout
-    const connectionTimeout = setTimeout(() => {
-      if (ws.readyState === WebSocket.CONNECTING) {
-        console.log('WebSocket connection timeout, closing...');
-        ws.close();
-      }
-    }, 10000); // 10 second timeout
-
-    ws.onopen = () => {
-      console.log('WebSocket connected');
-      clearTimeout(connectionTimeout);
-      setIsConnected(true);
-      setIsConnecting(false);
-      setSocket(ws);
-    };
-
-    ws.onclose = (event) => {
-      console.log('WebSocket disconnected', event.code, event.reason);
-      clearTimeout(connectionTimeout);
-      setIsConnected(false);
-      setIsConnecting(false);
-      setSocket(null);
+      const cleanedHTML = fullMessageBufferRef.current
+        .replace(/\\n/g, '\n')
+        .replace(/\\"/g, '"')
+        .replace(/\\t/g, '\t')
+        .replace(/\\r/g, '\r');
       
-      // Only show error message if it's not a normal closure and we were previously connected
-      if (event.code !== 1000 && isConnected) {
-        addMessage('Connection lost. Attempting to reconnect...', 'error');
+      const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+      if (iframeDoc) {
+        iframeDoc.open();
+        iframeDoc.write(cleanedHTML);
+        iframeDoc.close();
+        
+        setTimeout(() => {
+          if (iframeDoc.documentElement) {
+            iframeDoc.documentElement.scrollTop = iframeDoc.documentElement.scrollHeight;
+          }
+          if (iframeDoc.body) {
+            iframeDoc.body.scrollTop = iframeDoc.body.scrollHeight;
+          }
+        }, 100);
       }
-      
-      // Attempt to reconnect after 3 seconds
-      setTimeout(() => {
-        if (socketRef.current === ws) { // Only reconnect if this is still the current socket
-          console.log('Attempting to reconnect WebSocket...');
-          setIsConnecting(true);
-          initWebSocket();
+    } catch (e) {
+      console.log('Error updating iframe:', e);
+    }
+  }, []);
+
+  const switchToMobileView = useCallback((view) => {
+    document.body.classList.remove('mobile-chat-view', 'mobile-iframe-view');
+    
+    if (view === 'chat') {
+      document.body.classList.add('mobile-chat-view');
+      setCurrentMobileView('chat');
+    } else if (view === 'iframe') {
+      document.body.classList.add('mobile-iframe-view');
+      setCurrentMobileView('iframe');
+    }
+  }, []);
+
+  const handleResize = useCallback(() => {
+    if (window.innerWidth <= 768) {
+      if (!document.body.classList.contains('mobile-chat-view') && 
+          !document.body.classList.contains('mobile-iframe-view')) {
+        switchToMobileView(currentMobileView);
+      }
+    } else {
+      document.body.classList.remove('mobile-chat-view', 'mobile-iframe-view');
+    }
+  }, [currentMobileView, switchToMobileView]);
+
+  const initializeMobileView = useCallback(() => {
+    if (window.innerWidth <= 768) {
+      document.body.classList.add('mobile-chat-view');
+      setCurrentMobileView('chat');
+    }
+  }, []);
+
+  // Handle adding messages from WebSocket responses
+  const addMessage = useCallback((content, type, baseMessage = null) => {
+    if (type === 'end') {
+      setIsThinking(false);
+      return;
+    }
+
+    // Handle tool messages by updating the corresponding AI message with tool results
+    if (type === 'ai' && baseMessage?.tool_calls && baseMessage?.tool_calls.length > 0) {
+      const toolCallId = baseMessage?.tool_calls[0]?.id;
+      setMessages(prev => [...prev, { ...baseMessage, tool_call_id: toolCallId}]);
+    } else if (type === 'tool') {
+      const toolCallId = baseMessage?.tool_call_id || baseMessage?.tool_call?.id;
+      setMessages(prev => {
+        const updatedMessages = [...prev];
+        const correspondingAIMessage = updatedMessages.find(msg => msg.tool_call_id === toolCallId);
+        if (correspondingAIMessage) {
+          correspondingAIMessage.tool_results = [content];
         }
-      }, 3000);
-    };
+        return updatedMessages;
+      });
+    } else {
+      // For non-tool messages, add them normally
+      setMessages(prev => [...prev, baseMessage]);
+    }
+  }, []);
 
-    ws.onerror = (error) => {
-      console.error('WebSocket error:', error);
-      clearTimeout(connectionTimeout);
-      // Don't show error message immediately - let the onclose handler manage reconnection
-      // Only show error if we've been trying to connect for a while
-      if (socketRef.current === ws && !isConnected) {
-        // This is likely an initial connection failure, don't show error yet
-        console.log('Initial WebSocket connection attempt failed, will retry...');
-      }
-    };
-
-    ws.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      console.log('Received:', data);
-      handleWebSocketMessage(data);
-    };
-
-    return ws;
-  };
-
-  const handleWebSocketMessage = (data) => {
+  const handleWebSocketMessage = useCallback((data) => {
     if (data.type === 'AIMessageChunk') {
       if (data.content) {
         // Handle regular text content
         if (!currentAiMessageRef.current) {
-          const newMessageId = generateMessageId();
+          const newMessageId = `msg-${Date.now()}-${Math.random()}`;
           const newMessage = { 
             id: newMessageId, 
             type: 'ai', 
@@ -195,9 +163,6 @@ function App() {
             ? { ...msg, content: currentAiMessageBufferRef.current }
             : msg
         ));
-        
-        checkIfUserAtBottom();
-        scrollToBottom();
       } else if (data.content === '' || data.content === null) {
         // Handle tool call chunks
         if (data.base_message && data.base_message.tool_call_chunks && data.base_message.tool_call_chunks.length > 0 && data.base_message.tool_call_chunks[0]) {
@@ -221,7 +186,7 @@ function App() {
             htmlFragmentBufferRef.current = htmlFragmentBufferRef.current.substring(htmlTagIndex);
             
             if (!currentAiMessageRef.current) {
-              const newMessageId = generateMessageId();
+              const newMessageId = `msg-${Date.now()}-${Math.random()}`;
               const newMessage = { 
                 id: newMessageId, 
                 type: 'ai', 
@@ -283,83 +248,119 @@ function App() {
     } else {
       addMessage(data.content, data.type, data.base_message);
     }
-  };
+  }, [AGENT.TYPE, addMessage, createStreamingOverlay, flushToIframe, removeStreamingOverlay]);
 
-  const addMessage = (content, type, baseMessage = null) => {
-    if (type === 'end') {
-      setIsThinking(false);
-      return;
+  const initWebSocket = useCallback(() => {
+    // Close existing connection if any
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      socketRef.current.close();
     }
 
-    // Handle tool messages with collapsible structure
-    if (type === 'tool') {
-      // Try to match by tool_call_id or by looking for the tool call in existing messages
-      setMessages(prev => prev.map(msg => {
-        const toolCallId = baseMessage?.tool_call_id || baseMessage?.tool_call?.id;
-        const matchesById = msg.id === toolCallId || msg.baseMessage?.tool_calls?.[0]?.id === toolCallId;
+    // Backend is running in Docker on port 8000
+    let wsUrl = 'ws://localhost:8000/ws';
+    if (window.location.protocol === 'https:') {
+      wsUrl = 'wss://localhost:8000/ws';
+    }
+
+    console.log('Initializing WebSocket connection to:', wsUrl);
+    const ws = new WebSocket(wsUrl);
+    socketRef.current = ws;
+
+    // Track reconnection attempts to prevent infinite loops
+    const maxReconnectAttempts = 5;
+    
+    // Create a separate ref for tracking reconnection attempts
+    if (!window.wsReconnectAttempts) {
+      window.wsReconnectAttempts = 0;
+    }
+    
+    // Reset reconnect attempts if this is a fresh connection (not a reconnect)
+    if (!isConnecting) {
+      window.wsReconnectAttempts = 0;
+    }
+    
+    // Add connection timeout
+    const connectionTimeout = setTimeout(() => {
+      if (ws.readyState === WebSocket.CONNECTING) {
+        console.log('WebSocket connection timeout, closing...');
+        ws.close();
+      }
+    }, 10000); // 10 second timeout
+
+    ws.onopen = () => {
+      console.log('WebSocket connected');
+      clearTimeout(connectionTimeout);
+      setIsConnected(true);
+      setIsConnecting(false);
+      setSocket(ws);
+      
+      // Reset reconnection attempts on successful connection
+      window.wsReconnectAttempts = 0;
+    };
+
+    ws.onclose = (event) => {
+      console.log('WebSocket disconnected', event.code, event.reason);
+      clearTimeout(connectionTimeout);
+      setIsConnected(false);
+      setIsConnecting(false);
+      setSocket(null);
+      
+      // Only show error message if it's not a normal closure and we were previously connected
+      if (event.code !== 1000 && isConnected) {
+        addMessage('Connection lost. Attempting to reconnect...', 'error');
+      }
+      
+      // Get current reconnection attempts
+      const currentAttempts = window.wsReconnectAttempts;
+      
+      // Prevent reconnection loop by adding a delay that increases with each attempt
+      const reconnectDelay = Math.min(3000 * (currentAttempts + 1), 30000);
+      
+      // Attempt to reconnect after delay, but only if we haven't exceeded max attempts
+      if (currentAttempts < maxReconnectAttempts) {
+        console.log(`Reconnect attempt ${currentAttempts + 1}/${maxReconnectAttempts} in ${reconnectDelay}ms`);
         
-        if (matchesById) {
-          return { ...msg, toolResult: content };
-        }
-        return msg;
-      }));
-    } else {
-      const newMessage = createMessageObject(type, content, baseMessage);
-      setMessages(prev => [...prev, newMessage]);
-    }
-
-    if (type === 'human') {
-      scrollToBottom(true);
-    } else {
-      checkIfUserAtBottom();
-      scrollToBottom();
-    }
-  };
-
-  const sendMessage = () => {
-    if (inputMessage.trim() && socket && socket.readyState === WebSocket.OPEN) {
-      currentAiMessageRef.current = null;
-      currentAiMessageBufferRef.current = '';
-      
-      // Reset HTML streaming state
-      htmlFragmentBufferRef.current = '';
-      fullMessageBufferRef.current = '';
-      htmlChunksStartedStreamingRef.current = false;
-      htmlChunksEndedStreamingRef.current = false;
-      if (iframeFlushTimerRef.current) {
-        clearTimeout(iframeFlushTimerRef.current);
-        iframeFlushTimerRef.current = null;
+        // Increment the reconnect attempts counter
+        window.wsReconnectAttempts = currentAttempts + 1;
+        
+        setTimeout(() => {
+          console.log('Attempting to reconnect WebSocket...');
+          setIsConnecting(true);
+          initWebSocket();
+        }, reconnectDelay);
+      } else {
+        console.log('Max reconnection attempts reached. Giving up.');
+        addMessage('Connection lost. Please refresh the page to reconnect.', 'error');
       }
-      
-      removeStreamingOverlay();
-      
-      addMessage(inputMessage, 'human', null);
-      setIsThinking(true);
-      
-      if (!currentThreadId) {
-        const now = new Date();
-        setCurrentThreadId(
-          now.getFullYear() + '-' + 
-          String(now.getMonth() + 1).padStart(2, '0') + '-' + 
-          String(now.getDate()).padStart(2, '0') + '_' + 
-          String(now.getHours()).padStart(2, '0') + '-' + 
-          String(now.getMinutes()).padStart(2, '0') + '-' + 
-          String(now.getSeconds()).padStart(2, '0')
-        );
+    };
+
+    ws.onerror = (error) => {
+      console.error('WebSocket error:', error);
+      clearTimeout(connectionTimeout);
+      // Log more detailed error information
+      console.log('WebSocket error details:', {
+        readyState: ws.readyState,
+        url: ws.url,
+        protocol: ws.protocol,
+        extensions: ws.extensions
+      });
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        console.log('Received:', data);
+        handleWebSocketMessage(data);
+      } catch (error) {
+        console.error('Error parsing WebSocket message:', error);
+        console.log('Raw message:', event.data);
       }
+    };
 
-      const messageData = {
-        message: inputMessage,
-        thread_id: currentThreadId,
-        agent_name: AGENT.NAME
-      };
-      
-      socket.send(JSON.stringify(messageData));
-      setInputMessage('');
-    }
-  };
+    return ws;
+  }, [isConnected, isConnecting, addMessage, handleWebSocketMessage]);
 
-  const fetchThreads = async () => {
+  const fetchThreads = useCallback(async () => {
     try {
       // Backend is running in Docker on port 8000
       const backendUrl = 'http://localhost:8000/threads';
@@ -384,9 +385,9 @@ function App() {
       console.error('Error fetching threads:', error);
       // Don't show error in UI for now, just log it
     }
-  };
+  }, []);
 
-  const loadThread = async (threadId) => {
+  const loadThread = useCallback(async (threadId) => {
     try {
       setCurrentThreadId(threadId);
       
@@ -399,131 +400,87 @@ function App() {
       }
       
       const threadData = await response.json();
-      
-      const threadMessages = threadData[0]?.messages || [];
-      
-      // Clear existing messages and add each message using addMessage
-      setMessages([]);
-      
-      if (threadMessages.length > 0) {
-        threadMessages.forEach(msg => {
-          // Use shared helper for consistency
-          const newMessage = createMessageObject(
-            msg.type, 
-            msg.content, 
-            msg, 
-            msg.tool_results?.[0] || null
-          );
-          setMessages(prev => [...prev, newMessage]);
-        });
-      } else {
-        // Add default welcome message
-        setMessages([createMessageObject('ai', "Hi! I'm Leonardo. What are we building today?")]);
-      }
+      setMessages(threadData);
       
       setIsMenuOpen(false);
-      scrollToBottom(true);
     } catch (error) {
       console.error('Error loading thread:', error);
       alert('Failed to load conversation. Please check if the backend is running.');
     }
-  };
+  }, []);
 
-  const checkIfUserAtBottom = () => {
-    if (!messageHistoryRef.current) return;
-    
-    const { scrollTop, scrollHeight, clientHeight } = messageHistoryRef.current;
-    const isAtBottom = scrollTop + clientHeight >= scrollHeight - scrollThreshold;
-    setIsUserAtBottom(isAtBottom);
-    setShowScrollButton(!isAtBottom);
-  };
-
-  const scrollToBottom = (force = false) => {
-    if (!messageHistoryRef.current) return;
-    
-    if (force || isUserAtBottom) {
-      messageHistoryRef.current.scrollTop = messageHistoryRef.current.scrollHeight;
-      setIsUserAtBottom(true);
-      setShowScrollButton(false);
-    }
-  };
-
-  const flushToIframe = () => {
-    try {
-      const iframe = contentFrameRef.current;
-      if (!iframe) return;
+  const sendMessage = useCallback((inputMessage) => {
+    if (inputMessage.trim() && socket && socket.readyState === WebSocket.OPEN) {
+      currentAiMessageRef.current = null;
+      currentAiMessageBufferRef.current = '';
       
-      const cleanedHTML = fullMessageBufferRef.current
-        .replace(/\\n/g, '\n')
-        .replace(/\\"/g, '"')
-        .replace(/\\t/g, '\t')
-        .replace(/\\r/g, '\r');
+      // Reset HTML streaming state
+      htmlFragmentBufferRef.current = '';
+      fullMessageBufferRef.current = '';
+      htmlChunksStartedStreamingRef.current = false;
+      htmlChunksEndedStreamingRef.current = false;
+      if (iframeFlushTimerRef.current) {
+        clearTimeout(iframeFlushTimerRef.current);
+        iframeFlushTimerRef.current = null;
+      }
       
-      const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
-      if (iframeDoc) {
-        iframeDoc.open();
-        iframeDoc.write(cleanedHTML);
-        iframeDoc.close();
-        
-        setTimeout(() => {
-          if (iframeDoc.documentElement) {
-            iframeDoc.documentElement.scrollTop = iframeDoc.documentElement.scrollHeight;
-          }
-          if (iframeDoc.body) {
-            iframeDoc.body.scrollTop = iframeDoc.body.scrollHeight;
-          }
-        }, 100);
+      removeStreamingOverlay();
+      
+      // Add message to UI
+      const newMessage = { id: `msg-${Date.now()}-${Math.random()}`, type: 'human', content: inputMessage };
+      setMessages(prev => [...prev, newMessage]);
+      setIsThinking(true);
+      
+      if (!currentThreadId) {
+        const now = new Date();
+        setCurrentThreadId(
+          now.getFullYear() + '-' + 
+          String(now.getMonth() + 1).padStart(2, '0') + '-' + 
+          String(now.getDate()).padStart(2, '0') + '_' + 
+          String(now.getHours()).padStart(2, '0') + '-' + 
+          String(now.getMinutes()).padStart(2, '0') + '-' + 
+          String(now.getSeconds()).padStart(2, '0')
+        );
       }
-    } catch (e) {
-      console.log('Error updating iframe:', e);
+
+      const messageData = {
+        message: inputMessage,
+        thread_id: currentThreadId,
+        agent_name: AGENT.NAME
+      };
+      
+      socket.send(JSON.stringify(messageData));
     }
-  };
+  }, [socket, currentThreadId, AGENT.NAME, removeStreamingOverlay]);
 
-  const createStreamingOverlay = () => {
-    // This would be handled by state in React
-    console.log('Creating streaming overlay');
-  };
-
-  const removeStreamingOverlay = () => {
-    // This would be handled by state in React
-    console.log('Removing streaming overlay');
-  };
-
-  const initializeMobileView = () => {
-    if (window.innerWidth <= 768) {
-      document.body.classList.add('mobile-chat-view');
-      setCurrentMobileView('chat');
-    }
-  };
-
-  const handleResize = () => {
-    if (window.innerWidth <= 768) {
-      if (!document.body.classList.contains('mobile-chat-view') && 
-          !document.body.classList.contains('mobile-iframe-view')) {
-        switchToMobileView(currentMobileView);
-      }
-    } else {
-      document.body.classList.remove('mobile-chat-view', 'mobile-iframe-view');
-    }
-  };
-
-  const switchToMobileView = (view) => {
-    document.body.classList.remove('mobile-chat-view', 'mobile-iframe-view');
+  // WebSocket connection
+  useEffect(() => {
+    // Add a small delay to ensure the backend is ready
+    const timer = setTimeout(() => {
+      initWebSocket();
+      fetchThreads();
+      initializeMobileView();
+    }, 1000); // 1 second delay
     
-    if (view === 'chat') {
-      document.body.classList.add('mobile-chat-view');
-      setCurrentMobileView('chat');
-      setTimeout(() => {
-        checkIfUserAtBottom();
-        if (!isUserAtBottom) {
-          scrollToBottom(true);
-        }
-      }, 300);
-    } else if (view === 'iframe') {
-      document.body.classList.add('mobile-iframe-view');
-      setCurrentMobileView('iframe');
-    }
-  };
+    // Add a visibility change listener to reconnect when the tab becomes visible again
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && !isConnected && !isConnecting) {
+        console.log('Page became visible, attempting to reconnect WebSocket');
+        window.wsReconnectAttempts = 0; // Reset reconnection attempts
+        initWebSocket();
+      }
+    };
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('resize', handleResize);
+    
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('resize', handleResize);
+      if (socketRef.current) socketRef.current.close();
+    };
+  }, [initWebSocket, handleResize, fetchThreads, initializeMobileView, isConnected, isConnecting]);
 
   const refreshIframes = () => {
     const liveSiteFrame = document.getElementById('liveSiteFrame');
@@ -556,14 +513,6 @@ function App() {
     }
     
     return { title };
-  };
-
-  // Handle text area auto-resize
-  const handleInputChange = (e) => {
-    setInputMessage(e.target.value);
-    const textarea = e.target;
-    textarea.style.height = 'auto';
-    textarea.style.height = textarea.scrollHeight + 'px';
   };
 
   return (
@@ -632,77 +581,13 @@ function App() {
           </div>
         </div>
 
-        {/* Message History */}
-        <div 
-          ref={messageHistoryRef}
-          className="flex-grow p-4 overflow-y-auto bg-gray-800 flex flex-col gap-4 relative message-history"
-          onScroll={checkIfUserAtBottom}
-        >
-          {messages.map((message) => (
-            <Message 
-              key={message.id}
-              message={message}
-            />
-          ))}
-          
-          {/* Scroll to bottom button */}
-          {showScrollButton && (
-            <button 
-              className="fixed bottom-[120px] right-[calc(66.67%+20px)] w-7 h-7 bg-white/10 border border-white/20 rounded-full flex items-center justify-center shadow-lg transition-all hover:bg-white/20 opacity-80 hover:opacity-100"
-              onClick={() => scrollToBottom(true)}
-            >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-3.5 h-3.5">
-                <path d="M6 9l6 6 6-6"/>
-              </svg>
-            </button>
-          )}
-        </div>
-
-        {/* Input Area */}
-        <div className="p-4 bg-gray-800 border-t border-gray-700 flex flex-col gap-3">
-          <textarea 
-            value={inputMessage}
-            onChange={handleInputChange}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                sendMessage();
-              }
-            }}
-            placeholder="Type your message..."
-            className="w-full p-3 border border-gray-700 rounded-lg bg-gray-700 text-gray-100 text-sm resize-none min-h-[2.5rem] max-h-48 overflow-y-auto focus:outline-none focus:border-green-500 transition-colors"
-            style={{ height: 'auto' }}
-          />
-          <div className="flex justify-end items-center gap-2">
-            <div className={`text-xs flex items-center gap-1 ${
-              isConnected ? 'text-green-500' : 
-              isConnecting ? 'text-yellow-500' : 'text-red-400'
-            }`}>
-              <span className={`w-1.5 h-1.5 rounded-full ${
-                isConnected ? 'bg-green-500' : 
-                isConnecting ? 'bg-yellow-500' : 'bg-red-400'
-              }`}></span>
-              <span>{
-                isConnected ? 'Connected' : 
-                isConnecting ? 'Connecting...' : 'Disconnected'
-              }</span>
-            </div>
-            {isThinking && (
-              <div className="flex gap-1">
-                <span className="w-1 h-1 bg-green-500 rounded-full animate-bounce"></span>
-                <span className="w-1 h-1 bg-green-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></span>
-                <span className="w-1 h-1 bg-green-500 rounded-full animate-bounce" style={{ animationDelay: '0.4s' }}></span>
-              </div>
-            )}
-            <button 
-              onClick={sendMessage}
-              disabled={!isConnected || isConnecting}
-              className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
-            >
-              Send
-            </button>
-          </div>
-        </div>
+        <MessageWindow 
+          messages={messages}
+          isConnected={isConnected}
+          isConnecting={isConnecting}
+          isThinking={isThinking}
+          sendMessage={sendMessage}
+        />
       </div>
 
       {/* Browser Section */}
