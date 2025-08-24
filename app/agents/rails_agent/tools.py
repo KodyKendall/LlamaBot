@@ -315,12 +315,44 @@ def list_all_files_recursive(directory: Path):
     walk_directory(directory)
 
 # Rails container configuration
-RAILS_CONT = "rails-agent-llamapress-1"
-# RAILS_CONT = "llamapress2-llamapress-12"
-
 WORKDIR = "/rails"  # path that contains bin/rails inside the Rails container
 
-#TODO: This RAILS_CONT is causing problems. Because in our production, it's llamapress-1
+def get_rails_container_name():
+    """Dynamically get the Rails container name by looking for containers ending with 'llamapress-1'."""
+    try:
+        # List all running containers using Docker API
+        cmd = [
+            "curl", "--silent", "--unix-socket", "/var/run/docker.sock",
+            "http://localhost/containers/json"
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        if result.returncode == 0:
+            containers = json.loads(result.stdout)
+            for container in containers:
+                # Container names are in the 'Names' array with leading '/'
+                names = container.get('Names', [])
+                for name in names:
+                    # Remove leading '/' and check if it ends with 'llamapress-1'
+                    clean_name = name.lstrip('/')
+                    if clean_name.endswith('llamapress-1'):
+                        return clean_name
+        
+        # Fallback to environment-specific defaults
+        # Check if we're in production (you might have an env var or other indicator)
+        import os
+        if os.environ.get('ENV') == 'production':
+            return "llamapress-1"
+        
+        # Default to development container name
+        return "rails-agent-llamapress-1"
+        
+    except Exception:
+        # If anything goes wrong, return a sensible default
+        return "rails-agent-llamapress-1"
+
+# Get the container name dynamically
+RAILS_CONT = get_rails_container_name()
 
 def rails_api_sh(snippet: str, workdir: str = WORKDIR) -> str:
     """Execute a command in the Rails Docker container via Docker API."""

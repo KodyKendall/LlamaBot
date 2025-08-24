@@ -479,6 +479,33 @@ BASH_COMMAND_FOR_RAILS_DESCRIPTION = """
 Use this tool to execute a bash command in the Rails Docker container, especially for running Rails commands, such as :
 `rails db:migrate`, `rails db:seed`, `rails scaffold`, `rails db:migrate:status`, etc.
 
+ALWAYS prepend the command with `bundle exec` to make sure we use the right Rails runtime environment.
+
+For example, if you need to run "rails db:migrate", then you would pass the following string to the tool:
+<EXAMPLE_INPUT>
+bundle exec rails db:migrate
+</EXAMPLE_INPUT>
+
+If you need to run "rails db:seed", then you would pass the following string to the tool:
+<EXAMPLE_INPUT>
+bundle exec rails db:seed
+</EXAMPLE_INPUT>
+
+If you need to check the migration status of the database, you can use the following command:
+<EXAMPLE_INPUT>
+bundle exec rails db:migrate:status
+</EXAMPLE_INPUT>
+
+If you need to run "rails db:seed", then you would pass the following string to the tool:
+<EXAMPLE_INPUT>
+bundle exec rails db:seed
+</EXAMPLE_INPUT>
+
+If you need to query active records, you can use the following command:
+<EXAMPLE_INPUT>
+bundle exec rails runner "puts User.all"
+</EXAMPLE_INPUT>
+
 This puts you in the same environment as the Rails container, so you can use the same commands as the developer would use.
 
 Usage:
