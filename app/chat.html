@@ -36,6 +36,9 @@
             color: var(--text-color);
             height: 100vh;
             display: flex;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
         }
 
         /* Chat section (left 1/3) */
@@ -784,6 +787,179 @@
             stroke: rgba(255, 255, 255, 0.8);
             pointer-events: none;
         }
+
+        /* Mobile view toggle buttons */
+        .mobile-view-toggle {
+            display: none; /* Hidden by default, shown on mobile */
+            background: none;
+            border: none;
+            color: var(--text-color);
+            cursor: pointer;
+            padding: 8px;
+            border-radius: 8px;
+            transition: all 0.2s ease;
+        }
+
+        .mobile-view-toggle:hover {
+            background-color: rgba(255, 255, 255, 0.1);
+        }
+
+        .mobile-view-toggle svg {
+            width: 20px;
+            height: 20px;
+        }
+
+        /* Mobile back button in browser titlebar */
+        .mobile-back-btn {
+            margin-right: 12px;
+        }
+
+        /* Adjust chat header for mobile toggle */
+        .chat-header {
+            justify-content: space-between;
+        }
+
+        /* Mobile responsive styles */
+        @media screen and (max-width: 768px) {
+            body {
+                flex-direction: row;
+                position: relative;
+                overflow: hidden;
+                height: 100vh;
+                width: 100vw;
+            }
+
+            .chat-section {
+                width: 100vw;
+                height: 100vh;
+                border-right: none;
+                position: absolute;
+                top: 0;
+                left: 0;
+                transition: transform 0.3s ease;
+                z-index: 1;
+            }
+
+            .iframe-section {
+                width: 100vw;
+                height: 100vh;
+                padding: 0;
+                position: absolute;
+                top: 0;
+                left: 0;
+                background-color: var(--bg-color);
+                transition: transform 0.3s ease;
+                transform: translateX(100%);
+                z-index: 1;
+            }
+
+            /* Mobile view states */
+            body.mobile-chat-view .chat-section {
+                transform: translateX(0);
+            }
+
+            body.mobile-chat-view .iframe-section {
+                transform: translateX(100%);
+            }
+
+            body.mobile-iframe-view .chat-section {
+                transform: translateX(-100%);
+            }
+
+            body.mobile-iframe-view .iframe-section {
+                transform: translateX(0);
+            }
+
+            /* Show mobile toggle buttons */
+            .mobile-view-toggle {
+                display: block;
+            }
+
+            /* Adjust scroll button for mobile */
+            .scroll-to-bottom {
+                bottom: 80px; /* Above mobile toggle */
+                right: 20px; /* Fixed right position for mobile */
+            }
+            
+            .scroll-to-bottom.visible {
+                bottom: 80px; /* Ensure it stays above toggle buttons when visible */
+            }
+
+            /* Adjust hamburger menu for mobile */
+            .menu-drawer {
+                width: 85%;
+                max-width: 320px;
+            }
+
+            /* Adjust message history padding for mobile */
+            .message-history {
+                padding: 0.8rem;
+                padding-bottom: 1rem; /* Reduce bottom padding on mobile */
+            }
+
+            .message {
+                max-width: 90%;
+            }
+
+            /* Adjust input area for mobile */
+            .input-area {
+                padding: 0.8rem;
+                padding-bottom: 0.8rem; /* Normal padding since toggle is fixed position */
+            }
+
+            /* Browser window adjustments for mobile */
+            .browser-window {
+                border-radius: 0;
+                height: 100vh;
+            }
+
+            .browser-tabs {
+                overflow-x: auto;
+                white-space: nowrap;
+                padding-bottom: 2px;
+            }
+
+            .tab {
+                flex-shrink: 0;
+                font-size: 0.9rem;
+                padding: 6px 12px;
+            }
+
+            /* Hide browser controls on mobile for more space */
+            .browser-addressbar {
+                display: none;
+            }
+        }
+
+        /* Very small screens */
+        @media screen and (max-width: 480px) {
+            .chat-header h1 {
+                font-size: 1rem;
+            }
+
+            .mobile-toggle-btn {
+                padding: 10px 16px;
+                font-size: 13px;
+            }
+
+            .menu-drawer {
+                width: 90%;
+            }
+
+            .message {
+                font-size: 0.9rem;
+                padding: 0.6rem 0.8rem;
+            }
+
+            .browser-tabs {
+                margin-left: 5px;
+            }
+
+            .tab {
+                font-size: 0.8rem;
+                padding: 4px 8px;
+            }
+        }
     </style>
 </head>
 <body>
@@ -796,6 +972,12 @@
             </button>
             <img src="https://service-jobs-images.s3.us-east-2.amazonaws.com/7rl98t1weu387r43il97h6ipk1l7" alt="LlamaBot Logo">
             <h1>Leonardo</h1>
+            <button class="mobile-view-toggle" id="showPreviewBtn" onclick="switchToMobileView('iframe')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                    <line x1="9" y1="3" x2="9" y2="21"/>
+                </svg>
+            </button>
         </div>
         
         <!-- Slide-out drawer -->
@@ -836,6 +1018,12 @@
     <div class="iframe-section">
         <div class="browser-window">
             <div class="browser-titlebar">
+                <button class="mobile-view-toggle mobile-back-btn" id="showChatBtn" onclick="switchToMobileView('chat')">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M19 12H5"/>
+                        <path d="M12 19l-7-7 7-7"/>
+                    </svg>
+                </button>
                 <div class="browser-controls">
                     <div class="browser-control close"></div>
                     <div class="browser-control minimize"></div>
@@ -1708,6 +1896,61 @@
         document.getElementById('message-history').addEventListener('scroll', function() {
             checkIfUserAtBottom();
         });
+
+        // Mobile view management
+        let currentMobileView = 'chat'; // Default to chat view on mobile
+
+        function switchToMobileView(view) {
+            const body = document.body;
+            
+            // Remove existing mobile view classes
+            body.classList.remove('mobile-chat-view', 'mobile-iframe-view');
+            
+            // Add appropriate class based on view
+            if (view === 'chat') {
+                body.classList.add('mobile-chat-view');
+                currentMobileView = 'chat';
+                
+                // Scroll to bottom of chat when switching to chat view
+                setTimeout(() => {
+                    checkIfUserAtBottom();
+                    if (!isUserAtBottom) {
+                        scrollToBottom(true);
+                    }
+                }, 300); // Wait for transition to complete
+            } else if (view === 'iframe') {
+                body.classList.add('mobile-iframe-view');
+                currentMobileView = 'iframe';
+            }
+        }
+
+        function initializeMobileView() {
+            // Check if we're on mobile and set initial view
+            if (window.innerWidth <= 768) {
+                document.body.classList.add('mobile-chat-view');
+                currentMobileView = 'chat';
+            }
+        }
+
+        // Handle window resize
+        function handleResize() {
+            if (window.innerWidth <= 768) {
+                // Mobile view - ensure we have a mobile view class
+                if (!document.body.classList.contains('mobile-chat-view') && 
+                    !document.body.classList.contains('mobile-iframe-view')) {
+                    switchToMobileView(currentMobileView);
+                }
+            } else {
+                // Desktop view - remove mobile classes
+                document.body.classList.remove('mobile-chat-view', 'mobile-iframe-view');
+            }
+        }
+
+        // Listen for window resize
+        window.addEventListener('resize', handleResize);
+
+        // Initialize mobile view on page load
+        initializeMobileView();
 
         // Initialize WebSocket on page load
         initWebSocket();
