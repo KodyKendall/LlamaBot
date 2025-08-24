@@ -1,14 +1,15 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 
 function App() {
   // State management
   const [socket, setSocket] = useState(null);
   const [currentThreadId, setCurrentThreadId] = useState(null);
   const [messages, setMessages] = useState([
-    { id: Date.now(), type: 'ai', content: "Hi! I'm Leonardo. What are we building today?" }
+    { id: `msg-${Date.now()}-${Math.random()}`, type: 'ai', content: "Hi! I'm Leonardo. What are we building today?" }
   ]);
   const [inputMessage, setInputMessage] = useState('');
   const [isConnected, setIsConnected] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(true);
   const [isThinking, setIsThinking] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [threads, setThreads] = useState([]);
@@ -27,47 +28,99 @@ function App() {
   const htmlChunksEndedStreamingRef = useRef(false);
   const iframeFlushTimerRef = useRef(null);
   const contentFrameRef = useRef(null);
+  const socketRef = useRef(null);
+  const messageIdCounterRef = useRef(0);
 
   // Constants
   const AGENT = { NAME: 'rails_agent', TYPE: 'default' };
   const IFRAME_REFRESH_MS = 500;
   const scrollThreshold = 50;
 
+  // Generate unique message ID
+  const generateMessageId = () => {
+    messageIdCounterRef.current += 1;
+    return `msg-${Date.now()}-${messageIdCounterRef.current}-${Math.random().toString(36).substr(2, 9)}`;
+  };
+
   // WebSocket connection
   useEffect(() => {
-    initWebSocket();
-    fetchThreads();
-    initializeMobileView();
+    // Add a small delay to ensure the backend is ready
+    const timer = setTimeout(() => {
+      const ws = initWebSocket();
+      fetchThreads();
+      initializeMobileView();
+    }, 1000); // 1 second delay
     
     window.addEventListener('resize', handleResize);
     return () => {
+      clearTimeout(timer);
       window.removeEventListener('resize', handleResize);
-      if (socket) socket.close();
+      if (socketRef.current) socketRef.current.close();
     };
-  }, []);
+  }, []); // Empty dependency array - only run once
 
   const initWebSocket = () => {
-    let wsUrl = `ws://${window.location.host}/ws`;
+    // Close existing connection if any
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      socketRef.current.close();
+    }
+
+    // Backend is running in Docker on port 8000
+    let wsUrl = 'ws://localhost:8000/ws';
     if (window.location.protocol === 'https:') {
-      wsUrl = `wss://${window.location.host}/ws`;
+      wsUrl = 'wss://localhost:8000/ws';
     }
 
     const ws = new WebSocket(wsUrl);
+    socketRef.current = ws;
+
+    // Add connection timeout
+    const connectionTimeout = setTimeout(() => {
+      if (ws.readyState === WebSocket.CONNECTING) {
+        console.log('WebSocket connection timeout, closing...');
+        ws.close();
+      }
+    }, 10000); // 10 second timeout
 
     ws.onopen = () => {
       console.log('WebSocket connected');
+      clearTimeout(connectionTimeout);
       setIsConnected(true);
+      setIsConnecting(false);
+      setSocket(ws);
     };
 
-    ws.onclose = () => {
-      console.log('WebSocket disconnected');
+    ws.onclose = (event) => {
+      console.log('WebSocket disconnected', event.code, event.reason);
+      clearTimeout(connectionTimeout);
       setIsConnected(false);
-      setTimeout(initWebSocket, 3000);
+      setIsConnecting(false);
+      setSocket(null);
+      
+      // Only show error message if it's not a normal closure and we were previously connected
+      if (event.code !== 1000 && isConnected) {
+        addMessage('Connection lost. Attempting to reconnect...', 'error');
+      }
+      
+      // Attempt to reconnect after 3 seconds
+      setTimeout(() => {
+        if (socketRef.current === ws) { // Only reconnect if this is still the current socket
+          console.log('Attempting to reconnect WebSocket...');
+          setIsConnecting(true);
+          initWebSocket();
+        }
+      }, 3000);
     };
 
     ws.onerror = (error) => {
       console.error('WebSocket error:', error);
-      addMessage('Connection error. Please refresh the page.', 'error');
+      clearTimeout(connectionTimeout);
+      // Don't show error message immediately - let the onclose handler manage reconnection
+      // Only show error if we've been trying to connect for a while
+      if (socketRef.current === ws && !isConnected) {
+        // This is likely an initial connection failure, don't show error yet
+        console.log('Initial WebSocket connection attempt failed, will retry...');
+      }
     };
 
     ws.onmessage = (event) => {
@@ -76,7 +129,7 @@ function App() {
       handleWebSocketMessage(data);
     };
 
-    setSocket(ws);
+    return ws;
   };
 
   const handleWebSocketMessage = (data) => {
@@ -84,14 +137,15 @@ function App() {
       if (data.content) {
         // Handle regular text content
         if (!currentAiMessageRef.current) {
+          const newMessageId = generateMessageId();
           const newMessage = { 
-            id: Date.now(), 
+            id: newMessageId, 
             type: 'ai', 
             content: '',
             isStreaming: true 
           };
           setMessages(prev => [...prev, newMessage]);
-          currentAiMessageRef.current = newMessage.id;
+          currentAiMessageRef.current = newMessageId;
           currentAiMessageBufferRef.current = '';
         }
 
@@ -125,14 +179,15 @@ function App() {
             htmlFragmentBufferRef.current = htmlFragmentBufferRef.current.substring(htmlTagIndex);
             
             if (!currentAiMessageRef.current) {
+              const newMessageId = generateMessageId();
               const newMessage = { 
-                id: Date.now(), 
+                id: newMessageId, 
                 type: 'ai', 
                 content: '🎨 Generating your page...',
                 isStreaming: true 
               };
               setMessages(prev => [...prev, newMessage]);
-              currentAiMessageRef.current = newMessage.id;
+              currentAiMessageRef.current = newMessageId;
             }
             
             createStreamingOverlay();
@@ -193,7 +248,7 @@ function App() {
     }
 
     const newMessage = {
-      id: Date.now(),
+      id: generateMessageId(),
       type: type,
       content: content,
       baseMessage: baseMessage
@@ -262,7 +317,20 @@ function App() {
 
   const fetchThreads = async () => {
     try {
-      const response = await fetch('/threads');
+      // Backend is running in Docker on port 8000
+      const backendUrl = 'http://localhost:8000/threads';
+        
+      const response = await fetch(backendUrl);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const contentType = response.headers.get("content-type");
+      if (!contentType || !contentType.includes("application/json")) {
+        throw new TypeError("Response was not JSON");
+      }
+      
       const threadsData = await response.json();
       const sortedThreads = threadsData.sort((a, b) => 
         new Date(b.state[4]) - new Date(a.state[4])
@@ -270,31 +338,41 @@ function App() {
       setThreads(sortedThreads);
     } catch (error) {
       console.error('Error fetching threads:', error);
+      // Don't show error in UI for now, just log it
     }
   };
 
   const loadThread = async (threadId) => {
     try {
       setCurrentThreadId(threadId);
-      const response = await fetch(`/chat-history/${threadId}`);
+      
+      const backendUrl = `http://localhost:8000/chat-history/${threadId}`;
+        
+      const response = await fetch(backendUrl);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
       const threadData = await response.json();
       
       const threadMessages = threadData[0]?.messages || [];
       const formattedMessages = threadMessages.map(msg => ({
-        id: Date.now() + Math.random(),
+        id: generateMessageId(),
         type: msg.type,
         content: msg.content,
         baseMessage: msg
       }));
       
       setMessages(formattedMessages.length > 0 ? formattedMessages : [
-        { id: Date.now(), type: 'ai', content: "Hi! I'm Leonardo. What are we building today?" }
+        { id: generateMessageId(), type: 'ai', content: "Hi! I'm Leonardo. What are we building today?" }
       ]);
       
       setIsMenuOpen(false);
       scrollToBottom(true);
     } catch (error) {
       console.error('Error loading thread:', error);
+      alert('Failed to load conversation. Please check if the backend is running.');
     }
   };
 
@@ -421,7 +499,10 @@ function App() {
     
     [liveSiteFrame, contentFrame, gitFrame].forEach(iframe => {
       if (iframe && iframe.src) {
-        iframe.src = iframe.src;
+        // Store the current src and reassign to refresh the iframe
+        const currentSrc = iframe.src;
+        iframe.src = '';
+        iframe.src = currentSrc;
       }
     });
   };
@@ -442,6 +523,14 @@ function App() {
     }
     
     return { title };
+  };
+
+  // Handle text area auto-resize
+  const handleInputChange = (e) => {
+    setInputMessage(e.target.value);
+    const textarea = e.target;
+    textarea.style.height = 'auto';
+    textarea.style.height = textarea.scrollHeight + 'px';
   };
 
   return (
@@ -558,7 +647,7 @@ function App() {
         <div className="p-4 bg-gray-800 border-t border-gray-700 flex flex-col gap-3">
           <textarea 
             value={inputMessage}
-            onChange={(e) => setInputMessage(e.target.value)}
+            onChange={handleInputChange}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
@@ -570,9 +659,18 @@ function App() {
             style={{ height: 'auto' }}
           />
           <div className="flex justify-end items-center gap-2">
-            <div className={`text-xs flex items-center gap-1 ${isConnected ? 'text-green-500' : 'text-red-400'}`}>
-              <span className={`w-1.5 h-1.5 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-400'}`}></span>
-              <span>{isConnected ? 'Connected' : 'Disconnected'}</span>
+            <div className={`text-xs flex items-center gap-1 ${
+              isConnected ? 'text-green-500' : 
+              isConnecting ? 'text-yellow-500' : 'text-red-400'
+            }`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${
+                isConnected ? 'bg-green-500' : 
+                isConnecting ? 'bg-yellow-500' : 'bg-red-400'
+              }`}></span>
+              <span>{
+                isConnected ? 'Connected' : 
+                isConnecting ? 'Connecting...' : 'Disconnected'
+              }</span>
             </div>
             {isThinking && (
               <div className="flex gap-1">
@@ -583,7 +681,7 @@ function App() {
             )}
             <button 
               onClick={sendMessage}
-              disabled={!isConnected}
+              disabled={!isConnected || isConnecting}
               className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
             >
               Send
@@ -664,20 +762,20 @@ function App() {
           {/* Browser Content */}
           <div className="flex-grow relative bg-white overflow-hidden">
             <iframe 
-              src={window.location.protocol === 'https:' ? `https://rails.${window.location.host}` : "http://localhost:3000"}
+              src="http://localhost:3000"
               title="Live Site Frame" 
               id="liveSiteFrame" 
               className={`w-full h-full border-0 bg-white ${activeTab === 'liveSiteFrame' ? 'block' : 'hidden'}`}
             />
             <iframe 
               ref={contentFrameRef}
-              src="/page" 
+              src="http://localhost:8000/page"
               title="Content Frame" 
               id="contentFrame" 
               className={`w-full h-full border-0 bg-white ${activeTab === 'contentFrame' ? 'block' : 'hidden'}`}
             />
             <iframe 
-              src="/agent_page/rails_agent" 
+              src="http://localhost:8000/agent_page/rails_agent"
               title="Git Status Frame" 
               id="gitFrame" 
               className={`w-full h-full border-0 bg-white ${activeTab === 'gitFrame' ? 'block' : 'hidden'}`}
