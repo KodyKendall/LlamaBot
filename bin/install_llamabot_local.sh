@@ -31,12 +31,17 @@ _show_llamabot_banner() {
   | |___ | || (_| || | | | | || (_| || |_)  |_| | |_ 
   |_____||_| \__,_||_| |_| |_| \__,_||____/\___/ \__|
                                                            
-             __
-            /  \__     L L A M A B O T   I N S T A L L E R
-           (     @\___
-           /            \        Rails + LangGraph + Docker + Caddy
-          /  (_____/\    \       Ubuntu 24.04 • LlamaPress (Rails)
-        /_____/     \_____\
+                   _     _ 
+                  / \   / \
+                 /   \_/   \_
+         ______ /      _   ))
+        {            ( @ ) ))
+         |                 ))    L L A M A B O T   I N S T A L L E R
+          \___             ))     Rails + LangGraph + Docker + Caddy
+            |             )))|
+             |            )))|     Ubuntu 24.04 • LlamaPress (Rails)
+             |            )))|
+    
 
 LLAMABOT_ASCII
   printf "${RESET}"
