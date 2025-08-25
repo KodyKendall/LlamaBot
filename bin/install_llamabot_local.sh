@@ -34,13 +34,13 @@ _show_llamabot_banner() {
                    _     _ 
                   / \   / \
                  /   \_/   \_
-         ______ /      _   ))
-        {            ( @ ) ))
+         ______ /          ))
+        {                  ))
          |                 ))    L L A M A B O T   I N S T A L L E R
-          \___             ))     Rails + LangGraph + Docker + Caddy
-            |             )))|
-             |            )))|     Ubuntu 24.04 • LlamaPress (Rails)
-             |            )))|
+          \___             ))    LangGraph + Rails + Docker 
+             (            ))
+             |            ))     LlamaBot (LangGraph) • LlamaPress (Rails)
+             |            ))
     
 
 LLAMABOT_ASCII
@@ -292,4 +292,6 @@ docker compose up -d         # start in the background
 
 docker compose exec llamapress bash -c "bundle exec rails db:migrate"
 
-curl -I http://localhost:8080/health
+curl -I http://localhost:3000/health
+
+echo "Done! Open http://localhost:8000 to chat with Leonardo the Llama!"
