@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,8 +25,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.checkpoint.base import CheckpointTuple
 from langgraph.checkpoint.postgres import PostgresSaver
 
-from app.agents.react_agent.nodes import build_workflow
-from app.agents.llamabot_v1.nodes import build_workflow as build_workflow_llamabot_v1
+from app.agents.llamabot.nodes import build_workflow
 from app.websocket.web_socket_connection_manager import WebSocketConnectionManager
 from app.websocket.web_socket_handler import WebSocketHandler
 from app.websocket.request_handler import RequestHandler
@@ -51,7 +50,7 @@ app = FastAPI()
 # Add CORS middleware for React frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3001", "http://127.0.0.1:3001"],  # React dev server
+    allow_origins=["http://localhost:3000", "http://localhost:3001", "http://127.0.0.1:3000", "http://127.0.0.1:3001"],  # React dev server
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -252,6 +251,19 @@ async def page():
     with open("page.html") as f:
         return f.read()
     
+@app.get("/agent_page/{agent_name}", response_class=HTMLResponse)
+async def agent_page(agent_name: str):
+    from pathlib import Path
+    # Get the absolute path to the project root
+    project_root = Path(__file__).parent.parent
+    page_path = project_root / "app" / "agents" / agent_name / "page.html"
+    
+    if not page_path.exists():
+        raise HTTPException(status_code=404, detail=f"Page not found for agent: {agent_name}")
+    
+    with open(page_path) as f:
+        return f.read()
+
 @app.get("/conversations", response_class=HTMLResponse)
 async def conversations():
     with open("conversations.html") as f:
@@ -270,7 +282,7 @@ async def threads():
     for thread_id in unique_thread_ids:
         graph = build_workflow(checkpointer=checkpointer)
         config = {"configurable": {"thread_id": thread_id}}
-        state_history.append({"thread_id": thread_id, "state": graph.get_state(config=config)})
+        state_history.append({"thread_id": thread_id, "state": graph.get_state(config=config)}) #graph.get_state returns a StateSnapshot object, which inherits from Named Tuple. Serializes into an Array.
     return state_history
 
 @app.get("/chat-history/{thread_id}")
@@ -278,7 +290,7 @@ async def chat_history(thread_id: str):
     checkpointer = get_or_create_checkpointer()
     graph = build_workflow(checkpointer=checkpointer)
     config = {"configurable": {"thread_id": thread_id}}
-    state_history = graph.get_state(config=config)
+    state_history = graph.get_state(config=config) #graph.get_state returns a StateSnapshot object, which inherits from a Named Tuple. Serializes into an Array.
     print(state_history)
     return state_history
 

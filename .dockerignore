@@ -41,3 +41,6 @@ Dockerfile
 .dockerignore 
 
 app/agents/private/*
+
+# ignore for now
+app/frontend/*

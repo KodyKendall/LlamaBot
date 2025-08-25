@@ -1,0 +1,9 @@
+08/18/2025:
+- Consolidate agents into two distinct agents: one default for llamabot, and a default for llamapress.
+
+08/20/2025:
+- Create new rails agent that can modify Ruby on Rails apps that are running in a side docker container.
+- Add additional iframe for loading other running apps, such as Ruby on Rails, to go along with our rails-agent
+
+08/21/2025:
+- Add Jinja HTML templating so we can visualize the agent's state easier, for better user experience. For example, the TODOs in our rails agent can be shown via a nicely formatted HTML template, and in a re-usable way for other agents in the future.

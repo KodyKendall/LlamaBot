@@ -1,14 +1,12 @@
 version: "3.8"
 
 services:
-  llamabot-backend:
+  llamabot:
     build: .
     ports:
       - "8000:8000"
     env_file:
       - .env
-    depends_on:
-      - db
     volumes:
       - ./app:/app/app
     command: >
@@ -16,23 +14,46 @@ services:
     networks:
       - llama-network   # <-- only the app goes on shared-net
 
-  db:
-    image: postgres:16
-    environment:
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: llamapress
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    networks:
-      - llama-network
-    # no networks: → db stays on the project’s default network
-
-volumes:
-  postgres_data:
-
 networks:
   llama-network:
     name: llama-network
+
+# version: "3.8"
+
+# services:
+#   llamabot-backend:
+#     build: .
+#     ports:
+#       - "8000:8000"
+#     env_file:
+#       - .env
+#     depends_on:
+#       - db
+#     volumes:
+#       - ./app:/app/app
+#     command: >
+#       bash -c "python init_pg_checkpointer.py --uri $$DB_URI && uvicorn main:app --host 0.0.0.0 --port 8000"
+#     networks:
+#       - llama-network   # <-- only the app goes on shared-net
+
+#   db:
+#     image: postgres:16
+#     environment:
+#       POSTGRES_USER: user
+#       POSTGRES_PASSWORD: password
+#       POSTGRES_DB: llamapress
+#     ports:
+#       - "5432:5432"
+#     volumes:
+#       - postgres_data:/var/lib/postgresql/data
+#     networks:
+#       - llama-network
+#     # no networks: → db stays on the project’s default network
+
+# volumes:
+#   postgres_data:
+
+# networks:
+#   llama-network:
+#     name: llama-network
+
