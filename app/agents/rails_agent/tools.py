@@ -138,6 +138,7 @@ def write_file(
     try:
         full_path.parent.mkdir(parents=True, exist_ok=True)
         full_path.write_text(content)
+        git_status(tool_call_id) # hacky - this will update the git status page so the user can see the changes.
     except Exception as e:
         return Command(
             update={
@@ -224,6 +225,8 @@ def edit_file(
                 "messages": [ToolMessage(error_message, tool_call_id=tool_call_id)]
             }
         )
+
+    git_status(tool_call_id) # hacky - this will update the git status page so the user can see the changes.
 
     return Command(
         update={
