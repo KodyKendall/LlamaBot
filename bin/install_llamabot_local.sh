@@ -36,12 +36,12 @@ _show_llamabot_banner() {
                  /    \_/   \
          ______ /           ))
         {                   ))
-         |                 ))    L L A M A B O T   I N S T A L L E R
-          \_____          ))    LangGraph + Rails + Docker 
+         |                 ))   L L A M A B O T   I N S T A L L E R
+          \______         ))    LangGraph + Rails + Docker 
              (           ))
              |           ))     LlamaBot (LangGraph) • LlamaPress (Rails)
              |           ))
-             |           ))
+             |           ))     v0.1.17
              |           ))
     
 
