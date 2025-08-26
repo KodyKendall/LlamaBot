@@ -31,13 +31,13 @@ _show_llamabot_banner() {
   | |___ | || (_| || | | | | || (_| || |_)  |_| | |_ 
   |_____||_| \__,_||_| |_| |_| \__,_||____/\___/ \__|
                                                            
-                   (\     /\
-                  (  \   /  )
-                 (    \_/   )
+                   (\     (\
+                  (  )   (  )
+                 (   )___(  )
          ______ /           )
         {                   )
          |                 ))   L L A M A B O T   I N S T A L L E R
-          \______         ))    LangGraph + Rails + Docker + Caddy
+          \______         ))    LangGraph + Rails + Docker
              (           ))
              |           ))     LlamaBot (LangGraph) • LlamaPress (Rails)
              |           ))
