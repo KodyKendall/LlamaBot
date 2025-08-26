@@ -11,3 +11,5 @@ env/
 LlamaBot.egg-info/
 
 app/agents/private
+
+llamapress/*

@@ -19,6 +19,7 @@ from app.agents.rails_agent.prompts import (
     GIT_COMMAND_DESCRIPTION,
     SEARCH_FILE_DESCRIPTION,
     VIEW_CURRENT_PAGE_HTML_DESCRIPTION,
+    GITHUB_CLI_DESCRIPTION,
 )
 
 from app.agents.rails_agent.state import Todo, RailsAgentState
@@ -749,6 +750,25 @@ def git_command(
     output = f"Git command:\n{command}\n\nGit result:\n{git_result.stdout}"
     if git_result.stderr:
         output += f"\nGit command errors:\n{git_result.stderr}"
+
+    return Command(
+        update={
+            "messages": [ToolMessage(output, tool_call_id=tool_call_id)],
+        }
+    )
+
+@tool(description=GITHUB_CLI_DESCRIPTION)
+def github_cli_command(
+    command: str,
+    tool_call_id: Annotated[str, InjectedToolCallId],
+) -> Command:
+    """Use the github cli to do anything else related specifically to github."""
+
+    github_result = subprocess.run(["/bin/sh", "-lc", f"gh {command}"], capture_output=True, text=True, timeout=30)
+
+    output = f"Github result:\n{github_result.stdout}"
+    if github_result.stderr:
+        output += f"\nGithub command errors:\n{github_result.stderr}"
 
     return Command(
         update={

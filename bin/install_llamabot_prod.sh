@@ -186,6 +186,7 @@ services:
     command: bash -c "python init_pg_checkpointer.py --uri $$DB_URI && uvicorn main:app --host 0.0.0.0 --port 8000"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      # - ~/.config/gh:/root/.config/gh:ro
     ports:
       - "8080:8000"
     depends_on:
