@@ -44,8 +44,8 @@ LlamaBot is built for moving ideas fast:
 
 ### Run the install script remotely (no Github clone)
 ```bash
-# Only requirement: Docker + your OpenAI key
-docker run -e OPENAI_API_KEY=sk-... -p 8000:8000 kody06/llamabot-backend
+# Only requirement: docker compose + your OpenAI key
+curl -fsSL "https://raw.githubusercontent.com/KodyKendall/LlamaBot/refs/heads/main/bin/install_llamabot_local.sh" -o install_llamabot_local.sh && bash install_llamabot_local.sh
 ```
 
 Open your browser:
