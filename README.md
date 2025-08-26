@@ -36,9 +36,13 @@ LlamaBot is built for moving ideas fast:
 
 ---
 
-## 🚀 Quick Start (5 Minutes)
+## 🚀 Quick Start (<5 Minutes)
 
-### Run the interactive agent
+### Requires:
+- Docker Compose
+- OpenAI API Key
+
+### Run the install script remotely (no Github clone)
 ```bash
 # Only requirement: Docker + your OpenAI key
 docker run -e OPENAI_API_KEY=sk-... -p 8000:8000 kody06/llamabot-backend
@@ -49,9 +53,19 @@ Open your browser:
 http://localhost:8000/chat
 ```
 
+## 🚀 Dev Start (5-10 Minutes)
+
+### Clone repo & run install script locally
+```bash
+git clone https://github.com/kodykendall/LlamaBot
+cd LlamaBot
+bash bin/install_llamabot_local.sh
+```
+
+
 ## 🔌 Embed in an Existing App (Rails first, others coming)
 
-Today, Rails is the primary supported framework. With the [`llama_bot_rails`](https://github.com/kodykendall/llama_bot_rails) gem, you can:
+Today, Rails is the primary supported framework. With the [`llama_bot_rails`](https://github.com/kodykendall/llama_bot_rails) gem, you can use LlamaBot to:
 - Call existing ActiveRecord models
 - Trigger your real services, jobs, and routes
 - Automate workflows with natural language
@@ -62,6 +76,8 @@ Today, Rails is the primary supported framework. With the [`llama_bot_rails`](ht
 - Queue 100 Sidekiq jobs from chat
 
 Future adapters: Django, Laravel, Node.js.
+
+> **Not a developer but want to build something with LlamaBot?** Join the Discord or reach out directly — we’d love to collaborate on real-world MVPs and prototypes.
 
 ---
 
@@ -79,9 +95,19 @@ LlamaBot/
 ├── app/
 │   ├── main.py            # FastAPI app with WebSocket + API routes
 │   ├── chat.html          # Chat interface UI
-│   ├── page.html          # Rendered result display
+│   ├── page.html          # Agent scratchpad to display visual UI to user, show results, etc. (Such as the Agent TODO list, etc.)
 │   ├── agents/            # LangGraph agent logic
+│   ├── main.py            # FastAPI app with WebSocket + API routes
+│   ├── chat.html          # Chat interface UI
 │   └── ...                # Utility code, workflows, memory, etc.
+├── bin/
+│   ├── install_llamabot_local.sh # local dev install script
+│   └── install_llamabot_prod.sh  # production deployment script
+├── docs/
+│   └── dev_logs/
+│      ├── ...
+│      ├── v0.1.7
+│      └── v0.2.0
 ├── Dockerfile             # Run backend anywhere
 ├── requirements.txt       # Python dependencies
 └── README.md
@@ -90,8 +116,6 @@ LlamaBot/
 
 ## 🤝 Contributing
 We welcome PRs, issues, and ideas! Jump into [Discord](https://discord.gg/HtVVSxrK) to collaborate.
-
-> **Not a developer but want to build something with LlamaBot?** Join the Discord or reach out directly — we’d love to collaborate on real-world MVPs and prototypes.
 
 ---
 
