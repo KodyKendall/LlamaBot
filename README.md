@@ -9,7 +9,7 @@
 [![Live Site](https://img.shields.io/badge/Visit-LlamaPress.ai-brightgreen?style=for-the-badge&logo=safari)](https://llamapress.ai)
 [![LLM Prompts](https://img.shields.io/badge/LangSmith-Prompts-blue?style=for-the-badge&logo=langchain)](https://smith.langchain.com/hub/llamabot)
 [![AGPL License](https://img.shields.io/github/license/KodyKendall/LlamaBot?style=for-the-badge)](LICENSE)
-[![Discord](https://img.shields.io/badge/Join-Discord-7289DA?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/HtVVSxrK)
+[![Discord](https://img.shields.io/badge/Join-Discord-7289DA?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/7DapkvmWKZ)
 
 <img src="https://llamapress-ai-image-uploads.s3.us-west-2.amazonaws.com/d7zial72abpkblr9n6lf8cov8lp4" width="600" alt="LlamaBot live demo">
 
@@ -115,8 +115,7 @@ LlamaBot/
 ---
 
 ## 🤝 Contributing
-We welcome PRs, issues, and ideas! Jump into [Discord](https://discord.gg/HtVVSxrK) to collaborate.
-
+We welcome PRs, issues, and ideas! Jump into [Discord](https://discord.gg/7DapkvmWKZ) to collaborate.
 ---
 
 ## 📜 License
