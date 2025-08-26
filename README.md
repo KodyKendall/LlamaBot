@@ -4,158 +4,124 @@
 
 # **LlamaBot**
 
-*The open-source AI agent that writes, automates, and operates inside real software.*
+*The open-source AI coding agent that rapidly builds MVPs, prototypes, and internal tools.*
 
-[![Live Site](https://img.shields.io/badge/Visit-LlamaPress.ai-brightgreen?style=for-the-badge\&logo=safari)](https://llamapress.ai)
-[![LLM Prompts](https://img.shields.io/badge/LangSmith-Prompts-blue?style=for-the-badge\&logo=langchain)](https://smith.langchain.com/hub/llamabot)
-[![MIT License](https://img.shields.io/github/license/KodyKendall/LlamaBot?style=for-the-badge)](LICENSE)
-[![Discord](https://img.shields.io/badge/Join-Discord-7289DA?style=for-the-badge\&logo=discord\&logoColor=white)](https://discord.gg/HtVVSxrK)
+[![Live Site](https://img.shields.io/badge/Visit-LlamaPress.ai-brightgreen?style=for-the-badge&logo=safari)](https://llamapress.ai)
+[![LLM Prompts](https://img.shields.io/badge/LangSmith-Prompts-blue?style=for-the-badge&logo=langchain)](https://smith.langchain.com/hub/llamabot)
+[![AGPL License](https://img.shields.io/github/license/KodyKendall/LlamaBot?style=for-the-badge)](LICENSE)
+[![Discord](https://img.shields.io/badge/Join-Discord-7289DA?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/HtVVSxrK)
 
 <img src="https://llamapress-ai-image-uploads.s3.us-west-2.amazonaws.com/d7zial72abpkblr9n6lf8cov8lp4" width="600" alt="LlamaBot live demo">
 
 </div>
-
 ---
 
 ## ✨ What is LlamaBot?
 
-LlamaBot is an open-source AI agent built on **LangGraph** and **FastAPI**. It helps you:
+**LlamaBot is an AI coding agent that generates working prototypes, embeds AI directly into the app, and runs real workflows — letting you move from idea to production in record time.** 
 
-* 💬 Chat to write HTML/CSS/JS
-* ⚙️ Operate directly inside your real software (like Rails apps)
-* 🔁 Automate business logic using existing models, services, and routes
+It works across the full spectrum of users:
+- **Non-technical founders** who want to build without code.
+- **Product teams** who need to spin up prototypes fast.
+- **Engineers** who want an AI teammate to automate workflows inside production apps.
 
-There are two primary ways to use LlamaBot:
-
-1. **🧪 Try the interactive HTML/JS agent** – see the magic in your browser
-2. **⚙️ Embed it in your backend app (e.g. Rails)** – let it run real workflows
+Unlike typical codegen tools, LlamaBot doesn’t just write snippets — it can **embed directly in your app and run real workflows.** This makes it ideal for collaborative software building: founders guide the vision, engineers stay in control, and AI fills the gap.
 
 ---
 
-## 🚀 Option 1: Try the HTML/JS Agent (No setup)
+LlamaBot is built for moving ideas fast:
+- 🚀 *Prototype an AI MVP in a weekend* — landing pages, user flows, backend logic, all scaffolded by AI.
+- 🧪 *Experiment with workflows* — test reporting, notifications, automations directly inside your app.
+- 👥 *Collaborate with teammates* — Bridge the gap between non-technical founders and engineering teams.
 
-Perfect for:
+---
 
-* Mini-games (Canvas-based)
-* Static websites
-* Marketing pages
-* Interactive calculators
+## 🚀 Quick Start (<5 Minutes)
 
+### Requires:
+- Docker Compose
+- OpenAI API Key
+
+### Run the install script remotely (no Github clone)
 ```bash
-# Run via Docker
-# (only requirement: Docker and your OpenAI key)
+# Only requirement: Docker + your OpenAI key
 docker run -e OPENAI_API_KEY=sk-... -p 8000:8000 kody06/llamabot-backend
 ```
 
-Then open:
-
+Open your browser:
 ```
 http://localhost:8000/chat
 ```
 
----
+## 🚀 Dev Start (5-10 Minutes)
 
-## 🧩 Option 2: Embed the Agent in Your App (Rails, Django, Laravel, etc.) 
-Rails is our primary use case right now, others coming soon!
-
-LlamaBot also works as a **CodeAct-style embedded agent**. That means it can:
-
-* Operate inside your existing web app
-* Query your real ActiveRecord/ORM models
-* Trigger existing services and codepaths
-* Send emails, enqueue jobs, and more
-* Learn about your app and remember key workflows to trigger
-
-**Demo use cases:**
-
-* Refund a user and notify them by SMS
-* Generate a weekly revenue report
-* Queue 100 Sidekiq jobs from natural language
-
-**Add Rails adapter to your app:**
-
-* [`llama_bot_rails`](https://github.com/kodykendall/llama_bot_rails) gem
-* Point to the same backend (via Docker)
-* Whitelist safe routes and tools using your existing RBAC (Devise, Pundit, etc.)
-
-```rb
-# config/initializers/llama_bot.rb
-LlamaBotRails.configure do |config|
-  config.api_base_url = ENV["LLAMABOT_BACKEND_URL"]
-  config.allowed_routes = {
-    "send_sms" => { verb: :post, path: "/agent/users/:id/send_sms" },
-    "refund_order" => { verb: :post, path: "/agent/orders/:id/refund" }
-  }
-end
+### Clone repo & run install script locally
+```bash
+git clone https://github.com/kodykendall/LlamaBot
+cd LlamaBot
+bash bin/install_llamabot_local.sh
 ```
 
+
+## 🔌 Embed in an Existing App (Rails first, others coming)
+
+Today, Rails is the primary supported framework. With the [`llama_bot_rails`](https://github.com/kodykendall/llama_bot_rails) gem, you can use LlamaBot to:
+- Call existing ActiveRecord models
+- Trigger your real services, jobs, and routes
+- Automate workflows with natural language
+
+**Example use cases:**
+- Refund a user and send SMS
+- Generate a weekly revenue report
+- Queue 100 Sidekiq jobs from chat
+
+Future adapters: Django, Laravel, Node.js.
+
+> **Not a developer but want to build something with LlamaBot?** Join the Discord or reach out directly — we’d love to collaborate on real-world MVPs and prototypes.
+
 ---
 
-## 🧠 Agent Architecture
-
-* Built on **LangGraph** (multi-step agent workflows)
-* Streaming responses via **FastAPI + WebSocket**
-* Memory saved and scoped to conversation / session
-* Can call external tools via APIs or internal app methods (via HTTP calls)
+## 🧠 Under the Hood
+- Built on **LangGraph** for multi-step agent workflows
+- **FastAPI + WebSockets** for streaming real-time responses
+- Scoped memory per conversation/session
+- Can call external APIs or internal app methods via whitelisted routes
 
 ---
 
 ## 📦 Project Structure
-
 ```
 LlamaBot/
 ├── app/
 │   ├── main.py            # FastAPI app with WebSocket + API routes
 │   ├── chat.html          # Chat interface UI
-│   ├── page.html          # Rendered result display
+│   ├── page.html          # Agent scratchpad to display visual UI to user, show results, etc. (Such as the Agent TODO list, etc.)
 │   ├── agents/            # LangGraph agent logic
+│   ├── main.py            # FastAPI app with WebSocket + API routes
+│   ├── chat.html          # Chat interface UI
 │   └── ...                # Utility code, workflows, memory, etc.
-├── Dockerfile             # Container definition to run the backend anywhere
+├── bin/
+│   ├── install_llamabot_local.sh # local dev install script
+│   └── install_llamabot_prod.sh  # production deployment script
+├── docs/
+│   └── dev_logs/
+│      ├── ...
+│      ├── v0.1.7
+│      └── v0.2.0
+├── Dockerfile             # Run backend anywhere
 ├── requirements.txt       # Python dependencies
-├── fly.toml               # Fly.io deployment config
 └── README.md
 ```
-
 ---
-
-## 🔧 Development (Local)
-
-```bash
-# Clone & start backend locally
-git clone https://github.com/KodyKendall/LlamaBot.git
-cd LlamaBot/backend
-python -m venv venv && source venv/bin/activate
-pip install -r ../requirements.txt
-pip install -e .
-uvicorn main:app --reload
-```
-
-Browse to: [http://localhost:8000/chat](http://localhost:8000/chat)
-
----
-
-## 🚀 One-click Deploy to Fly.io
-
-1. Install [flyctl](https://fly.io/docs/hands-on/install-flyctl/)
-2. Clone this repo
-3. Run:
-
-```bash
-fly launch --no-deploy
-fly deploy
-fly secrets set OPENAI_API_KEY=sk-...
-```
 
 ## 🤝 Contributing
-
-We welcome PRs, feedback, and ideas! Open an issue or drop into our [Discord](https://discord.gg/HtVVSxrK).
+We welcome PRs, issues, and ideas! Jump into [Discord](https://discord.gg/HtVVSxrK) to collaborate.
 
 ---
 
 ## 📜 License
-
-LlamaBot is AGPLv3 open-source. For commercial licensing, contact: **[kody@llamapress.ai](mailto:kody@llamapress.ai)**
+LlamaBot is **AGPLv3 open source**. For commercial licensing, contact [kody@llamapress.ai](mailto:kody@llamapress.ai).
 
 <div align="center">
-Made with ❤️ in San Francisco — inspired by the next wave of AI code-gen tools.
+Made with ❤️ in San Francisco — inspired by the next wave of AI-powered software.
 </div>

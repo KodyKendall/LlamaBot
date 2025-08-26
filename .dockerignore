@@ -44,3 +44,6 @@ app/agents/private/*
 
 # ignore for now
 app/frontend/*
+
+rails/
+llamapress/

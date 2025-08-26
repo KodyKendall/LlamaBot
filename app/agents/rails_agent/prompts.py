@@ -535,7 +535,7 @@ Usage:
 """
 
 GIT_COMMAND_DESCRIPTION = """
-Use this tool if you need to configure the git repository, such as setting the author name and email, etc.
+Use this tool if you need to use git for things other than git_commit and git_status. For example, git push, or git pull, or configure the git repository, such as setting the author name and email, etc.
 
 This takes an input argument of the string arguments to pass to the git command.
 
@@ -568,6 +568,21 @@ Here is the command to do so:
 config --global --add safe.directory /app/app/rails
 </COMMAND_TO_MARK_SAFE_DIRECTORY>
 
+If you need to push the changes to the remote repository, you can use the following command:
+<EXAMPLE_INPUT>
+push
+</EXAMPLE_INPUT>
+
+If you need to pull the changes to the remote repository, you can use the following command:
+<EXAMPLE_INPUT>
+push
+</EXAMPLE_INPUT>
+
+If you'd need to make a new branch to isolate features, or if the user asks, you use the argument "branch" to create a new branch.
+<EXAMPLE_INPUT>
+branch
+</EXAMPLE_INPUT>
+
 Usage:
 - The command parameter must be a string that is a valid git command argument.
 - You can use this tool to configure the git repository, or do anything else. 
@@ -594,4 +609,27 @@ USAGE RULES:
 This is an important tool you will use frequently to understand and "see" what the user is looking at.Use once per user interaction unless the user navigates/reloads to a different page afterwards.
 If the HTML is excessively large, use the max_chars parameter to fetch only as much as you need; if further detail is needed, ask the user for a narrower target (specific element, component, selector).
 In your explanation, refer to the route, controller, and view path to anchor your advice precisely.
+"""
+
+GITHUB_CLI_DESCRIPTION = """
+The `github_cli_command` used when you need to check the github connection to this repo, or get information about the repo, or do anything else related specifically to github.
+
+This takes an input argument of the string arguments to pass to the github command.
+
+For example, if you need to check the github connection to this repo, you can use the following command:
+gh repo view
+Would be: 
+<EXAMPLE_ARGUMENT>
+repo view
+</EXAMPLE_ARGUMENT>
+
+gh status
+Would be: 
+<EXAMPLE_ARGUMENT>
+status
+</EXAMPLE_ARGUMENT>
+
+Usage:
+- The command parameter must be a string that is a valid github command argument.
+- You can use this tool to check the github connection to this repo, or get information about the repo, or do anything else related specifically to github.
 """
