@@ -3,9 +3,9 @@ FROM nikolaik/python-nodejs:python3.11-nodejs18
 WORKDIR /app
 
 # install gh cli
-RUN curl -fsSL https://github.com/cli/cli/releases/download/v2.78.0/gh_2.78.0_linux_amd64.deb -o gh.deb \
-    && apt-get install -y ./gh.deb \
-    && rm gh.deb
+# RUN curl -fsSL https://github.com/cli/cli/releases/download/v2.78.0/gh_2.78.0_linux_amd64.deb -o gh.deb \
+#     && apt-get install -y ./gh.deb \
+#     && rm gh.deb
 
 # Install dependencies (cached unless requirements.txt changes)
 COPY requirements.txt .
