@@ -174,12 +174,12 @@ networks:
 EOF
 
 # 7. Pull images & launch everything
-sudo docker compose pull          # fetch images
+docker compose pull          # fetch images
 
-sudo docker compose up -d         # start in the background
+docker compose up -d         # start in the background
 
-sudo docker compose exec llamapress bash -c "sleep 5 && bundle exec rails db:migrate"
-sudo docker compose exec llamabot rm -rf /app/app/rails
+docker compose exec llamapress bash -c "sleep 5 && bundle exec rails db:migrate"
+docker compose exec llamabot rm -rf /app/app/rails
 
 echo "Copying Rails application files from the container..."
 
@@ -188,7 +188,7 @@ echo "Copying Rails application files from the container..."
 # for 'sudo chown', providing a better experience for developers.
 # The tar stream from the container is extracted directly on the host,
 # resulting in files owned by the current user.
-sudo docker compose exec llamapress tar cf - -C /rails app db config/routes.rb | tar xf - -C rails
+docker compose exec llamapress tar cf - -C /rails app db config/routes.rb | tar xf - -C rails
 
 # Set appropriate permissions for the copied files.
 chmod -R 755 rails/
@@ -207,9 +207,9 @@ git add .
 git commit -m "init"
 cd ..
 
-sudo docker compose exec -it llamabot git config --global --add safe.directory /app/app/rails
+docker compose exec -it llamabot git config --global --add safe.directory /app/app/rails
 
-sudo docker compose down
+docker compose down
 mv docker-compose.yml docker-compose.yml.old
 
 cat <<EOF > docker-compose.yml
@@ -291,8 +291,8 @@ networks:
     name: llama-network
 EOF
 
-sudo docker compose up -d         # start in the background
+docker compose up -d         # start in the background
 
-sudo docker compose exec llamapress bash -c "bundle exec rails db:migrate"
+docker compose exec llamapress bash -c "bundle exec rails db:migrate"
 
 echo "🎉 Done! Open http://localhost:8000 to build with Leonardo the Llama!"
