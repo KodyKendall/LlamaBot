@@ -290,7 +290,8 @@ networks:
 EOF
 
 echo "@@@@@@@@@@@@@@@@@@@@@@@@@@@@" 
-echo "Note! Sudo required for this last docker command, in order to let the docker containers communicate with each other." 
+echo "Note! Password required for this next step." 
+echo "Sudo needed for this last docker command, in order to let the docker containers communicate with each other."
 echo "@@@@@@@@@@@@@@@@@@@@@@@@@@@@" 
 
 sudo docker compose up -d         # start in the background
