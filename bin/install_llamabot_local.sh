@@ -128,8 +128,6 @@ services:
     env_file:
       - .env
     command: bash -c "python init_pg_checkpointer.py --uri $$DB_URI && uvicorn main:app --host 0.0.0.0 --port 8000"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
     ports:
       - "8000:8000"
     depends_on:
@@ -291,8 +289,12 @@ networks:
     name: llama-network
 EOF
 
-docker compose up -d         # start in the background
+echo "@@@@@@@@@@@@@@@@@@@@@@@@@@@@" 
+echo "Note! Sudo required for this last docker command, in order to let the docker containers communicate with each other." 
+echo "@@@@@@@@@@@@@@@@@@@@@@@@@@@@" 
 
-docker compose exec llamapress bash -c "bundle exec rails db:migrate"
+sudo docker compose up -d         # start in the background
+
+sudo docker compose exec llamapress bash -c "bundle exec rails db:migrate"
 
 echo "🎉 Done! Open http://localhost:8000 to build with Leonardo the Llama!"
