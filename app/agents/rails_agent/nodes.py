@@ -31,7 +31,6 @@ PROJECT_ROOT = SCRIPT_DIR.parent.parent.parent  # Go up to LlamaBot root
 APP_DIR = PROJECT_ROOT / 'app'
 
 # Global tools list
-tools = [write_todos, read_file, ls, internet_search, search_file, write_file, edit_file, bash_command, git_status, git_commit, git_command, view_page, github_cli_command]
 
 # System message
 sys_msg = SystemMessage(content=RAILS_AGENT_PROMPT)
@@ -39,21 +38,28 @@ sys_msg = SystemMessage(content=RAILS_AGENT_PROMPT)
 current_page_html = APP_DIR / 'page.html'
 content = current_page_html.read_text()
 
+# Tools
+tools = [write_todos, 
+         ls, read_file, write_file, edit_file, search_file, bash_command, 
+         git_status, git_commit, git_command, github_cli_command, 
+         view_page, internet_search]
+
 # Node
 def leonardo(state: RailsAgentState):
-#    read_rails_file("app/agents/llamabot/nodes.py") # Testing.
    llm = ChatOpenAI(model="gpt-4.1")
+
    llm_with_tools = llm.bind_tools(tools)
-   view_path = state.get('debug_info').get('view_path')
+   view_path = (state.get('debug_info') or {}).get('view_path')
+
    if view_path:
-        messages = [sys_msg] + state["messages"] + [SystemMessage(content="The user is currently viewing their Ruby on Rails webpage route at: " + view_path)]
+        messages = [sys_msg] + state["messages"] + [HumanMessage(content="NOTE FROM SYSTEM: The user is currently viewing their Ruby on Rails webpage route at: " + view_path)]
    else:
         messages = [sys_msg] + state["messages"]
 
    return {"messages": [llm_with_tools.invoke(messages)]}
 
+# Graph
 def build_workflow(checkpointer=None):
-    # Graph
     builder = StateGraph(RailsAgentState)
 
     # Define nodes: these do the work

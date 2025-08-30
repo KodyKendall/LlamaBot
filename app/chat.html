@@ -1342,7 +1342,7 @@
                     debug_info: debugInfo,
                     agent_name: AGENT.NAME
                 };
-                
+
                 socket.send(JSON.stringify(messageData));
             }
         }
@@ -1983,32 +1983,42 @@
         // Initialize mobile view on page load
         initializeMobileView();
 
-        function getRailsDebugInfo(callback) {
+        function getRailsDebugInfo(callback, timeout = 250) { // 1/4 second timout is plenty of time since it's inter-process communication. Timeout after 1/4 second = Ruby on Rails server error, and application.js likelly didn't get load.
             const iframe = document.getElementById('liveSiteFrame');
-            if (iframe && iframe.contentWindow) {
-                iframe.contentWindow.postMessage({ type: "get_debug_info" }, "*");
+            if (!iframe || !iframe.contentWindow) {
+                callback(new Error("Iframe not available"));
+                return;
             }
-            window.callback = callback;
-        }
 
-        // Listen for messages coming back from the iframe
-        window.addEventListener("message", (event) => {
-            // console.log("Message from rails:", event.data);
-            if (event.data.source === "llamapress") {
-                //todo: think about attack vectors & patch.
+            //NOTE: eventually, we will want to make this a secure hash of the user's session id, so we can verify and authenticate the response.
+            const messageId = Math.random().toString(36).substr(2, 9);
 
-                // console.log("Message:", event.data);
-                // let allowedUrl = `${window.location.host}`;
-                // if (window.location.protocol === 'https:') {
-                //     allowedUrl = `rails.${window.location.host}`;
-                // }
-                if(window.callback){
-                    window.callback(event.data);
+            function handleMessage(event) {
+                if (event.data && event.data.source === "llamapress") {
+                    window.removeEventListener("message", handleMessage);
+                    clearTimeout(timer);
+                    callback(event.data);
+                    
+                    //TODO: This is an additional security measure we will add in the future. 
+                    // let allowedUrl = `${window.location.host}`;
+                    // if (window.location.protocol === 'https:') {
+                    //     allowedUrl = `rails.${window.location.host}`;
+                    // }
                 }
-                // if (event.origin === allowedUrl){
-                // }
             }
-        });
+
+            // Listen for messages coming back from the rails iframe
+            window.addEventListener("message", handleMessage);
+
+            // send message
+            iframe.contentWindow.postMessage({ type: "get_debug_info", id: messageId }, "*");
+
+            // fallback timeout
+            const timer = setTimeout(() => {
+                window.removeEventListener("message", handleMessage);
+                callback(new Error("No response from Rails iframe"));
+            }, timeout);
+        }
 
         // Initialize WebSocket on page load
         initWebSocket();

@@ -20,11 +20,23 @@ else:
     # pool = ConnectionPool(db_uri)
     conn = Connection.connect(db_uri, autocommit=True)
 
+
+    checkpointer_already_initialized = False
+    with conn.cursor() as cursor:
+        cursor.execute(
+            "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = %s)",
+            ('checkpoints',),
+        )
+        table_exists = cursor.fetchone()[0]
+        print(f"Table 'checkpoints' exists: {table_exists}")
+        checkpointer_already_initialized = table_exists
+
     # Create the saver
     checkpointer = PostgresSaver(conn)
 
     # This runs DDL like CREATE TABLE and CREATE INDEX
     # including CREATE INDEX CONCURRENTLY, which must be run outside a transaction
-    checkpointer.setup()
+    if not checkpointer_already_initialized:
+        checkpointer.setup()
 
     print("✅ Checkpointer tables & indexes initialized.")
