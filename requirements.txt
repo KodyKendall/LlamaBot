@@ -5,6 +5,7 @@ annotated-types==0.7.0
 anthropic==0.64.0
 anyio==4.9.0
 attrs==25.3.0
+bcrypt==4.3.0
 beautifulsoup4==4.13.4
 blockbuster==1.5.24
 bs4==0.0.2

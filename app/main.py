@@ -1,14 +1,18 @@
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, HTTPException, Depends, Form
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 import os
 import logging
 import time
 import json
 import asyncio
+import bcrypt
+import secrets
 from datetime import datetime
+from pathlib import Path
 
 from psycopg_pool import AsyncConnectionPool
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
@@ -71,6 +75,12 @@ manager = WebSocketConnectionManager(app)
 # Application state to hold persistent checkpointer, important for session-based persistence.
 app.state.checkpointer = None
 app.state.async_checkpointer = None
+
+# Initialize HTTP Basic Auth
+security = HTTPBasic()
+
+# Path to auth file
+AUTH_FILE = Path(__file__).parent / "auth.json"
 
 # Suppress psycopg connection error spam when PostgreSQL is unavailable
 psycopg_logger = logging.getLogger('psycopg.pool')
@@ -140,13 +150,58 @@ def get_langgraph_app_and_state_helper(message: dict):
     response = request_handler.get_langgraph_app_and_state(message)
     return response
 
+def auth(credentials: HTTPBasicCredentials = Depends(security)):
+    """Validate HTTP Basic Auth credentials against stored auth.json"""
+    # Check if auth file exists
+    if not AUTH_FILE.exists():
+        logger.warning("No auth.json file found. Please register first.")
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication not configured",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    
+    try:
+        # Load stored credentials
+        with open(AUTH_FILE, 'r') as f:
+            stored_auth = json.load(f)
+    except Exception as e:
+        logger.error(f"Error reading auth.json: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Authentication error"
+        )
+    
+    # Verify username using constant-time comparison
+    username_correct = secrets.compare_digest(
+        credentials.username.encode("utf-8"),
+        stored_auth.get("username", "").encode("utf-8")
+    )
+    
+    # Verify password
+    password_correct = False
+    if username_correct and "password_hash" in stored_auth:
+        password_correct = bcrypt.checkpw(
+            credentials.password.encode("utf-8"),
+            stored_auth["password_hash"].encode("utf-8")
+        )
+    
+    if not (username_correct and password_correct):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid credentials",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    
+    return credentials.username
+
 # At module level
 thread_locks = defaultdict(asyncio.Lock)
 thread_queues = defaultdict(asyncio.Queue)
 MAX_QUEUE_SIZE = 10
 
 @app.get("/", response_class=HTMLResponse)
-async def root():
+async def root(username: str = Depends(auth)):
     # Serve the chat.html file
     with open("chat.html") as f:
         return f.read()
@@ -155,12 +210,65 @@ async def root():
 async def hello():
     return {"message": "Hello, World! 🦙💬"}
 
+@app.get("/register", response_class=HTMLResponse)
+async def register_form():
+    """Serve the registration form"""
+    with open("register.html") as f:
+        html = f.read()
+        return HTMLResponse(content=html)
+
+@app.post("/register")
+async def register(
+    username: str = Form(...),
+    password: str = Form(...),
+    confirm: str = Form(...)
+):
+    """Process registration form"""
+    # Check if auth.json already exists
+    if AUTH_FILE.exists():
+        raise HTTPException(
+            status_code=400,
+            detail="Authentication already configured. Delete auth.json to re-register."
+        )
+    
+    # Validate passwords match
+    if password != confirm:
+        raise HTTPException(
+            status_code=400,
+            detail="Passwords do not match"
+        )
+    
+    # Hash the password
+    password_hash = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
+    
+    # Create auth data
+    auth_data = {
+        "username": username,
+        "password_hash": password_hash.decode('utf-8')
+    }
+    
+    try:
+        # Write to auth.json
+        with open(AUTH_FILE, 'w') as f:
+            json.dump(auth_data, f, indent=2)
+        
+        logger.info(f"User '{username}' registered successfully")
+        return JSONResponse({
+            "message": f"User '{username}' registered successfully! You can now use these credentials to access protected endpoints."
+        })
+    except Exception as e:
+        logger.error(f"Error writing auth.json: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to save authentication data"
+        )
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await WebSocketHandler(websocket, manager).handle_websocket()
 
 @app.post("/llamabot-chat-message")
-async def llamabot_chat_message(chat_message: dict): #NOTE: This could be arbitrary JSON, depending on the agent that we're using.
+async def llamabot_chat_message(chat_message: dict, username: str = Depends(auth)): #NOTE: This could be arbitrary JSON, depending on the agent that we're using.
     thread_id = chat_message.get("thread_id") or "5"
     request_id = f"req_{int(time.time())}_{hash(chat_message.get('message'))%1000}"
     
@@ -242,17 +350,17 @@ async def llamabot_chat_message(chat_message: dict): #NOTE: This could be arbitr
     )
 
 @app.get("/chat", response_class=HTMLResponse)
-async def chat():
+async def chat(username: str = Depends(auth)):
     with open("chat.html") as f:
         return f.read()
 
 @app.get("/page", response_class=HTMLResponse)
-async def page():
+async def page(username: str = Depends(auth)):
     with open("page.html") as f:
         return f.read()
     
 @app.get("/agent_page/{agent_name}", response_class=HTMLResponse)
-async def agent_page(agent_name: str):
+async def agent_page(agent_name: str, username: str = Depends(auth)):
     from pathlib import Path
     # Get the absolute path to the project root
     project_root = Path(__file__).parent.parent
@@ -265,12 +373,12 @@ async def agent_page(agent_name: str):
         return f.read()
 
 @app.get("/conversations", response_class=HTMLResponse)
-async def conversations():
+async def conversations(username: str = Depends(auth)):
     with open("conversations.html") as f:
         return f.read()
 
 @app.get("/threads", response_class=JSONResponse)
-async def threads():
+async def threads(username: str = Depends(auth)):
     checkpointer = get_or_create_checkpointer()
     config = {}
     checkpoint_generator = checkpointer.list(config=config)
@@ -286,7 +394,7 @@ async def threads():
     return state_history
 
 @app.get("/chat-history/{thread_id}")
-async def chat_history(thread_id: str):
+async def chat_history(thread_id: str, username: str = Depends(auth)):
     checkpointer = get_or_create_checkpointer()
     graph = build_workflow(checkpointer=checkpointer)
     config = {"configurable": {"thread_id": thread_id}}
