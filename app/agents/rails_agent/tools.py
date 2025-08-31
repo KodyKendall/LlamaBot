@@ -63,6 +63,11 @@ def write_todos(
         }
     )
 
+def guard_against_beginning_slash_argument(argument: str) -> str:
+    if argument.startswith("/"):
+        return argument[1:]
+    return argument
+
 @tool(description=LIST_DIRECTORY_DESCRIPTION)
 def ls(directory: str = "") -> list[str]:
     if directory.startswith("/"): # we NEVER want to include a leading slash "/"  at the beginning of the directory string. It's all relative in our docker container.
@@ -83,6 +88,8 @@ def read_file(
     offset: int = 0,
     limit: int = 2000,
 ) -> str:
+    file_path = guard_against_beginning_slash_argument(file_path)
+    
     # Construct the full path
     full_path = APP_DIR / "rails" / file_path
     
@@ -135,7 +142,9 @@ def write_file(
     tool_call_id: Annotated[str, InjectedToolCallId],
 ) -> Command:
     """Write to a file."""
+    file_path = guard_against_beginning_slash_argument(file_path)
     full_path = APP_DIR / "rails" / file_path
+    
     try:
         full_path.parent.mkdir(parents=True, exist_ok=True)
         full_path.write_text(content)
@@ -170,6 +179,7 @@ def edit_file(
     tool_call_id: Annotated[str, InjectedToolCallId],
     replace_all: bool = False,
 ) -> Command:
+    file_path = guard_against_beginning_slash_argument(file_path)
     full_path = APP_DIR / "rails" / file_path
 
     if not full_path.exists():
@@ -700,7 +710,6 @@ def git_status(
             ],
         }
     )
-
 
 @tool(description=GIT_COMMIT_DESCRIPTION)
 def git_commit(
