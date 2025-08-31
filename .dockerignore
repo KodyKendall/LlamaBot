@@ -47,3 +47,5 @@ app/frontend/*
 
 rails/
 llamapress/
+
+auth.json

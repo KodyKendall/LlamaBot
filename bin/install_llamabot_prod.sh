@@ -41,7 +41,7 @@ _show_llamabot_banner() {
              (           ))
              |           ))     LlamaBot (LangGraph) • LlamaPress (Rails)
              |           ))
-             |           ))     v0.1.17
+             |           ))     v0.2.1
              |           ))
     
 
@@ -180,7 +180,7 @@ services:
       - llama-network
 
   llamabot:
-    image: kody06/llamabot:0.1.17
+    image: kody06/llamabot:0.2.1
     env_file:
       - .env
     command: bash -c "python init_pg_checkpointer.py --uri $$DB_URI && uvicorn main:app --host 0.0.0.0 --port 8000"
@@ -322,7 +322,7 @@ services:
       - llama-network
 
   llamabot:
-    image: kody06/llamabot:0.1.17
+    image: kody06/llamabot:0.2.1
     env_file:
       - .env
     command: bash -c "python init_pg_checkpointer.py --uri $DB_URI && uvicorn main:app --host 0.0.0.0 --port 8000"
