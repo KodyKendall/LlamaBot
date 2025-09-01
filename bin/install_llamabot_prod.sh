@@ -150,8 +150,10 @@ DATABASE_URL="postgresql://postgres:${POSTGRES_PASSWORD}@db:5432/llamapress_prod
 SECRET_KEY_BASE=${NEW_KEY}
 EOF
 
-mkdir -p rails/app rails/config rails/db 
+mkdir -p rails/app rails/config rails/db rails/config/environments
 touch rails/config/routes.rb
+touch rails/config/environments/development.rb
+
 DIR=llamapress
 
 # 5. Write docker-compose.yml
@@ -185,6 +187,7 @@ services:
       - .env
     command: bash -c "python init_pg_checkpointer.py --uri $$DB_URI && uvicorn main:app --host 0.0.0.0 --port 8000"
     volumes:
+      - auth_data:/app/auth.json
       - /var/run/docker.sock:/var/run/docker.sock
       # - ~/.config/gh:/root/.config/gh:ro
     ports:
@@ -223,6 +226,7 @@ volumes:
   postgres_data:
   redis_data:
   rails_storage:
+  auth_data:
   
 # Declare the external network
 networks:
@@ -278,6 +282,7 @@ sudo docker compose exec llamabot rm -rf /app/app/rails
 sudo docker cp $DIR-llamapress-1:/rails/app/ rails
 sudo docker cp $DIR-llamapress-1:/rails/config/routes.rb rails/config/routes.rb 
 sudo docker cp $DIR-llamapress-1:/rails/db rails
+sudo docker cp $DIR-llamapress-1:/rails/config/environments/development.rb rails/config/environments/development.rb
 
 cd rails
 rm -rf .git
@@ -309,6 +314,8 @@ services:
       - ./rails/app:/rails/app:delegated
       - ./rails/config/routes.rb:/rails/config/routes.rb:delegated
       - ./rails/db:/rails/db:delegated
+      - ./rails/config/environments/development.rb:/rails/config/environments/development.rb
+
     command: bash -c "rm -f tmp/pids/server.pid && bundle exec rails db:prepare && bundle exec rails s -b 0.0.0.0"
     ports:
       - "3000:3000"                            # http://server_ip/
@@ -328,6 +335,7 @@ services:
     command: bash -c "python init_pg_checkpointer.py --uri $DB_URI && uvicorn main:app --host 0.0.0.0 --port 8000"
     volumes:
       - ./rails:/app/app/rails
+      - auth_data:/app/auth.json
       - /var/run/docker.sock:/var/run/docker.sock
     ports:
       - "8080:8000"
@@ -365,7 +373,7 @@ volumes:
   postgres_data:
   redis_data:
   rails_storage:
-  
+  auth_data:
 # Declare the external network
 networks:
   llama-network:

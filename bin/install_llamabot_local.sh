@@ -128,6 +128,8 @@ services:
     env_file:
       - .env
     command: bash -c "python init_pg_checkpointer.py --uri $$DB_URI && uvicorn main:app --host 0.0.0.0 --port 8000"
+    volumes:
+      - auth_data:/app/auth.json
     ports:
       - "8000:8000"
     depends_on:
@@ -164,7 +166,8 @@ volumes:
   postgres_data:
   redis_data:
   rails_storage:
-  
+  auth_data:
+
 # Declare the external network
 networks:
   llama-network:
@@ -244,6 +247,7 @@ services:
     command: bash -c "python init_pg_checkpointer.py --uri $DB_URI && uvicorn main:app --host 0.0.0.0 --port 8000"
     volumes:
       - ./rails:/app/app/rails
+      - auth_data:/app/auth.json
       - /var/run/docker.sock:/var/run/docker.sock
       # - ~/.config/gh:/root/.config/gh:ro
     ports:
@@ -282,6 +286,7 @@ volumes:
   postgres_data:
   redis_data:
   rails_storage:
+  auth_data:
   
 # Declare the external network
 networks:

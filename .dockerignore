@@ -1,6 +1,7 @@
 # Environment files
 .env
 .env.*
+*.env.*
 
 # Development files
 __pycache__/
@@ -49,3 +50,5 @@ rails/
 llamapress/
 
 auth.json
+
+diff.patch

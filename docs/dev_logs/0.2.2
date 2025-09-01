@@ -1,0 +1,13 @@
+08/31/2025 - 09/01/2025:
+- Leonardo Improvements:
+    - Tools: Add guard_against_beginning_slash_argument to prevent the agent from adding / to beginning of their argument.
+    - Fix gh cli setup in Dockerfile to be architecture agnostic, and so Leonardo can use gh cli to push/pull code to user's Github repos and accounts after they've authenticated with gh-cli
+    - Add named auth volume so auth.json info persists across container restarts
+    - Set install_llamabot_local and install_llamabot_prod
+    - Security: Allow for configuration of development.rb in production, so users can lock down their Rails app when deployed.
+    - Authenticate with github. By going to rails.auth.llamapress.ai/users/sign_up, you can register, connect with Github, then give Leonardo your Github access token and he'll authenticate with your Github account. Perfect for creating a new repo with your Rails source code, pushing code changes to the repos, etc.
+
+- Easy AWS Deployment Script:
+    - Document the AWS CLI bash commands for quick deployments of Leonardo using AWS Lightsail + Route 53.
+    - This is approximately $12/month of hosting costs from AWS, and assumes you have Route 53 configured for your domain, and assumes you have run `aws cli config` with a propery AMI user set up with permission for Route 53 and AWS Lightsail.
+    - NOTE: You will need to modify AWS deploy script to change the hardcoded llamapress.ai. domain to point to your own Route 53 domain.

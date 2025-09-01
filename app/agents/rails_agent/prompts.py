@@ -110,6 +110,48 @@ Usage:
 - This tool will return a HTML page with the latest changes & uncommitted changes
 - This tool will return a HTML page with the uncommitted changes
 
+### `github_cli_command`
+Purpose: use the github cli to interact with github, and set up the authentication between the user's github account and the git command tool.
+Usage:
+- Authenticate git command tool with the user's github account, by following these steps:
+
+#### Instructions for authenticating github with git for pushing to github
+<INSTRUCTIONS_FOR_AUTHENTICATING_GITHUB_WITH_GIT_FOR_PUSHING_TO_GITHUB>
+Here’s a step-by-step, copy-ready prompt to instruct a future LLM or agent on how to achieve reliable, non-interactive git pushes to GitHub using the GitHub CLI as a credential helper in a Rails project environment (where SSH is problematic or unavailable):
+
+Prompt: Enable Automated GitHub Pushes via GitHub CLI Credential Helper in a Rails Project
+
+Perform the following steps to ensure the git CLI can push to a GitHub repository using the credentials managed by the GitHub CLI (gh):
+
+Check the Current Git Remote
+
+Run: git remote -v
+If the remote URL is not HTTPS (e.g., set to SSH), update the remote to use HTTPS:
+git remote set-url origin https://github.com/[USERNAME]/[REPO].git
+(Replace with actual username/repo as appropriate.)
+Ensure GitHub CLI Authentication
+
+Verify that gh auth status reports the correct GitHub account, with sufficient scopes for repo operations.
+Configure git to Use gh as a Credential Helper
+
+Run:
+git config --global credential."https://github.com".helper "!gh auth git-credential"
+Test the Configuration
+
+Attempt to push code to GitHub:
+git push
+Confirm that the push succeeds without credential prompts or errors.
+If You Encounter SSH or Host Verification Errors:
+
+Double-check that the remote is set to HTTPS, not SSH.
+Only SSH users need to manage known_hosts and key distribution.
+Summary
+
+The environment should now support non-interactive git push/git pull using GitHub CLI credentials, ideal for CI and container use.
+- This tool will return a HTML page with the status of the github repository
+- This tool will return a HTML page with the latest changes & uncommitted changes
+- This tool will return a HTML page with the uncommitted changes
+</INSTRUCTIONS_FOR_AUTHENTICATING_GITHUB_WITH_GIT_FOR_PUSHING_TO_GITHUB>
 
 ### `internet_search`
 Purpose: search the web for authoritative information (Rails docs, API changes, gem usage, security guidance).
@@ -625,6 +667,12 @@ In your explanation, refer to the route, controller, and view path to anchor you
 GITHUB_CLI_DESCRIPTION = """
 The `github_cli_command` used when you need to check the github connection to this repo, or get information about the repo, or do anything else related specifically to github.
 
+If the git push command fails due to authentication issues, you can use this tool to authenticate with github. For example: 
+`gh auth setup-git` would be: 
+</EXAMPLE_ARGUMENT>
+auth setup-git
+</EXAMPLE_ARGUMENT>
+
 This takes an input argument of the string arguments to pass to the github command.
 
 For example, if you need to check the github connection to this repo, you can use the following command:
@@ -638,6 +686,20 @@ gh status
 Would be: 
 <EXAMPLE_ARGUMENT>
 status
+</EXAMPLE_ARGUMENT>
+
+## IMPORTANT: If the user isn't authenticated with the gh cli, we need to explain how to authenticate with the gh cli.
+The user has two options to authenticate with the gh cli:
+1. SSH into the server, and run `gh cli auth` to manually authenticate with the gh cli
+2. Ask the user to go to: rails.auth.llamapress.ai/users/sign_up, then register an account, then click on "Connect Github".
+Then, they will click on "Reveal". From there, ask the user to paste in their access token in their message to you. 
+
+If the user sends in their github access token, use the following command to authenticate with the gh cli.
+
+gh auth status >/dev/null 2>&1 || echo "<their_token>" | gh auth login --with-token; gh repo list
+Would be: 
+<EXAMPLE_ARGUMENT>
+auth status >/dev/null 2>&1 || echo "gh_xxx_token" | gh auth login --with-token; gh repo list
 </EXAMPLE_ARGUMENT>
 
 Usage:
