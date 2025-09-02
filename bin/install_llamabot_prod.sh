@@ -4,7 +4,7 @@
 # This script installs Docker, Docker Compose, LlamaBot, and LlamaPress on a 
 # fresh Ubuntu 24.04 instance. It also sets up Caddy as a reverse proxy.
 # To run:
-# https://raw.githubusercontent.com/KodyKendall/LlamaBot/refs/heads/rails-agent/bin/install_llamabot_prod.sh
+# curl -fsSL "https://raw.githubusercontent.com/KodyKendall/LlamaBot/refs/heads/main/bin/install_llamabot_prod.sh" -o install_llamabot_prod.sh && bash install_llamabot_prod.sh
 # ---------------------------------------------------------------------
 
 #!/usr/bin/env bash

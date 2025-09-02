@@ -4,7 +4,7 @@
 # This script installs LlamaBot, and a lightweight LlamaPress app (Rails app being modified) on a local machine.
 
 # To run:
-# curl -fsSL "https://raw.githubusercontent.com/KodyKendall/LlamaBot/refs/heads/rails-agent/bin/install_llamabot_local.sh" -o install_llamabot_local.sh && bash install_llamabot_local.sh
+# curl -fsSL "https://raw.githubusercontent.com/KodyKendall/LlamaBot/refs/heads/main/bin/install_llamabot_local.sh" -o install_llamabot_local.sh && bash install_llamabot_local.sh
 # ---------------------------------------------------------------------
 
 #!/usr/bin/env bash
