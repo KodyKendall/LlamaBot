@@ -1,2 +1,7 @@
 09/03/2025:
-  - Hardening security to prevent people from inspecting environment variables via the bash_command_rails. Three steps for this: 1) remove sensitive .env variables that are global beyond the Rails app, such as the OpenAI API key, or Tavily. 2) Add a mechanical filter in our bash_command_rails toolcall, that looks for .env or ENV[ substrings. 3) Add clear instructions to LLM to refuse using the bash_command_rails toolcall for self inspection of environment variables.
+  - Hardening security to prevent users from asking Leonardo to inspect environment variables via the bash_command_rails. 
+    
+    Three safeguards added for this:
+        1) remove sensitive .env variables that are global beyond the Rails app, such as the OpenAI API key, or Tavily. 
+        2) Add a mechanical filter in our bash_command_rails toolcall, that looks for .env or ENV[ substrings. 
+        3) Add clear instructions to LLM to refuse using the bash_command_rails toolcall for self inspection of environment variables.
