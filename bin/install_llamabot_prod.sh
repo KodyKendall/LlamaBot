@@ -41,7 +41,7 @@ _show_llamabot_banner() {
              (           ))
              |           ))     LlamaBot (LangGraph) • LlamaPress (Rails)
              |           ))
-             |           ))     v0.2.1
+             |           ))     v0.2.6
              |           ))
     
 
@@ -150,6 +150,11 @@ DATABASE_URL="postgresql://postgres:${POSTGRES_PASSWORD}@db:5432/llamapress_prod
 SECRET_KEY_BASE=${NEW_KEY}
 EOF
 
+cp .env .env.rails
+
+#remove OPENAI_API_KEY from .env.rails
+sed -i '/OPENAI_API_KEY/d' .env.rails
+
 mkdir -p rails/app rails/config rails/db rails/config/environments
 touch rails/config/routes.rb
 touch rails/config/environments/development.rb
@@ -163,7 +168,7 @@ version: "3.8"
 services:
   llamapress:
     image: kody06/llamapress-simple:0.1.17          # <— pre-built tag
-    env_file: .env                           # read secrets from this file
+    env_file: .env.rails                           # read secrets from this file
     environment:
       - RAILS_ENV=development
       - BOOTSNAP_CACHE_DIR=/rails/tmp/cache/bootsnap
@@ -305,7 +310,7 @@ version: "3.8"
 services:
   llamapress:
     image: kody06/llamapress-simple:0.1.17          # <— pre-built tag
-    env_file: .env                           # read secrets from this file
+    env_file: .env.rails                           # read secrets from this file
     environment:
       - RAILS_ENV=development
       - BOOTSNAP_CACHE_DIR=/rails/tmp/cache/bootsnap

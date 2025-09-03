@@ -431,6 +431,19 @@ def bash_command(
     tool_call_id: Annotated[str, InjectedToolCallId],
     workdir: str = WORKDIR
 ) -> Command:
+    # 🚨 Safeguard against secret exfiltration attempts
+    forbidden_patterns = [".env", "ENV["]
+    for pattern in forbidden_patterns:
+        if pattern.lower() in command.lower():
+            result = f"Blocked: use of '{pattern}' is not allowed for security reasons. Contact a LlamaPress admin for guidance in retrieving sensitive .env information."
+            return Command(
+                update={
+                    "messages": [
+                        ToolMessage(result, tool_call_id=tool_call_id)
+                    ],
+                }
+            )
+    
     result = rails_api_sh(command, workdir)
     
     return Command(
