@@ -12,6 +12,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langchain_core.load import dumpd
 from psycopg_pool import AsyncConnectionPool
+from datetime import datetime, timezone
 
 from pathlib import Path
 
@@ -26,7 +27,6 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 from typing import Any, Dict, TypedDict
-from datetime import datetime
 
 class RequestHandler:
     def __init__(self, app: FastAPI):
@@ -49,6 +49,8 @@ class RequestHandler:
         """Handle incoming WebSocket requests with proper locking and cancellation"""
         ws_id = id(websocket)
         lock = self._get_lock(websocket)
+
+        self.app.state.timestamp = datetime.now(timezone.utc) # keep timestamp updated
         
         async with lock:
             try:

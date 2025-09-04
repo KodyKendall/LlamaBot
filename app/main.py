@@ -11,7 +11,7 @@ import json
 import asyncio
 import bcrypt
 import secrets
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from psycopg_pool import AsyncConnectionPool
@@ -75,6 +75,7 @@ manager = WebSocketConnectionManager(app)
 # Application state to hold persistent checkpointer, important for session-based persistence.
 app.state.checkpointer = None
 app.state.async_checkpointer = None
+app.state.timestamp = datetime.now(timezone.utc)
 
 # Initialize HTTP Basic Auth
 security = HTTPBasic()
@@ -408,3 +409,8 @@ async def available_agents():
     with open("langgraph.json", "r") as f:
         langgraph_json = json.load(f)
     return {"agents": list(langgraph_json["graphs"].keys())}
+
+@app.get("/check")
+def check_timestamp():
+    # returns the timestamp of last message from user in utc
+    return {"timestamp": app.state.timestamp}
