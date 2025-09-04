@@ -58,6 +58,7 @@ class RequestHandler:
                 config = {
                     "configurable": {
                         "thread_id": f"{message.get('thread_id')}",
+                        "origin": message.get('origin', ''),
                         "recursion_limit": 100
                     },
                     "recursion_limit": 100
