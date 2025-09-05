@@ -38,7 +38,7 @@ export ZONE_ID=$(aws route53 list-hosted-zones-by-name \
 echo $ZONE_ID
 
 TARGET_FQDN=$INSTANCE.llamapress.ai.
-RAILS_TARGET_FQDN=rails.$TARGET_FQDN
+RAILS_TARGET_FQDN=rails-$TARGET_FQDN
 
 cat > new-a-record.json <<EOF
 {

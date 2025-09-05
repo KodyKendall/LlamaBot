@@ -59,7 +59,7 @@ export OPENAI_API_KEY
 # Prompt for Hosted Domain
 read -p "🌐 Enter your hosted domain (e.g., example.com): " HOSTED_DOMAIN
 export HOSTED_DOMAIN
-RAILS_HOSTED_DOMAIN=rails.$HOSTED_DOMAIN
+RAILS_HOSTED_DOMAIN=rails-$HOSTED_DOMAIN
 
 # ---------------------------------------------------------------------
 # 1. Install Docker & Compose if not present -- non-interactive
@@ -260,7 +260,7 @@ ${SERVER_NAME} {
     encode gzip
     reverse_proxy 127.0.0.1:8080
 }
-rails.${SERVER_NAME} {
+rails-${SERVER_NAME} {
     encode gzip
     reverse_proxy 127.0.0.1:3000
 }
