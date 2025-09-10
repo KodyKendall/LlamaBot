@@ -41,8 +41,8 @@ content = current_page_html.read_text()
 # Tools
 tools = [write_todos, 
          ls, read_file, write_file, edit_file, search_file, bash_command, 
-         git_status, git_commit, git_command, github_cli_command, 
-         view_page, internet_search]
+         git_status, git_commit, git_command, github_cli_command, internet_search]
+     #     view_page, /
 
 # Node
 def leonardo(state: RailsAgentState):
@@ -51,10 +51,15 @@ def leonardo(state: RailsAgentState):
    llm_with_tools = llm.bind_tools(tools)
    view_path = (state.get('debug_info') or {}).get('view_path')
 
+   show_full_html = True
+   messages = [sys_msg] + state["messages"]
+
    if view_path:
-        messages = [sys_msg] + state["messages"] + [HumanMessage(content="NOTE FROM SYSTEM: The user is currently viewing their Ruby on Rails webpage route at: " + view_path)]
-   else:
-        messages = [sys_msg] + state["messages"]
+        messages = messages + [HumanMessage(content="NOTE FROM SYSTEM: The user is currently viewing their Ruby on Rails webpage route at: " + view_path)]
+   
+   if show_full_html:
+        full_html = (state.get('debug_info') or {}).get('full_html')
+        messages = messages + [HumanMessage(content="NOTE FROM SYSTEM: Here's the full HTML of the page they're viewing: " + full_html)]
 
    return {"messages": [llm_with_tools.invoke(messages)]}
 
