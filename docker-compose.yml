@@ -25,7 +25,7 @@ services:
       - llama-network
 
   llamabot:
-    image: kody06/llamabot:0.2.6
+    image: kody06/llamabot:0.2.12
     # build:
     #   context: .
     #   dockerfile: Dockerfile
