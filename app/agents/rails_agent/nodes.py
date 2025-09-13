@@ -59,7 +59,8 @@ def leonardo(state: RailsAgentState):
    
    if show_full_html:
         full_html = (state.get('debug_info') or {}).get('full_html')
-        messages = messages + [HumanMessage(content="NOTE FROM SYSTEM: Here's the full HTML of the page they're viewing: " + full_html)]
+        if full_html:
+            messages = messages + [HumanMessage(content="NOTE FROM SYSTEM: Here's the full HTML of the page they're viewing: " + full_html)]
 
    return {"messages": [llm_with_tools.invoke(messages)]}
 
