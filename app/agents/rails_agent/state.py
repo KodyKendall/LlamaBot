@@ -12,3 +12,4 @@ class Todo(TypedDict):
 class RailsAgentState(AgentState):
     todos: NotRequired[list[Todo]]
     debug_info: NotRequired[dict[str, any]]
+    agent_mode: NotRequired[str]

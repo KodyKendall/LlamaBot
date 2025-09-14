@@ -359,7 +359,13 @@
 
         .button-row {
             display: flex;
-            justify-content: flex-end;
+            justify-content: space-between;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .send-controls {
+            display: flex;
             align-items: center;
             gap: 0.5rem;
         }
@@ -406,6 +412,43 @@
             height: 6px;
             border-radius: 50%;
             background-color: currentColor;
+        }
+
+        /* Custom dropdown styles */
+        .custom-dropdown-container {
+            position: relative;
+            display: inline-block;
+        }
+
+        .custom-dropdown {
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            appearance: none;
+            background-color: var(--input-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            color: var(--text-color);
+            padding: 0.5rem 1.8rem 0.5rem 0.8rem;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: border-color 0.2s;
+            font-family: inherit;
+        }
+
+        .custom-dropdown:focus {
+            outline: none;
+            border-color: var(--accent-color);
+        }
+
+        .custom-dropdown-container::after {
+            content: '▾';
+            font-size: 1rem;
+            color: var(--text-color);
+            position: absolute;
+            right: 0.8rem;
+            top: 50%;
+            transform: translateY(-50%);
+            pointer-events: none;
         }
 
         /* IFrame section (right 2/3) */
@@ -1030,10 +1073,19 @@
                     <span class="status-dot"></span>
                     <span>Disconnected</span>
                 </div>
-                <span id="thinkingIndicator" class="typing-indicator hidden">
-                    <span></span><span></span><span></span>
-                </span>
-                <button id="sendButton" disabled>Send</button>
+                <div class="send-controls">
+                    <span id="thinkingIndicator" class="typing-indicator hidden">
+                        <span></span><span></span><span></span>
+                    </span>
+                    <div class="custom-dropdown-container">
+                        <select id="agentModeSelect" class="custom-dropdown">
+                            <option value="engineer">Engineer Mode</option>
+                            <option value="design">Design Mode</option>
+                            <option value="ask">Ask Mode</option>
+                        </select>
+                    </div>
+                    <button id="sendButton" disabled>Send</button>
+                </div>
             </div>
         </div>
     </div>
@@ -1297,6 +1349,8 @@
         function sendMessage(debugInfo=null) {
             const input = document.getElementById('messageInput');
             const message = input.value.trim();
+            let agentMode = document.getElementById('agentModeSelect').value;
+            debugger;
             
             if (message && socket && socket.readyState === WebSocket.OPEN) {
                 // Reset any previous AI message reference
@@ -1341,7 +1395,8 @@
                     thread_id: currentThreadId,
                     origin: window.location.host,
                     debug_info: debugInfo,
-                    agent_name: AGENT.NAME
+                    agent_name: AGENT.NAME,
+                    agent_mode: agentMode
                 };
 
                 socket.send(JSON.stringify(messageData));
