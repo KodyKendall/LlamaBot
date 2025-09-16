@@ -1,3 +1,6 @@
 09/14/2025:
     - Add agent modes, starting with: ask mode, design mode (front-end), and engineer mode (fullstack engineering mode).
     - Each mode has different instructions, and different access to tool calls.
+
+09/15/2025:
+    - Add in a helper utility method for make_api_request_to_llamapress which helps wrap HTTP requests to a 3rd party Rails application using the LlamaBot authentication scheme, or any web application that implements authentication that way.
