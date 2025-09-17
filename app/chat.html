@@ -1350,7 +1350,6 @@
             const input = document.getElementById('messageInput');
             const message = input.value.trim();
             let agentMode = document.getElementById('agentModeSelect').value;
-            debugger;
             
             if (message && socket && socket.readyState === WebSocket.OPEN) {
                 // Reset any previous AI message reference
@@ -2067,7 +2066,7 @@
             window.addEventListener("message", handleMessage);
 
             // send message
-            iframe.contentWindow.postMessage({ type: "get_debug_info", id: messageId }, "*");
+            iframe.contentWindow.postMessage({ source: 'leonardo', type: "get_debug_info", id: messageId }, "*");
 
             // fallback timeout
             const timer = setTimeout(() => {

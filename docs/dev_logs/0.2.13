@@ -4,3 +4,7 @@
 
 09/15/2025:
     - Add in a helper utility method for make_api_request_to_llamapress which helps wrap HTTP requests to a 3rd party Rails application using the LlamaBot authentication scheme, or any web application that implements authentication that way.
+
+09/17/2025: 
+    - Add a "source" data field in our chat.html messages, for llamapress-simple to check on. (prevents iframe & rails browser tab from crashing)
+    - Add support for Gemini LLM

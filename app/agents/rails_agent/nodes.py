@@ -1,4 +1,6 @@
 from langchain_openai import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI as ChatGemini
+
 from langchain_core.tools import tool
 from dotenv import load_dotenv
 load_dotenv()
@@ -50,6 +52,12 @@ default_tools = [write_todos,
 def leonardo(state: RailsAgentState):
    llm = ChatOpenAI(model="gpt-4.1")
 
+# gemini_api_key = os.getenv("GEMINI_API_KEY")
+#    llm = ChatGemini(
+#     model="gemini-2.5-pro",
+#     temperature=1.0,
+#     max_retries=2,
+#     google_api_key=gemini_api_key)
 
    view_path = (state.get('debug_info') or {}).get('view_path')
 
