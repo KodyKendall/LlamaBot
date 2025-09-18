@@ -25,7 +25,7 @@ from app.agents.rails_agent.state import RailsAgentState
 from app.agents.rails_agent.tools import write_todos, write_file, read_file, ls, edit_file, search_file, internet_search, bash_command, git_status, git_commit, git_command, view_page, github_cli_command
 from app.agents.rails_agent.prompts import RAILS_AGENT_PROMPT
 
-from app.agents.rails_agent.prototype_agent import build_workflow as build_prototype_agent
+from app.agents.rails_agent.prototype_agent.prototype_agent import build_workflow as build_prototype_agent
 from app.agents.rails_agent.planning_agent import build_workflow as build_planning_agent
 
 import logging
@@ -94,6 +94,13 @@ def leonardo(state: RailsAgentState):
 
    return {"messages": [llm_with_tools.invoke(messages)]}
 
+def leonardo_router(state: RailsAgentState) -> Literal["tools", "prototype_agent", "planning_agent", "__end__"]:
+    if next_node := state.get("next"):
+        return next_node
+    if tools_condition(state) == "tools":
+        return "tools"
+    return END
+
 # Graph
 def build_workflow(checkpointer=None):
     builder = StateGraph(RailsAgentState)
@@ -110,22 +117,15 @@ def build_workflow(checkpointer=None):
     builder.add_edge(START, "leonardo")
     builder.add_conditional_edges(
         "leonardo",
-        # If the latest message (result) from leonardo is a tool call -> tools_condition routes to tools
-        # If the latest message (result) from leonardo is a not a tool call -> tools_condition routes to END
-        tools_condition,
-    )
-    builder.add_edge("tools", "leonardo")
-
-    builder.add_edge("leonardo", "prototype_agent")
-    builder.add_conditional_edges(
-        "leonardo",
-        lambda x: x["next"],
+        leonardo_router,
         {
+            "tools": "tools",
             "prototype_agent": "prototype_agent",
             "planning_agent": "planning_agent",
-        }
+            END: END,
+        },
     )
-
+    builder.add_edge("tools", "leonardo")
     builder.add_edge("prototype_agent", END)
     builder.add_edge("planning_agent", END)
 
