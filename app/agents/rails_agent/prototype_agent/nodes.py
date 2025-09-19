@@ -54,9 +54,19 @@ tools = [prototype_tool]
 # Node
 def prototype_agent(state: RailsAgentState):
    llm = ChatOpenAI(model="gpt-4.1")
-
-   messages = [sys_msg] + state["messages"]
    llm_with_tools = llm.bind_tools(tools)
+
+   view_path = (state.get('debug_info') or {}).get('view_path')
+
+   show_full_html = True
+   messages = [sys_msg] + state["messages"]
+   if view_path:
+        messages = messages + [HumanMessage(content="NOTE FROM SYSTEM: The user is currently vicewing their Ruby on Rails webpage route at: " + view_path + ". If they're not looking at a prototype page, you should ask them to navigate to the prototype page that they want to change.")]
+   
+   if show_full_html:
+        full_html = (state.get('debug_info') or {}).get('full_html')
+        if full_html:
+            messages = messages + [HumanMessage(content="NOTE FROM SYSTEM: Here's the full HTML of the page they're viewing: " + full_html)]
 
    return {"messages": [llm_with_tools.invoke(messages)]}
 
