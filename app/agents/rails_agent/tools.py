@@ -237,7 +237,7 @@ def edit_file(
             }
         )
 
-    git_status(tool_call_id) # hacky - this will update the git status page so the user can see the changes.
+    # git_status(tool_call_id) # hacky - this will update the git status page so the user can see the changes.
 
     return Command(
         update={
