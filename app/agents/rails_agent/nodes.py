@@ -8,6 +8,7 @@ from langgraph.graph import MessagesState
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 
 from langgraph.graph import START, StateGraph, END
+from langgraph.types import Command
 from langgraph.prebuilt import tools_condition
 from langgraph.prebuilt import ToolNode
 
@@ -49,17 +50,9 @@ default_tools = [write_todos,
          ls, read_file, write_file, edit_file, search_file, bash_command, 
          git_status, git_commit, git_command, github_cli_command, internet_search]
 
-     #     view_page, /
 # Node
-def leonardo(state: RailsAgentState):
+def leonardo(state: RailsAgentState) -> Command[Literal["tools", "prototype_agent", "planning_agent", END]]:
    llm = ChatOpenAI(model="gpt-4.1")
-
-# gemini_api_key = os.getenv("GEMINI_API_KEY")
-#    llm = ChatGemini(
-#     model="gemini-2.5-pro",
-#     temperature=1.0,
-#     max_retries=2,
-#     google_api_key=gemini_api_key)
 
    view_path = (state.get('debug_info') or {}).get('view_path')
 
@@ -82,24 +75,22 @@ def leonardo(state: RailsAgentState):
    agent_mode = state.get('agent_mode')
    if agent_mode:
         logger.info(f"🎯 User is in current mode: {agent_mode}")
+        
         if agent_mode == 'prototype':
-            return {"next": "prototype_agent"}
-        elif agent_mode == 'engineer':
+            return Command(goto="prototype_agent", update={})
+        
+        elif agent_mode == 'planning':
+            return Command(goto="planning_agent", update={})
+        
+        elif agent_mode == 'engineer': # just fall through here and let the tools_condition handle it
             messages = messages + [HumanMessage(content="<NOTE_FROM_SYSTEM> The user is in engineer mode. You are allowed to use the tools. Here are the tools you can use: tools = [write_todos, ls, read_file, write_file, edit_file, search_file, bash_command, git_status, git_commit, git_command, github_cli_command, internet_search] </NOTE_FROM_SYSTEM>")]
-        elif agent_mode == 'ask':
+
+        elif agent_mode == 'ask': # just fall through here and let the tools_condition handle it
             tools = [ls, read_file, search_file, git_status, internet_search] 
             messages = messages + [HumanMessage(content="<NOTE_FROM_SYSTEM> The user is in ask mode. You are only allowed tools to read state, but not modify or do anything to the application. Here are the tools you can use: tools = [ls, read_file, search_file, git_status, internet_search] </NOTE_FROM_SYSTEM>")]
 
    llm_with_tools = llm.bind_tools(tools)
-
-   return {"messages": [llm_with_tools.invoke(messages)]}
-
-def leonardo_router(state: RailsAgentState) -> Literal["tools", "prototype_agent", "planning_agent", "__end__"]:
-    if next_node := state.get("next"):
-        return next_node
-    if tools_condition(state) == "tools":
-        return "tools"
-    return END
+   response = llm_with_tools.invoke(messages)
 
 # Graph
 def build_workflow(checkpointer=None):
@@ -115,16 +106,14 @@ def build_workflow(checkpointer=None):
 
     # Define edges: these determine how the control flow moves
     builder.add_edge(START, "leonardo")
+
     builder.add_conditional_edges(
         "leonardo",
-        leonardo_router,
-        {
-            "tools": "tools",
-            "prototype_agent": "prototype_agent",
-            "planning_agent": "planning_agent",
-            END: END,
-        },
+        # If the latest message (result) from leonardo is a tool call -> tools_condition routes to tools
+        # If the latest message (result) from leonardo is a not a tool call -> tools_condition routes to END
+        tools_condition,
     )
+
     builder.add_edge("tools", "leonardo")
     builder.add_edge("prototype_agent", END)
     builder.add_edge("planning_agent", END)

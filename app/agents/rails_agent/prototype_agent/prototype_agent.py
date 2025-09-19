@@ -23,20 +23,20 @@ from app.agents.utils.images import encode_image
 
 from app.agents.rails_agent.state import RailsAgentState
 from app.agents.rails_agent.tools import write_todos, write_file, read_file, ls, edit_file, search_file, internet_search, bash_command, git_status, git_commit, git_command, view_page, github_cli_command
-from app.agents.rails_agent.prompts import RAILS_AGENT_PROMPT
+from app.agents.rails_agent.prototype_agent.prompts import PROTOTYPE_AGENT_PROMPT
 
 import logging
 logger = logging.getLogger(__name__)
 
 # Define base paths relative to project root
 SCRIPT_DIR = Path(__file__).parent.resolve()
-PROJECT_ROOT = SCRIPT_DIR.parent.parent.parent  # Go up to LlamaBot root
+PROJECT_ROOT = SCRIPT_DIR.parent.parent.parent.parent  # Go up to LlamaBot root
 APP_DIR = PROJECT_ROOT / 'app'
 
 # Global tools list
 
 # System message
-sys_msg = SystemMessage(content=RAILS_AGENT_PROMPT)
+sys_msg = SystemMessage(content=PROTOTYPE_AGENT_PROMPT)
 
 current_page_html = APP_DIR / 'page.html'
 content = current_page_html.read_text()
