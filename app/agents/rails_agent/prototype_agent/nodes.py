@@ -22,7 +22,7 @@ from openai import OpenAI
 from app.agents.utils.images import encode_image
 
 from app.agents.rails_agent.state import RailsAgentState
-from app.agents.rails_agent.prototype_agent.tools import write_todos, write_file, read_file, ls, edit_file, search_file, git_status, git_commit, git_command, github_cli_command
+from app.agents.rails_agent.prototype_agent.tools import write_todos, write_file, read_file, ls, edit_file, search_file, git_status, git_commit, git_command, github_cli_command, edit_stimulus_controller, read_stimulus_controller
 from app.agents.rails_agent.prototype_agent.prompts import PROTOTYPE_AGENT_PROMPT
 
 import logging
@@ -51,7 +51,8 @@ content = current_page_html.read_text()
 # Tools
 tools = [write_todos,
         ls, read_file, write_file, edit_file, search_file,
-        git_status, git_commit, git_command, github_cli_command]
+        git_status, git_commit, git_command, github_cli_command, 
+        edit_stimulus_controller, read_stimulus_controller]
 
 # Node
 def prototype_agent(state: RailsAgentState):

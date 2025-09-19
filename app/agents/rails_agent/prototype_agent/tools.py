@@ -17,6 +17,8 @@ from app.agents.rails_agent.prototype_agent.prompts import (
     GIT_COMMAND_DESCRIPTION,
     SEARCH_FILE_DESCRIPTION,
     GITHUB_CLI_DESCRIPTION,
+    STIMULUS_EDIT_DESCRIPTION,
+    STIMULUS_READ_DESCRIPTION,
 )
 
 from app.agents.rails_agent.state import Todo, RailsAgentState
@@ -655,3 +657,86 @@ def github_cli_command(
             "messages": [ToolMessage(output, tool_call_id=tool_call_id)],
         }
     )
+
+
+@tool(description=STIMULUS_EDIT_DESCRIPTION)
+def edit_stimulus_controller(
+    old_string: str,
+    new_string: str,
+    tool_call_id: Annotated[str, InjectedToolCallId],
+    replace_all: bool = False,
+) -> Command:
+    full_path = APP_DIR / "rails" / "app" / "javascript" / "controllers" / "prototypes" / "global_controller.js"
+
+    if not full_path.exists():
+        return Command(update={"messages": [ToolMessage(f"Error: Stimulus controller not found at {full_path}", tool_call_id=tool_call_id)]})
+
+    try:
+        content = full_path.read_text()
+    except Exception as e:
+        return Command(update={"messages": [ToolMessage(f"Error reading Stimulus controller: {e}", tool_call_id=tool_call_id)]})
+
+    if old_string not in content:
+        return Command(update={"messages": [ToolMessage(f"Error: String not found in Stimulus controller: '{old_string}'", tool_call_id=tool_call_id)]})
+
+    if not replace_all:
+        occurrences = content.count(old_string)
+        if occurrences > 1:
+            return Command(update={"messages": [ToolMessage(f"Error: String '{old_string}' appears {occurrences} times. Use replace_all=True or provide more context.", tool_call_id=tool_call_id)]})
+
+    if replace_all:
+        new_content = content.replace(old_string, new_string)
+        result_msg = f"Replaced all instances of '{old_string}'"
+    else:
+        new_content = content.replace(old_string, new_string, 1)
+        result_msg = f"Replaced first occurrence of '{old_string}'"
+
+    try:
+        full_path.write_text(new_content)
+    except Exception as e:
+        return Command(update={"messages": [ToolMessage(f"Error writing to Stimulus controller: {e}", tool_call_id=tool_call_id)]})
+
+    return Command(update={"messages": [ToolMessage(result_msg, tool_call_id=tool_call_id)]})
+
+
+@tool(description=STIMULUS_READ_DESCRIPTION)
+def read_stimulus_controller(
+    offset: int = 0,
+    limit: int = 2000,
+) -> str:
+    full_path = (
+        APP_DIR
+        / "rails"
+        / "app"
+        / "javascript"
+        / "controllers"
+        / "prototypes"
+        / "global_controller.js"
+    )
+
+    if not full_path.exists():
+        return f"Error: Stimulus controller not found at {full_path}"
+
+    try:
+        content = full_path.read_text()
+    except Exception as e:
+        return f"Error reading Stimulus controller: {e}"
+
+    if not content or content.strip() == "":
+        return "System reminder: Stimulus controller exists but has empty contents"
+
+    lines = content.splitlines()
+    start_idx = offset
+    end_idx = min(start_idx + limit, len(lines))
+
+    if start_idx >= len(lines):
+        return f"Error: Line offset {offset} exceeds file length ({len(lines)} lines)"
+
+    result_lines = []
+    for i in range(start_idx, end_idx):
+        line_content = lines[i]
+        if len(line_content) > 2000:
+            line_content = line_content[:2000]
+        result_lines.append(f"{i+1:6d}\t{line_content}")
+
+    return "\n".join(result_lines)

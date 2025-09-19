@@ -247,6 +247,42 @@ The only exception when dealing with secret keys is for ACCEPTING github_cli_com
 - The terminal context is already at rails/app/views/prototypes.
 
 ---
+## STIMULUS CONTROLLER RULES (PROTOTYPES)
+
+You have the ability to add interactive JavaScript to prototypes using the Stimulus framework.
+
+- All Stimulus interactivity for prototypes must live inside **one single controller file**:  
+  `app/javascript/controllers/prototypes/global_controller.js`
+- This file is auto-registered under the namespace:  
+  `prototypes--global`
+- **Always** add new actions and targets inside this file. Never create new controllers or modify production controllers.
+
+### How to Reference in ERB Views
+- Use `data-controller="prototypes--global"` to attach the controller.  
+- Use `data-action="event->prototypes--global#methodName"` for actions.  
+- Use `data-prototypes--global-target="targetName"` for targets.  
+
+**Example:**
+```erb
+<div data-controller="prototypes--global">
+  <button data-action="click->prototypes--global#toggleMenu"
+          data-prototypes--global-target="menuButton">
+    Open Menu
+  </button>
+</div>
+```
+
+### JavaScript Scope
+- You may only edit the single prototype_controller.js file.
+- Do not attempt to create new files, folders, or modify any Stimulus controllers outside of controllers/prototypes/.
+- If small, inline interactivity is needed, you may embed <script> tags inside .erb files, but prefer the global controller for consistency.
+
+
+### Why This Matters
+- Keeps all prototype interactivity isolated and safe.
+- Ensures bindings in .erb files always work with the prototypes--global namespace.
+- Prevents accidental edits to production Stimulus controllers or the asset pipeline.
+___
 
 ## EXAMPLES (ABBREVIATED)
 
@@ -638,4 +674,49 @@ auth status >/dev/null 2>&1 || echo "gh_xxx_token" | gh auth login --with-token;
 Usage:
 - The command parameter must be a string that is a valid github command argument.
 - You can use this tool to check the github connection to this repo, or get information about the repo, or do anything else related specifically to github.
+"""
+
+STIMULUS_READ_DESCRIPTION = """
+Reads the single global Stimulus controller for prototypes.
+
+- The only file you can read with this tool is:
+  app/javascript/controllers/prototypes/global_controller.js
+
+Usage:
+- Always use this tool before making any edits to the controller.
+- Output is returned in `cat -n` format with line numbers starting at 1.
+- Do not include the line numbers when creating edits.
+- Use this tool whenever you need to inspect the current state of the controller,
+  check for existing actions/targets, or verify your edits landed correctly.
+
+Important:
+- Do not attempt to read any other files with this tool.
+- Never assume what’s inside the controller without reading it first.
+"""
+
+STIMULUS_EDIT_DESCRIPTION = """
+Performs exact string replacements in the single global Stimulus controller for prototypes.
+
+- The only file you can edit with this tool is:
+  app/javascript/controllers/prototypes/global_controller.js
+
+Usage:
+- You must use `read_stimulus_controller` at least once before editing.
+- Match the exact `old_string` from the file (excluding the line number prefixes).
+- Preserve indentation (tabs/spaces) exactly as shown in the file.
+- If the string occurs more than once, either provide more context around it or set `replace_all=True`.
+
+Constraints:
+- Do not attempt to create new controller files.
+- Do not attempt to modify any Stimulus controllers outside of this one.
+- All prototype interactivity must be added here, under the `prototypes--global` namespace.
+
+Examples:
+- Add a new action method.
+- Add new target definitions to `static targets = []`.
+- Update or remove an existing method.
+
+Important:
+- Keep edits small and safe (one change at a time).
+- Re-read after each edit to confirm success.
 """
