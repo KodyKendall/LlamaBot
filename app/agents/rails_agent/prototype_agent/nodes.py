@@ -22,7 +22,7 @@ from openai import OpenAI
 from app.agents.utils.images import encode_image
 
 from app.agents.rails_agent.state import RailsAgentState
-from app.agents.rails_agent.tools import write_todos, write_file, read_file, ls, edit_file, search_file, internet_search, bash_command, git_status, git_commit, git_command, view_page, github_cli_command
+from app.agents.rails_agent.prototype_agent.tools import write_todos, write_file, read_file, ls, edit_file, search_file, git_status, git_commit, git_command, github_cli_command
 from app.agents.rails_agent.prototype_agent.prompts import PROTOTYPE_AGENT_PROMPT
 
 import logging
@@ -41,19 +41,24 @@ sys_msg = SystemMessage(content=PROTOTYPE_AGENT_PROMPT)
 current_page_html = APP_DIR / 'page.html'
 content = current_page_html.read_text()
 
-@tool
-def prototype_tool(state: RailsAgentState) -> str:
-    """
-    This tool is used to prototype the front-end UI/UX changes.
-    """
-    return "Prototype tool"
+# @tool
+# def prototype_tool(state: RailsAgentState) -> str:
+#     """
+#     This tool is used to prototype the front-end UI/UX changes.
+#     """
+#     return "Prototype tool"
 
 # Tools
-tools = [prototype_tool]
+tools = [write_todos,
+        ls, read_file, write_file, edit_file, search_file,
+        git_status, git_commit, git_command, github_cli_command]
 
 # Node
 def prototype_agent(state: RailsAgentState):
    llm = ChatOpenAI(model="gpt-4.1")
+#    llm = ChatOpenAI(model="gpt-5-2025-08-07")
+
+#    gpt-5-2025-08-07
    llm_with_tools = llm.bind_tools(tools)
 
    view_path = (state.get('debug_info') or {}).get('view_path')
