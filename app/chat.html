@@ -1920,12 +1920,39 @@
             return div.innerHTML;
         }
 
+        // Cookie helper functions
+        function setCookie(name, value, days) {
+            let expires = "";
+            if (days) {
+                let date = new Date();
+                date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
+                expires = "; expires=" + date.toUTCString();
+            }
+            document.cookie = name + "=" + (value || "") + expires + "; path=/";
+        }
+
+        function getCookie(name) {
+            let nameEQ = name + "=";
+            let ca = document.cookie.split(';');
+            for (let i = 0; i < ca.length; i++) {
+                let c = ca[i];
+                while (c.charAt(0) == ' ') c = c.substring(1, c.length);
+                if (c.indexOf(nameEQ) == 0) return c.substring(nameEQ.length, c.length);
+            }
+            return null;
+        }
+
         // Event listeners
         document.getElementById('sendButton').addEventListener('click', sendMessageWithDebugInfo);
         
         // Scroll-to-bottom button event listener
         document.getElementById('scrollToBottomBtn').addEventListener('click', scrollToBottomManually);
         
+        // Save agent mode to cookie on change
+        document.getElementById('agentModeSelect').addEventListener('change', function() {
+            setCookie('agentMode', this.value, 365); // Remember for a year
+        });
+
         document.getElementById('messageInput').addEventListener('keydown', function(e) {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
@@ -2129,6 +2156,21 @@
         // Initialize mobile view on page load
         initializeMobileView();
 
+        // Load settings from cookies
+        function loadSettingsFromCookies() {
+            // Load agent mode
+            const savedMode = getCookie('agentMode');
+            if (savedMode) {
+                const selectElement = document.getElementById('agentModeSelect');
+                if (selectElement) {
+                    // Check if the saved mode is a valid option
+                    if (Array.from(selectElement.options).some(option => option.value === savedMode)) {
+                        selectElement.value = savedMode;
+                    }
+                }
+            }
+        }
+
         function getRailsDebugInfo(callback, timeout = 250) { // 1/4 second timout is plenty of time since it's inter-process communication. Timeout after 1/4 second = Ruby on Rails server error, and application.js likelly didn't get load.
             const iframe = document.getElementById('liveSiteFrame');
             if (!iframe || !iframe.contentWindow) {
@@ -2170,6 +2212,9 @@
         initWebSocket();
 
         fetchThreads();
+        
+        // Load settings after other initializations
+        loadSettingsFromCookies();
     </script>
 </body>
 </html>
