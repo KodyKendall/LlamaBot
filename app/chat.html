@@ -615,6 +615,63 @@
             height: 14px;
         }
 
+        /* View mode toggle for desktop */
+        .view-mode-toggle {
+            display: none; /* Hidden by default */
+            align-items: center;
+            gap: 4px;
+            margin-right: 8px;
+            border: 1px solid #555;
+            border-radius: 6px;
+            padding: 2px;
+            background-color: #2a2a2a;
+        }
+
+        .view-mode-btn {
+            background: none;
+            border: none;
+            color: #888;
+            cursor: pointer;
+            padding: 2px 4px;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease;
+        }
+
+        .view-mode-btn svg {
+            width: 16px;
+            height: 16px;
+            fill: currentColor;
+        }
+
+        .view-mode-btn:hover {
+            color: #fff;
+            background-color: #404040;
+        }
+
+        .view-mode-btn.active {
+            color: #fff;
+            background-color: #505050;
+        }
+
+        .browser-content.mobile-view {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background-color: var(--bg-color);
+            padding: 20px;
+        }
+
+        .browser-content.mobile-view #liveSiteFrame {
+            width: 375px;
+            height: 667px;
+            border-radius: 20px;
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+            border: 5px solid #333;
+        }
+
         /* Spinning animation for refresh button */
         @keyframes spin {
             from {
@@ -862,6 +919,13 @@
             justify-content: space-between;
         }
 
+        /* Show toggle only on desktop */
+        @media screen and (min-width: 769px) {
+            .view-mode-toggle {
+                display: flex;
+            }
+        }
+
         /* Mobile responsive styles */
         @media screen and (max-width: 768px) {
             body {
@@ -1080,7 +1144,7 @@
                     <div class="custom-dropdown-container">
                         <select id="agentModeSelect" class="custom-dropdown">
                             <option value="engineer">Engineer Mode</option>
-                            <option value="design">Design Mode</option>
+                            <option value="prototype">Prototype Mode</option>
                             <option value="ask">Ask Mode</option>
                         </select>
                     </div>
@@ -1113,6 +1177,14 @@
                 <div class="browser-urlbar">
                     <span>localhost:3000</span>
                     <div class="browser-controls-right">
+                        <div class="view-mode-toggle">
+                            <button class="view-mode-btn active" id="desktopModeBtn" title="Desktop View">
+                                <svg fill="currentColor" viewBox="0 0 24 24"><path d="M21 2H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h7v2H8v2h8v-2h-2v-2h7c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H3V4h18v12z"/></svg>
+                            </button>
+                            <button class="view-mode-btn" id="mobileModeBtn" title="Mobile View">
+                                <svg fill="currentColor" viewBox="0 0 24 24"><path d="M17 1.01L7 1c-1.1 0-2 .9-2 2v18c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V3c0-1.1-.9-1.99-2-1.99zM17 19H7V5h10v14z"/></svg>
+                            </button>
+                        </div>
                         <button class="nav-button" id="backButton" title="Go back">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M19 12H5"/>
@@ -1848,12 +1920,39 @@
             return div.innerHTML;
         }
 
+        // Cookie helper functions
+        function setCookie(name, value, days) {
+            let expires = "";
+            if (days) {
+                let date = new Date();
+                date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
+                expires = "; expires=" + date.toUTCString();
+            }
+            document.cookie = name + "=" + (value || "") + expires + "; path=/";
+        }
+
+        function getCookie(name) {
+            let nameEQ = name + "=";
+            let ca = document.cookie.split(';');
+            for (let i = 0; i < ca.length; i++) {
+                let c = ca[i];
+                while (c.charAt(0) == ' ') c = c.substring(1, c.length);
+                if (c.indexOf(nameEQ) == 0) return c.substring(nameEQ.length, c.length);
+            }
+            return null;
+        }
+
         // Event listeners
         document.getElementById('sendButton').addEventListener('click', sendMessageWithDebugInfo);
         
         // Scroll-to-bottom button event listener
         document.getElementById('scrollToBottomBtn').addEventListener('click', scrollToBottomManually);
         
+        // Save agent mode to cookie on change
+        document.getElementById('agentModeSelect').addEventListener('change', function() {
+            setCookie('agentMode', this.value, 365); // Remember for a year
+        });
+
         document.getElementById('messageInput').addEventListener('keydown', function(e) {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
@@ -1928,6 +2027,25 @@
                 document.getElementById(targetIframeId).classList.add('active');
             });
         });
+
+        // View mode toggle logic
+        const desktopModeBtn = document.getElementById('desktopModeBtn');
+        const mobileModeBtn = document.getElementById('mobileModeBtn');
+        const browserContent = document.querySelector('.browser-content');
+
+        if (desktopModeBtn && mobileModeBtn && browserContent) {
+            desktopModeBtn.addEventListener('click', () => {
+                browserContent.classList.remove('mobile-view');
+                desktopModeBtn.classList.add('active');
+                mobileModeBtn.classList.remove('active');
+            });
+
+            mobileModeBtn.addEventListener('click', () => {
+                browserContent.classList.add('mobile-view');
+                mobileModeBtn.classList.add('active');
+                desktopModeBtn.classList.remove('active');
+            });
+        }
 
         // Auto-resize textarea
         document.getElementById('messageInput').addEventListener('input', function() {
@@ -2038,6 +2156,21 @@
         // Initialize mobile view on page load
         initializeMobileView();
 
+        // Load settings from cookies
+        function loadSettingsFromCookies() {
+            // Load agent mode
+            const savedMode = getCookie('agentMode');
+            if (savedMode) {
+                const selectElement = document.getElementById('agentModeSelect');
+                if (selectElement) {
+                    // Check if the saved mode is a valid option
+                    if (Array.from(selectElement.options).some(option => option.value === savedMode)) {
+                        selectElement.value = savedMode;
+                    }
+                }
+            }
+        }
+
         function getRailsDebugInfo(callback, timeout = 250) { // 1/4 second timout is plenty of time since it's inter-process communication. Timeout after 1/4 second = Ruby on Rails server error, and application.js likelly didn't get load.
             const iframe = document.getElementById('liveSiteFrame');
             if (!iframe || !iframe.contentWindow) {
@@ -2079,6 +2212,9 @@
         initWebSocket();
 
         fetchThreads();
+        
+        // Load settings after other initializations
+        loadSettingsFromCookies();
     </script>
 </body>
 </html>
