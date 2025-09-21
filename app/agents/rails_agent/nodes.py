@@ -91,6 +91,7 @@ def leonardo(state: RailsAgentState) -> Command[Literal["tools", "prototype_agen
 
    llm_with_tools = llm.bind_tools(tools)
    response = llm_with_tools.invoke(messages)
+   return {"messages": [llm_with_tools.invoke(messages)]}
 
 # Graph
 def build_workflow(checkpointer=None):
