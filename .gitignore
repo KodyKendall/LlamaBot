@@ -14,3 +14,4 @@ app/agents/private
 
 llamapress/*
 auth.json
+venv

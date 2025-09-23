@@ -18,7 +18,6 @@ coverage==7.9.1
 cryptography==44.0.3
 dataclasses-json==0.6.7
 debugpy==1.8.16
-deepagents==0.0.3
 distro==1.9.0
 fastapi==0.115.12
 forbiddenfruit==0.1.4
