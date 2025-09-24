@@ -7,19 +7,18 @@ from tavily import TavilyClient
 import os
 from bs4 import BeautifulSoup
 
-from app.agents.rails_agent.prompts import (
+from app.agents.rails_agent.prototype_agent.prompts import (
     WRITE_TODOS_DESCRIPTION,
     EDIT_DESCRIPTION,
     TOOL_DESCRIPTION,
-    INTERNET_SEARCH_DESCRIPTION,
     LIST_DIRECTORY_DESCRIPTION,
-    BASH_COMMAND_FOR_RAILS_DESCRIPTION,
     GIT_STATUS_DESCRIPTION,
     GIT_COMMIT_DESCRIPTION,
     GIT_COMMAND_DESCRIPTION,
     SEARCH_FILE_DESCRIPTION,
-    VIEW_CURRENT_PAGE_HTML_DESCRIPTION,
     GITHUB_CLI_DESCRIPTION,
+    STIMULUS_EDIT_DESCRIPTION,
+    STIMULUS_READ_DESCRIPTION,
 )
 
 from app.agents.rails_agent.state import Todo, RailsAgentState
@@ -35,7 +34,7 @@ from jinja2 import Environment, FileSystemLoader
 # Define base paths relative to project root
 SCRIPT_DIR = Path(__file__).parent.resolve()
 PROJECT_ROOT = SCRIPT_DIR.parent.parent.parent  # Go up to LlamaBot root
-APP_DIR = PROJECT_ROOT / 'app'
+APP_DIR = PROJECT_ROOT
 
 # Single HTML output file
 HTML_OUTPUT_PATH = APP_DIR / 'page.html'
@@ -70,11 +69,12 @@ def guard_against_beginning_slash_argument(argument: str) -> str:
 
 @tool(description=LIST_DIRECTORY_DESCRIPTION)
 def ls(directory: str = "") -> list[str]:
+
     if directory.startswith("/"): # we NEVER want to include a leading slash "/"  at the beginning of the directory string. It's all relative in our docker container.
         directory = directory[1:]
 
     # Build path - if directory is empty, just use rails root
-    dir_path = APP_DIR / "rails" / directory if directory else APP_DIR / "rails"
+    dir_path = APP_DIR / "rails" / "app" / "views" / "prototypes" / directory if directory else APP_DIR / "rails" / "app" / "views" / "prototypes"
     
     if not dir_path.exists():
         return f"Directory not found: {directory}"
@@ -91,7 +91,7 @@ def read_file(
     file_path = guard_against_beginning_slash_argument(file_path)
     
     # Construct the full path
-    full_path = APP_DIR / "rails" / file_path
+    full_path = APP_DIR / "rails" / "app" / "views" / "prototypes" / file_path
     
     # Check if file exists
     if not full_path.exists():
@@ -143,7 +143,7 @@ def write_file(
 ) -> Command:
     """Write to a file."""
     file_path = guard_against_beginning_slash_argument(file_path)
-    full_path = APP_DIR / "rails" / file_path
+    full_path = APP_DIR / "rails" / "app" / "views" / "prototypes" / file_path
     
     try:
         full_path.parent.mkdir(parents=True, exist_ok=True)
@@ -180,7 +180,7 @@ def edit_file(
     replace_all: bool = False,
 ) -> Command:
     file_path = guard_against_beginning_slash_argument(file_path)
-    full_path = APP_DIR / "rails" / file_path
+    full_path = APP_DIR / "rails" / "app" / "views" / "prototypes" / file_path
 
     if not full_path.exists():
         error_message = f"Error: File '{file_path}' not found"
@@ -250,10 +250,10 @@ def search_file(
     substring: str, tool_call_id: Annotated[str, InjectedToolCallId]
 ) -> Command:
     """Search all files in the directory for a substring."""
-    full_path = APP_DIR / "rails"
+    full_path = APP_DIR / "rails" / "app" / "views" / "prototypes"
     matches = []
     
-    # Check if the rails directory exists
+    # Check if the directory exists
     if not full_path.exists():
         result_msg = f"Project directory not found"
         return Command(
@@ -268,7 +268,7 @@ def search_file(
             try:
                 content = file_path.read_text()
                 if substring in content:
-                    # Get relative path from rails directory for cleaner output
+                    # Get relative path from directory for cleaner output
                     relative_path = file_path.relative_to(full_path)
                     matches.append(str(relative_path))
             except (UnicodeDecodeError, PermissionError, OSError):
@@ -288,7 +288,6 @@ def search_file(
             "messages": [ToolMessage(result_msg, tool_call_id=tool_call_id)],
         }
     )
-
 
 def list_all_files_recursive(directory: Path):
     """
@@ -331,145 +330,6 @@ def list_all_files_recursive(directory: Path):
 
 # Rails container configuration
 WORKDIR = "/rails"  # path that contains bin/rails inside the Rails container
-
-def get_rails_container_name():
-    """Dynamically get the Rails container name by looking for containers ending with 'llamapress-1'."""
-    try:
-        # List all running containers using Docker API
-        cmd = [
-            "curl", "--silent", "--unix-socket", "/var/run/docker.sock",
-            "http://localhost/containers/json"
-        ]
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        
-        if result.returncode == 0:
-            containers = json.loads(result.stdout)
-            for container in containers:
-                # Container names are in the 'Names' array with leading '/'
-                names = container.get('Names', [])
-                for name in names:
-                    # Remove leading '/' and check if it ends with 'llamapress-1'
-                    clean_name = name.lstrip('/')
-                    if clean_name.endswith('llamapress-1'):
-                        return clean_name
-        
-        # Fallback to environment-specific defaults
-        # Check if we're in production (you might have an env var or other indicator)
-        import os
-        if os.environ.get('ENV') == 'production':
-            return "llamapress-1"
-        
-        # Default to development container name
-        return "rails-agent-llamapress-1"
-        
-    except Exception:
-        # If anything goes wrong, return a sensible default
-        return "rails-agent-llamapress-1"
-
-# Get the container name dynamically
-RAILS_CONT = get_rails_container_name()
-
-def rails_api_sh(snippet: str, workdir: str = WORKDIR) -> str:
-    """Execute a command in the Rails Docker container via Docker API."""
-    try:
-        # Create the exec payload
-        payload = {
-            "AttachStdout": True,
-            "AttachStderr": True,
-            "Tty": True,
-            "Cmd": ["/bin/sh", "-lc", snippet],
-            "WorkingDir": workdir
-        }
-        
-        # Create exec instance using curl
-        create_cmd = [
-            "curl", "--silent", "--show-error", "--fail-with-body",
-            "--unix-socket", "/var/run/docker.sock",
-            "-H", "Content-Type: application/json",
-            "--data-binary", json.dumps(payload),
-            f"http://localhost/containers/{RAILS_CONT}/exec"
-        ]
-        
-        create_result = subprocess.run(create_cmd, capture_output=True, text=True, timeout=30)
-        if create_result.returncode != 0:
-            return f"CREATE-EXEC ERROR: {create_result.stderr or create_result.stdout}"
-        
-        # Parse exec ID
-        try:
-            exec_data = json.loads(create_result.stdout)
-            exec_id = exec_data["Id"]
-        except (KeyError, json.JSONDecodeError) as e:
-            return f"BAD CREATE RESPONSE: {create_result.stdout}"
-        
-        # Validate exec ID format (64 character hex string)
-        if not re.match(r'^[0-9a-f]{64}$', exec_id):
-            return f"No exec Id parsed; aborting. Got: {exec_id}"
-        
-        # Start exec instance using curl
-        start_cmd = [
-            "curl", "-N", "--silent", "--show-error", "--fail-with-body",
-            "--unix-socket", "/var/run/docker.sock",
-            "-H", "Content-Type: application/json",
-            "-d", '{"Detach":false,"Tty":true}',
-            f"http://localhost/exec/{exec_id}/start"
-        ]
-        
-        start_result = subprocess.run(start_cmd, capture_output=True, text=True, timeout=60)
-        if start_result.returncode != 0:
-            return f"START-EXEC ERROR: {start_result.stderr or start_result.stdout}"
-        
-        return start_result.stdout
-        
-    except subprocess.TimeoutExpired:
-        return "Command timed out"
-    except Exception as e:
-        return f"Unexpected error: {str(e)}"
-
-@tool(description=BASH_COMMAND_FOR_RAILS_DESCRIPTION)
-def bash_command(
-    command: str, 
-    tool_call_id: Annotated[str, InjectedToolCallId],
-    workdir: str = WORKDIR
-) -> Command:
-    # 🚨 Safeguard against secret exfiltration attempts
-    forbidden_patterns = [".env", "ENV["]
-    for pattern in forbidden_patterns:
-        if pattern.lower() in command.lower():
-            result = f"Blocked: use of '{pattern}' is not allowed for security reasons. Contact a LlamaPress admin for guidance in retrieving sensitive .env information."
-            return Command(
-                update={
-                    "messages": [
-                        ToolMessage(result, tool_call_id=tool_call_id)
-                    ],
-                }
-            )
-    
-    result = rails_api_sh(command, workdir)
-    
-    return Command(
-        update={
-            "messages": [
-                ToolMessage(f"Command output:\n{result}", tool_call_id=tool_call_id)
-            ],
-        }
-    )
-
-tavily_client = TavilyClient(api_key=os.environ["TAVILY_API_KEY"])
-@tool(description=INTERNET_SEARCH_DESCRIPTION)
-# Search tool to use to do research
-def internet_search(
-    query: str,
-    max_results: int = 5,
-    include_raw_content: bool = False,
-):
-    search_docs = tavily_client.search(
-        query,
-        max_results=max_results,
-        include_raw_content=include_raw_content,
-        topic="general",
-    )
-    return search_docs
-
 @tool(description=GIT_STATUS_DESCRIPTION)
 def git_status(
     tool_call_id: Annotated[str, InjectedToolCallId],
@@ -798,11 +658,85 @@ def github_cli_command(
         }
     )
 
-@tool(description=VIEW_CURRENT_PAGE_HTML_DESCRIPTION)
-def view_page(state: Annotated[RailsAgentState, InjectedState], tool_call_id: Annotated[str, InjectedToolCallId]):
-    debug_info = state.get("debug_info")
-    return Command(
-        update={
-            "messages": [ToolMessage(debug_info, tool_call_id=tool_call_id)],
-    }
+
+@tool(description=STIMULUS_EDIT_DESCRIPTION)
+def edit_stimulus_controller(
+    old_string: str,
+    new_string: str,
+    tool_call_id: Annotated[str, InjectedToolCallId],
+    replace_all: bool = False,
+) -> Command:
+    full_path = APP_DIR / "rails" / "app" / "javascript" / "controllers" / "prototypes" / "global_controller.js"
+
+    if not full_path.exists():
+        return Command(update={"messages": [ToolMessage(f"Error: Stimulus controller not found at {full_path}", tool_call_id=tool_call_id)]})
+
+    try:
+        content = full_path.read_text()
+    except Exception as e:
+        return Command(update={"messages": [ToolMessage(f"Error reading Stimulus controller: {e}", tool_call_id=tool_call_id)]})
+
+    if old_string not in content:
+        return Command(update={"messages": [ToolMessage(f"Error: String not found in Stimulus controller: '{old_string}'", tool_call_id=tool_call_id)]})
+
+    if not replace_all:
+        occurrences = content.count(old_string)
+        if occurrences > 1:
+            return Command(update={"messages": [ToolMessage(f"Error: String '{old_string}' appears {occurrences} times. Use replace_all=True or provide more context.", tool_call_id=tool_call_id)]})
+
+    if replace_all:
+        new_content = content.replace(old_string, new_string)
+        result_msg = f"Replaced all instances of '{old_string}'"
+    else:
+        new_content = content.replace(old_string, new_string, 1)
+        result_msg = f"Replaced first occurrence of '{old_string}'"
+
+    try:
+        full_path.write_text(new_content)
+    except Exception as e:
+        return Command(update={"messages": [ToolMessage(f"Error writing to Stimulus controller: {e}", tool_call_id=tool_call_id)]})
+
+    return Command(update={"messages": [ToolMessage(result_msg, tool_call_id=tool_call_id)]})
+
+
+@tool(description=STIMULUS_READ_DESCRIPTION)
+def read_stimulus_controller(
+    offset: int = 0,
+    limit: int = 2000,
+) -> str:
+    full_path = (
+        APP_DIR
+        / "rails"
+        / "app"
+        / "javascript"
+        / "controllers"
+        / "prototypes"
+        / "global_controller.js"
     )
+
+    if not full_path.exists():
+        return f"Error: Stimulus controller not found at {full_path}"
+
+    try:
+        content = full_path.read_text()
+    except Exception as e:
+        return f"Error reading Stimulus controller: {e}"
+
+    if not content or content.strip() == "":
+        return "System reminder: Stimulus controller exists but has empty contents"
+
+    lines = content.splitlines()
+    start_idx = offset
+    end_idx = min(start_idx + limit, len(lines))
+
+    if start_idx >= len(lines):
+        return f"Error: Line offset {offset} exceeds file length ({len(lines)} lines)"
+
+    result_lines = []
+    for i in range(start_idx, end_idx):
+        line_content = lines[i]
+        if len(line_content) > 2000:
+            line_content = line_content[:2000]
+        result_lines.append(f"{i+1:6d}\t{line_content}")
+
+    return "\n".join(result_lines)
