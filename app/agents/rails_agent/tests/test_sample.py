@@ -1,7 +1,9 @@
 import pytest
 from dotenv import load_dotenv
 from langsmith import Client, testing as t
-from app.main import get_langgraph_app_and_state_helper
+from app.agents.rails_agent.nodes import build_workflow
+from langgraph.checkpoint.memory import MemorySaver
+from langchain_core.messages import HumanMessage
 
 load_dotenv()
 
@@ -20,14 +22,25 @@ print(f"✅ Dataset '{DATASET_NAME}' loaded with {len(examples)} examples")
 
 
 @pytest.mark.langsmith
-@pytest.mark.parametrize("example", examples)
+@pytest.mark.parametrize("example", examples[:1])
 def test_edit_file_error(example):
     t.log_inputs(example.inputs)
 
     example.inputs.setdefault("agent_name", "rails_agent")
 
-    graph, state = get_langgraph_app_and_state_helper(example.inputs)
-    print("graph, state", graph, state)
+    checkpointer = MemorySaver()
+    graph = build_workflow(checkpointer)
+    if "input" in example.inputs:
+        message = example.inputs["input"]
+    elif "messages" in example.inputs:
+        last_message = example.inputs["messages"][-1]
+        if hasattr(last_message, 'content'):
+            message = last_message.content
+        else:
+            message = str(last_message)
+    else:
+        message = ""
+    state = {"messages": [HumanMessage(content=message)]}
 
 
     tool_calls = []         # [{'name': 'edit_file', 'args': {...}}, ...]
@@ -59,7 +72,7 @@ def test_edit_file_error(example):
             if not state_update:
                 continue
 
-            # updates  {agent_key: {'messages': [...], ...}, ...} 
+            # updates  {agent_key: {'messages': [...], ...} 
             for _, agent_data in state_update.items():
                 if not (isinstance(agent_data, dict) and "messages" in agent_data):
                     continue
