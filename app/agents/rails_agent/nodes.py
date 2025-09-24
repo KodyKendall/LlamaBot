@@ -27,7 +27,7 @@ from app.agents.rails_agent.tools import write_todos, write_file, read_file, ls,
 from app.agents.rails_agent.prompts import RAILS_AGENT_PROMPT
 
 from app.agents.rails_agent.prototype_agent.nodes import build_workflow as build_prototype_agent
-from app.agents.rails_agent.planning_agent import build_workflow as build_planning_agent
+# from app.agents.rails_agent.planning_agent import build_workflow as build_planning_agent
 
 import logging
 logger = logging.getLogger(__name__)
@@ -51,7 +51,7 @@ default_tools = [write_todos,
          git_status, git_commit, git_command, github_cli_command, internet_search]
 
 # Node
-def leonardo(state: RailsAgentState) -> Command[Literal["tools", "prototype_agent", "planning_agent", END]]:
+def leonardo(state: RailsAgentState) -> Command[Literal["tools"]]:
    llm = ChatOpenAI(model="gpt-4.1")
 
    view_path = (state.get('debug_info') or {}).get('view_path')
@@ -94,16 +94,16 @@ def leonardo(state: RailsAgentState) -> Command[Literal["tools", "prototype_agen
    response = llm_with_tools.invoke(messages)
    return {"messages": [llm_with_tools.invoke(messages)]}
 
-def should_continue(state: RailsAgentState) -> Literal["tools", "prototype_agent", "planning_agent", END]:
-    last_message = state['messages'][-1]
-    if last_message.tool_calls:
-        return "tools"
-    if isinstance(last_message, Command):
-        if last_message.goto == "prototype_agent":
-            return "prototype_agent"
-        if last_message.goto == "planning_agent":
-            return "planning_agent"
-    return END
+# def should_continue(state: RailsAgentState) -> Literal["tools", "prototype_agent", "planning_agent", END]:
+#     last_message = state['messages'][-1]
+#     if last_message.tool_calls:
+#         return "tools"
+#     if isinstance(last_message, Command):
+#         if last_message.goto == "prototype_agent":
+#             return "prototype_agent"
+#         if last_message.goto == "planning_agent":
+#             return "planning_agent"
+#     return END
 
 # Graph
 def build_workflow(checkpointer=None):
@@ -114,21 +114,22 @@ def build_workflow(checkpointer=None):
     builder.add_node("tools", ToolNode(default_tools))
     
     # sub-agents:
-    builder.add_node("prototype_agent", build_prototype_agent(checkpointer=checkpointer))
-    builder.add_node("planning_agent", build_planning_agent(checkpointer=checkpointer))
+    # builder.add_node("prototype_agent", build_prototype_agent(checkpointer=checkpointer))
+    # builder.add_node("planning_agent", build_planning_agent(checkpointer=checkpointer))
 
     # Define edges: these determine how the control flow moves
     builder.add_edge(START, "leonardo")
 
     builder.add_conditional_edges(
         "leonardo",
-        should_continue,
-        {"tools": "tools", "prototype_agent": "prototype_agent", "planning_agent": "planning_agent", END: END},
+        tools_condition,
+        # should_continue,
+        # {"tools": "tools", "prototype_agent": "prototype_agent", "planning_agent": "planning_agent", END: END},
     )
 
     builder.add_edge("tools", "leonardo")
-    builder.add_edge("prototype_agent", END)
-    builder.add_edge("planning_agent", END)
+    # builder.add_edge("prototype_agent", END)
+    # builder.add_edge("planning_agent", END)
 
     react_graph = builder.compile(checkpointer=checkpointer)
 
