@@ -22,7 +22,7 @@ print(f"✅ Dataset '{DATASET_NAME}' loaded with {len(examples)} examples")
 
 
 @pytest.mark.langsmith
-@pytest.mark.parametrize("example", examples[:1])
+@pytest.mark.parametrize("example", examples)
 def test_edit_file_error(example):
     t.log_inputs(example.inputs)
 
@@ -89,21 +89,29 @@ def test_edit_file_error(example):
                                 or (tc.get("function") or {}).get("name"))
                         args = (tc.get("args")
                                 or (tc.get("function") or {}).get("arguments"))
+                        # --- Path Fixing ---
+                        if isinstance(args, dict) and "file_path" in args:
+                            fpath = args["file_path"]
+                            if fpath.startswith("app/views/"):
+                                args["file_path"] = fpath.replace("app/views/", "views/", 1)
+                        # ---
                         tool_calls.append({"name": name, "args": args})
                         if name == "edit_file":
                             called_edit = True
 
-                # ToolMessage
                 for m in messages:
                     if getattr(m, "type", None) == "tool":
                         content = getattr(m, "content", "")
                         tool_messages.append(content)
-                        if isinstance(content, str) and (
-                            "Error:" in content
-                            or "String not found" in content
-                            or "appears " in content
-                        ):
-                            errors.append(content)
+                        print("TOOL MESSAGE:", content)
+
+                        if isinstance(content, str):
+                            if (
+                                "Error:" in content
+                                or "String not found" in content
+                                or "appears " in content
+                            ):
+                                errors.append(content)
 
     except Exception as e:
         errors.append(f"EXCEPTION: {e}")
