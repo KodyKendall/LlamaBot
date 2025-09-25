@@ -37,6 +37,7 @@ services:
     # command: bash -c "python init_pg_checkpointer.py --uri $DB_URI && uvicorn main:app --host 0.0.0.0 --port 8000"
     volumes:
       - ./app:/app/app
+      - ./llamapress/rails:/app/app/rails
       - auth_data:/app/auth.json
       - /var/run/docker.sock:/var/run/docker.sock
     ports:
