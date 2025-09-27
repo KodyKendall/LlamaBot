@@ -62,6 +62,22 @@ export HOSTED_DOMAIN
 RAILS_HOSTED_DOMAIN=rails-$HOSTED_DOMAIN
 
 # ---------------------------------------------------------------------
+# 0. Setup Swap (prevents OOM kills on small VMs)
+# ---------------------------------------------------------------------
+if ! swapon --show | grep -q '/swapfile'; then
+  echo "📦 Setting up 4G swapfile..."
+  sudo fallocate -l 4G /swapfile
+  sudo chmod 600 /swapfile
+  sudo mkswap /swapfile
+  sudo swapon /swapfile
+  echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+  # Tuning: prefer RAM, but use swap as fallback
+  sudo sysctl vm.swappiness=10
+  echo 'vm.swappiness=10' | sudo tee -a /etc/sysctl.conf
+fi
+
+
+# ---------------------------------------------------------------------
 # 1. Install Docker & Compose if not present -- non-interactive
 # ---------------------------------------------------------------------
 if ! command -v docker >/dev/null 2>&1; then
