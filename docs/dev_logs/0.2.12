@@ -1,3 +1,4 @@
+v0.2.12:
 09/10/2025: 
 - Change "llamabot" to a more generalized, default agent to be "leo" that is easier to customize within LlamaPress apps.
 
