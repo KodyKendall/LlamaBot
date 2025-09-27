@@ -94,9 +94,9 @@ echo "curl -fsSL "https://raw.githubusercontent.com/KodyKendall/LlamaBot/refs/he
 
 ssh $INSTANCE
 
-# REGION=us-east-2
 # REGION=us-east-1
-# INSTANCE=RailsAgent
+# REGION=us-east-2
+# INSTANCE=HistoryEducation
 # # LIST ALL INSTANCES:
 
 # aws lightsail get-instances \
