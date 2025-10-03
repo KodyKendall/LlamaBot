@@ -2,7 +2,7 @@ version: "3.8"
 
 services:
   llamapress:
-    image: kody06/llamapress-simple:0.1.17          # <— pre-built tag
+    image: kody06/llamapress-simple:0.2.2          # <— pre-built tag
     env_file: .env                           # read secrets from this file
     environment:
       - RAILS_ENV=development
@@ -25,7 +25,7 @@ services:
       - llama-network
 
   llamabot:
-    image: kody06/llamabot:0.2.12
+    image: kody06/llamabot:0.2.14b
     # build:
     #   context: .
     #   dockerfile: Dockerfile
