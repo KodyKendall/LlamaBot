@@ -8,7 +8,8 @@ from langchain_core.messages import HumanMessage
 load_dotenv()
 
 client = Client()
-DATASET_NAME = "Asahi-Evals-Leonardo"
+# DATASET_NAME = "Asahi-Evals-Leonardo"
+DATASET_NAME = "Hello-World-Leonardo-Basic-Evals"
 
 dataset = client.read_dataset(dataset_name=DATASET_NAME)
 if not dataset:
@@ -34,7 +35,10 @@ def test_llm_produces_output(example):
     inputs = example.inputs
 
     # Call the workflow with the dataset input
-    result = workflow.invoke({"messages": [HumanMessage(content=inputs["input"])]})
+    result = workflow.invoke(
+        {"messages": [inputs["messages"][-1]]},
+        config={"configurable": {"thread_id": str(example.id)}, "recursion_limit": 100},
+    )
 
     # Assert that we got some kind of output
     assert result is not None, "❌ Model returned None"
