@@ -3,6 +3,7 @@ set -e
 read -p "Name of instance: " INSTANCE
 read -p "Path to identity file: (defaults to ~/.ssh/LightsailDefaultKey-us-east-2.pem)" IDENTITY_FILE
 export INSTANCE
+export DOMAIN=llamapress.ai.
 export REGION=us-east-2
 export AZ=${REGION}a
 export BLUEPRINT=ubuntu_24_04
@@ -32,7 +33,6 @@ Host $INSTANCE
         IdentitiesOnly yes
 EOF
 
-export DOMAIN=llamapress.ai.   
 export ZONE_ID=$(aws route53 list-hosted-zones-by-name \
   --dns-name "$DOMAIN" --query 'HostedZones[0].Id' --output text | sed 's|/hostedzone/||')
 echo $ZONE_ID
@@ -94,9 +94,9 @@ echo "curl -fsSL "https://raw.githubusercontent.com/KodyKendall/LlamaBot/refs/he
 
 ssh $INSTANCE
 
-# REGION=us-east-2
 # REGION=us-east-1
-# INSTANCE=RailsAgent
+# REGION=us-east-2
+# INSTANCE=HistoryEducation
 # # LIST ALL INSTANCES:
 
 # aws lightsail get-instances \

@@ -1,0 +1,9 @@
+{
+    "dependencies": ["."],
+    "graphs": {
+      "llamabot": "./app/agents/llamabot/nodes.py:build_workflow",
+      "leo": "./app/agents/llamabot/nodes.py:build_workflow",
+      "llamapress": "./app/agents/llamapress/nodes.py:build_workflow",
+      "rails_agent": "./app/agents/rails_agent/nodes.py:build_workflow"
+    }
+  }

@@ -1,7 +1,7 @@
 set -e
 
 read -p "IP Address: " IPADDRESS
-export INSTANCE=spot
+export INSTANCE=LP-Test5
 export DOMAIN=llamapress.ai.
 export ZONE_ID=$(aws route53 list-hosted-zones-by-name \
   --dns-name "$DOMAIN" --query 'HostedZones[0].Id' --output text | sed 's|/hostedzone/||')
