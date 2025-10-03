@@ -92,7 +92,7 @@ def leonardo(state: RailsAgentState) -> Command[Literal["tools"]]:
    messages = messages + [HumanMessage(content="<NOTE_FROM_SYSTEM> The user is in engineer mode. You are allowed to use the tools. Here are the tools you can use: tools = [write_todos, ls, read_file, write_file, edit_file, search_file, bash_command, git_status, git_commit, git_command, github_cli_command, internet_search] </NOTE_FROM_SYSTEM>")]
    llm_with_tools = llm.bind_tools(tools)
    response = llm_with_tools.invoke(messages)
-   return {"messages": [llm_with_tools.invoke(messages)]}
+   return {"messages": [response]}
 
 # def should_continue(state: RailsAgentState) -> Literal["tools", "prototype_agent", "planning_agent", END]:
 #     last_message = state['messages'][-1]
