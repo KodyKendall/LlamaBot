@@ -14,4 +14,6 @@ app/agents/private
 
 llamapress/*
 auth.json
+venv
+.DS_Store
 new-a-record.json
