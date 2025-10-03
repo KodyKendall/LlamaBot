@@ -45,6 +45,7 @@ def test_llm_produces_output(example):
     assert isinstance(result, dict), "❌ Unexpected return type"
     assert "messages" in result, "❌ No messages key in result"
     assert any(m.content.strip() for m in result["messages"]), "❌ Empty response"
+    # breakpoint()
 
 # @pytest.mark.langsmith
 # @pytest.mark.parametrize("example", examples)
