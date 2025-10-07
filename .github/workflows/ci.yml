@@ -71,10 +71,10 @@ jobs:
 
       # 4. Build the Docker image using docker-compose
       - name: Build the llamabot service
-        run: docker-compose build llamabot
+        run: docker compose build llamabot
 
       # 5. Run the tests
       # This command starts the llamabot service and its dependencies,
       # runs the test script, and then exits.
       - name: Run Pytest suite
-        run: docker-compose run --rm llamabot python app/run_tests.py all
+        run: docker compose run --rm llamabot python app/run_tests.py all
