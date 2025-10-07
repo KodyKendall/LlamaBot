@@ -27,12 +27,13 @@ jobs:
           POSTGRES_DB: llamapress_production
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
-        # Health check to ensure postgres is ready before starting the tests
-        healthcheck:
-          test: ["CMD-SHELL", "pg_isready -U postgres -d llamapress_production"]
-          interval: 5s
-          timeout: 5s
-          retries: 5
+        # Health check options to ensure postgres is ready before starting tests.
+        # GitHub Actions uses 'options' instead of the 'healthcheck' key.
+        options: >-
+          --health-cmd "pg_isready -U postgres -d llamapress_production"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
         ports:
           # Maps port 5432 on the runner to port 5432 on the postgres container
           - 5432:5432
