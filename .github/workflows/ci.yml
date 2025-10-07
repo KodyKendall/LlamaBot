@@ -1,0 +1,92 @@
+# .github/workflows/ci.yml
+
+name: LlamaBot CI Tests
+
+# Controls when the action will run.
+on:
+  # Triggers the workflow on push events but only for the "main" branch
+  push:
+    branches: [ "main" ]
+  # Triggers the workflow on pull request events targeting the "main" branch
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  # This workflow contains a single job called "test"
+  test:
+    # The type of runner that the job will run on
+    runs-on: ubuntu-latest
+
+    # These services are spun up as separate containers and are available
+    # to the main job container on the same Docker network.
+    # This replaces the `db` and `redis` services from your docker-compose.yml.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: llamapress_production
+          POSTGRES_USER: postgres
+          # Using 'trust' is insecure for production but simplifies CI.
+          # It tells Postgres to allow any connection from its network without a password.
+          POSTGRES_HOST_AUTH_METHOD: trust
+        # Health check options to ensure postgres is ready before starting tests.
+        # GitHub Actions uses 'options' instead of the 'healthcheck' key.
+        options: >-
+          --health-cmd "pg_isready -U postgres -d llamapress_production"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          # Maps port 5432 on the runner to port 5432 on the postgres container
+          - 5432:5432
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+
+    steps:
+      # 1. Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. Create Docker Compose override file for CI
+      # This step ensures that we build the image from the Dockerfile in the repo
+      # instead of pulling a potentially outdated one from Docker Hub.
+      - name: Create Docker Compose override file for CI
+        run: |
+          cat <<EOF > docker-compose.ci.yml
+          services:
+            llamabot:
+              build:
+                context: .
+                dockerfile: Dockerfile
+          EOF
+      
+      # 3. Create .env file from GitHub Secrets
+      # This securely injects your secrets into an .env file that docker-compose will use.
+      - name: Create .env file
+        run: |
+          echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" >> .env
+          # No POSTGRES_PASSWORD needed now. The DB_URI points to the 'postgres' service container.
+          echo "DB_URI=postgresql://postgres@postgres:5432/llamapress_production" >> .env
+          echo "LANGCHAIN_TRACING_V2=false" >> .env
+          # Add any other required environment variables here
+
+      # 4. Build the Docker image using docker-compose
+      # This command starts the llamabot service and its dependencies,
+      # runs the test script, and then exits.
+      - name: Build the llamabot service
+        # Use both the original and the CI override file. The 'build' context from
+        # the CI file will override the 'image' from the main file.
+        run: docker compose -f docker-compose.yml -f docker-compose.ci.yml build llamabot
+
+      # 5. Run the tests
+      # This command starts the llamabot service and its dependencies,
+      # runs the test script, and then exits.
+      - name: Run Pytest suite
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust   # ✅ ensures db container becomes healthy
+          POSTGRES_PASSWORD: postgres     # set password for db container
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.ci.yml up --wait db
+          docker compose -f docker-compose.yml -f docker-compose.ci.yml run --rm llamabot python run_tests.py all

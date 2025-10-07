@@ -5,46 +5,52 @@ import pytest
 import json
 from unittest.mock import patch, MagicMock, AsyncMock
 from fastapi.testclient import TestClient
-from main import app, ChatMessage
+from main import app
 
 
 class TestMainEndpoints:
     """Test the main application endpoints."""
     
     @pytest.mark.asyncio
-    async def test_root_endpoint(self, async_client):
+    @patch("builtins.open")
+    async def test_root_endpoint(self, mock_open, async_client):
         """Test the root endpoint returns HTML."""
-        with patch("builtins.open", mock_open_html("home.html")):
-            response = await async_client.get("/")
-            assert response.status_code == 200
-            assert "text/html" in response.headers.get("content-type", "")
+        mock_open.return_value.__enter__.return_value.read.return_value = "<html><body><h1>Mock home.html</h1></body></html>"
+        response = await async_client.get("/")
+        assert response.status_code == 200
+        assert "text/html" in response.headers.get("content-type", "")
     
     @pytest.mark.asyncio
-    async def test_chat_endpoint(self, async_client):
+    @patch("builtins.open")
+    async def test_chat_endpoint(self, mock_open, async_client):
         """Test the chat endpoint returns HTML."""
-        with patch("builtins.open", mock_open_html("chat.html")):
-            response = await async_client.get("/chat")
-            assert response.status_code == 200
-            assert "text/html" in response.headers.get("content-type", "")
+        mock_open.return_value.__enter__.return_value.read.return_value = "<html><body><h1>Mock chat.html</h1></body></html>"
+        response = await async_client.get("/chat")
+        assert response.status_code == 200
+        assert "text/html" in response.headers.get("content-type", "")
     
     @pytest.mark.asyncio
-    async def test_page_endpoint(self, async_client):
+    @patch("builtins.open")
+    async def test_page_endpoint(self, mock_open, async_client):
         """Test the page endpoint returns HTML."""
-        with patch("builtins.open", mock_open_html("../page.html")):
-            response = await async_client.get("/page")
-            assert response.status_code == 200
-            assert "text/html" in response.headers.get("content-type", "")
+        mock_open.return_value.__enter__.return_value.read.return_value = "<html><body><h1>Mock ../page.html</h1></body></html>"
+        response = await async_client.get("/page")
+        assert response.status_code == 200
+        assert "text/html" in response.headers.get("content-type", "")
     
     @pytest.mark.asyncio
-    async def test_conversations_endpoint(self, async_client):
+    @patch("builtins.open")
+    async def test_conversations_endpoint(self, mock_open, async_client):
         """Test the conversations endpoint returns HTML."""
-        with patch("builtins.open", mock_open_html("conversations.html")):
-            response = await async_client.get("/conversations")
-            assert response.status_code == 200
-            assert "text/html" in response.headers.get("content-type", "")
+        mock_open.return_value.__enter__.return_value.read.return_value = "<html><body><h1>Mock conversations.html</h1></body></html>"
+        response = await async_client.get("/conversations")
+        assert response.status_code == 200
+        assert "text/html" in response.headers.get("content-type", "")
     
     @pytest.mark.asyncio
-    async def test_available_agents_endpoint(self, async_client):
+    @patch("json.load")
+    @patch("builtins.open")
+    async def test_available_agents_endpoint(self, mock_open, mock_json_load, async_client):
         """Test the available agents endpoint returns JSON."""
         mock_langgraph_json = {
             "graphs": {
@@ -53,19 +59,18 @@ class TestMainEndpoints:
                 "react_agent": {}
             }
         }
+        mock_json_load.return_value = mock_langgraph_json
         
-        with patch("builtins.open", mock_open_html("../langgraph.json")), \
-             patch("json.load", return_value=mock_langgraph_json):
-            response = await async_client.get("/available-agents")
-            assert response.status_code == 200
-            assert response.headers.get("content-type") == "application/json"
-            
-            data = response.json()
-            assert "agents" in data
-            assert len(data["agents"]) == 3
-            assert "agent1" in data["agents"]
-            assert "agent2" in data["agents"]
-            assert "react_agent" in data["agents"]
+        response = await async_client.get("/available-agents")
+        assert response.status_code == 200
+        assert response.headers.get("content-type") == "application/json"
+        
+        data = response.json()
+        assert "agents" in data
+        assert len(data["agents"]) == 3
+        assert "agent1" in data["agents"]
+        assert "agent2" in data["agents"]
+        assert "react_agent" in data["agents"]
 
 
 class TestChatMessage:
@@ -89,7 +94,7 @@ class TestChatMessage:
                 "agent": "test_agent"
             }
             
-            response = await async_client.post("/chat-message", json=chat_data)
+            response = await async_client.post("/llamabot-chat-message", json=chat_data)
             assert response.status_code == 200
             assert "text/event-stream" in response.headers.get("content-type", "")
     
@@ -104,7 +109,7 @@ class TestChatMessage:
                 "message": "Hello without thread_id"
             }
             
-            response = await async_client.post("/chat-message", json=chat_data)
+            response = await async_client.post("/llamabot-chat-message", json=chat_data)
             assert response.status_code == 200
     
     @pytest.mark.asyncio
@@ -126,7 +131,7 @@ class TestChatMessage:
                 "thread_id": "test_stream_thread"
             }
             
-            response = await async_client.post("/chat-message", json=chat_data)
+            response = await async_client.post("/llamabot-chat-message", json=chat_data)
             assert response.status_code == 200
             
             # The response should be a streaming response
@@ -182,30 +187,6 @@ class TestThreadsAndHistory:
         assert len(data["messages"]) == 2
 
 
-class TestChatMessageModel:
-    """Test the ChatMessage Pydantic model."""
-    
-    def test_chat_message_creation(self):
-        """Test creating a ChatMessage instance."""
-        message = ChatMessage(
-            message="Test message",
-            thread_id="test_thread",
-            agent="test_agent"
-        )
-        
-        assert message.message == "Test message"
-        assert message.thread_id == "test_thread"
-        assert message.agent == "test_agent"
-    
-    def test_chat_message_optional_fields(self):
-        """Test ChatMessage with optional fields."""
-        message = ChatMessage(message="Test message only")
-        
-        assert message.message == "Test message only"
-        assert message.thread_id is None
-        assert message.agent is None
-
-
 # Helper functions for mocking file operations
 def mock_open_html(filename):
     """Mock open function for HTML files."""
@@ -213,5 +194,4 @@ def mock_open_html(filename):
         mock_file = MagicMock()
         mock_file.read.return_value = f"<html><body><h1>Mock {filename}</h1></body></html>"
         mock_file.__enter__.return_value = mock_file
-        return mock_file
-    return mock_open 
+        return mock_open 

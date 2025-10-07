@@ -7,7 +7,6 @@ from unittest.mock import patch, MagicMock, AsyncMock
 from fastapi.testclient import TestClient
 from fastapi import WebSocketDisconnect
 from starlette.websockets import WebSocketState
-from app.websockets.exceptions import ConnectionClosed
 
 from app.websocket.web_socket_connection_manager import WebSocketConnectionManager
 from app.websocket.web_socket_handler import WebSocketHandler
@@ -103,7 +102,7 @@ class TestWebSocketConnectionManager:
         mock_ws1.send_json = AsyncMock()
         mock_ws1.client_state = WebSocketState.CONNECTED
         mock_ws2 = AsyncMock()
-        mock_ws2.send_json = AsyncMock(side_effect=ConnectionClosed(None, None))
+        mock_ws2.send_json = AsyncMock(side_effect=WebSocketDisconnect(1000))
         mock_ws2.client_state = WebSocketState.CONNECTED
         
         # Properly set up the manager's tracking
