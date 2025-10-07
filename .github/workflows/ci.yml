@@ -89,4 +89,4 @@ jobs:
           POSTGRES_PASSWORD: postgres     # set password for db container
         run: |
           docker compose -f docker-compose.yml -f docker-compose.ci.yml up --wait db
-          docker compose -f docker-compose.yml -f docker-compose.ci.yml run --rm llamabot python app/run_tests.py all
+          docker compose -f docker-compose.yml -f docker-compose.ci.yml run --rm llamabot python run_tests.py all
