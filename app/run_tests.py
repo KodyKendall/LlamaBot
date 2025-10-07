@@ -13,7 +13,7 @@ from pathlib import Path
 def run_command(cmd):
     """Run a command and return the result."""
     print(f"Running: {' '.join(cmd)}")
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
     
     if result.stdout:
         print(result.stdout)
@@ -25,28 +25,28 @@ def run_command(cmd):
 
 def run_all_tests():
     """Run all tests."""
-    return run_command(["pytest", "tests/", "--disable-warnings", "-q"])
+    return run_command([sys.executable, "-m", "pytest", "tests/", "--disable-warnings", "-q"])
 
 
 def run_unit_tests():
     """Run only unit tests."""
-    return run_command(["pytest", "tests/", "-m", "unit"])
+    return run_command([sys.executable, "-m", "pytest", "tests/", "-m", "unit"])
 
 
 def run_integration_tests():
     """Run only integration tests."""
-    return run_command(["pytest", "tests/", "-m", "integration"])
+    return run_command([sys.executable, "-m", "pytest", "tests/", "-m", "integration"])
 
 
 def run_websocket_tests():
     """Run only WebSocket tests."""
-    return run_command(["pytest", "tests/", "-m", "websocket"])
+    return run_command([sys.executable, "-m", "pytest", "tests/", "-m", "websocket"])
 
 
 def run_with_coverage():
     """Run tests with coverage report."""
     return run_command([
-        "pytest", 
+        sys.executable, "-m", "pytest", 
         "tests/", 
         "--cov=app", 
         "--cov=agents", 
@@ -58,13 +58,13 @@ def run_with_coverage():
 
 def run_specific_test(test_file):
     """Run a specific test file."""
-    return run_command(["pytest", f"tests/{test_file}", "-v"])
+    return run_command([sys.executable, "-m", "pytest", f"tests/{test_file}", "-v"])
 
 
 def run_clean_tests():
     """Run tests with minimal output (no warnings or verbose logging)."""
     return run_command([
-        "pytest", 
+        sys.executable, "-m", "pytest", 
         "tests/", 
         "--disable-warnings", 
         "-q",
@@ -134,11 +134,10 @@ def main():
     
     args = parser.parse_args()
     
-    # Change to the backend directory if not already there
-    backend_dir = Path(__file__).parent
-    if backend_dir.name == "backend":
-        import os
-        os.chdir(backend_dir)
+    # Change to the script's directory to ensure paths are correct
+    script_dir = Path(__file__).parent
+    import os
+    os.chdir(script_dir)
     
     # Add verbose flag if requested
     if args.verbose:

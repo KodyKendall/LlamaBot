@@ -5,6 +5,12 @@ from app.agents.rails_agent.nodes import build_workflow
 from langgraph.checkpoint.memory import MemorySaver
 from langchain_core.messages import HumanMessage
 
+#################### 
+# HOW TO RUN THIS TEST:
+# docker compose up -d 
+# docker compose exec -it llamabot pytest -s -v agents/rails_agent/tests/test_sample.py
+####################
+
 load_dotenv()
 
 client = Client()

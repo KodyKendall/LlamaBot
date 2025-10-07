@@ -1,0 +1,79 @@
+# .github/workflows/ci.yml
+
+name: LlamaBot CI Tests
+
+# Controls when the action will run.
+on:
+  # Triggers the workflow on push events but only for the "main" branch
+  push:
+    branches: [ "main" ]
+  # Triggers the workflow on pull request events targeting the "main" branch
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  # This workflow contains a single job called "test"
+  test:
+    # The type of runner that the job will run on
+    runs-on: ubuntu-latest
+
+    # These services are spun up as separate containers and are available
+    # to the main job container on the same Docker network.
+    # This replaces the `db` and `redis` services from your docker-compose.yml.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: llamapress_production
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+        # Health check to ensure postgres is ready before starting the tests
+        healthcheck:
+          test: ["CMD-SHELL", "pg_isready -U postgres -d llamapress_production"]
+          interval: 5s
+          timeout: 5s
+          retries: 5
+        ports:
+          # Maps port 5432 on the runner to port 5432 on the postgres container
+          - 5432:5432
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+
+    steps:
+      # 1. Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. Prepare docker-compose.yml for local build
+      # This step ensures that we build the image from the Dockerfile in the repo
+      # instead of pulling a potentially outdated one from Docker Hub.
+      - name: Use local Dockerfile for build
+        run: |
+          sed -i '/image: kody06\/llamabot/s/^/#/' docker-compose.yml
+          sed -i '/# build:/s/^# //' docker-compose.yml
+          sed -i '/#   context:/s/^# //' docker-compose.yml
+          sed -i '/#   dockerfile:/s/^# //' docker-compose.yml
+      
+      # 3. Create .env file from GitHub Secrets
+      # This securely injects your secrets into an .env file that docker-compose will use.
+      - name: Create .env file
+        run: |
+          echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" >> .env
+          echo "POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}" >> .env
+          # The DB_URI needs to point to the postgres service container.
+          # 'postgres' is the service name defined above, which acts as the hostname.
+          echo "DB_URI=postgresql://postgres:${{ secrets.POSTGRES_PASSWORD }}@postgres:5432/llamapress_production" >> .env
+          echo "LANGCHAIN_TRACING_V2=false" >> .env
+          # Add any other required environment variables here
+
+      # 4. Build the Docker image using docker-compose
+      - name: Build the llamabot service
+        run: docker-compose build llamabot
+
+      # 5. Run the tests
+      # This command starts the llamabot service and its dependencies,
+      # runs the test script, and then exits.
+      - name: Run Pytest suite
+        run: docker-compose run --rm llamabot python app/run_tests.py all
