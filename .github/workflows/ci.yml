@@ -26,7 +26,9 @@ jobs:
         env:
           POSTGRES_DB: llamapress_production
           POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          # Using 'trust' is insecure for production but simplifies CI.
+          # It tells Postgres to allow any connection from its network without a password.
+          POSTGRES_HOST_AUTH_METHOD: trust
         # Health check options to ensure postgres is ready before starting tests.
         # GitHub Actions uses 'options' instead of the 'healthcheck' key.
         options: >-
@@ -62,10 +64,8 @@ jobs:
       - name: Create .env file
         run: |
           echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" >> .env
-          echo "POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}" >> .env
-          # The DB_URI needs to point to the postgres service container.
-          # 'postgres' is the service name defined above, which acts as the hostname.
-          echo "DB_URI=postgresql://postgres:${{ secrets.POSTGRES_PASSWORD }}@postgres:5432/llamapress_production" >> .env
+          # No POSTGRES_PASSWORD needed now. The DB_URI points to the 'postgres' service container.
+          echo "DB_URI=postgresql://postgres@postgres:5432/llamapress_production" >> .env
           echo "LANGCHAIN_TRACING_V2=false" >> .env
           # Add any other required environment variables here
 
