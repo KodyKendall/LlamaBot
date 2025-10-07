@@ -86,6 +86,7 @@ jobs:
       - name: Run Pytest suite
         env:
           POSTGRES_HOST_AUTH_METHOD: trust   # ✅ ensures db container becomes healthy
+          POSTGRES_PASSWORD: postgres     # set password for db container
         run: |
           docker compose -f docker-compose.yml -f docker-compose.ci.yml up --wait db
           docker compose -f docker-compose.yml -f docker-compose.ci.yml run --rm llamabot python app/run_tests.py all
