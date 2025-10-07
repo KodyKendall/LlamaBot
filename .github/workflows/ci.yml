@@ -49,15 +49,18 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2. Prepare docker-compose.yml for local build
+      # 2. Create Docker Compose override file for CI
       # This step ensures that we build the image from the Dockerfile in the repo
       # instead of pulling a potentially outdated one from Docker Hub.
-      - name: Use local Dockerfile for build
+      - name: Create Docker Compose override file for CI
         run: |
-          sed -i '/image: kody06\/llamabot/s/^/#/' docker-compose.yml
-          sed -i '/# build:/s/^# //' docker-compose.yml
-          sed -i '/#   context:/s/^# //' docker-compose.yml
-          sed -i '/#   dockerfile:/s/^# //' docker-compose.yml
+          cat <<EOF > docker-compose.ci.yml
+          services:
+            llamabot:
+              build:
+                context: .
+                dockerfile: Dockerfile
+          EOF
       
       # 3. Create .env file from GitHub Secrets
       # This securely injects your secrets into an .env file that docker-compose will use.
@@ -70,11 +73,15 @@ jobs:
           # Add any other required environment variables here
 
       # 4. Build the Docker image using docker-compose
+      # This command starts the llamabot service and its dependencies,
+      # runs the test script, and then exits.
       - name: Build the llamabot service
-        run: docker compose build llamabot
+        # Use both the original and the CI override file. The 'build' context from
+        # the CI file will override the 'image' from the main file.
+        run: docker compose -f docker-compose.yml -f docker-compose.ci.yml build llamabot
 
       # 5. Run the tests
       # This command starts the llamabot service and its dependencies,
       # runs the test script, and then exits.
       - name: Run Pytest suite
-        run: docker compose run --rm llamabot python app/run_tests.py all
+        run: docker compose -f docker-compose.yml -f docker-compose.ci.yml run --rm llamabot python app/run_tests.py all
