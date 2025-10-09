@@ -1089,6 +1089,196 @@
                 height: 12px;
             }
         }
+
+        .agent-todo-container {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 12px;
+            padding: 20px;
+            margin: 10px 0;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .todo-section {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 12px;
+        }
+
+        .todo-section:last-child {
+            margin-bottom: 0;
+        }
+
+        .todo-section-title {
+            font-size: 0.75em;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #64748b;
+            margin-bottom: 10px;
+            padding-bottom: 6px;
+            border-bottom: 2px solid #e2e8f0;
+        }
+
+        .todo-container {
+            padding: 8px 0;
+        }
+
+        .todo-section-header {
+            font-size: 0.7em;
+            font-weight: 600;
+            text-transform: uppercase;
+            color: rgba(255, 255, 255, 0.6);
+            margin: 12px 0 6px 0;
+            letter-spacing: 0.5px;
+        }
+
+        .todo-item {
+            display: flex;
+            align-items: flex-start;
+            padding: 8px 10px;
+            margin: 4px 0;
+            background-color: rgba(255, 255, 255, 0.08);
+            border-radius: 6px;
+            cursor: pointer;
+            border-left: 3px solid transparent;
+            transition: background-color 0.2s ease;
+        }
+
+        .todo-item:hover {
+            background-color: rgba(255, 255, 255, 0.12);
+        }
+
+        .todo-icon {
+            margin-right: 10px;
+            font-size: 1em;
+            min-width: 18px;
+            margin-top: 2px;
+            font-weight: bold;
+        }
+
+        /* In Progress styling - with shimmer effect */
+        .todo-status-in-progress {
+            border-left-color: #60a5fa;
+        }
+
+        .todo-status-in-progress .todo-icon {
+            color: #60a5fa;
+        }
+
+        .todo-status-in-progress .todo-text {
+            animation: shimmer 2s ease-in-out infinite;
+            background: linear-gradient(
+                90deg,
+                rgba(255, 255, 255, 0.9) 0%,
+                rgba(255, 255, 255, 1) 50%,
+                rgba(255, 255, 255, 0.9) 100%
+            );
+            background-size: 200% 100%;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        /* Pending styling */
+        .todo-status-pending {
+            border-left-color: #fbbf24;
+        }
+
+        .todo-status-pending .todo-icon {
+            color: #fbbf24;
+        }
+
+        .todo-status-pending .todo-text {
+            color: #e5e5e5;
+        }
+
+        /* Completed styling - with green check and strikethrough */
+        .todo-status-completed {
+            border-left-color: #34d399;
+            opacity: 0.7;
+        }
+
+        .todo-status-completed .todo-icon {
+            color: #34d399;
+        }
+
+        .todo-status-completed .todo-text {
+            color: #a0a0a0;
+            text-decoration: line-through;
+        }
+
+        .todo-text {
+            flex: 1;
+            font-size: 0.9em;
+            line-height: 1.4;
+            color: var(--text-color);
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .todo-text.expanded {
+            -webkit-line-clamp: unset;
+            display: block;
+        }
+
+        /* Shimmer animation for in-progress tasks */
+        @keyframes shimmer {
+            0% {
+                background-position: -200% 0;
+            }
+            100% {
+                background-position: 200% 0;
+            }
+        }
+
+        .todo-in-progress {
+            border-left-color: #3b82f6;
+            background: linear-gradient(90deg, rgba(59, 130, 246, 0.05) 0%, white 100%);
+        }
+
+        .todo-pending {
+            border-left-color: #f59e0b;
+            background: linear-gradient(90deg, rgba(245, 158, 11, 0.05) 0%, white 100%);
+        }
+
+        .todo-completed {
+            border-left-color: #10b981;
+            background: linear-gradient(90deg, rgba(16, 185, 129, 0.05) 0%, white 100%);
+            opacity: 0.75;
+        }
+
+        .todo-in-progress .todo-icon {
+            color: #3b82f6;
+            animation: spin 2s linear infinite;
+        }
+
+        .todo-pending .todo-icon {
+            color: #f59e0b;
+        }
+
+        .todo-completed .todo-icon {
+            color: #10b981;
+        }
+
+        .todo-text {
+            flex: 1;
+            font-size: 0.9em;
+            line-height: 1.5;
+            color: #334155;
+        }
+
+        .todo-completed .todo-text {
+            text-decoration: line-through;
+            color: #94a3b8;
+        }
+
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body>
@@ -1553,18 +1743,66 @@
         function createCollapsibleToolMessage(toolName, firstArgument, toolArgs, toolResult) {
             const uniqueId = 'tool_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
             // <span class="tool-summary">${toolName == 'write_todos' ? '📝' : toolName == 'ls' ? '📁' : toolName == 'read_file' ? '📄' : toolName == 'edit_file' || toolName == 'write_file' ? '✏️': toolName == 'search_file' || toolName == 'internet_search' ? '🔍' : toolName == 'bash_command' ? '⚡' : '🔨'} ${toolName} ${firstArgument}</span>
-            return `
-                <div class="tool-collapsible" onclick="toggleToolCollapsible('${uniqueId}')">
-                    <span class="tool-summary">🔨${toolName} ${firstArgument}</span>
-                </div>
-                <div class="tool-content" id="${uniqueId}">
-                    <div class="tool-details">
-                        <strong>Arguments:</strong><br>
-                        <pre style="margin: 4px 0; font-size: 0.85em; white-space: pre-wrap;">${toolArgs}</pre>
-                        ${toolResult ? `<strong>Result:</strong><br><pre style="margin: 4px 0; font-size: 0.85em; white-space: pre-wrap;">${toolResult}</pre>` : ''}
+            console.log('toolName!!!', toolName);
+            if (toolName == 'write_todos') {
+                let todos = JSON.parse(toolArgs)['todos'];
+                
+                // Sort todos: in_progress → pending → completed
+                const statusOrder = { 'in_progress': 0, 'pending': 1, 'completed': 2 };
+                todos.sort((a, b) => statusOrder[a.status] - statusOrder[b.status]);
+                
+                let todoListHTML = '';
+                
+                // Current status for grouping
+                let currentStatus = null;
+                
+                todos.forEach((todo, index) => {
+                    // Add section header if status changed
+                    if (todo.status !== currentStatus) {
+                        currentStatus = todo.status;
+                        const sectionTitle = todo.status === 'in_progress' ? 'In Progress' :
+                                            todo.status === 'pending' ? 'Pending' : 'Completed';
+                        todoListHTML += `<div class="todo-section-header">${sectionTitle}</div>`;
+                    }
+                    
+                    const todoId = `todo-${uniqueId}-${index}`;
+                    const statusClass = `todo-status-${todo.status.replace('_', '-')}`; // ADD THIS LINE
+                    const icon = todo.status === 'completed' ? '✅' : 
+                                 todo.status === 'in_progress' ? '🎯' : '🕒';
+                    
+                    todoListHTML += `
+                        <div class="todo-item ${statusClass}" onclick="toggleTodo('${todoId}')">
+                            <span class="todo-icon">${icon}</span>
+                            <span class="todo-text" id="${todoId}">${todo.content}</span>
+                        </div>
+                    `;
+                });
+
+                return `
+                    <div class="tool-collapsible" onclick="toggleToolCollapsible('${uniqueId}')">
+                        <span class="tool-summary">🎯 Todo List (${todos.length} tasks)</span>
                     </div>
-                </div>
-            `;
+                    <div class="tool-content" id="${uniqueId}">
+                        <div class="todo-container">
+                            ${todoListHTML}
+                        </div>
+                    </div>
+                `;
+            }
+            else {
+                return `
+                    <div class="tool-collapsible" onclick="toggleToolCollapsible('${uniqueId}')">
+                        <span class="tool-summary">🔨${toolName} ${firstArgument}</span>
+                    </div>
+                    <div class="tool-content" id="${uniqueId}">
+                        <div class="tool-details">
+                            <strong>Arguments:</strong><br>
+                            <pre style="margin: 4px 0; font-size: 0.85em; white-space: pre-wrap;">${toolArgs}</pre>
+                            ${toolResult ? `<strong>Result:</strong><br><pre style="margin: 4px 0; font-size: 0.85em; white-space: pre-wrap;">${toolResult}</pre>` : ''}
+                        </div>
+                    </div>
+                `;
+            }
         }
 
         function updateCollapsibleToolMessage(messageDiv, toolResult) {
@@ -2215,6 +2453,12 @@
         
         // Load settings after other initializations
         loadSettingsFromCookies();
+
+        function toggleTodo(todoId) {
+            event.stopPropagation(); // Prevent triggering parent tool collapse
+            const todoText = document.getElementById(todoId);
+            todoText.classList.toggle('expanded');
+        }
     </script>
 </body>
 </html>
