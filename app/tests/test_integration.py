@@ -35,7 +35,7 @@ class TestApplicationIntegration:
                 "agent": "react_agent"
             }
             
-            response = await async_client.post("/chat-message", json=chat_data)
+            response = await async_client.post("/llamabot-chat-message", json=chat_data)
             
             # Verify the response
             assert response.status_code == 200
@@ -105,7 +105,9 @@ class TestApplicationIntegration:
         assert data2["messages"][0]["content"] == "Hello from thread_2"
     
     @pytest.mark.asyncio
-    async def test_available_agents_integration(self, async_client):
+    @patch("json.load")
+    @patch("builtins.open")
+    async def test_available_agents_integration(self, mock_open, mock_json_load, async_client):
         """Test the available agents endpoint integration."""
         mock_config = {
             "graphs": {
@@ -117,19 +119,20 @@ class TestApplicationIntegration:
                 }
             }
         }
+        mock_json_load.return_value = mock_config
+
+        response = await async_client.get("/available-agents")
         
-        with patch("builtins.open"), patch("json.load", return_value=mock_config):
-            response = await async_client.get("/available-agents")
-            
-            assert response.status_code == 200
-            data = response.json()
-            
-            assert "agents" in data
-            assert "react_agent" in data["agents"]
-            assert "write_html_agent" in data["agents"]
+        assert response.status_code == 200
+        data = response.json()
+        
+        assert "agents" in data
+        assert "react_agent" in data["agents"]
+        assert "write_html_agent" in data["agents"]
     
     @pytest.mark.asyncio 
-    async def test_html_endpoints_integration(self, async_client):
+    @patch("builtins.open")
+    async def test_html_endpoints_integration(self, mock_open, async_client):
         """Test all HTML-serving endpoints."""
         html_endpoints = [
             ("/", "home.html"),
@@ -139,13 +142,13 @@ class TestApplicationIntegration:
         ]
         
         for endpoint, filename in html_endpoints:
-            with patch("builtins.open", mock_open_html(filename)):
-                response = await async_client.get(endpoint)
-                
-                assert response.status_code == 200
-                assert "text/html" in response.headers.get("content-type", "")
-                content = response.text
-                assert f"Mock {filename}" in content
+            mock_open.return_value.__enter__.return_value.read.return_value = f"<html><body><h1>Mock {filename}</h1></body></html>"
+            response = await async_client.get(endpoint)
+            
+            assert response.status_code == 200
+            assert "text/html" in response.headers.get("content-type", "")
+            content = response.text
+            assert f"Mock {filename}" in content
     
     @pytest.mark.asyncio
     async def test_error_handling_integration(self, async_client, mock_build_workflow):
@@ -160,7 +163,7 @@ class TestApplicationIntegration:
                 "thread_id": "error_test_thread"
             }
             
-            response = await async_client.post("/chat-message", json=chat_data)
+            response = await async_client.post("/llamabot-chat-message", json=chat_data)
             
             # The response should still be 200 (streaming response)
             # but should contain error information in the stream
@@ -209,5 +212,4 @@ def mock_open_html(filename):
         mock_file = MagicMock()
         mock_file.read.return_value = f"<html><body><h1>Mock {filename}</h1></body></html>"
         mock_file.__enter__.return_value = mock_file
-        return mock_file
-    return mock_open 
+        return mock_open 

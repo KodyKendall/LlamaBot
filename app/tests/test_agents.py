@@ -4,179 +4,17 @@ Tests for agent functionality.
 import pytest
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
-import requests
 
-from app.agents.base_agent import BaseAgent
-from app.agents.llamabot_v1.nodes import run_rails_console_command, LlamaBotState
 from app.agents.llamapress.clone_agent import write_html_page, LlamaPressState
+# Note: BaseAgent class no longer exists in current codebase
+# from app.agents.base_agent import BaseAgent
 from langgraph.checkpoint.memory import MemorySaver
 
 
-class TestBaseAgent:
-    """Test the base agent functionality."""
-    
-    def test_base_agent_initialization(self):
-        """Test base agent initialization."""
-        # BaseAgent is abstract, so we need to create a concrete implementation
-        class ConcreteAgent(BaseAgent):
-            def run(self, input: str) -> str:
-                return f"Processed: {input}"
-        
-        agent = ConcreteAgent("test_agent", "A test agent")
-        assert agent.name == "test_agent"
-        assert agent.description == "A test agent"
-        assert hasattr(agent, 'llm')
-    
-    def test_base_agent_is_abstract(self):
-        """Test that BaseAgent is properly abstract."""
-        # This test ensures that BaseAgent cannot be instantiated directly
-        with pytest.raises(TypeError):
-            BaseAgent("test", "test")
+# Removed TestBaseAgent class - BaseAgent no longer exists in codebase
 
-
-class TestLlamaBotV1Nodes:
-    """Test LlamaBot V1 node functionality."""
-    
-    @patch('agents.llamabot_v1.nodes.requests.post')
-    @patch('agents.llamabot_v1.nodes.os.getenv')
-    def test_run_rails_console_command_success(self, mock_getenv, mock_post):
-        """Test successful rails console command execution."""
-        # Setup mocks
-        mock_getenv.return_value = "http://test-server.com"
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
-            'result': {'data': 'test_result'},
-            'type': 'success'
-        }
-        mock_post.return_value = mock_response
-        
-        # Create test state with all required fields
-        state = {
-            'api_token': 'test_token_123',
-            'agent_prompt': 'Test prompt',
-            'messages': []
-        }
-        
-        # Execute function using tool invoke
-        result = run_rails_console_command.invoke({
-            'rails_console_command': 'User.count',
-            'message_to_user': 'Counting users',
-            'internal_thoughts': 'Getting user count',
-            'state': state
-        })
-        
-        # Verify the request was made correctly
-        mock_post.assert_called_once_with(
-            "http://test-server.com/llama_bot/agent/command",
-            json={'command': 'User.count'},
-            headers={
-                'Content-Type': 'application/json',
-                'Authorization': 'LlamaBot test_token_123'
-            },
-            timeout=30
-        )
-        
-        # Verify the result
-        assert 'test_result' in result
-        assert isinstance(result, str)
-    
-    @patch('agents.llamabot_v1.nodes.requests.post')
-    @patch('agents.llamabot_v1.nodes.os.getenv')
-    def test_run_rails_console_command_http_error(self, mock_getenv, mock_post):
-        """Test rails console command with HTTP error."""
-        # Setup mocks
-        mock_getenv.return_value = "http://test-server.com"
-        mock_response = MagicMock()
-        mock_response.status_code = 401
-        mock_response.text = "Unauthorized"
-        mock_post.return_value = mock_response
-        
-        # Create test state with all required fields
-        state = {
-            'api_token': 'invalid_token',
-            'agent_prompt': 'Test prompt',
-            'messages': []
-        }
-        
-        # Execute function using tool invoke
-        result = run_rails_console_command.invoke({
-            'rails_console_command': 'User.count',
-            'message_to_user': 'Counting users',
-            'internal_thoughts': 'Getting user count',
-            'state': state
-        })
-        
-        # Verify error handling
-        assert "HTTP Error 401" in result
-        assert "Unauthorized" in result
-    
-    @patch('agents.llamabot_v1.nodes.requests.post')
-    @patch('agents.llamabot_v1.nodes.os.getenv')
-    def test_run_rails_console_command_connection_error(self, mock_getenv, mock_post):
-        """Test rails console command with connection error."""
-        # Setup mocks
-        mock_getenv.return_value = "http://test-server.com"
-        mock_post.side_effect = requests.exceptions.ConnectionError("Connection failed")
-        
-        # Create test state with all required fields
-        state = {
-            'api_token': 'test_token',
-            'agent_prompt': 'Test prompt',
-            'messages': []
-        }
-        
-        # Execute function using tool invoke
-        result = run_rails_console_command.invoke({
-            'rails_console_command': 'User.count',
-            'message_to_user': 'Counting users',
-            'internal_thoughts': 'Getting user count',
-            'state': state
-        })
-        
-        # Verify error handling
-        assert "Could not connect to Rails server" in result
-    
-    @patch('agents.llamabot_v1.nodes.requests.post')
-    @patch('agents.llamabot_v1.nodes.os.getenv')
-    def test_run_rails_console_command_missing_token(self, mock_getenv, mock_post):
-        """Test rails console command with missing API token."""
-        # Setup mocks
-        mock_getenv.return_value = "http://test-server.com"
-        mock_response = MagicMock()
-        mock_response.status_code = 401
-        mock_response.text = "Unauthorized"
-        mock_post.return_value = mock_response
-        
-        # Create test state with empty api_token to simulate missing token
-        state = {
-            'api_token': '',  # Use empty string instead of None
-            'agent_prompt': 'Test prompt',
-            'messages': []
-        }
-        
-        # Execute function using tool invoke
-        result = run_rails_console_command.invoke({
-            'rails_console_command': 'User.count',
-            'message_to_user': 'Counting users',
-            'internal_thoughts': 'Getting user count',
-            'state': state
-        })
-        
-        # Verify the request was made with empty token
-        mock_post.assert_called_once_with(
-            "http://test-server.com/llama_bot/agent/command",
-            json={'command': 'User.count'},
-            headers={
-                'Content-Type': 'application/json',
-                'Authorization': 'LlamaBot '
-            },
-            timeout=30
-        )
-        
-        # Verify error handling for unauthorized request
-        assert "HTTP Error 401" in result
-        assert "Unauthorized" in result
+# Removed TestLlamaBotV1Nodes class - llamabot_v1 module doesn't exist in current codebase
+# The agents.llamabot module exists but doesn't have the rails_console_command functions
 
 
 class TestLlamaPressNodes:
@@ -393,12 +231,12 @@ class TestWorkflowBuilding:
         checkpointer = MemorySaver()
         
         # Import and patch the actual build_workflow function
-        with patch('app.agents.react_agent.nodes.build_workflow') as mock_build:
+        with patch('app.agents.llamapress.nodes.build_workflow') as mock_build:
             mock_workflow = MagicMock()
             mock_build.return_value = mock_workflow
             
             # Import and call the function
-            from app.agents.react_agent.nodes import build_workflow
+            from app.agents.llamapress.nodes import build_workflow
             workflow = build_workflow(checkpointer=checkpointer)
             
             mock_build.assert_called_once_with(checkpointer=checkpointer)
@@ -556,10 +394,10 @@ class TestAgentErrorHandling:
         mock_checkpointer = MagicMock()
         mock_checkpointer.setup.side_effect = Exception("Invalid checkpointer")
         
-        with patch('app.agents.react_agent.nodes.build_workflow') as mock_build:
+        with patch('app.agents.llamapress.nodes.build_workflow') as mock_build:
             mock_build.side_effect = Exception("Invalid checkpointer configuration")
             
-            from app.agents.react_agent.nodes import build_workflow
+            from app.agents.llamapress.nodes import build_workflow
             
             with pytest.raises(Exception):
                 build_workflow(checkpointer=mock_checkpointer)
@@ -582,23 +420,7 @@ class TestAgentConfiguration:
         assert "description" in mock_config
         assert "llm_model" in mock_config
     
-    @pytest.mark.asyncio
-    async def test_agent_initialization_with_config(self):
-        """Test agent initialization with configuration."""
-        class ConfigurableAgent(BaseAgent):
-            def __init__(self, name: str, description: str, config: dict = None):
-                super().__init__(name, description)
-                self.config = config or {}
-            
-            def run(self, input: str) -> str:
-                return f"Configured agent processed: {input}"
-        
-        test_config = {"test_param": "test_value"}
-        agent = ConfigurableAgent("test_agent", "Test description", test_config)
-        
-        assert agent.name == "test_agent"
-        assert agent.config == test_config
-        assert agent.run("test input") == "Configured agent processed: test input"
+    # Removed test_agent_initialization_with_config - BaseAgent no longer exists
     
     @pytest.mark.asyncio
     async def test_agent_thread_isolation(self, mock_build_workflow):

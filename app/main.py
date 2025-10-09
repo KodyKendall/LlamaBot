@@ -23,7 +23,6 @@ from dotenv import load_dotenv
 from langchain_core.load import dumpd
 from langchain_openai import ChatOpenAI
 from langchain.schema import HumanMessage
-from langsmith import Client
 
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.checkpoint.base import CheckpointTuple
@@ -62,12 +61,6 @@ app.add_middleware(
 
 # Mount static directories
 
-# Initialize the ChatOpenAI client
-llm = ChatOpenAI(
-    model="o4-mini-2025-04-16"
-)
-
-client = Client(api_key=os.getenv("LANGSMITH_API_KEY"))
 
 # This is responsible for holding and managing all active websocket connections.
 manager = WebSocketConnectionManager(app) 

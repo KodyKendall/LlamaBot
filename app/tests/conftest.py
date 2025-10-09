@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from main import app, manager
 from langgraph.checkpoint.memory import MemorySaver
+from main import auth
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -58,7 +59,11 @@ def disable_langsmith_completely():
 @pytest_asyncio.fixture
 async def async_client():
     """Create an async HTTP client for testing."""
-    async with AsyncClient(base_url="http://test") as client:
+    app.dependency_overrides[auth] = lambda: "testuser"
+    
+    from fastapi.testclient import TestClient
+    
+    with TestClient(app) as client:
         # We need to patch the client to work with our FastAPI app
         from fastapi.testclient import TestClient
         sync_client = TestClient(app)
@@ -84,6 +89,8 @@ async def async_client():
                 return self._sync_client.patch(url, **kwargs)
 
         yield AsyncClientWrapper(sync_client)
+    
+    app.dependency_overrides = {}
 
 
 @pytest.fixture
