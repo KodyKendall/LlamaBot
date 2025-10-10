@@ -1402,7 +1402,8 @@
 
     <script>
         // AGENT = {NAME: 'llamabot', TYPE: 'default'};
-        // AGENT = {NAME: 'deep_research', TYPE: 'deep_agent'}; // uses create_react_agent which I believe is why we have to case into content in AIMessageChunk differently 
+        // AGENT = {NAME: 'deep_research', TYPE: 'claude_llm_model'}; // uses create_react_agent which I believe is why we have to case into content in AIMessageChunk differently 
+        // AGENT = {NAME: 'rails_agent', TYPE: 'claude_llm_model'};
         AGENT = {NAME: 'rails_agent', TYPE: 'default'};
 
         // WebSocket connection management
@@ -1438,6 +1439,11 @@
             
             try {
                 // Parse markdown to HTML
+                // if (AGENT.TYPE === 'claude_llm_model') {
+                if (Array.isArray(text)) {
+                 text = text[0].text;   
+                }
+
                 let html = marked.parse(text);
                 
                 // Basic XSS prevention - remove script tags and event handlers
@@ -1449,7 +1455,12 @@
             } catch (error) {
                 console.error('Markdown parsing error:', error);
                 // Fallback to plain text with line breaks
-                return text.replace(/\n/g, '<br>');
+                try {
+                    return text.replace(/\n/g, '<br>');
+                } catch (error) {
+                    console.error('Text.replace parsing error:', error);
+                    return text;
+                }
             }
         }
 
@@ -1485,7 +1496,8 @@
 
             socket.onmessage = function(event) { //when the websocket sends a message to our front-end, this function is called
                 const data = JSON.parse(event.data);
-                console.log('Received:', data);
+                console.log('Received:', data.type);
+                console.log('Data:', data);
                 
                 // Handle streaming AI messages
                 if (data.type === 'AIMessageChunk') {
@@ -1499,8 +1511,8 @@
                         if (currentAiMessage.querySelector('.typing-indicator')) {
                             currentAiMessage.innerHTML = '';
                         }
-                        if (AGENT.TYPE === 'deep_agent') { //follows deep_research data content structure for AIMessageChunks.
-                            if (data.content && data.content.length > 0) { // it's strange how this different deep agent requires this changed structure/format.
+                        if (AGENT.TYPE === 'claude_llm_model') { //follows claude's data content structure for AIMessageChunks.
+                            if (data.content && data.content.length > 0) { // it's strange how claude's llm model requires this changed structure/format.
                                 currentAiMessageBuffer += data.content[0].text;
                                 currentAiMessage.innerHTML = parseMarkdown(currentAiMessageBuffer);
                             }
@@ -1587,9 +1599,16 @@
                     }
                 }
                 else if (data.type === 'ai') {
-                    if (data.tool_calls && data.tool_calls.length > 0) { //since we streamed the message with AIMessageChunk, we don't need to add a message unless there's a tool_call payload.
+                    //TODO: This is where there's an issue with claude vs. openai.
+                    // Tool calls come back as undefined for claude models.
+                    if (data.base_message.tool_calls && data.base_message.tool_calls.length > 0) { //since we streamed the message with AIMessageChunk, we don't need to add a message unless there's a tool_call payload.
                         addMessage(data.content, data.type, data.base_message);
                     }
+
+                    // Old code:
+                    // if (data.tool_calls && data.tool_calls.length > 0) { //since we streamed the message with AIMessageChunk, we don't need to add a message unless there's a tool_call payload.
+                    //     addMessage(data.content, data.type, data.base_message);
+                    // }
                 }
                 else {
                     addMessage(data.content, data.type, data.base_message);
@@ -1681,12 +1700,11 @@
                 messageDiv.textContent = content;
             }
             else if (type === 'ai') {
-                // console.log('ai content', content);
                 messageDiv.className = 'message ai-message';
-                
                 messageDiv.innerHTML = parseMarkdown(content);
 
-                if (content == '' || content == null) {
+                // We'll add a tool-message div that we later go back and add the output of what the tool responded with
+                if (content == '' || content == null) { // this follows OpenAI's data content structure for AI message that has a tool call.
                     if (baseMessage && baseMessage.tool_calls && baseMessage.tool_calls.length > 0) {
                         messageDiv.className = 'message tool-message';
                         
@@ -1708,6 +1726,10 @@
                     // Update the collapsible content with the tool response
                     updateCollapsibleToolMessage(messageDiv, content);
                 }
+                else { //TODO: Issue with Claude's LLM here, because there is no message div created by this point for Claude's model.
+                // There was no message div!! This means we are likely using Claude's llm model. Let's create a new message div.
+                }
+
             } 
             else if (type === 'error') {
                 messageDiv.className = 'message error-message';
