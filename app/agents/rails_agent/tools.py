@@ -199,8 +199,9 @@ def edit_file(
             }
         )
 
-    if old_string not in content:
-        error_message = f"Error: String not found in file: '{old_string}'"
+    if old_string not in content: # This is often failing. The LLM is using this tool call slightly wrong.
+        error_message = f"Error!! old_string not found in file: '{old_string}'. <HINT> This content may come from dynamic rendering or ERB logic. Make sure you use 'read_file' function/tool first, to ensure you are editing the correct string from the ERB, not from the browser's rendered HTML.</HINT>"
+        # breakpoint() # TODO: How do I make this A LOT more flexible and robust?
         return Command(
             update={
                 "messages": [ToolMessage(error_message, tool_call_id=tool_call_id)]
