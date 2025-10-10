@@ -28,6 +28,7 @@ from pathlib import Path
 import subprocess
 import json
 import re
+import difflib
 
 from jinja2 import Environment, FileSystemLoader
 
@@ -67,6 +68,22 @@ def guard_against_beginning_slash_argument(argument: str) -> str:
     if argument.startswith("/"):
         return argument[1:]
     return argument
+
+def normalize_whitespace(s: str) -> str:
+    """Normalize whitespace for more flexible string matching.
+
+    This helps handle differences in:
+    - Line endings (CRLF vs LF)
+    - Spaces vs tabs
+    - Multiple consecutive spaces/newlines
+    """
+    # Normalize line endings
+    s = s.replace('\r\n', '\n')
+    # Collapse multiple spaces/tabs to single space (but preserve indentation structure)
+    s = re.sub(r'[ \t]+', ' ', s)
+    # Collapse multiple newlines to single newline
+    s = re.sub(r'\n\n+', '\n\n', s)
+    return s.strip()
 
 @tool(description=LIST_DIRECTORY_DESCRIPTION)
 def ls(directory: str = "") -> list[str]:
@@ -199,19 +216,85 @@ def edit_file(
             }
         )
 
-    if old_string not in content: # This is often failing. The LLM is using this tool call slightly wrong.
-        error_message = f"Error!! old_string not found in file: '{old_string}'. <HINT> This content may come from dynamic rendering or ERB logic. Make sure you use 'read_file' function/tool first, to ensure you are editing the correct string from the ERB, not from the browser's rendered HTML.</HINT>"
-        # breakpoint() # TODO: How do I make this A LOT more flexible and robust?
+    # Try exact match first
+    search_string = old_string
+    match_found = old_string in content
+    match_type = "exact"
+
+    # If exact match fails, try normalized matching
+    if not match_found:
+        normalized_content = normalize_whitespace(content)
+        normalized_old = normalize_whitespace(old_string)
+
+        if normalized_old in normalized_content:
+            # Find the actual substring in the original content that matches the normalized version
+            # We'll use fuzzy matching to locate it
+            match_found = True
+            match_type = "normalized"
+            search_string = normalized_old
+
+            # Use difflib to find the best matching region
+            matcher = difflib.SequenceMatcher(None, content, old_string)
+            match = matcher.find_longest_match(0, len(content), 0, len(old_string))
+
+            if match.size > len(old_string) * 0.7:  # At least 70% match
+                # Extract the actual substring from content
+                search_string = content[match.a:match.a + match.size]
+                match_found = True
+                match_type = "fuzzy"
+
+    # If still no match, try fuzzy matching as last resort
+    if not match_found:
+        matcher = difflib.SequenceMatcher(None, content, old_string)
+        similarity = matcher.ratio()
+
+        if similarity > 0.6:  # 60% similarity threshold
+            match = matcher.find_longest_match(0, len(content), 0, len(old_string))
+
+            if match.size > len(old_string) * 0.5:  # At least 50% of the string
+                search_string = content[match.a:match.a + match.size]
+                match_found = True
+                match_type = "fuzzy"
+
+    # If still no match found, provide detailed error with diff
+    if not match_found:
+        # Generate a helpful diff preview
+        content_lines = content.splitlines()
+        old_string_lines = old_string.splitlines()
+
+        # Limit diff preview to first 15 lines
+        diff_lines = list(difflib.unified_diff(
+            content_lines[:50],  # Show up to 50 lines of context
+            old_string_lines[:50],
+            fromfile='file_content',
+            tofile='old_string_provided',
+            lineterm=''
+        ))[:20]  # Limit to 20 lines of diff
+
+        diff_preview = '\n'.join(diff_lines) if diff_lines else "No meaningful diff available"
+
+        error_message = (
+            f"Error: Could not find old_string in file '{file_path}'.\n\n"
+            f"<HINT>This content may come from dynamic rendering or ERB logic. "
+            f"Use 'read_file' first to get the exact string from the source file, "
+            f"not from rendered HTML.</HINT>\n\n"
+            f"Diff preview (file vs your old_string):\n{diff_preview}\n\n"
+            f"Suggestions:\n"
+            f"1. Use read_file to verify the exact content\n"
+            f"2. Provide a smaller, more specific substring\n"
+            f"3. Check for whitespace differences (spaces, tabs, newlines)"
+        )
         return Command(
             update={
                 "messages": [ToolMessage(error_message, tool_call_id=tool_call_id)]
             }
         )
 
+    # Check for multiple occurrences
     if not replace_all:
-        occurrences = content.count(old_string)
+        occurrences = content.count(search_string)
         if occurrences > 1:
-            error_message = f"Error: String '{old_string}' appears {occurrences} times in file. Use replace_all=True to replace all instances, or provide a more specific string with surrounding context."
+            error_message = f"Error: String appears {occurrences} times in file. Use replace_all=True to replace all instances, or provide a more specific string with surrounding context."
             return Command(
                 update={
                     "messages": [
@@ -220,13 +303,14 @@ def edit_file(
                 }
             )
 
+    # Perform the replacement
     if replace_all:
-        new_content = content.replace(old_string, new_string)
-        replacement_count = content.count(old_string)
-        result_msg = f"Successfully replaced {replacement_count} instance(s) of the string in '{file_path}'"
+        new_content = content.replace(search_string, new_string)
+        replacement_count = content.count(search_string)
+        result_msg = f"Successfully replaced {replacement_count} instance(s) in '{file_path}' (match type: {match_type})"
     else:
-        new_content = content.replace(old_string, new_string, 1)
-        result_msg = f"Successfully replaced string in '{file_path}'"
+        new_content = content.replace(search_string, new_string, 1)
+        result_msg = f"Successfully replaced string in '{file_path}' (match type: {match_type})"
 
     try:
         full_path.write_text(new_content)
