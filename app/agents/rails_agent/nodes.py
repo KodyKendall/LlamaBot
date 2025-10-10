@@ -1,4 +1,5 @@
 from langchain_openai import ChatOpenAI
+from langchain_anthropic import ChatAnthropic
 
 from langchain_core.tools import tool
 from dotenv import load_dotenv
@@ -53,21 +54,27 @@ default_tools = [write_todos,
 # Node
 def leonardo(state: RailsAgentState) -> Command[Literal["tools"]]:
    llm = ChatOpenAI(model="gpt-4.1")
+#    llm = ChatAnthropic(model="claude-sonnet-4-5-20250929")
 
    view_path = (state.get('debug_info') or {}).get('view_path')
 
    show_full_html = True
    messages = [sys_msg] + state["messages"]
-
-   if view_path:
-        messages = messages + [HumanMessage(content="NOTE FROM SYSTEM: The user is currently viewing their Ruby on Rails webpage route at: " + view_path)]
    
    if show_full_html:
-        full_html = (state.get('debug_info') or {}).get('full_html')
-        if full_html:
-            messages = messages + [HumanMessage(content="NOTE FROM SYSTEM: Here's the full HTML of the page they're viewing: " + full_html)]
+      rendered_html = (state.get('debug_info') or {}).get('full_html')
+      if rendered_html:
+         messages = messages + [HumanMessage(content=(
+            "<NOTE_FROM_SYSTEM> Below is the *rendered* HTML from the browser. "
+            "This includes dynamic data and server-generated elements. "
+            "Do NOT attempt to edit this literal HTML. "
+            "Instead, use it to understand what the user sees visually. </NOTE_FROM_SYSTEM>\n\n"
+            f"<RENDERED_HTML>{rendered_html}</RENDERED_HTML>"))]
 
-      # Tools
+   if view_path:
+      messages = messages + [HumanMessage(content="<NOTE_FROM_SYSTEM> The user is currently viewing their Ruby on Rails webpage route at: " + view_path + " </NOTE_FROM_SYSTEM>")]
+
+   # Tools
    tools = [write_todos,
          ls, read_file, write_file, edit_file, search_file, bash_command, 
          git_status, git_commit, git_command, github_cli_command, internet_search]
