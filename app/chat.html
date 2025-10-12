@@ -1671,14 +1671,24 @@
                                     String(now.getSeconds()).padStart(2, '0');
                 }
 
+                user_selected_agent_name = document.getElementById('agentModeSelect').value;
+                // For reference:
+                // <option value="engineer">Engineer Mode</option>
+                // <option value="prototype">Prototype Mode</option>
+                if (user_selected_agent_name == 'prototype') {
+                    AGENT.NAME = 'rails_frontend_starter_agent';
+                } else if (user_selected_agent_name == 'engineer') {
+                    AGENT.NAME = 'rails_agent';
+                }
+
                 // Send message via WebSocket
                 const messageData = {
                     message: message,
                     thread_id: currentThreadId,
                     origin: window.location.host,
                     debug_info: debugInfo,
-                    agent_name: AGENT.NAME,
-                    agent_mode: agentMode
+                    agent_name: AGENT.NAME, // agent name is used to route to the langgraph.json entry for the agent.
+                    agent_mode: agentMode // this is used to route to a subagent with a single langgraph agent (each agent has it's own langgraph.json entry.)
                 };
 
                 socket.send(JSON.stringify(messageData));
