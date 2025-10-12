@@ -6,3 +6,4 @@
 - Document the bug with the edit tool
 - Fix Prototyping Agent Mode & Rename to Design Mode
 - Add Rails starter agent (entire new agent in LangGraph.json), that prototyping mode routes to.
+- Remember where the user is at in the iframe for their Rails app, and when refreshed, make sure it loads that page again.
