@@ -286,7 +286,8 @@ def edit_file(
         )
         return Command(
             update={
-                "messages": [ToolMessage(error_message, tool_call_id=tool_call_id)]
+                "messages": [ToolMessage(error_message, tool_call_id=tool_call_id)],
+                "failed_tool_calls_count": 1  # This will be added to the existing count due to operator.add reducer
             }
         )
 
@@ -298,8 +299,8 @@ def edit_file(
             return Command(
                 update={
                     "messages": [
-                        ToolMessage(error_message, tool_call_id=tool_call_id)
-                    ]
+                        ToolMessage(error_message, tool_call_id=tool_call_id)],
+                    "failed_tool_calls_count": 1  # This will be added to the existing count due to operator.add reducer
                 }
             )
 
@@ -318,7 +319,8 @@ def edit_file(
         error_message = f"Error writing to file '{file_path}': {e}"
         return Command(
             update={
-                "messages": [ToolMessage(error_message, tool_call_id=tool_call_id)]
+                "messages": [ToolMessage(error_message, tool_call_id=tool_call_id)],
+                "failed_tool_calls_count": 1  # This will be added to the existing count due to operator.add reducer
             }
         )
 
