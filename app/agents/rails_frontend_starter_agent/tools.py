@@ -201,18 +201,28 @@ def edit_file(
 
     if not full_path.exists():
         error_message = f"Error: File '{file_path}' not found"
+        tool_output = {
+            "status": "error",
+            "message": error_message
+        }
+
         return Command(
             update={
-                "messages": [ToolMessage(error_message, tool_call_id=tool_call_id)]
+                "messages": [ToolMessage(error_message, artifact=tool_output, tool_call_id=tool_call_id)]
             }
         )
     try:
         content = full_path.read_text()
     except Exception as e:
         error_message = f"Error reading file '{file_path}': {e}"
+        tool_output = {
+            "status": "error",
+            "message": error_message
+        }
+
         return Command(
             update={
-                "messages": [ToolMessage(error_message, tool_call_id=tool_call_id)]
+                "messages": [ToolMessage(error_message, artifact=tool_output, tool_call_id=tool_call_id)]
             }
         )
 
@@ -284,9 +294,16 @@ def edit_file(
             f"2. Provide a smaller, more specific substring\n"
             f"3. Check for whitespace differences (spaces, tabs, newlines)"
         )
+
+        tool_output = {
+            "status": "error",
+            "message": error_message
+        }
+
+
         return Command(
             update={
-                "messages": [ToolMessage(error_message, tool_call_id=tool_call_id)],
+                "messages": [ToolMessage(error_message, artifact=tool_output, tool_call_id=tool_call_id)],
                 "failed_tool_calls_count": 1  # This will be added to the existing count due to operator.add reducer
             }
         )
@@ -296,10 +313,15 @@ def edit_file(
         occurrences = content.count(search_string)
         if occurrences > 1:
             error_message = f"Error: String appears {occurrences} times in file. Use replace_all=True to replace all instances, or provide a more specific string with surrounding context."
+            tool_output = {
+                "status": "error",
+                "message": error_message
+            }
+
             return Command(
                 update={
                     "messages": [
-                        ToolMessage(error_message, tool_call_id=tool_call_id)],
+                        ToolMessage(error_message, artifact=tool_output, tool_call_id=tool_call_id)],
                     "failed_tool_calls_count": 1  # This will be added to the existing count due to operator.add reducer
                 }
             )
@@ -317,18 +339,27 @@ def edit_file(
         full_path.write_text(new_content)
     except Exception as e:
         error_message = f"Error writing to file '{file_path}': {e}"
+        tool_output = {
+            "status": "error",
+            "message": error_message
+        }
+
         return Command(
             update={
-                "messages": [ToolMessage(error_message, tool_call_id=tool_call_id)],
+                "messages": [ToolMessage(error_message, artifact=tool_output, tool_call_id=tool_call_id)],
                 "failed_tool_calls_count": 1  # This will be added to the existing count due to operator.add reducer
             }
         )
 
     # git_status(tool_call_id) # hacky - this will update the git status page so the user can see the changes.
+    tool_output = {
+        "status": "success",
+        "message": result_msg
+    }
 
     return Command(
         update={
-            "messages": [ToolMessage(result_msg, tool_call_id=tool_call_id)],
+            "messages": [ToolMessage(result_msg, artifact=tool_output, tool_call_id=tool_call_id)],
         }
     )
 

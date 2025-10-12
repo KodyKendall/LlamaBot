@@ -90,15 +90,20 @@ def leonardo(state: RailsAgentState) -> Command[Literal["tools"]]:
         
       #   elif agent_mode == 'planning':
       #       return Command(goto="planning_agent", update={})
-        
-
-
       #   elif agent_mode == 'ask': # just fall through here and let the tools_condition handle it
       #       tools = [ls, read_file, search_file, git_status, internet_search] 
       #       messages = messages + [HumanMessage(content="<NOTE_FROM_SYSTEM> The user is in ask mode. You are only allowed tools to read state, but not modify or do anything to the application. Here are the tools you can use: tools = [ls, read_file, search_file, git_status, internet_search] </NOTE_FROM_SYSTEM>")]
 
+   failed_tool_calls_count = state.get("failed_tool_calls_count", 0)
+   if failed_tool_calls_count >= 3:
+      messages = messages + [HumanMessage(content="<NOTE_FROM_SYSTEM> The user has had too many failed tool calls. DO NOT DO ANY NEW TOOL CALLS. Tell the user it's failed, and you need to stop and ask the user to try again in a different way. </NOTE_FROM_SYSTEM>")]
+      # Don't bind tools when we've failed too many times - we want a text response only
+      response = llm.invoke(messages)
+      # Reset counter by subtracting current count (since reducer uses operator.add)
+      return {"messages": [response], "failed_tool_calls_count": -failed_tool_calls_count} # by adding a negative number, we subtract the current count and reset it to 0.
+
    messages = messages + [HumanMessage(content="<NOTE_FROM_SYSTEM> The user is in engineer mode. You are allowed to use the tools. Here are the tools you can use: tools = [write_todos, ls, read_file, write_file, edit_file, search_file, bash_command, git_status, git_commit, git_command, github_cli_command, internet_search] </NOTE_FROM_SYSTEM>")]
-   llm_with_tools = llm.bind_tools(tools)
+   llm_with_tools = llm.bind_tools(tools, parallel_tool_calls=False)
    response = llm_with_tools.invoke(messages)
    return {"messages": [response]}
 

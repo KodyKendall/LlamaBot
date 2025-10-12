@@ -1333,8 +1333,8 @@
                     </span>
                     <div class="custom-dropdown-container">
                         <select id="agentModeSelect" class="custom-dropdown">
+                            <option value="prototype">Design Mode</option>
                             <option value="engineer">Engineer Mode</option>
-                            <option value="prototype">Prototype Mode</option>
                             <!-- <option value="ask">Ask Mode</option> -->
                         </select>
                     </div>
@@ -1736,7 +1736,7 @@
                 if (messageDiv) {
                     messageDiv.className = 'message tool-message';
                     // Update the collapsible content with the tool response
-                    updateCollapsibleToolMessage(messageDiv, content);
+                    updateCollapsibleToolMessage(messageDiv, content, baseMessage);
                 }
                 else { //TODO: Issue with Claude's LLM here, because there is no message div created by this point for Claude's model.
                 // There was no message div!! This means we are likely using Claude's llm model. Let's create a new message div.
@@ -1823,6 +1823,20 @@
                     </div>
                 `;
             }
+            else if (toolName == 'edit_file') {
+                return `
+                    <div class="tool-collapsible" onclick="toggleToolCollapsible('${uniqueId}')">
+                        <span class="tool-summary">Edit ${firstArgument}</span>
+                    </div>
+                    <div class="tool-content" id="${uniqueId}">
+                        <div class="tool-details">
+                            <strong>Arguments:</strong><br>
+                            <pre style="margin: 4px 0; font-size: 0.85em; white-space: pre-wrap;">${toolArgs}</pre>
+                            ${toolResult ? `<strong>Result:</strong><br><pre style="margin: 4px 0; font-size: 0.85em; white-space: pre-wrap;">${toolResult}</pre>` : ''}
+                        </div>
+                    </div>
+                `;
+            }
             else {
                 return `
                     <div class="tool-collapsible" onclick="toggleToolCollapsible('${uniqueId}')">
@@ -1839,8 +1853,20 @@
             }
         }
 
-        function updateCollapsibleToolMessage(messageDiv, toolResult) {
+        function updateCollapsibleToolMessage(messageDiv, toolResult, baseMessage) {
             const toolContent = messageDiv.querySelector('.tool-content .tool-details');
+            
+            if (baseMessage.name == 'edit_file') {
+                const tool_header_label = messageDiv.querySelector('.tool-collapsible')
+                console.log('edit_file');
+                debugger;
+                if (baseMessage.artifact?.status == 'success') {
+                    tool_header_label.innerHTML = tool_header_label.innerHTML.replace('Edit', '✅ Edit');
+                }   
+                else if(baseMessage.artifact?.status == 'error') {
+                    tool_header_label.innerHTML = tool_header_label.innerHTML.replace('Edit', '❌ Edit');
+                }
+            }
             if (toolContent) {
                 // Check if result already exists to avoid duplication
                 if (!toolContent.innerHTML.includes('<strong>Result:</strong>')) {
