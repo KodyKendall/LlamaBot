@@ -1759,6 +1759,7 @@
             }
             else if (type === 'end') {
                 console.log('end of stream');
+                refreshMainIFrame(); //after langgraph, just refresh for now. In the future, we can do it more intelligently.
                 // STOP thinking indicator.
                 document.getElementById('thinkingIndicator').classList.add('hidden'); // stop thinking indicator
                 return; // Don't append anything for end messages
@@ -2280,7 +2281,18 @@
             const button = this;
             const svg = button.querySelector('svg');
             svg.style.animation = 'spin 0.5s linear';
+
+            // Remove animation after it completes
+            setTimeout(() => {
+                svg.style.animation = '';
+            }, 500);
             
+            refreshMainIFrame();
+            
+
+        });
+
+        function refreshMainIFrame(){
             // Get all iframes and refresh them
             const iframes = document.querySelectorAll('iframe');
             iframes.forEach(iframe => {
@@ -2303,12 +2315,7 @@
                     }
                 }
             });
-            
-            // Remove animation after it completes
-            setTimeout(() => {
-                svg.style.animation = '';
-            }, 500);
-        });
+        }
 
         // Back button functionality
         document.getElementById('backButton').addEventListener('click', function() {
