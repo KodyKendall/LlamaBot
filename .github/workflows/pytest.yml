@@ -1,0 +1,438 @@
+name: LlamaBot Pytest CI
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'app/**'
+      - 'requirements.txt'
+      - 'pyproject.toml'
+      - '.github/workflows/pytest.yml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'app/**'
+      - 'requirements.txt'
+      - 'pyproject.toml'
+      - '.github/workflows/pytest.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12']
+        test-type: ['unit', 'integration', 'websocket']
+    
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: llamapress_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_HOST_AUTH_METHOD: md5
+        options: >-
+          --health-cmd "pg_isready -U postgres -d llamapress_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    env:
+      PYTHONPATH: ${{ github.workspace }}/app:${{ github.workspace }}
+      LANGCHAIN_TRACING_V2: false
+      LANGSMITH_ENDPOINT: 
+      LANGCHAIN_ENDPOINT: 
+      LANGSMITH_RUNS_ENDPOINTS: 
+      DB_URI: postgresql://postgres:postgres@localhost:5432/llamapress_test
+      REDIS_URL: redis://localhost:6379
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+      TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-${{ matrix.python-version }}-
+          ${{ runner.os }}-pip-
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          postgresql-client \
+          redis-tools \
+          curl \
+          gnupg \
+          ca-certificates
+
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip setuptools wheel
+        pip install -r requirements.txt
+        pip install pytest-xdist pytest-timeout
+
+    - name: Install Playwright browsers (if needed)
+      run: |
+        if grep -q "playwright" requirements.txt; then
+          playwright install --with-deps chromium
+        fi
+
+    - name: Initialize database
+      working-directory: ./app
+      run: |
+        # Wait for postgres to be ready
+        until pg_isready -h localhost -p 5432 -U postgres; do
+          echo "Waiting for postgres..."
+          sleep 2
+        done
+        
+        # Create test database if it doesn't exist
+        PGPASSWORD=postgres createdb -h localhost -U postgres llamapress_test || true
+        
+        # Initialize database schema if init script exists
+        if [ -f "init_pg_checkpointer.py" ]; then
+          python init_pg_checkpointer.py --uri "$DB_URI" || true
+        fi
+
+    - name: Verify test environment
+      working-directory: ./app
+      run: |
+        python -c "
+        import sys
+        import os
+        print('Python version:', sys.version)
+        print('Working directory:', os.getcwd())
+        print('PYTHONPATH:', os.environ.get('PYTHONPATH', 'Not set'))
+        print('DB_URI:', os.environ.get('DB_URI', 'Not set'))
+        
+        # Test database connection
+        try:
+            import psycopg
+            conn = psycopg.connect(os.environ['DB_URI'])
+            print('Database connection: OK')
+            conn.close()
+        except Exception as e:
+            print(f'Database connection error: {e}')
+        
+        # Test Redis connection
+        try:
+            import redis
+            r = redis.Redis(host='localhost', port=6379, decode_responses=True)
+            r.ping()
+            print('Redis connection: OK')
+        except Exception as e:
+            print(f'Redis connection error: {e}')
+        
+        # Check if main modules can be imported
+        try:
+            from main import app
+            print('FastAPI app import: OK')
+        except Exception as e:
+            print(f'FastAPI app import error: {e}')
+        "
+
+    - name: Run ${{ matrix.test-type }} tests with pytest
+      working-directory: ./app
+      timeout-minutes: 30
+      run: |
+        case "${{ matrix.test-type }}" in
+          unit)
+            pytest tests/ -m "unit" \
+              --maxfail=5 \
+              --tb=short \
+              --disable-warnings \
+              -v \
+              --durations=10 \
+              --junitxml=test-results-unit.xml \
+              --cov=. \
+              --cov-report=xml:coverage-unit.xml \
+              --cov-report=term-missing
+            ;;
+          integration)
+            pytest tests/ -m "integration" \
+              --maxfail=3 \
+              --tb=short \
+              --disable-warnings \
+              -v \
+              --durations=10 \
+              --junitxml=test-results-integration.xml \
+              --cov=. \
+              --cov-report=xml:coverage-integration.xml \
+              --timeout=300
+            ;;
+          websocket)
+            pytest tests/ -m "websocket" \
+              --maxfail=3 \
+              --tb=short \
+              --disable-warnings \
+              -v \
+              --durations=10 \
+              --junitxml=test-results-websocket.xml \
+              --cov=. \
+              --cov-report=xml:coverage-websocket.xml \
+              --timeout=120
+            ;;
+        esac
+
+    - name: Upload test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: test-results-${{ matrix.python-version }}-${{ matrix.test-type }}
+        path: |
+          app/test-results-*.xml
+          app/coverage-*.xml
+        retention-days: 30
+
+    - name: Upload coverage to Codecov
+      if: matrix.python-version == '3.11'
+      uses: codecov/codecov-action@v3
+      with:
+        file: app/coverage-${{ matrix.test-type }}.xml
+        flags: ${{ matrix.test-type }}
+        name: codecov-${{ matrix.test-type }}
+        fail_ci_if_error: false
+
+  test-all:
+    runs-on: ubuntu-latest
+    needs: test
+    if: always()
+    
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: llamapress_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_HOST_AUTH_METHOD: md5
+        options: >-
+          --health-cmd "pg_isready -U postgres -d llamapress_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    env:
+      PYTHONPATH: ${{ github.workspace }}/app:${{ github.workspace }}
+      LANGCHAIN_TRACING_V2: false
+      LANGSMITH_ENDPOINT: 
+      LANGCHAIN_ENDPOINT: 
+      LANGSMITH_RUNS_ENDPOINTS: 
+      DB_URI: postgresql://postgres:postgres@localhost:5432/llamapress_test
+      REDIS_URL: redis://localhost:6379
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+      TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-3.11-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-3.11-
+          ${{ runner.os }}-pip-
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          postgresql-client \
+          redis-tools \
+          curl \
+          gnupg \
+          ca-certificates
+
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip setuptools wheel
+        pip install -r requirements.txt
+        pip install pytest-xdist pytest-timeout
+
+    - name: Install Playwright browsers (if needed)
+      run: |
+        if grep -q "playwright" requirements.txt; then
+          playwright install --with-deps chromium
+        fi
+
+    - name: Initialize database
+      working-directory: ./app
+      run: |
+        # Wait for postgres to be ready
+        until pg_isready -h localhost -p 5432 -U postgres; do
+          echo "Waiting for postgres..."
+          sleep 2
+        done
+        
+        # Create test database if it doesn't exist
+        PGPASSWORD=postgres createdb -h localhost -U postgres llamapress_test || true
+        
+        # Initialize database schema if init script exists
+        if [ -f "init_pg_checkpointer.py" ]; then
+          python init_pg_checkpointer.py --uri "$DB_URI" || true
+        fi
+
+    - name: Run all tests
+      working-directory: ./app
+      timeout-minutes: 45
+      run: |
+        pytest tests/ \
+          --maxfail=10 \
+          --tb=short \
+          --disable-warnings \
+          -v \
+          --durations=20 \
+          --junitxml=test-results-all.xml \
+          --cov=. \
+          --cov-report=xml:coverage-all.xml \
+          --cov-report=term-missing \
+          --cov-report=html:htmlcov \
+          --timeout=300
+
+    - name: Generate test summary
+      if: always()
+      working-directory: ./app
+      run: |
+        echo "## Test Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        if [ -f "test-results-all.xml" ]; then
+          python -c "
+          import xml.etree.ElementTree as ET
+          try:
+              tree = ET.parse('test-results-all.xml')
+              root = tree.getroot()
+              tests = root.get('tests', '0')
+              failures = root.get('failures', '0')
+              errors = root.get('errors', '0')
+              skipped = root.get('skipped', '0')
+              time = root.get('time', '0')
+              
+              print(f'- **Total Tests**: {tests}')
+              print(f'- **Passed**: {int(tests) - int(failures) - int(errors) - int(skipped)}')
+              print(f'- **Failed**: {failures}')
+              print(f'- **Errors**: {errors}')
+              print(f'- **Skipped**: {skipped}')
+              print(f'- **Duration**: {float(time):.2f}s')
+          except Exception as e:
+              print(f'Could not parse test results: {e}')
+          " >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Coverage Report" >> $GITHUB_STEP_SUMMARY
+        
+        if [ -f "coverage-all.xml" ]; then
+          python -c "
+          import xml.etree.ElementTree as ET
+          try:
+              tree = ET.parse('coverage-all.xml')
+              root = tree.getroot()
+              coverage = root.get('line-rate', '0')
+              coverage_pct = f'{float(coverage) * 100:.1f}%'
+              print(f'- **Line Coverage**: {coverage_pct}')
+          except Exception as e:
+              print(f'Could not parse coverage: {e}')
+          " >> $GITHUB_STEP_SUMMARY
+        fi
+
+    - name: Upload comprehensive test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: comprehensive-test-results
+        path: |
+          app/test-results-all.xml
+          app/coverage-all.xml
+          app/htmlcov/
+        retention-days: 30
+
+    - name: Upload comprehensive coverage
+      uses: codecov/codecov-action@v3
+      with:
+        file: app/coverage-all.xml
+        flags: comprehensive
+        name: codecov-comprehensive
+        fail_ci_if_error: false
+
+  security-scan:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install security scanning tools
+      run: |
+        pip install safety bandit semgrep
+
+    - name: Run safety check
+      run: |
+        safety check -r requirements.txt --json --output safety-report.json || true
+
+    - name: Run bandit security scan
+      run: |
+        bandit -r app/ -f json -o bandit-report.json || true
+
+    - name: Upload security scan results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: security-scan-results
+        path: |
+          safety-report.json
+          bandit-report.json
+        retention-days: 30
