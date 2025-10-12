@@ -1465,12 +1465,22 @@
                 }
             }
         }
+        
+        function getRailsUrl(){
+            if (window.location.protocol === 'https:') {
+                return 'https://rails-' + window.location.host;
+            }
+            else {
+                return "http://localhost:3000";
+            }
+        }
 
         // Initialize WebSocket connection
         function initWebSocket() {
             let wsUrl = `ws://${window.location.host}/ws`;
             if (window.location.protocol === 'https:') {
                 wsUrl = `wss://${window.location.host}/ws`;
+                //TODO: Swap this out with the getRailsUrl() helper function.
                 document.getElementById('liveSiteFrame').src = 'https://rails-' + window.location.host;
             }
 
@@ -1859,7 +1869,6 @@
             if (baseMessage.name == 'edit_file') {
                 const tool_header_label = messageDiv.querySelector('.tool-collapsible')
                 console.log('edit_file');
-                debugger;
                 if (baseMessage.artifact?.status == 'success') {
                     tool_header_label.innerHTML = tool_header_label.innerHTML.replace('Edit', '✅ Edit');
                 }   
@@ -2275,8 +2284,23 @@
             // Get all iframes and refresh them
             const iframes = document.querySelectorAll('iframe');
             iframes.forEach(iframe => {
-                if (iframe.src) {
-                    iframe.src = iframe.src;
+                
+                let isRailsIFrame = iframe.src.includes(':3000') || iframe.src.includes('https://rails-');
+                // debugger; // see where the user is at right now.
+
+                if (isRailsIFrame) {
+                    getRailsDebugInfo((debugInfoJson) => {
+                        console.log('debugInfoJson', debugInfoJson);
+                        if (iframe.src) {
+                            let baseUrl = 'localhost:3000'; //todo. fix this.
+                            iframe.src = getRailsUrl() + debugInfoJson.request_path;
+                        }
+                    });
+                }
+                else {
+                    if (iframe.src) {
+                        iframe.src = iframe.src;
+                    }
                 }
             });
             
