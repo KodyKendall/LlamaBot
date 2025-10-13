@@ -23,12 +23,9 @@ from app.agents.utils.playwright_screenshot import capture_page_and_img_src
 from openai import OpenAI
 from app.agents.utils.images import encode_image
 
-from app.agents.rails_agent.state import RailsAgentState
-from app.agents.rails_agent.tools import write_todos, write_file, read_file, ls, edit_file, search_file, internet_search, bash_command, git_status, git_commit, git_command, view_page, github_cli_command
-from app.agents.rails_agent.prompts import RAILS_AGENT_PROMPT
-
-from app.agents.rails_agent.prototype_agent.nodes import build_workflow as build_prototype_agent
-# from app.agents.rails_agent.planning_agent import build_workflow as build_planning_agent
+from app.agents.rails_frontend_starter_agent.state import RailsAgentState
+from app.agents.rails_frontend_starter_agent.tools import write_todos, write_file, read_file, ls, edit_file, search_file, internet_search, bash_command, git_status, git_commit, git_command, view_page, github_cli_command
+from app.agents.rails_frontend_starter_agent.prompts import RAILS_AGENT_PROMPT
 
 import logging
 logger = logging.getLogger(__name__)
@@ -82,12 +79,10 @@ def leonardo(state: RailsAgentState) -> Command[Literal["tools"]]:
    agent_mode = state.get('agent_mode')
    if agent_mode:
         logger.info(f"🎯 User is in current mode: {agent_mode}")
-        if agent_mode == 'prototype':
-            return Command(goto="prototype_agent", update={})
-
-        elif agent_mode == 'engineer': # just fall through here and let the tools_condition handle it
-            messages = messages + [HumanMessage(content="<NOTE_FROM_SYSTEM> The user is in engineer mode. You are allowed to use the tools. Here are the tools you can use: tools = [write_todos, ls, read_file, write_file, edit_file, search_file, bash_command, git_status, git_commit, git_command, github_cli_command, internet_search] </NOTE_FROM_SYSTEM>")]
-        
+        messages = messages + [HumanMessage(content="<NOTE_FROM_SYSTEM> The user is in engineer mode. You are allowed to use the tools. Here are the tools you can use: tools = [write_todos, ls, read_file, write_file, edit_file, search_file, bash_command, git_status, git_commit, git_command, github_cli_command, internet_search] </NOTE_FROM_SYSTEM>")]
+      #   if agent_mode == 'prototype':
+      #       return Command(goto="prototype_agent", update={})
+      #   elif agent_mode == 'engineer': # just fall through here and let the tools_condition handle it
       #   elif agent_mode == 'planning':
       #       return Command(goto="planning_agent", update={})
       #   elif agent_mode == 'ask': # just fall through here and let the tools_condition handle it
@@ -107,17 +102,6 @@ def leonardo(state: RailsAgentState) -> Command[Literal["tools"]]:
    response = llm_with_tools.invoke(messages)
    return {"messages": [response]}
 
-# def should_continue(state: RailsAgentState) -> Literal["tools", "prototype_agent", END]:
-#     last_message = state['messages'][-1]
-#     if last_message.tool_calls:
-#         return "tools"
-#     if isinstance(last_message, Command):
-#         if last_message.goto == "prototype_agent":
-#             return "prototype_agent"
-#         if last_message.goto == "planning_agent":
-#             return "planning_agent"
-#     return END
-
 # Graph
 def build_workflow(checkpointer=None):
     builder = StateGraph(RailsAgentState)
@@ -125,23 +109,16 @@ def build_workflow(checkpointer=None):
     # Define nodes: these do the work
     builder.add_node("leonardo", leonardo)
     builder.add_node("tools", ToolNode(default_tools))
-    
-    # sub-agents:
-    builder.add_node("prototype_agent", build_prototype_agent(checkpointer=checkpointer))
-   #  builder.add_node("planning_agent", build_planning_agent(checkpointer=checkpointer))
-
     # Define edges: these determine how the control flow moves
     builder.add_edge(START, "leonardo")
 
     builder.add_conditional_edges(
         "leonardo",
         tools_condition,
-        {"tools": "tools", "prototype_agent": "prototype_agent", END: END},
+        {"tools": "tools", END: END},
     )
 
     builder.add_edge("tools", "leonardo")
-    builder.add_edge("prototype_agent", END)
-   #  builder.add_edge("planning_agent", END)
 
     react_graph = builder.compile(checkpointer=checkpointer)
 

@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Git Changes</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .file-item:hover {
+      background-color: #f3f4f6;
+    }
+    .file-item.selected {
+      background-color: #dbeafe;
+      border-left: 4px solid #3b82f6;
+    }
+    .diff-line-add {
+      background-color: #dcfce7;
+      color: #166534;
+    }
+    .diff-line-remove {
+      background-color: #fecaca;
+      color: #991b1b;
+    }
+    .diff-line-context {
+      background-color: #f9fafb;
+      color: #374151;
+    }
+    .diff-header {
+      background-color: #f3f4f6;
+      color: #6b7280;
+      font-weight: 600;
+    }
+    .status-badge {
+      font-size: 0.75rem;
+      padding: 0.125rem 0.375rem;
+      border-radius: 0.375rem;
+      font-weight: 500;
+    }
+    .status-modified { background-color: #fbbf24; color: #92400e; }
+    .status-added { background-color: #34d399; color: #065f46; }
+    .status-deleted { background-color: #f87171; color: #991b1b; }
+    .status-renamed { background-color: #a78bfa; color: #5b21b6; }
+    .status-untracked { background-color: #9ca3af; color: #374151; }
+    .status-copied { background-color: #60a5fa; color: #1e40af; }
+  </style>
+</head>
+<body class="bg-gray-50 h-screen flex flex-col">
+  <div class="bg-white border-b border-gray-200 px-6 py-4">
+    <div class="flex items-center justify-between">
+      <div id="header-info">
+        <h1 class="text-2xl font-bold text-gray-900">Source Control</h1>
+        <p class="text-sm text-gray-600 mt-1">
+          {% if changed_files %}
+            {{ changed_files|length }} file{{ 's' if changed_files|length != 1 else '' }} changed
+          {% else %}
+            No changes detected
+          {% endif %}
+        </p>
+      </div>
+      <div id="commit-header-info" class="hidden">
+        <h1 class="text-2xl font-bold text-gray-900">Source Control</h1>
+        <p class="text-sm text-gray-600 mt-1">
+          Viewing commit: <span id="commit-hash"></span> - <span id="commit-subject"></span>
+        </p>
+      </div>
+      <button id="back-button" onclick="showCurrentChanges()" class="hidden px-4 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
+        Back to Current Changes
+      </button>
+    </div>
+  </div>
+
+  <!-- Current Changes View -->
+  <div id="current-changes-view" class="flex-1 flex overflow-hidden">
+    <!-- File List Panel -->
+    <div class="w-1/3 bg-white border-r border-gray-200 flex flex-col">
+      <div class="px-4 py-3 bg-gray-50 border-b border-gray-200">
+        <h2 class="text-sm font-semibold text-gray-700 uppercase tracking-wide">Changes</h2>
+      </div>
+      
+      <div class="flex-1 overflow-y-auto">
+        {% if changed_files %}
+          {% for file in changed_files %}
+          <div class="file-item cursor-pointer px-4 py-3 border-b border-gray-100 hover:bg-gray-50 transition-colors"
+               onclick="showDiff('current', '{{ loop.index0 }}')" 
+               data-file-index="{{ loop.index0 }}">
+            <div class="flex items-center justify-between">
+              <div class="flex-1 min-w-0">
+                <p class="text-sm font-medium text-gray-900 truncate" title="{{ file.path }}">
+                  {{ file.path.split('/')[-1] }}
+                </p>
+                <p class="text-xs text-gray-500 truncate">
+                  {{ file.path if file.path != file.path.split('/')[-1] else '' }}
+                </p>
+              </div>
+              <span class="status-badge ml-2 
+                {% if 'Modified' in file.status %}status-modified
+                {% elif 'Added' in file.status %}status-added
+                {% elif 'Deleted' in file.status %}status-deleted
+                {% elif 'Renamed' in file.status %}status-renamed
+                {% elif 'Untracked' in file.status %}status-untracked
+                {% elif 'Copied' in file.status %}status-copied
+                {% else %}status-untracked{% endif %}">
+                {{ file.status.split(' ')[0] }}
+              </span>
+            </div>
+          </div>
+          {% endfor %}
+        {% else %}
+          <div class="px-4 py-8 text-center text-gray-500">
+            <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <p class="mt-2 text-sm">No changes to display</p>
+          </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- Diff Panel -->
+    <div class="flex-1 bg-white flex flex-col">
+      <div class="px-6 py-3 bg-gray-50 border-b border-gray-200">
+        <h2 class="text-sm font-semibold text-gray-700" id="current-diff-title">Select a file to view changes</h2>
+      </div>
+      
+      <div class="flex-1 overflow-auto">
+        {% if changed_files %}
+          {% for file in changed_files %}
+          <div id="current-diff-{{ loop.index0 }}" class="diff-content hidden h-full">
+            <pre class="text-xs font-mono leading-relaxed p-4 h-full overflow-auto bg-gray-50">{% if file.diff %}{{ format_diff(file.diff) }}{% else %}No diff available for {{ file.path }}{% endif %}</pre>
+          </div>
+          {% endfor %}
+        {% else %}
+          <div class="flex items-center justify-center h-full text-gray-500">
+            <div class="text-center">
+              <svg class="mx-auto h-16 w-16 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              <p class="mt-4 text-lg">No files to compare</p>
+            </div>
+          </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Commit Views (will be populated by the tool) -->
+  {% if commit_diffs %}
+    {% for commit_hash, commit_data in commit_diffs.items() %}
+    <div id="commit-view-{{ commit_hash }}" class="hidden flex-1 flex overflow-hidden">
+      <!-- File List Panel -->
+      <div class="w-1/3 bg-white border-r border-gray-200 flex flex-col">
+        <div class="px-4 py-3 bg-gray-50 border-b border-gray-200">
+          <h2 class="text-sm font-semibold text-gray-700 uppercase tracking-wide">Files Changed</h2>
+        </div>
+        
+        <div class="flex-1 overflow-y-auto">
+          {% if commit_data.files %}
+            {% for file in commit_data.files %}
+            <div class="file-item cursor-pointer px-4 py-3 border-b border-gray-100 hover:bg-gray-50 transition-colors"
+                 onclick="showDiff('{{ commit_hash }}', '{{ loop.index0 }}')" 
+                 data-commit="{{ commit_hash }}"
+                 data-file-index="{{ loop.index0 }}">
+              <div class="flex items-center justify-between">
+                <div class="flex-1 min-w-0">
+                  <p class="text-sm font-medium text-gray-900 truncate" title="{{ file.path }}">
+                    {{ file.path.split('/')[-1] }}
+                  </p>
+                  <p class="text-xs text-gray-500 truncate">
+                    {{ file.path if file.path != file.path.split('/')[-1] else '' }}
+                  </p>
+                </div>
+                <span class="status-badge ml-2 
+                  {% if 'Modified' in file.status %}status-modified
+                  {% elif 'Added' in file.status %}status-added
+                  {% elif 'Deleted' in file.status %}status-deleted
+                  {% elif 'Renamed' in file.status %}status-renamed
+                  {% elif 'Untracked' in file.status %}status-untracked
+                  {% elif 'Copied' in file.status %}status-copied
+                  {% else %}status-untracked{% endif %}">
+                  {{ file.status.split(' ')[0] }}
+                </span>
+              </div>
+            </div>
+            {% endfor %}
+          {% endif %}
+        </div>
+      </div>
+
+      <!-- Diff Panel -->
+      <div class="flex-1 bg-white flex flex-col">
+        <div class="px-6 py-3 bg-gray-50 border-b border-gray-200">
+          <h2 class="text-sm font-semibold text-gray-700" id="commit-diff-title-{{ commit_hash }}">Select a file to view changes</h2>
+        </div>
+        
+        <div class="flex-1 overflow-auto">
+          {% if commit_data.files %}
+            {% for file in commit_data.files %}
+            <div id="commit-diff-{{ commit_hash }}-{{ loop.index0 }}" class="diff-content hidden h-full">
+              <pre class="text-xs font-mono leading-relaxed p-4 h-full overflow-auto bg-gray-50">{% if file.diff %}{{ format_diff(file.diff) }}{% else %}No diff available for {{ file.path }}{% endif %}</pre>
+            </div>
+            {% endfor %}
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  {% endif %}
+
+  <!-- Recent Commits Section (Collapsible) -->
+  {% if commits %}
+  <div class="bg-white border-t border-gray-200">
+    <button onclick="toggleCommits()" class="w-full px-6 py-3 text-left text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:bg-gray-50">
+      <div class="flex items-center justify-between">
+        <span>Recent Commits ({{ commits|length }})</span>
+        <svg id="commits-chevron" class="h-5 w-5 text-gray-400 transform transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+        </svg>
+      </div>
+    </button>
+    
+    <div id="commits-section" class="hidden border-t border-gray-200 max-h-64 overflow-y-auto">
+      {% for commit in commits %}
+      <div class="commit-item cursor-pointer px-6 py-3 border-b border-gray-100 hover:bg-gray-50 transition-colors"
+           onclick="viewCommitDiff('{{ commit.hash }}')"
+           data-commit-hash="{{ commit.hash }}">
+        <div class="flex items-start space-x-3">
+          <div class="flex-shrink-0">
+            <span class="inline-flex items-center px-2 py-1 rounded text-xs font-mono bg-blue-100 text-blue-800">
+              {{ commit.hash[:7] }}
+            </span>
+          </div>
+          <div class="flex-1 min-w-0">
+            <p class="text-sm text-gray-900 font-medium">{{ commit.subject }}</p>
+            <p class="text-xs text-gray-500">by {{ commit.author }} • {{ commit.date }}</p>
+          </div>
+          <div class="flex-shrink-0">
+            <svg class="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+            </svg>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <script>
+    let currentSelectedFile = null;
+
+    function showDiff(viewType, fileIndex) {
+      // Hide all diff contents
+      const allDiffs = document.querySelectorAll('.diff-content');
+      allDiffs.forEach(diff => diff.classList.add('hidden'));
+      
+      // Remove selected class from all file items
+      const allFileItems = document.querySelectorAll('.file-item');
+      allFileItems.forEach(item => item.classList.remove('selected'));
+      
+      let selectedDiff, selectedFileItem, titleElement, fileData;
+      
+      if (viewType === 'current') {
+        // Current changes view
+        selectedDiff = document.getElementById(`current-diff-${fileIndex}`);
+        selectedFileItem = document.querySelector(`#current-changes-view [data-file-index="${fileIndex}"]`);
+        titleElement = document.getElementById('current-diff-title');
+        fileData = window.currentFiles ? window.currentFiles[fileIndex] : null;
+      } else {
+        // Commit view
+        selectedDiff = document.getElementById(`commit-diff-${viewType}-${fileIndex}`);
+        selectedFileItem = document.querySelector(`#commit-view-${viewType} [data-file-index="${fileIndex}"]`);
+        titleElement = document.getElementById(`commit-diff-title-${viewType}`);
+        fileData = window.commitData && window.commitData[viewType] ? window.commitData[viewType].files[fileIndex] : null;
+      }
+      
+      // Show selected diff
+      if (selectedDiff) {
+        selectedDiff.classList.remove('hidden');
+      }
+      
+      // Add selected class to clicked file item
+      if (selectedFileItem) {
+        selectedFileItem.classList.add('selected');
+      }
+      
+      // Update diff title
+      if (titleElement && fileData) {
+        titleElement.textContent = fileData.path;
+      }
+      
+      currentSelectedFile = fileIndex;
+    }
+
+    function toggleCommits() {
+      const commitsSection = document.getElementById('commits-section');
+      const chevron = document.getElementById('commits-chevron');
+      
+      if (commitsSection.classList.contains('hidden')) {
+        commitsSection.classList.remove('hidden');
+        chevron.classList.add('rotate-180');
+      } else {
+        commitsSection.classList.add('hidden');
+        chevron.classList.remove('rotate-180');
+      }
+    }
+
+    function viewCommitDiff(commitHash) {
+      // Hide current changes view
+      document.getElementById('current-changes-view').classList.add('hidden');
+      
+      // Hide all other commit views
+      const allCommitViews = document.querySelectorAll('[id^="commit-view-"]');
+      allCommitViews.forEach(view => view.classList.add('hidden'));
+      
+      // Show specific commit diff view
+      const commitView = document.getElementById(`commit-view-${commitHash}`);
+      if (commitView) {
+        commitView.classList.remove('hidden');
+      }
+      
+      // Update header to show we're in commit mode
+      document.getElementById('header-info').classList.add('hidden');
+      document.getElementById('commit-header-info').classList.remove('hidden');
+      document.getElementById('back-button').classList.remove('hidden');
+      
+      // Update commit header with specific commit info
+      const commitData = window.commitData && window.commitData[commitHash];
+      if (commitData) {
+        document.getElementById('commit-hash').textContent = commitHash.substring(0, 7);
+        document.getElementById('commit-subject').textContent = commitData.subject;
+      }
+      
+      // Auto-select first file in commit if available
+      const firstCommitFile = commitView.querySelector('[data-file-index="0"]');
+      if (firstCommitFile) {
+        showDiff(commitHash, 0);
+      }
+    }
+
+    function showCurrentChanges() {
+      // Hide all commit views
+      const commitViews = document.querySelectorAll('[id^="commit-view-"]');
+      commitViews.forEach(view => view.classList.add('hidden'));
+      
+      // Show current changes view
+      document.getElementById('current-changes-view').classList.remove('hidden');
+      
+      // Update header to show we're in current changes mode
+      document.getElementById('commit-header-info').classList.add('hidden');
+      document.getElementById('back-button').classList.add('hidden');
+      document.getElementById('header-info').classList.remove('hidden');
+      
+      // Auto-select first current file if available
+      const firstCurrentFile = document.querySelector('#current-changes-view [data-file-index="0"]');
+      if (firstCurrentFile) {
+        showDiff('current', 0);
+      }
+    }
+
+    // Store data in window for JavaScript access
+    window.currentFiles = {{ changed_files | tojson }};
+    window.commitData = {% if commit_diffs %}{{ commit_diffs | tojson }}{% else %}{}{% endif %};
+    
+    // Auto-select first file if available
+    document.addEventListener('DOMContentLoaded', function() {
+      // Default to current changes view
+      showCurrentChanges();
+    });
+  </script>
+</body>
+</html>

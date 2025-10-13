@@ -67,7 +67,7 @@ def prototype_agent(state: RailsAgentState):
    show_full_html = True
    messages = [sys_msg] + state["messages"]
    if view_path:
-        messages = messages + [HumanMessage(content="NOTE FROM SYSTEM: The user is currently vicewing their Ruby on Rails webpage route at: " + view_path + ". If they're not looking at a prototype page, you should ask them to navigate to the prototype page that they want to change.")]
+        messages = messages + [HumanMessage(content="NOTE FROM SYSTEM: The user is currently viewing their Ruby on Rails webpage route at: " + view_path + ". If they're not looking at a prototype page, you should ask them to navigate to the prototype page that they want to change.")]
    
    if show_full_html:
         full_html = (state.get('debug_info') or {}).get('full_html')

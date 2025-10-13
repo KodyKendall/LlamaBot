@@ -1089,6 +1089,196 @@
                 height: 12px;
             }
         }
+
+        .agent-todo-container {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 12px;
+            padding: 20px;
+            margin: 10px 0;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .todo-section {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 12px;
+        }
+
+        .todo-section:last-child {
+            margin-bottom: 0;
+        }
+
+        .todo-section-title {
+            font-size: 0.75em;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #64748b;
+            margin-bottom: 10px;
+            padding-bottom: 6px;
+            border-bottom: 2px solid #e2e8f0;
+        }
+
+        .todo-container {
+            padding: 8px 0;
+        }
+
+        .todo-section-header {
+            font-size: 0.7em;
+            font-weight: 600;
+            text-transform: uppercase;
+            color: rgba(255, 255, 255, 0.6);
+            margin: 12px 0 6px 0;
+            letter-spacing: 0.5px;
+        }
+
+        .todo-item {
+            display: flex;
+            align-items: flex-start;
+            padding: 8px 10px;
+            margin: 4px 0;
+            background-color: rgba(255, 255, 255, 0.08);
+            border-radius: 6px;
+            cursor: pointer;
+            border-left: 3px solid transparent;
+            transition: background-color 0.2s ease;
+        }
+
+        .todo-item:hover {
+            background-color: rgba(255, 255, 255, 0.12);
+        }
+
+        .todo-icon {
+            margin-right: 10px;
+            font-size: 1em;
+            min-width: 18px;
+            margin-top: 2px;
+            font-weight: bold;
+        }
+
+        /* In Progress styling - with shimmer effect */
+        .todo-status-in-progress {
+            border-left-color: #60a5fa;
+        }
+
+        .todo-status-in-progress .todo-icon {
+            color: #60a5fa;
+        }
+
+        .todo-status-in-progress .todo-text {
+            animation: shimmer 2s ease-in-out infinite;
+            background: linear-gradient(
+                90deg,
+                rgba(255, 255, 255, 0.9) 0%,
+                rgba(255, 255, 255, 1) 50%,
+                rgba(255, 255, 255, 0.9) 100%
+            );
+            background-size: 200% 100%;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        /* Pending styling */
+        .todo-status-pending {
+            border-left-color: #fbbf24;
+        }
+
+        .todo-status-pending .todo-icon {
+            color: #fbbf24;
+        }
+
+        .todo-status-pending .todo-text {
+            color: #e5e5e5;
+        }
+
+        /* Completed styling - with green check and strikethrough */
+        .todo-status-completed {
+            border-left-color: #34d399;
+            opacity: 0.7;
+        }
+
+        .todo-status-completed .todo-icon {
+            color: #34d399;
+        }
+
+        .todo-status-completed .todo-text {
+            color: #a0a0a0;
+            text-decoration: line-through;
+        }
+
+        .todo-text {
+            flex: 1;
+            font-size: 0.9em;
+            line-height: 1.4;
+            color: var(--text-color);
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .todo-text.expanded {
+            -webkit-line-clamp: unset;
+            display: block;
+        }
+
+        /* Shimmer animation for in-progress tasks */
+        @keyframes shimmer {
+            0% {
+                background-position: -200% 0;
+            }
+            100% {
+                background-position: 200% 0;
+            }
+        }
+
+        .todo-in-progress {
+            border-left-color: #3b82f6;
+            background: linear-gradient(90deg, rgba(59, 130, 246, 0.05) 0%, white 100%);
+        }
+
+        .todo-pending {
+            border-left-color: #f59e0b;
+            background: linear-gradient(90deg, rgba(245, 158, 11, 0.05) 0%, white 100%);
+        }
+
+        .todo-completed {
+            border-left-color: #10b981;
+            background: linear-gradient(90deg, rgba(16, 185, 129, 0.05) 0%, white 100%);
+            opacity: 0.75;
+        }
+
+        .todo-in-progress .todo-icon {
+            color: #3b82f6;
+            animation: spin 2s linear infinite;
+        }
+
+        .todo-pending .todo-icon {
+            color: #f59e0b;
+        }
+
+        .todo-completed .todo-icon {
+            color: #10b981;
+        }
+
+        .todo-text {
+            flex: 1;
+            font-size: 0.9em;
+            line-height: 1.5;
+            color: #334155;
+        }
+
+        .todo-completed .todo-text {
+            text-decoration: line-through;
+            color: #94a3b8;
+        }
+
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body>
@@ -1143,9 +1333,9 @@
                     </span>
                     <div class="custom-dropdown-container">
                         <select id="agentModeSelect" class="custom-dropdown">
+                            <option value="prototype">Design Mode</option>
                             <option value="engineer">Engineer Mode</option>
-                            <option value="prototype">Prototype Mode</option>
-                            <option value="ask">Ask Mode</option>
+                            <!-- <option value="ask">Ask Mode</option> -->
                         </select>
                     </div>
                     <button id="sendButton" disabled>Send</button>
@@ -1212,8 +1402,11 @@
 
     <script>
         // AGENT = {NAME: 'llamabot', TYPE: 'default'};
-        // AGENT = {NAME: 'deep_research', TYPE: 'deep_agent'}; // uses create_react_agent which I believe is why we have to case into content in AIMessageChunk differently 
-        AGENT = {NAME: 'rails_agent', TYPE: 'default'};
+        // AGENT = {NAME: 'deep_research', TYPE: 'claude_llm_model'}; // uses create_react_agent which I believe is why we have to case into content in AIMessageChunk differently 
+        // AGENT = {NAME: 'rails_agent', TYPE: 'claude_llm_model'};
+        // AGENT = {NAME: 'rails_agent', TYPE: 'default'};
+        AGENT = {NAME: 'rails_frontend_starter_agent', TYPE: 'default'};
+
 
         // WebSocket connection management
         let socket = null;
@@ -1248,6 +1441,11 @@
             
             try {
                 // Parse markdown to HTML
+                // if (AGENT.TYPE === 'claude_llm_model') {
+                if (Array.isArray(text)) {
+                 text = text[0].text;   
+                }
+
                 let html = marked.parse(text);
                 
                 // Basic XSS prevention - remove script tags and event handlers
@@ -1259,7 +1457,21 @@
             } catch (error) {
                 console.error('Markdown parsing error:', error);
                 // Fallback to plain text with line breaks
-                return text.replace(/\n/g, '<br>');
+                try {
+                    return text.replace(/\n/g, '<br>');
+                } catch (error) {
+                    console.error('Text.replace parsing error:', error);
+                    return text;
+                }
+            }
+        }
+        
+        function getRailsUrl(){
+            if (window.location.protocol === 'https:') {
+                return 'https://rails-' + window.location.host;
+            }
+            else {
+                return "http://localhost:3000";
             }
         }
 
@@ -1268,6 +1480,7 @@
             let wsUrl = `ws://${window.location.host}/ws`;
             if (window.location.protocol === 'https:') {
                 wsUrl = `wss://${window.location.host}/ws`;
+                //TODO: Swap this out with the getRailsUrl() helper function.
                 document.getElementById('liveSiteFrame').src = 'https://rails-' + window.location.host;
             }
 
@@ -1295,7 +1508,8 @@
 
             socket.onmessage = function(event) { //when the websocket sends a message to our front-end, this function is called
                 const data = JSON.parse(event.data);
-                console.log('Received:', data);
+                console.log('Received:', data.type);
+                console.log('Data:', data);
                 
                 // Handle streaming AI messages
                 if (data.type === 'AIMessageChunk') {
@@ -1309,8 +1523,8 @@
                         if (currentAiMessage.querySelector('.typing-indicator')) {
                             currentAiMessage.innerHTML = '';
                         }
-                        if (AGENT.TYPE === 'deep_agent') { //follows deep_research data content structure for AIMessageChunks.
-                            if (data.content && data.content.length > 0) { // it's strange how this different deep agent requires this changed structure/format.
+                        if (AGENT.TYPE === 'claude_llm_model') { //follows claude's data content structure for AIMessageChunks.
+                            if (data.content && data.content.length > 0) { // it's strange how claude's llm model requires this changed structure/format.
                                 currentAiMessageBuffer += data.content[0].text;
                                 currentAiMessage.innerHTML = parseMarkdown(currentAiMessageBuffer);
                             }
@@ -1397,9 +1611,16 @@
                     }
                 }
                 else if (data.type === 'ai') {
-                    if (data.tool_calls && data.tool_calls.length > 0) { //since we streamed the message with AIMessageChunk, we don't need to add a message unless there's a tool_call payload.
+                    //TODO: This is where there's an issue with claude vs. openai.
+                    // Tool calls come back as undefined for claude models.
+                    if (data.base_message.tool_calls && data.base_message.tool_calls.length > 0) { //since we streamed the message with AIMessageChunk, we don't need to add a message unless there's a tool_call payload.
                         addMessage(data.content, data.type, data.base_message);
                     }
+
+                    // Old code:
+                    // if (data.tool_calls && data.tool_calls.length > 0) { //since we streamed the message with AIMessageChunk, we don't need to add a message unless there's a tool_call payload.
+                    //     addMessage(data.content, data.type, data.base_message);
+                    // }
                 }
                 else {
                     addMessage(data.content, data.type, data.base_message);
@@ -1460,14 +1681,24 @@
                                     String(now.getSeconds()).padStart(2, '0');
                 }
 
+                user_selected_agent_name = document.getElementById('agentModeSelect').value;
+                // For reference:
+                // <option value="engineer">Engineer Mode</option>
+                // <option value="prototype">Prototype Mode</option>
+                if (user_selected_agent_name == 'prototype') {
+                    AGENT.NAME = 'rails_frontend_starter_agent';
+                } else if (user_selected_agent_name == 'engineer') {
+                    AGENT.NAME = 'rails_agent';
+                }
+
                 // Send message via WebSocket
                 const messageData = {
                     message: message,
                     thread_id: currentThreadId,
                     origin: window.location.host,
                     debug_info: debugInfo,
-                    agent_name: AGENT.NAME,
-                    agent_mode: agentMode
+                    agent_name: AGENT.NAME, // agent name is used to route to the langgraph.json entry for the agent.
+                    agent_mode: agentMode // this is used to route to a subagent with a single langgraph agent (each agent has it's own langgraph.json entry.)
                 };
 
                 socket.send(JSON.stringify(messageData));
@@ -1491,12 +1722,11 @@
                 messageDiv.textContent = content;
             }
             else if (type === 'ai') {
-                // console.log('ai content', content);
                 messageDiv.className = 'message ai-message';
-                
                 messageDiv.innerHTML = parseMarkdown(content);
 
-                if (content == '' || content == null) {
+                // We'll add a tool-message div that we later go back and add the output of what the tool responded with
+                if (content == '' || content == null) { // this follows OpenAI's data content structure for AI message that has a tool call.
                     if (baseMessage && baseMessage.tool_calls && baseMessage.tool_calls.length > 0) {
                         messageDiv.className = 'message tool-message';
                         
@@ -1516,8 +1746,12 @@
                 if (messageDiv) {
                     messageDiv.className = 'message tool-message';
                     // Update the collapsible content with the tool response
-                    updateCollapsibleToolMessage(messageDiv, content);
+                    updateCollapsibleToolMessage(messageDiv, content, baseMessage);
                 }
+                else { //TODO: Issue with Claude's LLM here, because there is no message div created by this point for Claude's model.
+                // There was no message div!! This means we are likely using Claude's llm model. Let's create a new message div.
+                }
+
             } 
             else if (type === 'error') {
                 messageDiv.className = 'message error-message';
@@ -1525,6 +1759,7 @@
             }
             else if (type === 'end') {
                 console.log('end of stream');
+                refreshMainIFrame(); //after langgraph, just refresh for now. In the future, we can do it more intelligently.
                 // STOP thinking indicator.
                 document.getElementById('thinkingIndicator').classList.add('hidden'); // stop thinking indicator
                 return; // Don't append anything for end messages
@@ -1553,22 +1788,95 @@
         function createCollapsibleToolMessage(toolName, firstArgument, toolArgs, toolResult) {
             const uniqueId = 'tool_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
             // <span class="tool-summary">${toolName == 'write_todos' ? '📝' : toolName == 'ls' ? '📁' : toolName == 'read_file' ? '📄' : toolName == 'edit_file' || toolName == 'write_file' ? '✏️': toolName == 'search_file' || toolName == 'internet_search' ? '🔍' : toolName == 'bash_command' ? '⚡' : '🔨'} ${toolName} ${firstArgument}</span>
-            return `
-                <div class="tool-collapsible" onclick="toggleToolCollapsible('${uniqueId}')">
-                    <span class="tool-summary">🔨${toolName} ${firstArgument}</span>
-                </div>
-                <div class="tool-content" id="${uniqueId}">
-                    <div class="tool-details">
-                        <strong>Arguments:</strong><br>
-                        <pre style="margin: 4px 0; font-size: 0.85em; white-space: pre-wrap;">${toolArgs}</pre>
-                        ${toolResult ? `<strong>Result:</strong><br><pre style="margin: 4px 0; font-size: 0.85em; white-space: pre-wrap;">${toolResult}</pre>` : ''}
+            console.log('toolName!!!', toolName);
+            if (toolName == 'write_todos') {
+                let todos = JSON.parse(toolArgs)['todos'];
+                
+                // Sort todos: in_progress → pending → completed
+                const statusOrder = { 'in_progress': 0, 'pending': 1, 'completed': 2 };
+                todos.sort((a, b) => statusOrder[a.status] - statusOrder[b.status]);
+                
+                let todoListHTML = '';
+                
+                // Current status for grouping
+                let currentStatus = null;
+                
+                todos.forEach((todo, index) => {
+                    // Add section header if status changed
+                    if (todo.status !== currentStatus) {
+                        currentStatus = todo.status;
+                        const sectionTitle = todo.status === 'in_progress' ? 'In Progress' :
+                                            todo.status === 'pending' ? 'Pending' : 'Completed';
+                        todoListHTML += `<div class="todo-section-header">${sectionTitle}</div>`;
+                    }
+                    
+                    const todoId = `todo-${uniqueId}-${index}`;
+                    const statusClass = `todo-status-${todo.status.replace('_', '-')}`; // ADD THIS LINE
+                    const icon = todo.status === 'completed' ? '✅' : 
+                                 todo.status === 'in_progress' ? '🎯' : '🕒';
+                    
+                    todoListHTML += `
+                        <div class="todo-item ${statusClass}" onclick="toggleTodo('${todoId}')">
+                            <span class="todo-icon">${icon}</span>
+                            <span class="todo-text" id="${todoId}">${todo.content}</span>
+                        </div>
+                    `;
+                });
+
+                return `
+                    <div class="tool-collapsible" onclick="toggleToolCollapsible('${uniqueId}')">
+                        <span class="tool-summary">🎯 Todo List (${todos.length} tasks)</span>
                     </div>
-                </div>
-            `;
+                    <div class="tool-content" id="${uniqueId}">
+                        <div class="todo-container">
+                            ${todoListHTML}
+                        </div>
+                    </div>
+                `;
+            }
+            else if (toolName == 'edit_file') {
+                return `
+                    <div class="tool-collapsible" onclick="toggleToolCollapsible('${uniqueId}')">
+                        <span class="tool-summary">Edit ${firstArgument}</span>
+                    </div>
+                    <div class="tool-content" id="${uniqueId}">
+                        <div class="tool-details">
+                            <strong>Arguments:</strong><br>
+                            <pre style="margin: 4px 0; font-size: 0.85em; white-space: pre-wrap;">${toolArgs}</pre>
+                            ${toolResult ? `<strong>Result:</strong><br><pre style="margin: 4px 0; font-size: 0.85em; white-space: pre-wrap;">${toolResult}</pre>` : ''}
+                        </div>
+                    </div>
+                `;
+            }
+            else {
+                return `
+                    <div class="tool-collapsible" onclick="toggleToolCollapsible('${uniqueId}')">
+                        <span class="tool-summary">🔨${toolName} ${firstArgument}</span>
+                    </div>
+                    <div class="tool-content" id="${uniqueId}">
+                        <div class="tool-details">
+                            <strong>Arguments:</strong><br>
+                            <pre style="margin: 4px 0; font-size: 0.85em; white-space: pre-wrap;">${toolArgs}</pre>
+                            ${toolResult ? `<strong>Result:</strong><br><pre style="margin: 4px 0; font-size: 0.85em; white-space: pre-wrap;">${toolResult}</pre>` : ''}
+                        </div>
+                    </div>
+                `;
+            }
         }
 
-        function updateCollapsibleToolMessage(messageDiv, toolResult) {
+        function updateCollapsibleToolMessage(messageDiv, toolResult, baseMessage) {
             const toolContent = messageDiv.querySelector('.tool-content .tool-details');
+            
+            if (baseMessage.name == 'edit_file') {
+                const tool_header_label = messageDiv.querySelector('.tool-collapsible')
+                console.log('edit_file');
+                if (baseMessage.artifact?.status == 'success') {
+                    tool_header_label.innerHTML = tool_header_label.innerHTML.replace('Edit', '✅ Edit');
+                }   
+                else if(baseMessage.artifact?.status == 'error') {
+                    tool_header_label.innerHTML = tool_header_label.innerHTML.replace('Edit', '❌ Edit');
+                }
+            }
             if (toolContent) {
                 // Check if result already exists to avoid duplication
                 if (!toolContent.innerHTML.includes('<strong>Result:</strong>')) {
@@ -1973,20 +2281,46 @@
             const button = this;
             const svg = button.querySelector('svg');
             svg.style.animation = 'spin 0.5s linear';
-            
-            // Get all iframes and refresh them
-            const iframes = document.querySelectorAll('iframe');
-            iframes.forEach(iframe => {
-                if (iframe.src) {
-                    iframe.src = iframe.src;
-                }
-            });
-            
+
             // Remove animation after it completes
             setTimeout(() => {
                 svg.style.animation = '';
             }, 500);
+            
+            refreshMainIFrame();
+            
+
         });
+
+        function refreshMainIFrame(){
+            // Get all iframes and refresh them
+            const iframes = document.querySelectorAll('iframe');
+            iframes.forEach(iframe => {
+                
+                let isRailsIFrame = iframe.src.includes(':3000') || iframe.src.includes('https://rails-');
+                // debugger; // see where the user is at right now.
+
+                if (isRailsIFrame) {
+                    getRailsDebugInfo((debugInfoJson) => {
+                        console.log('debugInfoJson', debugInfoJson);
+                        if (iframe.src) {
+                            let baseUrl = 'localhost:3000'; //todo. fix this.
+                            let additionalRequestPath = debugInfoJson.request_path;
+                            if (!additionalRequestPath) {
+                                console.warn('Warning: debugInfoJson.request_path is undefined or null! Theres probably a rails error.', debugInfoJson);
+                                additionalRequestPath = '/'; // fallback path, choose appropriate default for your app
+                            }
+                            iframe.src = getRailsUrl() + additionalRequestPath;
+                        }
+                    });
+                }
+                else {
+                    if (iframe.src) {
+                        iframe.src = iframe.src;
+                    }
+                }
+            });
+        }
 
         // Back button functionality
         document.getElementById('backButton').addEventListener('click', function() {
@@ -2215,6 +2549,12 @@
         
         // Load settings after other initializations
         loadSettingsFromCookies();
+
+        function toggleTodo(todoId) {
+            event.stopPropagation(); // Prevent triggering parent tool collapse
+            const todoText = document.getElementById(todoId);
+            todoText.classList.toggle('expanded');
+        }
     </script>
 </body>
 </html>

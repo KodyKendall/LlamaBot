@@ -1,0 +1,12 @@
+10/09/2025
+- Introducing, Design Mode!
+- Design Mode allows you to have Leonardo focus on the user interface, which makes it much easier to get started building with Leonardo.
+- Format the agent's TODO list in the Leonardo chat window for more clarity on what the agent is focusing on.
+- Begin trying to support Claude's LLM output data shape in our chat.html. 
+- Document the bug with the edit tool
+- Fix Prototyping Agent Mode & Rename to Design Mode
+- Add Rails starter agent (entire new agent in LangGraph.json), that prototyping mode routes to.
+- Remember where the user is at in the iframe for their Rails app, and when refreshed, make sure it loads that page again.
+
+10/13/2025:
+- 0.2.15b: Improve iframe refresh so if there's a rails error it doesn't take to a broken URL/page. (undefined route)
