@@ -7,3 +7,6 @@
 - Fix Prototyping Agent Mode & Rename to Design Mode
 - Add Rails starter agent (entire new agent in LangGraph.json), that prototyping mode routes to.
 - Remember where the user is at in the iframe for their Rails app, and when refreshed, make sure it loads that page again.
+
+10/13/2025:
+- 0.2.15b: Improve iframe refresh so if there's a rails error it doesn't take to a broken URL/page. (undefined route)

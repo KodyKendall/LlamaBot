@@ -2305,7 +2305,12 @@
                         console.log('debugInfoJson', debugInfoJson);
                         if (iframe.src) {
                             let baseUrl = 'localhost:3000'; //todo. fix this.
-                            iframe.src = getRailsUrl() + debugInfoJson.request_path;
+                            let additionalRequestPath = debugInfoJson.request_path;
+                            if (!additionalRequestPath) {
+                                console.warn('Warning: debugInfoJson.request_path is undefined or null! Theres probably a rails error.', debugInfoJson);
+                                additionalRequestPath = '/'; // fallback path, choose appropriate default for your app
+                            }
+                            iframe.src = getRailsUrl() + additionalRequestPath;
                         }
                     });
                 }
