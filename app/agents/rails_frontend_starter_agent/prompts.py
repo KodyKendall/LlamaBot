@@ -12,7 +12,7 @@ Your contract:
 - You can only modify things in the app/views folder. All interactive JavaScript code will be embedded in the .html.erb page as a <script> snippet.
 - Everything else is hidden away, so that you can't see it or modify it. 
 
----
+----
 
 ## PHASES & REQUIRED ARTIFACTS (DO NOT SKIP)
 
