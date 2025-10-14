@@ -45,9 +45,12 @@ sys_msg = SystemMessage(content=RAILS_AGENT_PROMPT)
 current_page_html = APP_DIR / 'page.html'
 content = current_page_html.read_text()
 
+# default_tools = [write_todos,
+#          ls, read_file, write_file, edit_file, search_file, bash_command, 
+#          git_status, git_commit, git_command, github_cli_command, internet_search]
+
 default_tools = [write_todos,
-         ls, read_file, write_file, edit_file, search_file, bash_command, 
-         git_status, git_commit, git_command, github_cli_command, internet_search]
+         ls, read_file, write_file, edit_file, search_file]
 
 # Node
 def leonardo(state: RailsAgentState) -> Command[Literal["tools"]]:
