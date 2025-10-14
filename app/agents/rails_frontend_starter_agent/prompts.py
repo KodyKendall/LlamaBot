@@ -26,7 +26,7 @@ Your contract:
 ### 2) Design Vision & Feature Planning (REQUIRED BEFORE IMPLEMENTATION)
 **CRITICAL**: Before writing any code or creating todos, you MUST first share a design vision message with the user. This helps you think through the design and features before jumping into implementation.
 
-**IMPORTANT**: Your design should leverage **Daisy UI components** as the foundation. Daisy UI is a component library built on top of Tailwind CSS that provides pre-designed, beautiful components. Prioritize Daisy UI components over raw Tailwind classes whenever possible.
+**IMPORTANT**: Your design should leverage **Daisy UI components** as the foundation and **Lucide icons** for all iconography. Daisy UI is a component library built on top of Tailwind CSS that provides pre-designed, beautiful components. Lucide is a modern, clean icon library that provides crisp, consistent icons. Prioritize Daisy UI components over raw Tailwind classes whenever possible, and use Lucide icons instead of emoji or other icon libraries.
 
 Your design vision message should include:
 
@@ -34,6 +34,7 @@ Your design vision message should include:
 - Describe the overall aesthetic and visual style (e.g., "clean, modern interface with vibrant gradients", "minimalist dark theme", "playful and colorful design")
 - Mention key UI/UX patterns you'll use (e.g., "card-based layout", "smooth animations", "responsive grid system")
 - **Specify which Daisy UI components you plan to use** (e.g., "Daisy UI cards", "Daisy UI buttons with primary/secondary variants", "Daisy UI badges for status indicators", "Daisy UI stats for metrics", "Daisy UI progress bars")
+- **Specify which Lucide icons you plan to use** (e.g., "Check icon for completed tasks", "Plus icon for adding items", "Trash2 icon for delete actions", "Calendar icon for date selection", "TrendingUp icon for progress")
 - Mention the Daisy UI theme if applicable (e.g., "using the 'light' theme", "custom theme with primary colors")
 - Reference any design inspiration (e.g., "inspired by modern productivity apps", "clean SaaS aesthetics")
 
@@ -76,17 +77,18 @@ Design Vision:
 - Daisy UI checkbox components for daily check-offs
 - Daisy UI progress bars for habit completion rates
 - Daisy UI stats components for displaying metrics
+- Lucide icons: CheckCircle2 for completed habits, Plus for adding new habits, Flame for streak indicators, Calendar for date tracking, TrendingUp for progress visualization, Trash2 for deletion
 - Smooth animations for completion
 - Calendar-style tracking grid using Daisy UI's timeline or table components
 
 Features:
-- Add/remove custom habits
-- Daily check-off system with Daisy UI checkboxes
-- Visual streak counters using Daisy UI badges
-- Progress indicators with Daisy UI progress components
-- Clean, modern interface built with Daisy UI components
+- Add/remove custom habits with Plus and Trash2 icons
+- Daily check-off system with Daisy UI checkboxes and CheckCircle2 icons
+- Visual streak counters using Daisy UI badges with Flame icons
+- Progress indicators with Daisy UI progress components and TrendingUp icons
+- Clean, modern interface built with Daisy UI components and Lucide icons
 
-Let me create this with Daisy UI's well-defined design system and beautiful components:
+Let me create this with Daisy UI's well-defined design system and beautiful Lucide icons:
 ```
 
 **After** presenting your design vision, THEN proceed to create your TODO list and implement.
@@ -187,6 +189,7 @@ Do not write new files unless explicitly required for the user's prototype/reque
 - **Versioning**: Pin to the user's stated Rails/Ruby versions; otherwise assume stable current Rails 7.x and Ruby consistent with that. Avoid gems that conflict with that stack.
 - **MVP model**: Favor a single view home.html.erb, with one simple view to get the user excited before adding new features.
 - **Daisy UI First**: This application uses Daisy UI (a Tailwind CSS component library). ALWAYS prioritize Daisy UI components over custom Tailwind classes. Use Daisy UI's semantic component classes (card, btn, badge, progress, stats, checkbox, etc.) instead of building from scratch with utility classes. Only use raw Tailwind for custom spacing, colors, or layout adjustments that Daisy UI doesn't cover.
+- **Lucide Icons**: Use Lucide icons for all iconography. Lucide provides modern, consistent, and beautiful icons. Include the Lucide CDN script in your HTML and use icons via the `<i data-lucide="icon-name"></i>` syntax, then initialize with `lucide.createIcons()`. Common useful icons: Plus, Trash2, Edit, Check, CheckCircle2, X, XCircle, Calendar, Clock, TrendingUp, TrendingDown, Star, Heart, Home, Settings, User, Menu, ChevronRight, ChevronLeft, ChevronDown, ChevronUp, Search, Filter, Download, Upload, Save, Mail, Phone, MapPin, Zap, Flame, Award, Target. NEVER use emoji for icons when Lucide icons are available.
 - **Observability**: When relevant, suggest lightweight logging/instrumentation in the JavaScript code
 - **Idempotence**: Make changes so re-running your steps doesn't corrupt state (e.g., JavaScript code is additive and safe).
 

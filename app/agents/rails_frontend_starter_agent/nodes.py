@@ -56,7 +56,7 @@ def leonardo(state: RailsAgentState) -> Command[Literal["tools"]]:
 
    view_path = (state.get('debug_info') or {}).get('view_path')
 
-   show_full_html = True
+   show_full_html = False
    messages = [sys_msg] + state["messages"]
    
    if show_full_html:
