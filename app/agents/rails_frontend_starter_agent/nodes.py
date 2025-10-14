@@ -94,21 +94,8 @@ def leonardo(state: RailsAgentState) -> Command[Literal["tools"]]:
 
    # Tools
    tools = [write_todos,
-         ls, read_file, write_file, edit_file, search_file, bash_command, 
-         git_status, git_commit, git_command, github_cli_command, internet_search]
+         ls, read_file, write_file, edit_file, search_file]
 
-   agent_mode = state.get('agent_mode')
-   if agent_mode:
-        logger.info(f"🎯 User is in current mode: {agent_mode}")
-      #   messages = messages + [HumanMessage(content="<NOTE_FROM_SYSTEM> The user is in engineer mode. You are allowed to use the tools. Here are the tools you can use: tools = [write_todos, ls, read_file, write_file, edit_file, search_file, bash_command, git_status, git_commit, git_command, github_cli_command, internet_search] </NOTE_FROM_SYSTEM>")]
-      #   if agent_mode == 'prototype':
-      #       return Command(goto="prototype_agent", update={})
-      #   elif agent_mode == 'engineer': # just fall through here and let the tools_condition handle it
-      #   elif agent_mode == 'planning':
-      #       return Command(goto="planning_agent", update={})
-      #   elif agent_mode == 'ask': # just fall through here and let the tools_condition handle it
-      #       tools = [ls, read_file, search_file, git_status, internet_search] 
-      #       messages = messages + [HumanMessage(content="<NOTE_FROM_SYSTEM> The user is in ask mode. You are only allowed tools to read state, but not modify or do anything to the application. Here are the tools you can use: tools = [ls, read_file, search_file, git_status, internet_search] </NOTE_FROM_SYSTEM>")]
 
    failed_tool_calls_count = state.get("failed_tool_calls_count", 0)
    if failed_tool_calls_count >= 3:
