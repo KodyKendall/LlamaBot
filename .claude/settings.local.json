@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(docker build:*)",
+      "Bash(PORT=3001 npm start)",
+      "Bash(docker run:*)",
+      "Bash(npm install:*)",
+      "Bash(docker inspect:*)",
+      "Bash(npx tailwindcss init:*)",
+      "Bash(timeout 5 docker run --rm --entrypoint=/bin/sh vscode-test:latest -c \"which gh && which node && which npm\")",
+      "Bash(lsof:*)",
+      "Bash(xargs kill:*)",
+      "Bash(npm uninstall:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
