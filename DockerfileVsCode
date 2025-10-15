@@ -1,0 +1,29 @@
+FROM linuxserver/code-server:latest
+
+RUN apt-get update && apt-get install -y \
+    curl \
+    gnupg \
+    && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
+    && apt-get update \
+    && apt-get install -y gh nodejs npm \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Configure default user settings directory
+ENV HOME=/config
+
+# Install VS Code extensions using the full path
+# The linuxserver/code-server image has code-server installed at /app/code-server
+RUN mkdir -p /config/.local/share/code-server/extensions && \
+    /app/code-server/bin/code-server --extensions-dir /config/.local/share/code-server/extensions --install-extension anthropic.claude-code || \
+    echo "Extension installation will complete on first run"
+
+# Configure VS Code settings (dark theme)
+RUN mkdir -p /config/data/User && \
+    echo '{\n\
+    "workbench.colorTheme": "Default Dark Modern",\n\
+    "window.autoDetectColorScheme": false\n\
+}' > /config/data/User/settings.json
+
+# docker buildx build --file DockerfileVsCode --platform linux/amd64,linux/arm64 --tag kody06/llamabot-vscode:latest --push .
