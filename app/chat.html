@@ -1359,8 +1359,10 @@
                 </div>
                 <div class="browser-tabs">
                     <div class="tab active" data-target="liveSiteFrame">Your Rails App</div>
-                    <div class="tab" data-target="contentFrame">Agent TODO List</div>
                     <div class="tab" data-target="gitFrame">Git Status</div>
+                    <!-- <div class="tab" data-target="vsCodeFrame">VS Code</div>
+                    <div class="tab" data-target="pgWebFrame">Database</div> -->
+                    <!-- <div class="tab" data-target="contentFrame">Agent TODO List</div> -->
                 </div>
             </div>
             <div class="browser-addressbar">
@@ -1394,8 +1396,10 @@
             </div>
             <div class="browser-content">
                 <iframe src="http://localhost:3000" title="Live Site Frame" id="liveSiteFrame" class="content-iframe active"></iframe>
-                <iframe src="/page" title="Content Frame" id="contentFrame" class="content-iframe"></iframe>
                 <iframe src="/agent_page/rails_agent" title="Git Status Frame" id="gitFrame" class="content-iframe"></iframe>
+                <!-- <iframe src="http://localhost:8443" title="VS Code Frame" id="vsCodeFrame" class="content-iframe"></iframe> -->
+                <!-- <iframe src="/page" title="Content Frame" id="contentFrame" class="content-iframe"></iframe> -->
+                <!-- <iframe src="http://localhost:8082" title="Database Frame" id="pgWebFrame" class="content-iframe"></iframe> -->
             </div>
         </div>
     </div>
@@ -1872,9 +1876,11 @@
                 console.log('edit_file');
                 if (baseMessage.artifact?.status == 'success') {
                     tool_header_label.innerHTML = tool_header_label.innerHTML.replace('Edit', '✅ Edit');
+                    refreshMainIFrame(); // forces a refresh of the iframe to show the changes AND to get the new debug info. (rendered HTML)
                 }   
                 else if(baseMessage.artifact?.status == 'error') {
                     tool_header_label.innerHTML = tool_header_label.innerHTML.replace('Edit', '❌ Edit');
+                    refreshMainIFrame(); // forces a refresh of the iframe to show the changes AND to get the new debug info. (rendered HTML)
                 }
             }
             if (toolContent) {
