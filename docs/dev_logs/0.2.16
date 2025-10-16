@@ -1,0 +1,5 @@
+10/15/2025
+- Change Leonardo to GPT 5 with minimal reasoning mode for higher intelligence
+- Add VSCode Container for better developer experience in hosted developer instances.
+- Add sound that plays when complete
+- Continue progress on React frontend view for long-term stability of front-end experience, (moving away from chat.html)

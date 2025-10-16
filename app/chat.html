@@ -1359,8 +1359,10 @@
                 </div>
                 <div class="browser-tabs">
                     <div class="tab active" data-target="liveSiteFrame">Your Rails App</div>
-                    <div class="tab" data-target="contentFrame">Agent TODO List</div>
                     <div class="tab" data-target="gitFrame">Git Status</div>
+                    <!-- <div class="tab" data-target="vsCodeFrame">VS Code</div>
+                    <div class="tab" data-target="pgWebFrame">Database</div> -->
+                    <!-- <div class="tab" data-target="contentFrame">Agent TODO List</div> -->
                 </div>
             </div>
             <div class="browser-addressbar">
@@ -1394,15 +1396,22 @@
             </div>
             <div class="browser-content">
                 <iframe src="http://localhost:3000" title="Live Site Frame" id="liveSiteFrame" class="content-iframe active"></iframe>
-                <iframe src="/page" title="Content Frame" id="contentFrame" class="content-iframe"></iframe>
                 <iframe src="/agent_page/rails_agent" title="Git Status Frame" id="gitFrame" class="content-iframe"></iframe>
+                <!-- <iframe src="http://localhost:8443" title="VS Code Frame" id="vsCodeFrame" class="content-iframe"></iframe> -->
+                <!-- <iframe src="/page" title="Content Frame" id="contentFrame" class="content-iframe"></iframe> -->
+                <!-- <iframe src="http://localhost:8082" title="Database Frame" id="pgWebFrame" class="content-iframe"></iframe> -->
             </div>
         </div>
     </div>
 
+    <!-- Audio element for task completion sound -->
+    <audio id="taskCompletedSound" preload="auto">
+        <source src="/assets/Leonardo-Task-Completed-Sound.wav" type="audio/wav">
+    </audio>
+
     <script>
         // AGENT = {NAME: 'llamabot', TYPE: 'default'};
-        // AGENT = {NAME: 'deep_research', TYPE: 'claude_llm_model'}; // uses create_react_agent which I believe is why we have to case into content in AIMessageChunk differently 
+        // AGENT = {NAME: 'deep_research', TYPE: 'claude_llm_model'}; // uses create_react_agent which I believe is why we have to case into content in AIMessageChunk differently
         // AGENT = {NAME: 'rails_agent', TYPE: 'claude_llm_model'};
         // AGENT = {NAME: 'rails_agent', TYPE: 'default'};
         AGENT = {NAME: 'rails_frontend_starter_agent', TYPE: 'default'};
@@ -1762,6 +1771,15 @@
                 refreshMainIFrame(); //after langgraph, just refresh for now. In the future, we can do it more intelligently.
                 // STOP thinking indicator.
                 document.getElementById('thinkingIndicator').classList.add('hidden'); // stop thinking indicator
+
+                // Play task completed sound
+                const taskCompletedSound = document.getElementById('taskCompletedSound');
+                if (taskCompletedSound) {
+                    taskCompletedSound.play().catch(error => {
+                        console.log('Could not play sound:', error);
+                    });
+                }
+
                 return; // Don't append anything for end messages
             }
             // Insert message before the scroll button if it exists
@@ -1872,9 +1890,11 @@
                 console.log('edit_file');
                 if (baseMessage.artifact?.status == 'success') {
                     tool_header_label.innerHTML = tool_header_label.innerHTML.replace('Edit', '✅ Edit');
+                    refreshMainIFrame(); // forces a refresh of the iframe to show the changes AND to get the new debug info. (rendered HTML)
                 }   
                 else if(baseMessage.artifact?.status == 'error') {
                     tool_header_label.innerHTML = tool_header_label.innerHTML.replace('Edit', '❌ Edit');
+                    refreshMainIFrame(); // forces a refresh of the iframe to show the changes AND to get the new debug info. (rendered HTML)
                 }
             }
             if (toolContent) {

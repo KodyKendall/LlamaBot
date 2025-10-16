@@ -60,7 +60,8 @@ app.add_middleware(
 )
 
 # Mount static directories
-
+assets_dir = Path(__file__).parent / "assets"
+app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
 
 # This is responsible for holding and managing all active websocket connections.
 manager = WebSocketConnectionManager(app) 

@@ -360,6 +360,7 @@ def edit_file(
     return Command(
         update={
             "messages": [ToolMessage(result_msg, artifact=tool_output, tool_call_id=tool_call_id)],
+            "failed_tool_calls_count": -state.get("failed_tool_calls_count", 0)  # This will be added to the existing count due to operator.add reducer
         }
     )
 

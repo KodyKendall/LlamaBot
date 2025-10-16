@@ -1,0 +1,77 @@
+FROM linuxserver/code-server:latest
+
+RUN apt-get update && apt-get install -y \
+    curl \
+    gnupg \
+    && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
+    && apt-get update \
+    && apt-get install -y gh nodejs npm git \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Configure default user settings directory
+ENV HOME=/config
+
+# Pre-create necessary directories
+RUN mkdir -p /config/.local/share/code-server/extensions && \
+    mkdir -p /config/data/User
+
+# Install Claude Code extension
+# Note: This will be persisted when /config is mounted as a volume
+RUN /app/code-server/bin/code-server \
+    --extensions-dir /config/.local/share/code-server/extensions \
+    --install-extension anthropic.claude-code || \
+    echo "Extension will be available after volume mount"
+
+# Configure VS Code settings (dark theme)
+RUN echo '{\n\
+    "workbench.colorTheme": "Default Dark Modern",\n\
+    "window.autoDetectColorScheme": false\n\
+}' > /config/data/User/settings.json
+
+# Set up a default git config (can be overridden by user)
+RUN git config --system credential.helper store && \
+    git config --system --add safe.directory '*'
+
+# docker buildx build --file DockerfileVsCode --platform linux/amd64,linux/arm64 --tag kody06/llamabot-vscode:latest --push .
+# TODO: set up VS Code SSH:
+    # Dockerfile for VSCode container with Leonardo SSH auto-setup
+# Base image: linuxserver/code-server or your preferred VSCode image
+
+# FROM kody06/llamabot-vscode:latest
+
+# # Install SSH client if not already present
+# RUN apt-get update && \
+#     apt-get install -y openssh-client && \
+#     apt-get clean && \
+#     rm -rf /var/lib/apt/lists/*
+
+# # Create .ssh directory with proper permissions
+# RUN mkdir -p /config/.ssh && \
+#     chmod 700 /config/.ssh
+
+# # Copy the setup script
+# COPY setup-leonardo-ssh.sh /usr/local/bin/setup-leonardo-ssh
+# RUN chmod +x /usr/local/bin/setup-leonardo-ssh
+
+# # Add a helpful message to .bashrc that prompts first-time setup
+# RUN echo '' >> /config/.bashrc && \
+#     echo '# Check if Leonardo SSH is configured' >> /config/.bashrc && \
+#     echo 'if [ ! -f /config/.ssh/id_ed25519 ] && [ -z "$LEONARDO_SETUP_PROMPTED" ]; then' >> /config/.bashrc && \
+#     echo '    export LEONARDO_SETUP_PROMPTED=1' >> /config/.bashrc && \
+#     echo '    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"' >> /config/.bashrc && \
+#     echo '    echo "🚀 First time setup: Run this command to configure Leonardo SSH:"' >> /config/.bashrc && \
+#     echo '    echo "   setup-leonardo-ssh"' >> /config/.bashrc && \
+#     echo '    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"' >> /config/.bashrc && \
+#     echo '    echo ""' >> /config/.bashrc && \
+#     echo 'fi' >> /config/.bashrc
+
+# # Set Leonardo server details as environment variables
+# ENV LEONARDO_IP=3.133.157.176
+# ENV LEONARDO_USER=ubuntu
+
+# # Optional: Uncomment to enable auto-connect by default
+# # ENV AUTO_SSH_LEONARDO=1
+
+# WORKDIR /config/workspace

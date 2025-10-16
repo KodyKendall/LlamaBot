@@ -17,6 +17,7 @@ import asyncio
 from pathlib import Path
 import os
 from typing import List, Literal, Optional, TypedDict
+from bs4 import BeautifulSoup
 
 from app.agents.utils.playwright_screenshot import capture_page_and_img_src
 
@@ -44,22 +45,48 @@ sys_msg = SystemMessage(content=RAILS_AGENT_PROMPT)
 current_page_html = APP_DIR / 'page.html'
 content = current_page_html.read_text()
 
+# default_tools = [write_todos,
+#          ls, read_file, write_file, edit_file, search_file, bash_command, 
+#          git_status, git_commit, git_command, github_cli_command, internet_search]
+
 default_tools = [write_todos,
-         ls, read_file, write_file, edit_file, search_file, bash_command, 
-         git_status, git_commit, git_command, github_cli_command, internet_search]
+         ls, read_file, write_file, edit_file, search_file]
 
 # Node
 def leonardo(state: RailsAgentState) -> Command[Literal["tools"]]:
-   llm = ChatOpenAI(model="gpt-4.1")
+   # llm = ChatOpenAI(model="gpt-5")
+   llm = ChatOpenAI(model="gpt-5", extra_body={"reasoning_effort": "minimal"})
+   # llm = ChatOpenAI(model="gpt-5", extra_body={"reasoning_effort": "high"})
+   
 #    llm = ChatAnthropic(model="claude-sonnet-4-5-20250929")
 
    view_path = (state.get('debug_info') or {}).get('view_path')
 
-   show_full_html = True
+   show_full_html = False
    messages = [sys_msg] + state["messages"]
    
    if show_full_html:
       rendered_html = (state.get('debug_info') or {}).get('full_html')
+      
+      # Clean up HTML: keep structure but remove verbose head content
+      soup = BeautifulSoup(rendered_html, 'html.parser')
+
+      # Remove all attributes from html and body tags
+      if soup.html:
+         soup.html.attrs = {}
+      if soup.body:
+         soup.body.attrs = {}
+
+      # Clear head content and replace with a comment
+      if soup.head:
+         soup.head.clear()
+         from bs4 import Comment
+         head_comment = Comment(' Head contents omitted for clarity (CSS, JS, meta tags, etc.) ')
+         soup.head.append(head_comment)
+
+      # Build clean HTML with proper doctype
+      rendered_html = "<!DOCTYPE html>\n" + str(soup.prettify())
+
       if rendered_html:
          messages = messages + [HumanMessage(content=(
             "<NOTE_FROM_SYSTEM> Below is the *rendered* HTML from the browser. "
@@ -73,21 +100,8 @@ def leonardo(state: RailsAgentState) -> Command[Literal["tools"]]:
 
    # Tools
    tools = [write_todos,
-         ls, read_file, write_file, edit_file, search_file, bash_command, 
-         git_status, git_commit, git_command, github_cli_command, internet_search]
+         ls, read_file, write_file, edit_file, search_file]
 
-   agent_mode = state.get('agent_mode')
-   if agent_mode:
-        logger.info(f"🎯 User is in current mode: {agent_mode}")
-        messages = messages + [HumanMessage(content="<NOTE_FROM_SYSTEM> The user is in engineer mode. You are allowed to use the tools. Here are the tools you can use: tools = [write_todos, ls, read_file, write_file, edit_file, search_file, bash_command, git_status, git_commit, git_command, github_cli_command, internet_search] </NOTE_FROM_SYSTEM>")]
-      #   if agent_mode == 'prototype':
-      #       return Command(goto="prototype_agent", update={})
-      #   elif agent_mode == 'engineer': # just fall through here and let the tools_condition handle it
-      #   elif agent_mode == 'planning':
-      #       return Command(goto="planning_agent", update={})
-      #   elif agent_mode == 'ask': # just fall through here and let the tools_condition handle it
-      #       tools = [ls, read_file, search_file, git_status, internet_search] 
-      #       messages = messages + [HumanMessage(content="<NOTE_FROM_SYSTEM> The user is in ask mode. You are only allowed tools to read state, but not modify or do anything to the application. Here are the tools you can use: tools = [ls, read_file, search_file, git_status, internet_search] </NOTE_FROM_SYSTEM>")]
 
    failed_tool_calls_count = state.get("failed_tool_calls_count", 0)
    if failed_tool_calls_count >= 3:
