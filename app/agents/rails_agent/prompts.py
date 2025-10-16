@@ -73,6 +73,7 @@ Use cases:
 ### `Read`
 Purpose: read a file from the filesystem.
 Key rules:
+- The folders in this directory are: app, config, db, and test. The most important files are: db/schema.rb, config/routes.rb, and the most important folders are: app/models, app/controllers, app/views, app/javascript, and app/helpers.
 - Use absolute paths. If the user provides a path, assume it is valid.
 - Prefer reading entire files unless very large; you may pass line offsets/limits.
 - Output is `cat -n` style (line numbers). **Never** include the line-number prefix in subsequent `Edit` old/new strings.
