@@ -53,9 +53,14 @@ default_tools = [write_todos,
 
 # Node
 def leonardo(state: RailsAgentState) -> Command[Literal["tools"]]:
-#    llm = ChatOpenAI(model="gpt-4.1")
+   llm = ChatOpenAI(model="gpt-4.1")
 #    llm = ChatOpenAI(model="gpt-5", extra_body={"reasoning_effort": "minimal"})
-   llm = ChatAnthropic(model="claude-sonnet-4-5-20250929")
+   #llm = ChatAnthropic(model="claude-sonnet-4-5-20250929")
+#    llm = ChatOpenAI(
+#       model="gpt-5-codex",
+#       use_responses_api=True,
+#       reasoning={"effort": "low"}
+#    )
 
    view_path = (state.get('debug_info') or {}).get('view_path')
 

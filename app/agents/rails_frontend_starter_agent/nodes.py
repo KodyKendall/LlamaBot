@@ -57,8 +57,13 @@ def leonardo(state: RailsAgentState) -> Command[Literal["tools"]]:
    # llm = ChatOpenAI(model="gpt-5")
    llm = ChatOpenAI(model="gpt-5", extra_body={"reasoning_effort": "minimal"})
    # llm = ChatOpenAI(model="gpt-5", extra_body={"reasoning_effort": "high"})
-   
-#    llm = ChatAnthropic(model="claude-sonnet-4-5-20250929")
+   # llm = ChatAnthropic(model="claude-sonnet-4-5-20250929")
+   # llm = ChatOpenAI(
+   #    model="gpt-5-codex",
+   #    use_responses_api=True,
+   #    output_version="responses/v1",
+   #    reasoning={"effort": "low"}
+   # )
 
    view_path = (state.get('debug_info') or {}).get('view_path')
 
