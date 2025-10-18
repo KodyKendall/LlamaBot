@@ -46,12 +46,31 @@ def test_llm_produces_output(example):
         config={"configurable": {"thread_id": str(example.id)}, "recursion_limit": 100},
     )
 
-    # Assert that we got some kind of output
+    # Assert that we got some kind of output from Leonardo
     assert result is not None, "❌ Model returned None"
     assert isinstance(result, dict), "❌ Unexpected return type"
     assert "messages" in result, "❌ No messages key in result"
     assert any(m.content.strip() for m in result["messages"]), "❌ Empty response"
     # breakpoint()
+
+@pytest.mark.langsmith
+@pytest.mark.parametrize("example", examples)
+def test_leonardo_knows_his_name(example):
+    """Simplest eval: does the agent return a non-empty string?"""
+    workflow = build_workflow(checkpointer=MemorySaver())
+    inputs = example.inputs
+
+    # Call the workflow with the dataset input
+    result = workflow.invoke(
+        {"messages": [inputs["messages"][-1]]},
+        config={"configurable": {"thread_id": str(example.id)}, "recursion_limit": 100},
+    )
+
+    # Assert that we got some kind of output from Leonardo
+    assert result is not None, "❌ Model returned None"
+    assert isinstance(result, dict), "❌ Unexpected return type"
+    assert "messages" in result, "❌ No messages key in result"
+    assert any(m.content.strip() for m in result["messages"]), "❌ Empty response"
 
 # @pytest.mark.langsmith
 # @pytest.mark.parametrize("example", examples)
