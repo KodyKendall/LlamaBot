@@ -27,7 +27,7 @@ from app.agents.rails_agent.state import RailsAgentState
 from app.agents.rails_agent.tools import write_todos, write_file, read_file, ls, edit_file, search_file, internet_search, bash_command, git_status, git_commit, git_command, view_page, github_cli_command
 from app.agents.rails_agent.prompts import RAILS_AGENT_PROMPT
 
-from app.agents.rails_agent.prototype_agent.nodes import build_workflow as build_prototype_agent
+# from app.agents.rails_agent.prototype_agent.nodes import build_workflow as build_prototype_agent
 # from app.agents.rails_agent.planning_agent import build_workflow as build_planning_agent
 
 import logging
@@ -53,13 +53,13 @@ default_tools = [write_todos,
 
 # Node
 def leonardo(state: RailsAgentState) -> Command[Literal["tools"]]:
-   llm = ChatOpenAI(model="gpt-4.1")
+#    llm = ChatOpenAI(model="gpt-4.1")
 #    llm = ChatOpenAI(model="gpt-5", extra_body={"reasoning_effort": "minimal"})
-#    llm = ChatAnthropic(model="claude-sonnet-4-5-20250929")
+   llm = ChatAnthropic(model="claude-sonnet-4-5-20250929")
 
    view_path = (state.get('debug_info') or {}).get('view_path')
 
-   show_full_html = True
+   show_full_html = False
    messages = [sys_msg] + state["messages"]
    
    if show_full_html:
@@ -80,11 +80,12 @@ def leonardo(state: RailsAgentState) -> Command[Literal["tools"]]:
          ls, read_file, write_file, edit_file, search_file, bash_command, 
          git_status, git_commit, git_command, github_cli_command, internet_search]
 
-   agent_mode = state.get('agent_mode')
+   agent_mode = 'engineer' #state.get('agent_mode')
    if agent_mode:
         logger.info(f"🎯 User is in current mode: {agent_mode}")
         if agent_mode == 'prototype':
-            return Command(goto="prototype_agent", update={})
+            messages = messages + [HumanMessage(content="<NOTE_FROM_SYSTEM> The user is in engineer mode. You are allowed to use the tools. Here are the tools you can use: tools = [write_todos, ls, read_file, write_file, edit_file, search_file, bash_command, git_status, git_commit, git_command, github_cli_command, internet_search] </NOTE_FROM_SYSTEM>")]
+            # return Command(goto="prototype_agent", update={})
 
         elif agent_mode == 'engineer': # just fall through here and let the tools_condition handle it
             messages = messages + [HumanMessage(content="<NOTE_FROM_SYSTEM> The user is in engineer mode. You are allowed to use the tools. Here are the tools you can use: tools = [write_todos, ls, read_file, write_file, edit_file, search_file, bash_command, git_status, git_commit, git_command, github_cli_command, internet_search] </NOTE_FROM_SYSTEM>")]
@@ -128,7 +129,7 @@ def build_workflow(checkpointer=None):
     builder.add_node("tools", ToolNode(default_tools))
     
     # sub-agents:
-    builder.add_node("prototype_agent", build_prototype_agent(checkpointer=checkpointer))
+    # builder.add_node("prototype_agent", build_prototype_agent(checkpointer=checkpointer))
    #  builder.add_node("planning_agent", build_planning_agent(checkpointer=checkpointer))
 
     # Define edges: these determine how the control flow moves
@@ -137,11 +138,11 @@ def build_workflow(checkpointer=None):
     builder.add_conditional_edges(
         "leonardo",
         tools_condition,
-        {"tools": "tools", "prototype_agent": "prototype_agent", END: END},
+        {"tools": "tools", END: END}, #"prototype_agent": "prototype_agent", END: END},
     )
 
     builder.add_edge("tools", "leonardo")
-    builder.add_edge("prototype_agent", END)
+    # builder.add_edge("prototype_agent", END)
    #  builder.add_edge("planning_agent", END)
 
     react_graph = builder.compile(checkpointer=checkpointer)
