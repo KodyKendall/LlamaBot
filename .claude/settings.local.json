@@ -12,7 +12,12 @@
       "Bash(xargs kill:*)",
       "Bash(npm uninstall:*)",
       "Bash(source venv/bin/activate)",
-      "Bash(timeout 10 langgraph dev:*)"
+      "Bash(timeout 10 langgraph dev:*)",
+      "Bash(python -m pip:*)",
+      "Bash(pip index:*)",
+      "Bash(pip install:*)",
+      "Bash(python:*)",
+      "Bash(pip uninstall:*)"
     ],
     "deny": [],
     "ask": []
