@@ -17,7 +17,8 @@
       "Bash(pip index:*)",
       "Bash(pip install:*)",
       "Bash(python:*)",
-      "Bash(pip uninstall:*)"
+      "Bash(pip uninstall:*)",
+      "Bash(tree:*)"
     ],
     "deny": [],
     "ask": []
