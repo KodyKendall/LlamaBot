@@ -10,7 +10,9 @@
       "Bash(timeout 5 docker run --rm --entrypoint=/bin/sh vscode-test:latest -c \"which gh && which node && which npm\")",
       "Bash(lsof:*)",
       "Bash(xargs kill:*)",
-      "Bash(npm uninstall:*)"
+      "Bash(npm uninstall:*)",
+      "Bash(source venv/bin/activate)",
+      "Bash(timeout 10 langgraph dev:*)"
     ],
     "deny": [],
     "ask": []
