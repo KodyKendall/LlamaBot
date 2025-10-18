@@ -261,9 +261,11 @@ function App() {
     }
 
     // Backend is running in Docker on port 8000
-    let wsUrl = 'ws://localhost:8000/ws';
+    // When running in Docker, use the service name; otherwise use localhost
+    const wsHost = window.location.hostname === 'localhost' ? 'localhost:8000' : 'llamabot:8000';
+    let wsUrl = `ws://${wsHost}/ws`;
     if (window.location.protocol === 'https:') {
-      wsUrl = 'wss://localhost:8000/ws';
+      wsUrl = `wss://${wsHost}/ws`;
     }
 
     console.log('Initializing WebSocket connection to:', wsUrl);
