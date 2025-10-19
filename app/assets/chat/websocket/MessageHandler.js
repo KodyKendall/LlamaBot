@@ -116,6 +116,7 @@ export class MessageHandler {
 
   /**
    * Handle tool call chunks (HTML generation)
+   * This is for the STREAMING PREVIEW feature (contentFrame)
    */
   handleToolCallChunk(data) {
     if (!data.base_message?.tool_call_chunks?.[0]) {
@@ -138,7 +139,7 @@ export class MessageHandler {
     // Schedule iframe update if streaming
     if (this.streamingState.isStreaming()) {
       this.streamingState.scheduleIframeFlush(() => {
-        this.iframeManager.flushToIframe(this.streamingState.getCleanedFullMessage());
+        this.iframeManager.flushToStreamingPreview(this.streamingState.getCleanedFullMessage());
       });
       this.streamingState.clearFragmentBuffer();
     }
@@ -146,6 +147,7 @@ export class MessageHandler {
 
   /**
    * Handle start of HTML streaming
+   * This is for the STREAMING PREVIEW feature (contentFrame)
    */
   handleHtmlStreamStart(data) {
     // Show loading state
@@ -157,12 +159,13 @@ export class MessageHandler {
     const currentMessage = this.appState.getCurrentAiMessage();
     currentMessage.innerHTML = '🎨 Generating your page...';
 
-    // Create overlay animation
+    // Create overlay animation for streaming preview
     this.iframeManager.createStreamingOverlay();
   }
 
   /**
    * Handle end of HTML streaming
+   * This is for the STREAMING PREVIEW feature (contentFrame)
    */
   handleHtmlStreamEnd() {
     // Update AI message
@@ -174,8 +177,8 @@ export class MessageHandler {
     // Clear pending flush
     this.streamingState.clearIframeFlush();
 
-    // Final flush
-    this.iframeManager.flushToIframe(this.streamingState.getCleanedFullMessage());
+    // Final flush to streaming preview iframe
+    this.iframeManager.flushToStreamingPreview(this.streamingState.getCleanedFullMessage());
 
     // Remove overlay
     this.iframeManager.removeStreamingOverlay();

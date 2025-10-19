@@ -1,20 +1,40 @@
 /**
- * Iframe refresh and streaming overlay management
+ * Iframe Manager
+ *
+ * Manages TWO separate iframe concepts:
+ * 1. STREAMING PREVIEW (contentFrame - commented out in HTML)
+ *    - Used for real-time HTML streaming preview
+ *    - Shows agent-generated HTML as it's being built token-by-token
+ *    - Has overlay animations during generation
+ *
+ * 2. RAILS APP PREVIEW (liveSiteFrame)
+ *    - Shows the actual running Rails application
+ *    - Refreshed after changes to show updated app
+ *    - Requires Rails debug info to maintain state
  */
 
 import { getRailsUrl, CONFIG } from '../config.js';
 
 export class IframeManager {
   constructor() {
+    // STREAMING PREVIEW iframe (for HTML generation preview)
     this.contentFrame = document.getElementById('contentFrame');
+
+    // RAILS APP PREVIEW iframe (for live Rails app)
     this.liveSiteFrame = document.getElementById('liveSiteFrame');
+
     this.overlayElement = null;
   }
 
+  // ============================================================================
+  // STREAMING PREVIEW Methods (contentFrame - for HTML generation preview)
+  // ============================================================================
+
   /**
-   * Flush HTML content to iframe
+   * Flush HTML content to STREAMING PREVIEW iframe
+   * Used when agent is generating HTML and we want to show it token-by-token
    */
-  flushToIframe(htmlContent) {
+  flushToStreamingPreview(htmlContent) {
     if (!this.contentFrame) return;
 
     try {
@@ -36,12 +56,13 @@ export class IframeManager {
         }, 100);
       }
     } catch (e) {
-      console.log('Error updating iframe (normal during streaming):', e);
+      console.log('Error updating streaming preview iframe (normal during streaming):', e);
     }
   }
 
   /**
    * Create streaming overlay with animation
+   * Used during HTML generation to show progress animation
    */
   createStreamingOverlay() {
     // Check if overlay already exists
@@ -128,10 +149,20 @@ export class IframeManager {
     }
   }
 
+  // ============================================================================
+  // RAILS APP PREVIEW Methods (liveSiteFrame - for live Rails app)
+  // ============================================================================
+
   /**
-   * Refresh the main Rails iframe
+   * Refresh the Rails app preview iframe
+   *
+   * @param {Function} getRailsDebugInfoCallback - Function that accepts a callback parameter
+   *                                                The callback will receive debugInfoJson
+   *
+   * Example usage:
+   *   iframeManager.refreshRailsApp((callback) => this.getRailsDebugInfo(callback))
    */
-  refreshMainIFrame(getRailsDebugInfoCallback) {
+  refreshRailsApp(getRailsDebugInfoCallback) {
     const iframes = document.querySelectorAll('iframe');
 
     iframes.forEach(iframe => {
@@ -153,6 +184,7 @@ export class IframeManager {
           }
         });
       } else {
+        // Refresh non-Rails iframes by reloading their current src
         if (iframe.src) {
           iframe.src = iframe.src;
         }
@@ -161,7 +193,8 @@ export class IframeManager {
   }
 
   /**
-   * Simple iframe refresh (legacy)
+   * Simple iframe refresh (legacy - for streaming preview)
+   * @deprecated Use flushToStreamingPreview instead
    */
   refreshIframe() {
     if (!this.contentFrame) return;
@@ -171,8 +204,12 @@ export class IframeManager {
     }, 100);
   }
 
+  // ============================================================================
+  // UI Controls (for both iframe types)
+  // ============================================================================
+
   /**
-   * Handle navigation buttons
+   * Initialize navigation buttons (refresh, back, etc.)
    */
   initNavigationButtons() {
     // Refresh button

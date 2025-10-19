@@ -134,18 +134,18 @@ class ChatApp {
       });
     }
 
-    // Listen for stream end event to refresh iframe
+    // LEGACY: Listen for stream end event
+    // This was used for HTML streaming preview feature
+    // Keeping for backwards compatibility but may be deprecated
     window.addEventListener('streamEnded', () => {
-      this.getRailsDebugInfo((debugInfoJson) => {
-        this.iframeManager.refreshMainIFrame(() => this.getRailsDebugInfo);
-      });
+      // Refresh Rails app after agent finishes making changes
+      this.iframeManager.refreshRailsApp((callback) => this.getRailsDebugInfo(callback));
     });
 
-    // Listen for iframe refresh requested
+    // Listen for iframe refresh requested (triggered by refresh button)
     window.addEventListener('iframeRefreshRequested', () => {
-      this.getRailsDebugInfo((debugInfoJson) => {
-        this.iframeManager.refreshMainIFrame(() => this.getRailsDebugInfo);
-      });
+      // Refresh Rails app to show latest changes
+      this.iframeManager.refreshRailsApp((callback) => this.getRailsDebugInfo(callback));
     });
 
     // Listen for thread change
