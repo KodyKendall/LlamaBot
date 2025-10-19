@@ -15,9 +15,12 @@ function App() {
   const [isThinking, setIsThinking] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [threads, setThreads] = useState([]);
+  const [isLoadingThreads, setIsLoadingThreads] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   
   const [activeTab, setActiveTab] = useState('liveSiteFrame');
   const [currentMobileView, setCurrentMobileView] = useState('chat');
+  const [viewMode, setViewMode] = useState('desktop'); // 'desktop' or 'mobile'
 
   // Refs
   const currentAiMessageRef = useRef(null);
@@ -31,7 +34,6 @@ function App() {
   const socketRef = useRef(null);
 
   // Constants
-  const AGENT = { NAME: 'rails_agent', TYPE: 'default' };
   const IFRAME_REFRESH_MS = 500;
 
   // Helper functions
@@ -139,18 +141,19 @@ function App() {
         // Handle regular text content
         if (!currentAiMessageRef.current) {
           const newMessageId = `msg-${Date.now()}-${Math.random()}`;
-          const newMessage = { 
-            id: newMessageId, 
-            type: 'ai', 
+          const newMessage = {
+            id: newMessageId,
+            type: 'ai',
             content: '',
-            isStreaming: true 
+            isStreaming: true
           };
           setMessages(prev => [...prev, newMessage]);
           currentAiMessageRef.current = newMessageId;
           currentAiMessageBufferRef.current = '';
         }
 
-        if (AGENT.TYPE === 'deep_agent') {
+        // Handle array content (some LLM models return content as an array)
+        if (Array.isArray(data.content)) {
           if (data.content && data.content.length > 0) {
             currentAiMessageBufferRef.current += data.content[0].text;
           }
@@ -248,12 +251,13 @@ function App() {
     } else {
       addMessage(data.content, data.type, data.base_message);
     }
-  }, [AGENT.TYPE, addMessage, createStreamingOverlay, flushToIframe, removeStreamingOverlay]);
+  }, [addMessage, createStreamingOverlay, flushToIframe, removeStreamingOverlay]);
 
   const initWebSocket = useCallback(() => {
-    // Close existing connection if any
+    // Don't create a new connection if one already exists and is open
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-      socketRef.current.close();
+      console.log('WebSocket already connected');
+      return socketRef.current;
     }
 
     // Backend is running in Docker on port 8000
@@ -266,84 +270,32 @@ function App() {
     const ws = new WebSocket(wsUrl);
     socketRef.current = ws;
 
-    // Track reconnection attempts to prevent infinite loops
-    const maxReconnectAttempts = 5;
-    
-    // Create a separate ref for tracking reconnection attempts
-    if (!window.wsReconnectAttempts) {
-      window.wsReconnectAttempts = 0;
-    }
-    
-    // Reset reconnect attempts if this is a fresh connection (not a reconnect)
-    if (!isConnecting) {
-      window.wsReconnectAttempts = 0;
-    }
-    
-    // Add connection timeout
-    const connectionTimeout = setTimeout(() => {
-      if (ws.readyState === WebSocket.CONNECTING) {
-        console.log('WebSocket connection timeout, closing...');
-        ws.close();
-      }
-    }, 10000); // 10 second timeout
-
     ws.onopen = () => {
       console.log('WebSocket connected');
-      clearTimeout(connectionTimeout);
       setIsConnected(true);
       setIsConnecting(false);
       setSocket(ws);
-      
-      // Reset reconnection attempts on successful connection
-      window.wsReconnectAttempts = 0;
     };
 
     ws.onclose = (event) => {
       console.log('WebSocket disconnected', event.code, event.reason);
-      clearTimeout(connectionTimeout);
       setIsConnected(false);
-      setIsConnecting(false);
       setSocket(null);
-      
-      // Only show error message if it's not a normal closure and we were previously connected
-      if (event.code !== 1000 && isConnected) {
-        addMessage('Connection lost. Attempting to reconnect...', 'error');
-      }
-      
-      // Get current reconnection attempts
-      const currentAttempts = window.wsReconnectAttempts;
-      
-      // Prevent reconnection loop by adding a delay that increases with each attempt
-      const reconnectDelay = Math.min(3000 * (currentAttempts + 1), 30000);
-      
-      // Attempt to reconnect after delay, but only if we haven't exceeded max attempts
-      if (currentAttempts < maxReconnectAttempts) {
-        console.log(`Reconnect attempt ${currentAttempts + 1}/${maxReconnectAttempts} in ${reconnectDelay}ms`);
-        
-        // Increment the reconnect attempts counter
-        window.wsReconnectAttempts = currentAttempts + 1;
-        
+
+      // Only attempt to reconnect if it wasn't a normal closure
+      if (event.code !== 1000) {
+        console.log('Attempting to reconnect in 3 seconds...');
         setTimeout(() => {
-          console.log('Attempting to reconnect WebSocket...');
-          setIsConnecting(true);
-          initWebSocket();
-        }, reconnectDelay);
-      } else {
-        console.log('Max reconnection attempts reached. Giving up.');
-        addMessage('Connection lost. Please refresh the page to reconnect.', 'error');
+          if (socketRef.current?.readyState !== WebSocket.OPEN) {
+            setIsConnecting(true);
+            initWebSocket();
+          }
+        }, 3000);
       }
     };
 
     ws.onerror = (error) => {
       console.error('WebSocket error:', error);
-      clearTimeout(connectionTimeout);
-      // Log more detailed error information
-      console.log('WebSocket error details:', {
-        readyState: ws.readyState,
-        url: ws.url,
-        protocol: ws.protocol,
-        extensions: ws.extensions
-      });
     };
 
     ws.onmessage = (event) => {
@@ -358,50 +310,79 @@ function App() {
     };
 
     return ws;
-  }, [isConnected, isConnecting, addMessage, handleWebSocketMessage]);
+  }, [handleWebSocketMessage]);
 
   const fetchThreads = useCallback(async () => {
     try {
-      // Backend is running in Docker on port 8000
-      const backendUrl = 'http://localhost:8000/threads';
-        
-      const response = await fetch(backendUrl);
-      
+      // Use relative URL - proxy will forward to backend on port 8000
+      const backendUrl = '/threads';
+
+      console.log('Fetching threads from:', backendUrl);
+      const response = await fetch(backendUrl, {
+        credentials: 'include', // Include cookies for authentication
+        headers: {
+          'Accept': 'application/json',
+        }
+      });
+
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
-      
+
       const contentType = response.headers.get("content-type");
       if (!contentType || !contentType.includes("application/json")) {
         throw new TypeError("Response was not JSON");
       }
-      
+
       const threadsData = await response.json();
-      const sortedThreads = threadsData.sort((a, b) => 
+      console.log('Threads fetched:', threadsData);
+      console.log('Number of threads:', threadsData.length);
+
+      const sortedThreads = threadsData.sort((a, b) =>
         new Date(b.state[4]) - new Date(a.state[4])
       );
+
+      console.log('Setting threads state with:', sortedThreads);
       setThreads(sortedThreads);
     } catch (error) {
       console.error('Error fetching threads:', error);
-      // Don't show error in UI for now, just log it
+      console.error('Error details:', error.message, error.stack);
     }
   }, []);
 
   const loadThread = useCallback(async (threadId) => {
     try {
       setCurrentThreadId(threadId);
-      
-      const backendUrl = `http://localhost:8000/chat-history/${threadId}`;
-        
-      const response = await fetch(backendUrl);
-      
+
+      // Use relative URL - proxy will forward to backend on port 8000
+      const backendUrl = `/chat-history/${threadId}`;
+
+      const response = await fetch(backendUrl, {
+        credentials: 'include', // Include cookies for authentication
+        headers: {
+          'Accept': 'application/json',
+        }
+      });
+
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
-      
+
       const threadData = await response.json();
-      setMessages(threadData);
-      
+
+      // threadData is in format: [{ messages: [...] }, ...]
+      // Extract and format messages properly
+      const messagesArray = threadData[0]?.messages || [];
+      const formattedMessages = messagesArray.map((msg, index) => ({
+        id: msg.id || `msg-${Date.now()}-${index}`,
+        type: msg.type,
+        content: msg.content,
+        tool_calls: msg.tool_calls,
+        tool_results: msg.tool_results,
+        tool_call_id: msg.tool_call_id
+      }));
+
+      setMessages(formattedMessages);
       setIsMenuOpen(false);
     } catch (error) {
       console.error('Error loading thread:', error);
@@ -443,44 +424,36 @@ function App() {
         );
       }
 
+      const agentMode = localStorage.getItem('agentMode') || 'prototype';
+      const agentName = agentMode === 'prototype' ? 'rails_frontend_starter_agent' : 'rails_agent';
+
       const messageData = {
         message: inputMessage,
         thread_id: currentThreadId,
-        agent_name: AGENT.NAME
+        agent_name: agentName,
+        agent_mode: agentMode
       };
-      
+
       socket.send(JSON.stringify(messageData));
     }
-  }, [socket, currentThreadId, AGENT.NAME, removeStreamingOverlay]);
+  }, [socket, currentThreadId, removeStreamingOverlay]);
 
-  // WebSocket connection
+  // WebSocket connection - only initialize once
   useEffect(() => {
-    // Add a small delay to ensure the backend is ready
-    const timer = setTimeout(() => {
-      initWebSocket();
-      fetchThreads();
-      initializeMobileView();
-    }, 1000); // 1 second delay
-    
-    // Add a visibility change listener to reconnect when the tab becomes visible again
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible' && !isConnected && !isConnecting) {
-        console.log('Page became visible, attempting to reconnect WebSocket');
-        window.wsReconnectAttempts = 0; // Reset reconnection attempts
-        initWebSocket();
+    initWebSocket();
+    fetchThreads();
+    initializeMobileView();
+    window.addEventListener('resize', handleResize);
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      if (socketRef.current) {
+        socketRef.current.close();
+        socketRef.current = null;
       }
     };
-    
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('resize', handleResize);
-    
-    return () => {
-      clearTimeout(timer);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('resize', handleResize);
-      if (socketRef.current) socketRef.current.close();
-    };
-  }, [initWebSocket, handleResize, fetchThreads, initializeMobileView, isConnected, isConnecting]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Empty dependency array - only run once on mount
 
   const refreshIframes = () => {
     const liveSiteFrame = document.getElementById('liveSiteFrame');
@@ -561,22 +534,28 @@ function App() {
               </button>
             </div>
             <div className="flex-1 py-4 overflow-y-auto">
-              {threads.length === 0 ? (
-                <div className="px-5 py-3 text-gray-400">No conversations yet</div>
-              ) : (
-                threads.map((thread) => {
-                  const { title } = generateConversationSummary(thread.state[0]?.messages || []);
-                  return (
-                    <div 
-                      key={thread.thread_id}
-                      className="px-5 py-3 cursor-pointer hover:bg-gray-700 transition-colors border-b border-gray-700"
-                      onClick={() => loadThread(thread.thread_id)}
-                    >
-                      {title}
-                    </div>
-                  );
-                })
-              )}
+              {(() => {
+                console.log('Rendering threads, count:', threads.length);
+                console.log('Threads array:', threads);
+                return threads.length === 0 ? (
+                  <div className="px-5 py-3 text-gray-400">No conversations yet</div>
+                ) : (
+                  threads.map((thread) => {
+                    console.log('Rendering thread:', thread);
+                    const { title } = generateConversationSummary(thread.state[0]?.messages || []);
+                    console.log('Thread title:', title);
+                    return (
+                      <div
+                        key={thread.thread_id}
+                        className="px-5 py-3 cursor-pointer hover:bg-gray-700 transition-colors border-b border-gray-700"
+                        onClick={() => loadThread(thread.thread_id)}
+                      >
+                        {title}
+                      </div>
+                    );
+                  })
+                );
+              })()}
             </div>
           </div>
         </div>
@@ -626,7 +605,28 @@ function App() {
             <div className="h-7 bg-gray-900 border border-gray-900 rounded-md px-3 flex items-center justify-between text-gray-400 text-sm">
               <span>localhost:3000</span>
               <div className="flex gap-1 ml-2">
-                <button 
+                {/* View mode toggle */}
+                <div className="flex gap-0.5 mr-2 border border-gray-600 rounded p-0.5">
+                  <button
+                    className={`p-1 rounded transition-colors ${viewMode === 'desktop' ? 'bg-gray-700 text-white' : 'hover:bg-gray-700'}`}
+                    onClick={() => setViewMode('desktop')}
+                    title="Desktop View"
+                  >
+                    <svg fill="currentColor" viewBox="0 0 24 24" width="16" height="16">
+                      <path d="M21 2H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h7v2H8v2h8v-2h-2v-2h7c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H3V4h18v12z"/>
+                    </svg>
+                  </button>
+                  <button
+                    className={`p-1 rounded transition-colors ${viewMode === 'mobile' ? 'bg-gray-700 text-white' : 'hover:bg-gray-700'}`}
+                    onClick={() => setViewMode('mobile')}
+                    title="Mobile View"
+                  >
+                    <svg fill="currentColor" viewBox="0 0 24 24" width="16" height="16">
+                      <path d="M17 1.01L7 1c-1.1 0-2 .9-2 2v18c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V3c0-1.1-.9-1.99-2-1.99zM17 19H7V5h10v14z"/>
+                    </svg>
+                  </button>
+                </div>
+                <button
                   className="p-1 rounded hover:bg-gray-700 transition-colors"
                   onClick={() => {
                     const iframe = document.getElementById('liveSiteFrame');
@@ -644,7 +644,7 @@ function App() {
                     <path d="M12 19l-7-7 7-7"/>
                   </svg>
                 </button>
-                <button 
+                <button
                   className="p-1 rounded hover:bg-gray-700 transition-colors"
                   onClick={refreshIframes}
                 >
@@ -660,12 +660,14 @@ function App() {
           </div>
 
           {/* Browser Content */}
-          <div className="flex-grow relative bg-white overflow-hidden">
-            <iframe 
+          <div className={`flex-grow relative overflow-hidden ${viewMode === 'mobile' ? 'flex items-center justify-center bg-gray-900 p-5' : 'bg-white'}`}>
+            <iframe
               src="http://localhost:3000"
-              title="Live Site Frame" 
-              id="liveSiteFrame" 
-              className={`w-full h-full border-0 bg-white ${activeTab === 'liveSiteFrame' ? 'block' : 'hidden'}`}
+              title="Live Site Frame"
+              id="liveSiteFrame"
+              className={`border-0 bg-white ${activeTab === 'liveSiteFrame' ? 'block' : 'hidden'} ${
+                viewMode === 'mobile' ? 'w-[375px] h-[667px] rounded-[20px] shadow-2xl border-[5px] border-gray-800' : 'w-full h-full'
+              }`}
             />
             <iframe 
               ref={contentFrameRef}
