@@ -6,7 +6,8 @@ export const CONFIG = {
   // Agent configuration
   AGENT: {
     NAME: 'rails_frontend_starter_agent',
-    TYPE: 'claude_llm_model'
+    TYPE: 'default'
+    // TYPE: 'claude_llm_model'
   },
 
   // Agent mode mappings

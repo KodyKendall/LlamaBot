@@ -18,7 +18,9 @@
       "Bash(pip install:*)",
       "Bash(python:*)",
       "Bash(pip uninstall:*)",
-      "Bash(tree:*)"
+      "Bash(tree:*)",
+      "Bash(cat:*)",
+      "Bash(timeout 10 python:*)"
     ],
     "deny": [],
     "ask": []

@@ -1,5 +1,6 @@
 from langchain_openai import ChatOpenAI
 from langchain_anthropic import ChatAnthropic
+from langchain_google_genai import ChatGoogleGenerativeAI
 
 from langchain_core.tools import tool
 from dotenv import load_dotenv
@@ -53,14 +54,34 @@ default_tools = [write_todos,
 
 # Node
 def leonardo(state: RailsAgentState) -> Command[Literal["tools"]]:
-   llm = ChatOpenAI(model="gpt-4.1")
-#    llm = ChatOpenAI(model="gpt-5", extra_body={"reasoning_effort": "minimal"})
-   #llm = ChatAnthropic(model="claude-sonnet-4-5-20250929")
-#    llm = ChatOpenAI(
-#       model="gpt-5-codex",
-#       use_responses_api=True,
-#       reasoning={"effort": "low"}
+   # ==================== LLM Model Selection ====================
+   # The frontend now supports ALL models automatically!
+   # No config changes needed - just uncomment the model you want:
+
+   # OpenAI models (content format: string)
+   # llm = ChatOpenAI(model="gpt-4.1")
+   # llm = ChatOpenAI(model="gpt-5", extra_body={"reasoning_effort": "minimal"})
+   llm = ChatOpenAI(
+      model="gpt-5-codex",
+      use_responses_api=True,
+      reasoning={"effort": "low"}
+   )
+
+   # Anthropic models (content format: array of content blocks)
+#    llm = ChatAnthropic(model="claude-sonnet-4-5-20250929")
+
+   # Google Gemini models (content format: array of content blocks)
+   # NOTE: Requires GOOGLE_API_KEY in .env (not Google Cloud ADC)
+   # Get your API key from: https://aistudio.google.com/app/apikey
+#    llm = ChatGoogleGenerativeAI(
+#       model="gemini-2.5-pro-preview-03-25",
+#       google_api_key=os.getenv("GOOGLE_API_KEY")
 #    )
+   # llm = ChatGoogleGenerativeAI(
+   #    model="gemini-2.5-flash-preview-04-17",
+   #    google_api_key=os.getenv("GOOGLE_API_KEY")
+   # )
+   # =============================================================
 
    view_path = (state.get('debug_info') or {}).get('view_path')
 

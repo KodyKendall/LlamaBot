@@ -14,6 +14,49 @@ export class MessageHandler {
   }
 
   /**
+   * Extract text content from different LLM provider formats
+   * Handles OpenAI (string), Anthropic/Claude, and Gemini (array of content blocks) formats
+   * @param {string|Array} content - The content from AIMessageChunk
+   * @returns {string} - Extracted text content
+   */
+  extractTextContent(content) {
+    if (!content) return '';
+
+    // OpenAI format: content is a simple string
+    if (typeof content === 'string') {
+      return content;
+    }
+
+    // Anthropic/Claude/Gemini/GPT-5 Codex format: content is array of content blocks
+    // Examples:
+    //   Anthropic: [{type: "text", text: "Hello"}]
+    //   Gemini: [{type: "text", text: "Hello"}, {type: "image_url", image_url: "..."}]
+    //   Gemini streaming: [{type: "text_delta", text: "Hello"}]
+    //   GPT-5 Codex: [{type: "text", text: "Hello"}, {type: "reasoning", text: "thinking..."}]
+    if (Array.isArray(content) && content.length > 0) {
+      return content
+        .filter(block => {
+          if (!block || typeof block !== 'object') return false;
+
+          // Handle text blocks from all providers
+          const isTextBlock = block.type === 'text' ||
+                             block.type === 'text_delta' ||  // Gemini streaming
+                             block.text;
+          return isTextBlock;
+        })
+        .map(block => {
+          const text = block.text || block.content || '';
+          // Filter out undefined/null values
+          return (text !== undefined && text !== null && text !== 'undefined') ? text : '';
+        })
+        .filter(text => text.length > 0)  // Remove empty strings
+        .join('');
+    }
+
+    return '';
+  }
+
+  /**
    * Handle incoming WebSocket message
    */
   handleMessage(data) {
@@ -30,6 +73,7 @@ export class MessageHandler {
    * Handle AI message chunks (streaming)
    */
   handleAIMessageChunk(data) {
+    // debugger;
     if (data.content) {
       // Regular text content streaming
       this.handleTextContent(data);
@@ -56,18 +100,14 @@ export class MessageHandler {
       currentMessage.innerHTML = '';
     }
 
-    // Handle different LLM formats
-    if (this.appState.getAgentConfig().type === 'claude_llm_model') {
-      if (data.content && data.content.length > 0) {
-        this.appState.appendToMessageBuffer(data.content[0].text);
-      }
-    } else {
-      this.appState.appendToMessageBuffer(data.content);
-    }
+    // Extract text content using universal parser (handles both OpenAI and Anthropic formats)
+    const textContent = this.extractTextContent(data.content);
+    this.appState.appendToMessageBuffer(textContent);
 
     // Update message with parsed markdown
     const parser = this.messageRenderer.markdownParser;
-    currentMessage.innerHTML = parser.parse(this.appState.getMessageBuffer());
+    let fullMessage = this.appState.getMessageBuffer();
+    currentMessage.innerHTML = parser.parse(fullMessage);
 
     // Handle scrolling
     this.scrollManager.checkIfUserAtBottom();
@@ -149,8 +189,15 @@ export class MessageHandler {
    */
   handleAIMessage(data) {
     // Only add message if there are tool calls
+    // (streaming already displayed the text content via AIMessageChunk)
     if (data.base_message?.tool_calls?.length > 0) {
-      this.messageRenderer.addMessage(data.content, data.type, data.base_message);
+      // Extract text content (handles all model formats including GPT-5 Codex)
+      const textContent = this.extractTextContent(data.content);
+      this.messageRenderer.addMessage(textContent, data.type, data.base_message);
+    } else {
+      // No tool calls - the message was already streamed via AIMessageChunk
+      // Just reset state so next message starts fresh
+      this.appState.resetMessageState();
     }
   }
 

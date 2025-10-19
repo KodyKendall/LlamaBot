@@ -60,7 +60,13 @@ export class MessageRenderer {
   renderAiMessage(content, baseMessage) {
     const messageDiv = document.createElement('div');
     messageDiv.className = 'message ai-message';
-    messageDiv.innerHTML = this.markdownParser.parse(content);
+
+    // Ensure content is a valid string (handle undefined, null, etc.)
+    const safeContent = (content !== undefined && content !== null && content !== 'undefined')
+      ? String(content)
+      : '';
+
+    messageDiv.innerHTML = this.markdownParser.parse(safeContent);
 
     // Check if this is a tool call message (OpenAI format)
     if ((content === '' || content === null) && baseMessage?.tool_calls?.length > 0) {

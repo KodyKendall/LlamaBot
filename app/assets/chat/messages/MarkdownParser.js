@@ -16,13 +16,18 @@ export class MarkdownParser {
    * Parse markdown text to HTML
    */
   parse(text) {
+    // Safety check for undefined/null/invalid input
+    if (text === undefined || text === null || text === 'undefined') return '';
     if (!text) return '';
 
     try {
       // Handle array format (from Claude's LLM model)
       if (Array.isArray(text)) {
-        text = text[0].text;
+        text = text[0]?.text || '';
       }
+
+      // Ensure text is a string
+      text = String(text);
 
       // Parse markdown to HTML
       let html = marked.parse(text);
@@ -35,10 +40,11 @@ export class MarkdownParser {
       console.error('Markdown parsing error:', error);
       // Fallback to plain text with line breaks
       try {
-        return text.replace(/\n/g, '<br>');
+        const safeText = String(text || '');
+        return safeText.replace(/\n/g, '<br>');
       } catch (fallbackError) {
         console.error('Text.replace parsing error:', fallbackError);
-        return text;
+        return '';
       }
     }
   }

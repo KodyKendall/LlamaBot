@@ -65,35 +65,46 @@ class RequestHandler:
                 }
 
                 async for chunk in app.astream(state, config=config, stream_mode=["updates", "messages"], subgraphs=True):
+
                     # NOTE: In LangGraph 0.5, they introduced this "subgraphs" parameter, that changes the datashape if you set it to True.
                     # if subgraph=True, it returns a tuple with 3 elements, instead of 2 elements.
                     # the first element is the subgraph name, the second element is the streaming data type ["updates", "messages", "values"], and the third element is the actual metadata.
+
                     is_this_chunk_an_llm_message = isinstance(chunk, tuple) and len(chunk) == 3 and chunk[1] == 'messages'
                     is_this_chunk_an_update_stream_type = isinstance(chunk, tuple) and len(chunk) == 3 and chunk[1] == 'updates'
                     logger.info(f"🍅🍅🍅 Chunk: {chunk}")
+                    
                     if is_this_chunk_an_llm_message:
-                        # breakpoint()
                         message_chunk_from_llm = chunk[2][0] #AIMessageChunk object -> https://python.langchain.com/api_reference/core/messages/langchain_core.messages.ai.AIMessageChunk.html
                         data_type = "AIMessageChunk"
                         base_message_as_dict = dumpd(chunk[2][0])["kwargs"]
-                        logger.info(f"🍅 {base_message_as_dict['content']}")
+
+                        # Content format varies by LLM provider:
+                        # - OpenAI: content is a string ("Hello world")
+                        # - Anthropic/Claude: content is a list of content blocks [{type: "text", text: "..."}]
+                        # - Gemini: content is a list of content blocks [{type: "text", text: "..."}, {type: "image_url", ...}]
+                        # The frontend extractTextContent() method handles all formats automatically!
+                        content = base_message_as_dict["content"]
+                        logger.info(f"🍅 Content type: {type(content)}, Content: {content}")
+
                         # # Only send if WebSocket is still open
                         if self._is_websocket_open(websocket):
                             await websocket.send_json({
                                 "type": base_message_as_dict["type"],
-                                "content": base_message_as_dict["content"],
+                                "content": base_message_as_dict["content"],  # Keep original format, frontend handles both
                                 "tool_calls": [],
                                 "base_message": base_message_as_dict
                             })
-                    
+
                     elif is_this_chunk_an_update_stream_type: # This means that LangGraph has given us a state update. This will often include a new message from the AI.
                         state_object = chunk[2]
                         logger.info(f"🧠🧠🧠 LangGraph Output (State Update): {state_object}")
-                    
+
                         # Handle dynamic agent key - look for messages in any nested dict
                         messages = None
                         for agent_key, agent_data in state_object.items():
                             did_agent_have_a_message_for_us = isinstance(agent_data, dict) and 'messages' in agent_data
+
                             if did_agent_have_a_message_for_us:
 
                                 #agent_data is a just the state dictionary. 
