@@ -109,8 +109,10 @@ export class ThreadManager {
     let title = 'New Conversation';
 
     if (firstUserMessage && firstUserMessage.content) {
-      title = firstUserMessage.content.substring(0, 50);
-      if (firstUserMessage.content.length > 50) {
+      // Extract text content in case it's an array/object
+      const textContent = this.normalizeHistoricalMessageContent(firstUserMessage.content);
+      title = textContent.substring(0, 50);
+      if (textContent.length > 50) {
         title += '...';
       }
     }
@@ -177,12 +179,64 @@ export class ThreadManager {
 
     // Render all messages
     messages.forEach(message => {
-      this.messageRenderer.addMessage(message.content, message.type, message);
+      // Extract text content from message.content
+      const textContent = this.normalizeHistoricalMessageContent(message.content);
+      this.messageRenderer.addMessage(textContent, message.type, message);
     });
 
     // Scroll to bottom
     if (this.scrollManager) {
       this.scrollManager.scrollToBottom(true);
     }
+  }
+
+  /**
+   * Normalize historical LangGraph message content for display
+   * Handles string, array (multimodal), and object content structures from stored messages
+   * @param {string|Array|Object} content - The content from a stored LangGraph message
+   * @returns {string} - Extracted text content ready for display
+   */
+  normalizeHistoricalMessageContent(content) {
+    // If content is already a string, return it
+    if (typeof content === 'string') {
+      return content;
+    }
+
+    // If content is an array (multimodal message), extract text parts
+    if (Array.isArray(content)) {
+      return content
+        .map(block => {
+          if (typeof block === 'string') {
+            return block;
+          }
+          if (block && typeof block === 'object') {
+            // Handle different content block types
+            if (block.type === 'text' && block.text) {
+              return block.text;
+            }
+            if (block.text) {
+              return block.text;
+            }
+          }
+          return '';
+        })
+        .filter(text => text.length > 0)
+        .join('\n');
+    }
+
+    // If content is an object, try to extract text
+    if (content && typeof content === 'object') {
+      if (content.text) {
+        return content.text;
+      }
+      if (content.content) {
+        return this.normalizeHistoricalMessageContent(content.content);
+      }
+      // Fallback: stringify the object
+      return JSON.stringify(content);
+    }
+
+    // Fallback for null/undefined
+    return '';
   }
 }

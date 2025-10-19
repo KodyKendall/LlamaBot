@@ -14,12 +14,12 @@ export class MessageHandler {
   }
 
   /**
-   * Extract text content from different LLM provider formats
+   * Normalize streaming content from different LLM provider formats
    * Handles OpenAI (string), Anthropic/Claude, and Gemini (array of content blocks) formats
    * @param {string|Array} content - The content from AIMessageChunk
    * @returns {string} - Extracted text content
    */
-  extractTextContent(content) {
+  normalizeLLMStreamingContent(content) {
     if (!content) return '';
 
     // OpenAI format: content is a simple string
@@ -99,7 +99,7 @@ export class MessageHandler {
     const currentMessage = this.appState.getCurrentAiMessage();
 
     // Extract text content using universal parser (handles both OpenAI and Anthropic formats)
-    const textContent = this.extractTextContent(data.content);
+    const textContent = this.normalizeLLMStreamingContent(data.content);
 
     // Only update if we have actual content
     if (textContent) {
@@ -205,7 +205,7 @@ export class MessageHandler {
     // (streaming already displayed the text content via AIMessageChunk)
     if (data.base_message?.tool_calls?.length > 0) {
       // Extract text content (handles all model formats including GPT-5 Codex)
-      const textContent = this.extractTextContent(data.content);
+      const textContent = this.normalizeLLMStreamingContent(data.content);
       this.messageRenderer.addMessage(textContent, data.type, data.base_message);
     } else {
       // No tool calls - the message was already streamed via AIMessageChunk
