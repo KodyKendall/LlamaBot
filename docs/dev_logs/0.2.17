@@ -1,0 +1,4 @@
+10.19.25:
+- Refactor massive chat.html file into separate JavaScript & CSS packages.
+- Create JavaScript modules for Chat, making it more understandable, maintainable, and ready to continue working towards React with TypeScript frontend
+- Add frontend support for any model - Claude, Gemini, GPT Codex, or Traditional GPT series. Added extractTextContent method for this.
