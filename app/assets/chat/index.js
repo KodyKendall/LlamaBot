@@ -56,11 +56,17 @@ class ChatApp {
   initComponents() {
     // Initialize UI managers
     const messageHistoryElement = document.getElementById('message-history');
-    this.messageRenderer = new MessageRenderer(messageHistoryElement);
     this.scrollManager = new ScrollManager(messageHistoryElement);
     this.iframeManager = new IframeManager();
     this.menuManager = new MenuManager();
     this.mobileViewManager = new MobileViewManager(this.scrollManager);
+
+    // Initialize message renderer with iframe manager and debug info callback
+    this.messageRenderer = new MessageRenderer(
+      messageHistoryElement,
+      this.iframeManager,
+      (callback) => this.getRailsDebugInfo(callback)
+    );
 
     // Initialize thread manager
     this.threadManager = new ThreadManager(

@@ -5,6 +5,11 @@
 import { generateUniqueId } from '../utils/domHelpers.js';
 
 export class ToolMessageRenderer {
+  constructor(iframeManager = null, getRailsDebugInfoCallback = null) {
+    this.iframeManager = iframeManager;
+    this.getRailsDebugInfoCallback = getRailsDebugInfoCallback;
+  }
+
   /**
    * Create collapsible tool message HTML
    */
@@ -118,6 +123,12 @@ export class ToolMessageRenderer {
       const toolHeaderLabel = messageDiv.querySelector('.tool-collapsible');
       if (baseMessage.artifact?.status === 'success') {
         toolHeaderLabel.innerHTML = toolHeaderLabel.innerHTML.replace('Edit', '✅ Edit');
+
+        // Refresh the main iframe when edit_file succeeds
+        // This allows the user to see their code changes in real-time
+        if (this.iframeManager && this.getRailsDebugInfoCallback) {
+          this.iframeManager.refreshRailsApp(this.getRailsDebugInfoCallback);
+        }
       } else if (baseMessage.artifact?.status === 'error') {
         toolHeaderLabel.innerHTML = toolHeaderLabel.innerHTML.replace('Edit', '❌ Edit');
       }

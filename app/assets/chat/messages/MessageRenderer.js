@@ -6,10 +6,10 @@ import { MarkdownParser } from './MarkdownParser.js';
 import { ToolMessageRenderer } from './ToolMessageRenderer.js';
 
 export class MessageRenderer {
-  constructor(messageHistoryElement) {
+  constructor(messageHistoryElement, iframeManager = null, getRailsDebugInfoCallback = null) {
     this.messageHistory = messageHistoryElement;
     this.markdownParser = new MarkdownParser();
-    this.toolRenderer = new ToolMessageRenderer();
+    this.toolRenderer = new ToolMessageRenderer(iframeManager, getRailsDebugInfoCallback);
   }
 
   /**
