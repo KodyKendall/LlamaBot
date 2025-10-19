@@ -116,14 +116,26 @@ export class MessageRenderer {
 
   /**
    * Handle end of stream
+   * @param {object} appState - Application state to access current AI message
    */
-  handleEndMessage() {
+  handleEndMessage(appState = null) {
     console.log('end of stream');
 
-    // Hide thinking indicator
+    // Hide thinking indicator in input area
     const thinkingIndicator = document.getElementById('thinkingIndicator');
     if (thinkingIndicator) {
       thinkingIndicator.classList.add('hidden');
+    }
+
+    // Remove typing indicator from AI message div if present
+    if (appState) {
+      const currentAiMessage = appState.getCurrentAiMessage();
+      if (currentAiMessage) {
+        const typingIndicator = currentAiMessage.querySelector('.typing-indicator');
+        if (typingIndicator) {
+          typingIndicator.remove();
+        }
+      }
     }
 
     // Play task completed sound
@@ -150,6 +162,43 @@ export class MessageRenderer {
       this.messageHistory.insertBefore(messageDiv, scrollButton);
     } else {
       this.messageHistory.appendChild(messageDiv);
+    }
+  }
+
+  /**
+   * Reposition AI message to be below all tool messages
+   * This keeps the streaming AI response at the bottom during tool calls
+   */
+  repositionAiMessageBelowTools(aiMessageDiv) {
+    if (!aiMessageDiv || !aiMessageDiv.parentNode) return;
+
+    // Find all tool messages
+    const allMessages = Array.from(this.messageHistory.children);
+    const toolMessages = allMessages.filter(msg => msg.classList.contains('tool-message'));
+
+    if (toolMessages.length === 0) return;
+
+    // Find the last tool message
+    const lastToolMessage = toolMessages[toolMessages.length - 1];
+
+    // Move AI message after the last tool message (if it's not already there)
+    const aiMessageIndex = allMessages.indexOf(aiMessageDiv);
+    const lastToolIndex = allMessages.indexOf(lastToolMessage);
+
+    if (aiMessageIndex < lastToolIndex) {
+      // Remove and reinsert after last tool message
+      const scrollButton = document.getElementById('scrollToBottomBtn');
+
+      if (scrollButton && lastToolMessage.nextSibling === scrollButton) {
+        // Insert before scroll button
+        this.messageHistory.insertBefore(aiMessageDiv, scrollButton);
+      } else if (lastToolMessage.nextSibling) {
+        // Insert after last tool message
+        this.messageHistory.insertBefore(aiMessageDiv, lastToolMessage.nextSibling);
+      } else {
+        // Append to end
+        this.messageHistory.appendChild(aiMessageDiv);
+      }
     }
   }
 

@@ -65,6 +65,7 @@ def write_todos(
     )
 
 def guard_against_beginning_slash_argument(argument: str) -> str:
+    # TODO: Guard agains app/app formatted argument, and guard against the LLM putting 'rails' in the path for some reason.
     if argument.startswith("/"):
         return argument[1:]
     return argument

@@ -91,23 +91,33 @@ export class MessageHandler {
     if (!this.appState.getCurrentAiMessage()) {
       const messageElement = this.messageRenderer.addMessage('', 'ai', data);
       this.appState.setCurrentAiMessage(messageElement);
+
+      // Add typing indicator initially
+      messageElement.innerHTML = '<div class="typing-indicator"><span></span><span></span><span></span></div>';
     }
 
     const currentMessage = this.appState.getCurrentAiMessage();
 
-    // Remove typing indicator if present
-    if (currentMessage.querySelector('.typing-indicator')) {
-      currentMessage.innerHTML = '';
-    }
-
     // Extract text content using universal parser (handles both OpenAI and Anthropic formats)
     const textContent = this.extractTextContent(data.content);
-    this.appState.appendToMessageBuffer(textContent);
 
-    // Update message with parsed markdown
-    const parser = this.messageRenderer.markdownParser;
-    let fullMessage = this.appState.getMessageBuffer();
-    currentMessage.innerHTML = parser.parse(fullMessage);
+    // Only update if we have actual content
+    if (textContent) {
+      // Remove typing indicator if present (on first content chunk)
+      if (currentMessage.querySelector('.typing-indicator')) {
+        currentMessage.innerHTML = '';
+      }
+
+      this.appState.appendToMessageBuffer(textContent);
+
+      // Update message with parsed markdown
+      const parser = this.messageRenderer.markdownParser;
+      let fullMessage = this.appState.getMessageBuffer();
+      currentMessage.innerHTML = parser.parse(fullMessage);
+
+      // Reposition AI message to be below all tool messages
+      this.messageRenderer.repositionAiMessageBelowTools(currentMessage);
+    }
 
     // Handle scrolling
     this.scrollManager.checkIfUserAtBottom();
@@ -208,6 +218,11 @@ export class MessageHandler {
    * Handle generic messages (tool, error, end, etc.)
    */
   handleGenericMessage(data) {
-    this.messageRenderer.addMessage(data.content, data.type, data.base_message);
+    // Pass appState to handleEndMessage for typing indicator cleanup
+    if (data.type === 'end') {
+      this.messageRenderer.handleEndMessage(this.appState);
+    } else {
+      this.messageRenderer.addMessage(data.content, data.type, data.base_message);
+    }
   }
 }
