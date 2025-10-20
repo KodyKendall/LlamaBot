@@ -200,17 +200,22 @@ class ChatApp {
     // Add user message
     this.messageRenderer.addMessage(message, 'human', null);
 
-    // Add AI thinking message immediately (will be replaced with actual response)
+    // Create the thinking indicator message (stays visible until stream ends)
     const thinkingMessage = this.messageRenderer.addMessage('', 'ai', null);
     const verb = this.loadingVerbs.getRandomVerb();
     thinkingMessage.innerHTML = `<div class="typing-indicator">🦙 ${verb}...</div>`;
-    this.appState.setCurrentAiMessage(thinkingMessage);
+    thinkingMessage.classList.add('thinking-message'); // Add class to identify thinking messages
+    this.appState.setThinkingMessage(thinkingMessage);
 
     // Start cycling the verb in the thinking message
     const thinkingDiv = thinkingMessage.querySelector('.typing-indicator');
     if (thinkingDiv) {
       this.loadingVerbs.startCycling(thinkingDiv);
     }
+
+    // Don't create content message yet - it will be created on first content chunk
+    // This prevents empty message boxes from showing up
+    this.appState.setCurrentAiMessage(null);
 
     // Show thinking indicator in input area (just llama, no text)
     const thinkingIndicator = document.getElementById('thinkingIndicator');

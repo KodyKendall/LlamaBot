@@ -92,27 +92,19 @@ export class MessageHandler {
    */
   handleTextContent(data) {
     let currentMessage = this.appState.getCurrentAiMessage();
-
-    // If no current message exists (shouldn't happen but just in case), create one
-    if (!currentMessage) {
-      console.warn('No current AI message found, creating one');
-      const messageElement = this.messageRenderer.addMessage('', 'ai', data);
-      this.appState.setCurrentAiMessage(messageElement);
-      messageElement.innerHTML = '<div class="typing-indicator">🦙 Thinking...</div>';
-      currentMessage = messageElement;
-    }
-
-    // Always reposition to ensure thinking indicator stays below tool messages
-    this.messageRenderer.repositionAiMessageBelowTools(currentMessage);
+    let thinkingMessage = this.appState.getThinkingMessage();
 
     // Extract text content using universal parser (handles both OpenAI and Anthropic formats)
     const textContent = this.normalizeLLMStreamingContent(data.content);
 
-    // Only update if we have actual content
+    // Only create/update if we have actual content
     if (textContent) {
-      // Remove typing indicator if present (on first content chunk)
-      if (currentMessage.querySelector('.typing-indicator')) {
-        currentMessage.innerHTML = '';
+      // Create content message on first content chunk (or after tool calls)
+      if (!currentMessage) {
+        const messageElement = this.messageRenderer.addMessage('', 'ai', data);
+        messageElement.classList.add('content-message'); // Add class to identify content messages
+        this.appState.setCurrentAiMessage(messageElement);
+        currentMessage = messageElement;
       }
 
       this.appState.appendToMessageBuffer(textContent);
@@ -121,9 +113,11 @@ export class MessageHandler {
       const parser = this.messageRenderer.markdownParser;
       let fullMessage = this.appState.getMessageBuffer();
       currentMessage.innerHTML = parser.parse(fullMessage);
+    }
 
-      // Reposition AI message to be below all tool messages
-      this.messageRenderer.repositionAiMessageBelowTools(currentMessage);
+    // Always reposition thinking indicator to ensure it stays at the very bottom
+    if (thinkingMessage && thinkingMessage.parentNode) {
+      this.messageRenderer.repositionThinkingIndicator(thinkingMessage);
     }
 
     // Handle scrolling
@@ -208,25 +202,42 @@ export class MessageHandler {
    * Handle complete AI message
    */
   handleAIMessage(data) {
-    // Only add message if there are tool calls
-    // (streaming already displayed the text content via AIMessageChunk)
+    // Only process tool calls if present
     if (data.base_message?.tool_calls?.length > 0) {
-      // Extract text content (handles all model formats including GPT-5 Codex)
-      const textContent = this.normalizeLLMStreamingContent(data.content);
-      this.messageRenderer.addMessage(textContent, data.type, data.base_message);
+      // "Close" the current content message by resetting the buffer and clearing current message
+      // This ensures that when streaming resumes, a NEW message bubble is created
+      this.appState.setCurrentAiMessage(null);
+      this.appState.currentAiMessageBuffer = ''; // Reset buffer for next content chunk
 
-      // Reposition AI thinking message to stay below tool calls
-      const currentAiMessage = this.appState.getCurrentAiMessage();
-      if (currentAiMessage) {
-        this.messageRenderer.repositionAiMessageBelowTools(currentAiMessage);
+      // Check if there was streamed content (Claude/Gemini) or not (OpenAI)
+      const textContent = this.normalizeLLMStreamingContent(data.content);
+      const hasContent = textContent && textContent.trim() !== '';
+
+      if (!hasContent) {
+        // OpenAI style: Content is empty, create the tool call message with the tool calls
+        // This will render as a tool call message (not a content message)
+        this.messageRenderer.addMessage('', 'ai', data.base_message);
+      } else {
+        // Claude/Gemini style: Content was already streamed
+        // Just create the tool call placeholders for each tool call
+        for (const toolCall of data.base_message.tool_calls) {
+          const toolCallMessage = {
+            tool_calls: [toolCall]
+          };
+          // Empty content since this is just the tool call placeholder
+          this.messageRenderer.addMessage('', 'ai', toolCallMessage);
+        }
       }
 
       // Track plan if this is a write_todos tool call
       this.trackPlanFromToolCall(data.base_message.tool_calls);
     } else {
       // No tool calls - the message was already streamed via AIMessageChunk
-      // Just reset state so next message starts fresh
-      this.appState.resetMessageState();
+      // Remove empty content message if it has no content
+      const currentAiMessage = this.appState.getCurrentAiMessage();
+      if (currentAiMessage && currentAiMessage.innerHTML.trim() === '') {
+        currentAiMessage.remove();
+      }
     }
   }
 
@@ -291,12 +302,6 @@ export class MessageHandler {
       this.planStepMapping.clear();
     } else {
       this.messageRenderer.addMessage(data.content, data.type, data.base_message);
-
-      // Reposition AI thinking message to stay below tool/error messages
-      const currentAiMessage = this.appState.getCurrentAiMessage();
-      if (currentAiMessage && data.type === 'tool') {
-        this.messageRenderer.repositionAiMessageBelowTools(currentAiMessage);
-      }
 
       // Check if this is an updated todo list and update plan steps in real-time
       if (data.base_message?.name === 'write_todos' && data.base_message?.args) {

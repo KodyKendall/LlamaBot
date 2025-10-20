@@ -135,14 +135,11 @@ export class MessageRenderer {
       thinkingIndicator.textContent = '';
     }
 
-    // Remove typing indicator from AI message div if present
+    // Remove the thinking message from the message history
     if (appState) {
-      const currentAiMessage = appState.getCurrentAiMessage();
-      if (currentAiMessage) {
-        const typingIndicator = currentAiMessage.querySelector('.typing-indicator');
-        if (typingIndicator) {
-          typingIndicator.remove();
-        }
+      const thinkingMessage = appState.getThinkingMessage();
+      if (thinkingMessage && thinkingMessage.parentNode) {
+        thinkingMessage.remove();
       }
     }
 
@@ -164,13 +161,9 @@ export class MessageRenderer {
    * Insert message into the message history
    */
   insertMessage(messageDiv) {
-    const scrollButton = document.getElementById('scrollToBottomBtn');
-
-    if (scrollButton) {
-      this.messageHistory.insertBefore(messageDiv, scrollButton);
-    } else {
-      this.messageHistory.appendChild(messageDiv);
-    }
+    // Simply append to the end of message history
+    // (scroll button is now in input-area, not message-history)
+    this.messageHistory.appendChild(messageDiv);
 
     // Increment unread count if user is not at bottom
     if (this.scrollManager) {
@@ -197,6 +190,7 @@ export class MessageRenderer {
     const allMessages = Array.from(this.messageHistory.children);
     const toolMessages = allMessages.filter(msg => msg.classList.contains('tool-message'));
 
+    // If no tool messages, the AI message should stay where it is
     if (toolMessages.length === 0) return;
 
     // Find the last tool message
@@ -206,19 +200,26 @@ export class MessageRenderer {
     const aiMessageIndex = allMessages.indexOf(aiMessageDiv);
     const lastToolIndex = allMessages.indexOf(lastToolMessage);
 
+    // Only reposition if AI message is BEFORE the last tool message
     if (aiMessageIndex < lastToolIndex) {
-      // Remove and reinsert after last tool message
-      const scrollButton = document.getElementById('scrollToBottomBtn');
+      // Find thinking message (should stay at bottom)
+      const thinkingMessage = allMessages.find(msg => msg.classList.contains('thinking-message'));
 
-      if (scrollButton && lastToolMessage.nextSibling === scrollButton) {
-        // Insert before scroll button
-        this.messageHistory.insertBefore(aiMessageDiv, scrollButton);
-      } else if (lastToolMessage.nextSibling) {
-        // Insert after last tool message
-        this.messageHistory.insertBefore(aiMessageDiv, lastToolMessage.nextSibling);
+      // Insert after last tool message but before thinking message
+      if (thinkingMessage) {
+        this.messageHistory.insertBefore(aiMessageDiv, thinkingMessage);
       } else {
-        // Append to end
-        this.messageHistory.appendChild(aiMessageDiv);
+        const scrollButton = document.getElementById('scrollToBottomBtn');
+        if (scrollButton && lastToolMessage.nextSibling === scrollButton) {
+          // Insert before scroll button
+          this.messageHistory.insertBefore(aiMessageDiv, scrollButton);
+        } else if (lastToolMessage.nextSibling) {
+          // Insert after last tool message
+          this.messageHistory.insertBefore(aiMessageDiv, lastToolMessage.nextSibling);
+        } else {
+          // Append to end
+          this.messageHistory.appendChild(aiMessageDiv);
+        }
       }
 
       // Auto-scroll if user is already at bottom
@@ -227,6 +228,35 @@ export class MessageRenderer {
           this.scrollManager.scrollToBottom();
         });
       }
+    }
+  }
+
+  /**
+   * Reposition thinking indicator to always be at the very bottom
+   * This ensures the thinking indicator stays visible below all content
+   */
+  repositionThinkingIndicator(thinkingMessageDiv) {
+    if (!thinkingMessageDiv || !thinkingMessageDiv.parentNode) return;
+
+    // Find scroll button (should be at the very end)
+    const scrollButton = document.getElementById('scrollToBottomBtn');
+
+    // Move thinking indicator to be right before scroll button (or at the very end)
+    if (scrollButton) {
+      // Check if it's not already in the right position
+      if (thinkingMessageDiv.nextSibling !== scrollButton) {
+        this.messageHistory.insertBefore(thinkingMessageDiv, scrollButton);
+      }
+    } else {
+      // No scroll button, so append to the very end
+      this.messageHistory.appendChild(thinkingMessageDiv);
+    }
+
+    // Auto-scroll if user is already at bottom
+    if (this.scrollManager) {
+      requestAnimationFrame(() => {
+        this.scrollManager.scrollToBottom();
+      });
     }
   }
 

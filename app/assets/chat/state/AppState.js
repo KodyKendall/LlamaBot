@@ -15,6 +15,7 @@ export class AppState {
     // Message streaming
     this.currentAiMessage = null;
     this.currentAiMessageBuffer = '';
+    this.thinkingMessage = null;
 
     // Agent configuration (mutable for dynamic selection)
     this.agentConfig = {
@@ -76,6 +77,20 @@ export class AppState {
   }
 
   /**
+   * Set thinking message element
+   */
+  setThinkingMessage(element) {
+    this.thinkingMessage = element;
+  }
+
+  /**
+   * Get thinking message element
+   */
+  getThinkingMessage() {
+    return this.thinkingMessage;
+  }
+
+  /**
    * Append to AI message buffer
    */
   appendToMessageBuffer(content) {
@@ -95,6 +110,7 @@ export class AppState {
   resetMessageState() {
     this.currentAiMessage = null;
     this.currentAiMessageBuffer = '';
+    this.thinkingMessage = null;
   }
 
   /**

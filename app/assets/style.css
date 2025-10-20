@@ -278,6 +278,14 @@ body {
     border-bottom-left-radius: 4px;
 }
 
+/* Thinking message styling - minimal, compact appearance */
+.message.ai-message.thinking-message {
+    background-color: transparent;
+    padding: 0.4rem 0.6rem;
+    max-width: 100%;
+    font-size: 0.8rem;
+}
+
 .message.tool-message {
     background-color: var(--message-tool-bg);
     align-self: flex-start;
@@ -464,6 +472,7 @@ body {
     display: flex;
     align-items: center;
     gap: 0.5rem;
+    flex-wrap: wrap;
 }
 
 .input-area button {
@@ -493,6 +502,35 @@ body {
     border-color: rgba(139, 92, 246, 0.15);
 }
 
+/* Send icon button */
+.send-icon-button {
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(139, 92, 246, 0.08);
+    border: 1px solid rgba(139, 92, 246, 0.2);
+    border-radius: 50%;
+    flex-shrink: 0;
+    font-size: 20px;
+    font-weight: 400;
+    line-height: 1;
+}
+
+.send-icon-button:hover:not(:disabled) {
+    background: rgba(139, 92, 246, 0.15);
+    border-color: rgba(139, 92, 246, 0.3);
+    transform: translateY(-1px) scale(1.05);
+}
+
+.send-icon-button:disabled {
+    opacity: 0.3;
+    background: rgba(139, 92, 246, 0.04);
+    border-color: rgba(139, 92, 246, 0.1);
+}
+
 /* Connection status */
 .connection-status {
     font-size: 0.75rem;
@@ -517,45 +555,49 @@ body {
     background-color: currentColor;
 }
 
-/* Custom dropdown styles */
+/* Custom dropdown styles - subtle design */
 .custom-dropdown-container {
     position: relative;
     display: inline-block;
+    flex-shrink: 0;
 }
 
 .custom-dropdown {
     -webkit-appearance: none;
     -moz-appearance: none;
     appearance: none;
-    background: rgba(139, 92, 246, 0.06);
-    border: 1px solid rgba(139, 92, 246, 0.15);
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 6px;
-    color: rgba(255, 255, 255, 0.8);
-    padding: 0.5rem 1.8rem 0.5rem 0.75rem;
-    font-size: 0.8rem;
+    color: rgba(255, 255, 255, 0.7);
+    padding: 0.45rem 1.8rem 0.45rem 0.65rem;
+    font-size: 0.75rem;
     cursor: pointer;
     transition: all 0.2s ease;
     font-family: inherit;
     backdrop-filter: blur(10px);
+    white-space: nowrap;
 }
 
 .custom-dropdown:hover {
-    background: rgba(139, 92, 246, 0.1);
-    border-color: rgba(139, 92, 246, 0.25);
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.12);
+    color: rgba(255, 255, 255, 0.85);
 }
 
 .custom-dropdown:focus {
     outline: none;
-    border-color: rgba(139, 92, 246, 0.35);
-    background: rgba(139, 92, 246, 0.12);
+    border-color: rgba(139, 92, 246, 0.25);
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.9);
 }
 
 .custom-dropdown-container::after {
     content: '▾';
-    font-size: 0.85rem;
-    color: rgba(255, 255, 255, 0.6);
+    font-size: 0.7rem;
+    color: rgba(255, 255, 255, 0.4);
     position: absolute;
-    right: 0.65rem;
+    right: 0.5rem;
     top: 50%;
     transform: translateY(-50%);
     pointer-events: none;
@@ -563,7 +605,7 @@ body {
 }
 
 .custom-dropdown-container:hover::after {
-    color: rgba(255, 255, 255, 0.8);
+    color: rgba(255, 255, 255, 0.6);
 }
 
 /* IFrame section (right 2/3) */
@@ -964,9 +1006,9 @@ body {
 
 /* Floating scroll-to-bottom button - Notification style */
 .scroll-to-bottom {
-    position: fixed;
-    bottom: 120px; /* Above the input area */
-    right: calc(66.67% + 20px); /* Position within chat section, 20px from right edge */
+    position: absolute;
+    top: -45px; /* Position slightly above the input area */
+    right: 10px; /* 10px from the right edge of input-area */
     width: 40px;
     height: 40px;
     background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
@@ -983,7 +1025,6 @@ body {
     visibility: hidden; /* Hide by default */
     transform: translateY(10px) scale(0.9);
     backdrop-filter: blur(10px);
-    position: relative;
     animation: subtle-pulse 2s ease-in-out infinite;
 }
 
@@ -1152,14 +1193,10 @@ body {
 
     /* Adjust scroll button for mobile */
     .scroll-to-bottom {
-        bottom: 100px; /* Above mobile toggle */
-        right: 20px; /* Fixed right position for mobile */
+        top: -50px; /* Position slightly higher on mobile */
+        right: 15px; /* Adjust positioning for mobile */
         width: 44px;
         height: 44px;
-    }
-
-    .scroll-to-bottom.visible {
-        bottom: 100px; /* Ensure it stays above toggle buttons when visible */
     }
 
     .scroll-to-bottom svg {
@@ -1188,6 +1225,34 @@ body {
     .input-area {
         padding: 0.8rem;
         padding-bottom: 0.8rem; /* Normal padding since toggle is fixed position */
+    }
+
+    /* Mobile responsive controls */
+    .send-controls {
+        gap: 0.4rem;
+        width: 100%;
+    }
+
+    .custom-dropdown-container {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .custom-dropdown {
+        width: 100%;
+        font-size: 0.7rem;
+        padding: 0.4rem 1.6rem 0.4rem 0.55rem;
+    }
+
+    .custom-dropdown-container::after {
+        right: 0.4rem;
+        font-size: 0.65rem;
+    }
+
+    .send-icon-button {
+        width: 36px;
+        height: 36px;
+        font-size: 18px;
     }
 
     /* Browser window adjustments for mobile */
@@ -1263,6 +1328,18 @@ body {
     .nav-button svg {
         width: 12px;
         height: 12px;
+    }
+
+    /* Further optimize controls for very small screens */
+    .custom-dropdown {
+        font-size: 0.65rem;
+        padding: 0.35rem 1.4rem 0.35rem 0.5rem;
+    }
+
+    .send-icon-button {
+        width: 34px;
+        height: 34px;
+        font-size: 17px;
     }
 }
 
