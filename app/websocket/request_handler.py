@@ -171,11 +171,11 @@ class RequestHandler:
 
             except CancelledError as e:
                 logger.info("handle_request was cancelled")
-                # Only send error message if WebSocket is still open
+                # Only send queued message if WebSocket is still open
                 if self._is_websocket_open(websocket):
                     await websocket.send_json({
-                        "type": "error",
-                        "content": f"Cancelled!"
+                        "type": "queued",
+                        "content": "Message queued!"
                     })
                 raise e
             except Exception as e:

@@ -17,7 +17,7 @@ export class MessageRenderer {
   /**
    * Add a message to the conversation window
    * @param {string} content - The content of the message
-   * @param {string} type - The type of message ('human', 'ai', 'tool', 'error', 'end')
+   * @param {string} type - The type of message ('human', 'ai', 'tool', 'error', 'queued', 'end')
    * @param {object} baseMessage - The base langgraph message object
    * @returns {HTMLElement|null} The message div or null
    */
@@ -36,6 +36,10 @@ export class MessageRenderer {
 
     if (type === 'error') {
       return this.renderErrorMessage(content);
+    }
+
+    if (type === 'queued') {
+      return this.renderQueuedMessage(content);
     }
 
     if (type === 'end') {
@@ -111,6 +115,17 @@ export class MessageRenderer {
   renderErrorMessage(content) {
     const messageDiv = document.createElement('div');
     messageDiv.className = 'message error-message';
+    messageDiv.textContent = content;
+    this.insertMessage(messageDiv);
+    return messageDiv;
+  }
+
+  /**
+   * Render queued message
+   */
+  renderQueuedMessage(content) {
+    const messageDiv = document.createElement('div');
+    messageDiv.className = 'message queued-message';
     messageDiv.textContent = content;
     this.insertMessage(messageDiv);
     return messageDiv;

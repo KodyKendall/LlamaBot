@@ -52,9 +52,7 @@
         <div class="input-area">
             <!-- Floating scroll-to-bottom button -->
             <button class="scroll-to-bottom" id="scrollToBottomBtn" title="Scroll to bottom">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M6 9l6 6 6-6"/>
-                </svg>
+                <i class="fa-solid fa-arrow-down"></i>
                 <!-- Badge will be added dynamically by ScrollManager -->
             </button>
             <!-- Thinking indicator area - displays above input -->
@@ -64,15 +62,15 @@
                 <div class="send-controls">
                     <div class="custom-dropdown-container">
                         <select id="modelSelect" class="custom-dropdown">
-                            <option value="gpt-5-codex">GPT-5 Codex</option>
-                            <option value="claude-4.5-sonnet" selected>Claude 4.5 Sonnet</option>
-                            <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+                            <option value="gpt-5-codex" data-short-label="GPT">GPT-5 Codex</option>
+                            <option value="claude-4.5-sonnet" selected data-short-label="Claude">Claude 4.5 Sonnet</option>
+                            <option value="gemini-2.5-pro" data-short-label="Gemini">Gemini 2.5 Pro</option>
                         </select>
                     </div>
                     <div class="custom-dropdown-container">
                         <select id="agentModeSelect" class="custom-dropdown">
-                            <option value="prototype">Design Mode</option>
-                            <option value="engineer">Engineer Mode</option>
+                            <option value="prototype" data-short-label="Design">Design Mode</option>
+                            <option value="engineer" data-short-label="Engineer">Engineer Mode</option>
                             <!-- <option value="ask">Ask Mode</option> -->
                         </select>
                     </div>

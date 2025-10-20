@@ -85,6 +85,11 @@ export class ToolMessageRenderer {
    * Format tool name for display (remove underscores, title case, remove "file" suffix)
    */
   _formatToolName(toolName) {
+    // Special case for bash_command - just show "Bash"
+    if (toolName === 'bash_command') {
+      return 'Bash';
+    }
+
     return toolName
       .replace(/_file$/, '')  // Remove "_file" suffix
       .split('_')
@@ -93,10 +98,16 @@ export class ToolMessageRenderer {
   }
 
   /**
-   * Extract filename from full path
+   * Extract filename from full path or clean up bash command
    */
   _extractFilename(path) {
     if (!path) return '';
+
+    // For bash commands, strip out "bundle exec" prefix
+    if (typeof path === 'string' && path.startsWith('bundle exec ')) {
+      return path.replace(/^bundle exec /, '');
+    }
+
     // Handle both forward and backward slashes
     const parts = path.replace(/\\/g, '/').split('/');
     return parts[parts.length - 1];

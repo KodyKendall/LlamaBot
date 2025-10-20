@@ -141,7 +141,10 @@ class ChatApp {
       agentModeSelect.addEventListener('change', (e) => {
         this.appState.setAgentMode(e.target.value);
         setCookie('agentMode', e.target.value, CONFIG.COOKIE_EXPIRY_DAYS);
+        this.updateDropdownLabel(agentModeSelect);
       });
+      // Initialize with short label
+      this.updateDropdownLabel(agentModeSelect);
     }
 
     // Model selector
@@ -149,7 +152,10 @@ class ChatApp {
     if (modelSelect) {
       modelSelect.addEventListener('change', (e) => {
         setCookie('llmModel', e.target.value, CONFIG.COOKIE_EXPIRY_DAYS);
+        this.updateDropdownLabel(modelSelect);
       });
+      // Initialize with short label
+      this.updateDropdownLabel(modelSelect);
     }
 
     // LEGACY: Listen for stream end event
@@ -293,6 +299,7 @@ class ChatApp {
         if (Array.from(selectElement.options).some(option => option.value === savedMode)) {
           selectElement.value = savedMode;
           this.appState.setAgentMode(savedMode);
+          this.updateDropdownLabel(selectElement);
         }
       }
     }
@@ -303,8 +310,46 @@ class ChatApp {
       if (modelSelect) {
         if (Array.from(modelSelect.options).some(option => option.value === savedModel)) {
           modelSelect.value = savedModel;
+          this.updateDropdownLabel(modelSelect);
         }
       }
+    }
+  }
+
+  /**
+   * Update dropdown to show short label when closed
+   */
+  updateDropdownLabel(selectElement) {
+    if (!selectElement) return;
+
+    const selectedOption = selectElement.options[selectElement.selectedIndex];
+    const shortLabel = selectedOption?.getAttribute('data-short-label');
+
+    if (shortLabel) {
+      // Store original text if not already stored
+      if (!selectedOption.hasAttribute('data-original-label')) {
+        selectedOption.setAttribute('data-original-label', selectedOption.textContent);
+      }
+
+      // Update to short label when not open
+      selectedOption.textContent = shortLabel;
+
+      // Restore full labels when dropdown opens
+      selectElement.addEventListener('focus', function restoreLabels() {
+        Array.from(selectElement.options).forEach(option => {
+          const originalLabel = option.getAttribute('data-original-label');
+          if (originalLabel) {
+            option.textContent = originalLabel;
+          }
+        });
+      }, { once: false });
+
+      // Restore short label when dropdown closes
+      selectElement.addEventListener('blur', () => {
+        setTimeout(() => {
+          this.updateDropdownLabel(selectElement);
+        }, 150);
+      }, { once: true });
     }
   }
 }
