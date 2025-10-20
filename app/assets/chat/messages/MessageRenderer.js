@@ -6,10 +6,12 @@ import { MarkdownParser } from './MarkdownParser.js';
 import { ToolMessageRenderer } from './ToolMessageRenderer.js';
 
 export class MessageRenderer {
-  constructor(messageHistoryElement, iframeManager = null, getRailsDebugInfoCallback = null) {
+  constructor(messageHistoryElement, iframeManager = null, getRailsDebugInfoCallback = null, scrollManager = null, loadingVerbs = null) {
     this.messageHistory = messageHistoryElement;
     this.markdownParser = new MarkdownParser();
     this.toolRenderer = new ToolMessageRenderer(iframeManager, getRailsDebugInfoCallback);
+    this.scrollManager = scrollManager;
+    this.loadingVerbs = loadingVerbs;
   }
 
   /**
@@ -121,10 +123,16 @@ export class MessageRenderer {
   handleEndMessage(appState = null) {
     console.log('end of stream');
 
+    // Stop cycling verbs
+    if (this.loadingVerbs) {
+      this.loadingVerbs.stopCycling();
+    }
+
     // Hide thinking indicator in input area
     const thinkingIndicator = document.getElementById('thinkingIndicator');
     if (thinkingIndicator) {
       thinkingIndicator.classList.add('hidden');
+      thinkingIndicator.textContent = '';
     }
 
     // Remove typing indicator from AI message div if present
@@ -163,6 +171,19 @@ export class MessageRenderer {
     } else {
       this.messageHistory.appendChild(messageDiv);
     }
+
+    // Increment unread count if user is not at bottom
+    if (this.scrollManager) {
+      this.scrollManager.incrementUnreadCount();
+    }
+
+    // Auto-scroll if user is already at bottom
+    // Use requestAnimationFrame to ensure DOM has updated
+    if (this.scrollManager) {
+      requestAnimationFrame(() => {
+        this.scrollManager.scrollToBottom();
+      });
+    }
   }
 
   /**
@@ -198,6 +219,13 @@ export class MessageRenderer {
       } else {
         // Append to end
         this.messageHistory.appendChild(aiMessageDiv);
+      }
+
+      // Auto-scroll if user is already at bottom
+      if (this.scrollManager) {
+        requestAnimationFrame(() => {
+          this.scrollManager.scrollToBottom();
+        });
       }
     }
   }

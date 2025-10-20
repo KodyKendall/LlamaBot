@@ -436,7 +436,7 @@ body {
     color: var(--text-color);
     font-size: 0.95rem;
     font-family: inherit;
-    transition: border-color 0.2s;
+    transition: all 0.2s ease;
     resize: none;
     min-height: 2.5rem;
     max-height: 12rem;
@@ -448,7 +448,9 @@ body {
 
 .input-area textarea:focus {
     outline: none;
-    border-color: var(--accent-color);
+    border-color: rgba(139, 92, 246, 0.4);
+    background-color: rgba(61, 61, 61, 0.8);
+    box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.08);
 }
 
 .button-row {
@@ -821,10 +823,6 @@ body {
     align-items: center;
     gap: 8px;
     font-size: 0.85rem;
-}
-
-.typing-indicator::before {
-    content: '🦙 Thinking...';
     background: linear-gradient(90deg, #666 0%, #aaa 50%, #666 100%);
     background-size: 200% 100%;
     -webkit-background-clip: text;
@@ -836,6 +834,16 @@ body {
 @keyframes thinking-shimmer {
     0% { background-position: 200% 0; }
     100% { background-position: -200% 0; }
+}
+
+/* Input area thinking indicator - just flashing llama */
+#thinkingIndicator {
+    animation: llama-pulse 1s ease-in-out infinite;
+}
+
+@keyframes llama-pulse {
+    0%, 100% { opacity: 0.4; }
+    50% { opacity: 1; }
 }
 
 .hidden {
@@ -954,49 +962,98 @@ body {
     font-weight: 600;
 }
 
-/* Floating scroll-to-bottom button */
+/* Floating scroll-to-bottom button - Notification style */
 .scroll-to-bottom {
     position: fixed;
     bottom: 120px; /* Above the input area */
     right: calc(66.67% + 20px); /* Position within chat section, 20px from right edge */
-    width: 28px;
-    height: 28px;
-    background-color: rgba(255, 255, 255, 0.1);
-    border: 1px solid rgba(255, 255, 255, 0.2);
+    width: 40px;
+    height: 40px;
+    background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+    border: 2px solid rgba(255, 255, 255, 0.15);
     border-radius: 50%;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-    transition: all 0.2s ease;
+    box-shadow: 0 4px 16px rgba(239, 68, 68, 0.4), 0 0 0 0 rgba(239, 68, 68, 0.4);
+    transition: all 0.3s ease;
     z-index: 1000;
     opacity: 0; /* Hide by default */
     visibility: hidden; /* Hide by default */
-    transform: translateY(10px);
+    transform: translateY(10px) scale(0.9);
     backdrop-filter: blur(10px);
+    position: relative;
+    animation: subtle-pulse 2s ease-in-out infinite;
+}
+
+@keyframes subtle-pulse {
+    0%, 100% {
+        box-shadow: 0 4px 16px rgba(239, 68, 68, 0.4), 0 0 0 0 rgba(239, 68, 68, 0.4);
+    }
+    50% {
+        box-shadow: 0 4px 20px rgba(239, 68, 68, 0.6), 0 0 0 8px rgba(239, 68, 68, 0);
+    }
 }
 
 .scroll-to-bottom.visible {
-    opacity: 0.8;
+    opacity: 1;
     visibility: visible;
-    transform: translateY(0);
+    transform: translateY(0) scale(1);
 }
 
 .scroll-to-bottom:hover {
-    background-color: rgba(255, 255, 255, 0.2);
-    border-color: rgba(255, 255, 255, 0.3);
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-    opacity: 1;
+    background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
+    transform: translateY(-2px) scale(1.05);
+    box-shadow: 0 6px 24px rgba(239, 68, 68, 0.6), 0 0 0 0 rgba(239, 68, 68, 0);
+    animation: none;
+}
+
+.scroll-to-bottom:active {
+    transform: translateY(0) scale(0.95);
 }
 
 .scroll-to-bottom svg {
-    width: 14px;
-    height: 14px;
-    fill: rgba(255, 255, 255, 0.8);
-    stroke: rgba(255, 255, 255, 0.8);
+    width: 18px;
+    height: 18px;
+    fill: none;
+    stroke: #ffffff;
+    stroke-width: 2.5;
     pointer-events: none;
+    filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3));
+}
+
+/* Unread badge */
+.unread-badge {
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    min-width: 20px;
+    height: 20px;
+    background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
+    border: 2px solid var(--chat-bg);
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+    color: #1a1a1a;
+    padding: 0 5px;
+    box-shadow: 0 2px 8px rgba(251, 191, 36, 0.5);
+    animation: badge-pop 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+}
+
+@keyframes badge-pop {
+    0% {
+        transform: scale(0);
+    }
+    50% {
+        transform: scale(1.2);
+    }
+    100% {
+        transform: scale(1);
+    }
 }
 
 /* Mobile view toggle buttons */
@@ -1095,12 +1152,19 @@ body {
 
     /* Adjust scroll button for mobile */
     .scroll-to-bottom {
-        bottom: 80px; /* Above mobile toggle */
+        bottom: 100px; /* Above mobile toggle */
         right: 20px; /* Fixed right position for mobile */
+        width: 44px;
+        height: 44px;
     }
 
     .scroll-to-bottom.visible {
-        bottom: 80px; /* Ensure it stays above toggle buttons when visible */
+        bottom: 100px; /* Ensure it stays above toggle buttons when visible */
+    }
+
+    .scroll-to-bottom svg {
+        width: 20px;
+        height: 20px;
     }
 
     /* Adjust hamburger menu for mobile */

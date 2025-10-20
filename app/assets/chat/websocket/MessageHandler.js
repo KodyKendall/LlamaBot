@@ -91,16 +91,19 @@ export class MessageHandler {
    * Handle text content streaming
    */
   handleTextContent(data) {
-    // Initialize AI message if not exists
-    if (!this.appState.getCurrentAiMessage()) {
+    let currentMessage = this.appState.getCurrentAiMessage();
+
+    // If no current message exists (shouldn't happen but just in case), create one
+    if (!currentMessage) {
+      console.warn('No current AI message found, creating one');
       const messageElement = this.messageRenderer.addMessage('', 'ai', data);
       this.appState.setCurrentAiMessage(messageElement);
-
-      // Add typing indicator initially
-      messageElement.innerHTML = '<div class="typing-indicator"></div>';
+      messageElement.innerHTML = '<div class="typing-indicator">🦙 Thinking...</div>';
+      currentMessage = messageElement;
     }
 
-    const currentMessage = this.appState.getCurrentAiMessage();
+    // Always reposition to ensure thinking indicator stays below tool messages
+    this.messageRenderer.repositionAiMessageBelowTools(currentMessage);
 
     // Extract text content using universal parser (handles both OpenAI and Anthropic formats)
     const textContent = this.normalizeLLMStreamingContent(data.content);
@@ -212,6 +215,12 @@ export class MessageHandler {
       const textContent = this.normalizeLLMStreamingContent(data.content);
       this.messageRenderer.addMessage(textContent, data.type, data.base_message);
 
+      // Reposition AI thinking message to stay below tool calls
+      const currentAiMessage = this.appState.getCurrentAiMessage();
+      if (currentAiMessage) {
+        this.messageRenderer.repositionAiMessageBelowTools(currentAiMessage);
+      }
+
       // Track plan if this is a write_todos tool call
       this.trackPlanFromToolCall(data.base_message.tool_calls);
     } else {
@@ -282,6 +291,12 @@ export class MessageHandler {
       this.planStepMapping.clear();
     } else {
       this.messageRenderer.addMessage(data.content, data.type, data.base_message);
+
+      // Reposition AI thinking message to stay below tool/error messages
+      const currentAiMessage = this.appState.getCurrentAiMessage();
+      if (currentAiMessage && data.type === 'tool') {
+        this.messageRenderer.repositionAiMessageBelowTools(currentAiMessage);
+      }
 
       // Check if this is an updated todo list and update plan steps in real-time
       if (data.base_message?.name === 'write_todos' && data.base_message?.args) {

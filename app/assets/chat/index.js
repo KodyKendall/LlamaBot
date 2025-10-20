@@ -15,6 +15,7 @@ import { IframeManager } from './ui/IframeManager.js';
 import { MenuManager } from './ui/MenuManager.js';
 import { MobileViewManager } from './ui/MobileViewManager.js';
 import { ThreadManager } from './threads/ThreadManager.js';
+import { LoadingVerbs } from './utils/LoadingVerbs.js';
 
 /**
  * Main application class
@@ -32,6 +33,7 @@ class ChatApp {
     this.menuManager = null;
     this.mobileViewManager = null;
     this.threadManager = null;
+    this.loadingVerbs = new LoadingVerbs();
 
     // Initialize WebSocket components
     this.webSocketManager = null;
@@ -61,11 +63,13 @@ class ChatApp {
     this.menuManager = new MenuManager();
     this.mobileViewManager = new MobileViewManager(this.scrollManager);
 
-    // Initialize message renderer with iframe manager and debug info callback
+    // Initialize message renderer with iframe manager, debug info callback, scroll manager, and loading verbs
     this.messageRenderer = new MessageRenderer(
       messageHistoryElement,
       this.iframeManager,
-      (callback) => this.getRailsDebugInfo(callback)
+      (callback) => this.getRailsDebugInfo(callback),
+      this.scrollManager,
+      this.loadingVerbs
     );
 
     // Initialize thread manager
@@ -196,10 +200,23 @@ class ChatApp {
     // Add user message
     this.messageRenderer.addMessage(message, 'human', null);
 
-    // Show thinking indicator
+    // Add AI thinking message immediately (will be replaced with actual response)
+    const thinkingMessage = this.messageRenderer.addMessage('', 'ai', null);
+    const verb = this.loadingVerbs.getRandomVerb();
+    thinkingMessage.innerHTML = `<div class="typing-indicator">🦙 ${verb}...</div>`;
+    this.appState.setCurrentAiMessage(thinkingMessage);
+
+    // Start cycling the verb in the thinking message
+    const thinkingDiv = thinkingMessage.querySelector('.typing-indicator');
+    if (thinkingDiv) {
+      this.loadingVerbs.startCycling(thinkingDiv);
+    }
+
+    // Show thinking indicator in input area (just llama, no text)
     const thinkingIndicator = document.getElementById('thinkingIndicator');
     if (thinkingIndicator) {
       thinkingIndicator.classList.remove('hidden');
+      thinkingIndicator.textContent = '🦙';
     }
 
     // Clear input

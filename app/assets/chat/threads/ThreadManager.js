@@ -38,9 +38,16 @@ export class ThreadManager {
     const menuItems = document.querySelector('.menu-items');
     if (!menuItems) return;
 
+    // Show loading with random verb
+    const loadingVerbs = [
+      "Frolicking", "Dreaming", "Cyborging", "Llama'ing", "Grazing", "Thinking",
+      "Working", "Cogitating", "Circuiting", "Llaminating", "Synapsing", "Daydreaming"
+    ];
+    const randomVerb = loadingVerbs[Math.floor(Math.random() * loadingVerbs.length)];
+
     menuItems.innerHTML = `
       <div class="menu-item" style="opacity: 0.6; cursor: default;">
-        <div class="typing-indicator" style="justify-content: center;"></div>
+        <div class="typing-indicator" style="justify-content: center;">🦙 ${randomVerb}...</div>
       </div>
     `;
   }
