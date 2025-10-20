@@ -118,9 +118,8 @@ export class MessageRenderer {
 
   /**
    * Handle end of stream
-   * @param {object} appState - Application state to access current AI message
    */
-  handleEndMessage(appState = null) {
+  handleEndMessage() {
     console.log('end of stream');
 
     // Stop cycling verbs
@@ -128,19 +127,17 @@ export class MessageRenderer {
       this.loadingVerbs.stopCycling();
     }
 
-    // Hide thinking indicator in input area
-    const thinkingIndicator = document.getElementById('thinkingIndicator');
-    if (thinkingIndicator) {
-      thinkingIndicator.classList.add('hidden');
-      thinkingIndicator.textContent = '';
+    // Hide thinking area in input area
+    const thinkingArea = document.getElementById('thinkingArea');
+    if (thinkingArea) {
+      thinkingArea.classList.add('hidden');
+      thinkingArea.innerHTML = '';
     }
 
-    // Remove the thinking message from the message history
-    if (appState) {
-      const thinkingMessage = appState.getThinkingMessage();
-      if (thinkingMessage && thinkingMessage.parentNode) {
-        thinkingMessage.remove();
-      }
+    // Restore original placeholder text
+    const messageInput = document.getElementById('messageInput');
+    if (messageInput) {
+      messageInput.placeholder = 'Ask Leonardo...';
     }
 
     // Play task completed sound
@@ -228,35 +225,6 @@ export class MessageRenderer {
           this.scrollManager.scrollToBottom();
         });
       }
-    }
-  }
-
-  /**
-   * Reposition thinking indicator to always be at the very bottom
-   * This ensures the thinking indicator stays visible below all content
-   */
-  repositionThinkingIndicator(thinkingMessageDiv) {
-    if (!thinkingMessageDiv || !thinkingMessageDiv.parentNode) return;
-
-    // Find scroll button (should be at the very end)
-    const scrollButton = document.getElementById('scrollToBottomBtn');
-
-    // Move thinking indicator to be right before scroll button (or at the very end)
-    if (scrollButton) {
-      // Check if it's not already in the right position
-      if (thinkingMessageDiv.nextSibling !== scrollButton) {
-        this.messageHistory.insertBefore(thinkingMessageDiv, scrollButton);
-      }
-    } else {
-      // No scroll button, so append to the very end
-      this.messageHistory.appendChild(thinkingMessageDiv);
-    }
-
-    // Auto-scroll if user is already at bottom
-    if (this.scrollManager) {
-      requestAnimationFrame(() => {
-        this.scrollManager.scrollToBottom();
-      });
     }
   }
 

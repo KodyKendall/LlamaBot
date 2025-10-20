@@ -278,14 +278,6 @@ body {
     border-bottom-left-radius: 4px;
 }
 
-/* Thinking message styling - minimal, compact appearance */
-.message.ai-message.thinking-message {
-    background-color: transparent;
-    padding: 0.4rem 0.6rem;
-    max-width: 100%;
-    font-size: 0.8rem;
-}
-
 .message.tool-message {
     background-color: var(--message-tool-bg);
     align-self: flex-start;
@@ -878,14 +870,25 @@ body {
     100% { background-position: -200% 0; }
 }
 
-/* Input area thinking indicator - just flashing llama */
-#thinkingIndicator {
-    animation: llama-pulse 1s ease-in-out infinite;
+/* Thinking area - dedicated space in input area for thinking messages */
+.thinking-area {
+    padding: 0.6rem 0.8rem;
+    background-color: rgba(139, 92, 246, 0.08);
+    border: 1px solid rgba(139, 92, 246, 0.2);
+    border-radius: 6px;
+    margin-bottom: 0.8rem;
+    font-size: 0.85rem;
+    color: rgba(255, 255, 255, 0.85);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 36px;
 }
 
-@keyframes llama-pulse {
-    0%, 100% { opacity: 0.4; }
-    50% { opacity: 1; }
+.thinking-area .typing-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
 }
 
 .hidden {

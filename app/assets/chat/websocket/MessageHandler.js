@@ -92,7 +92,6 @@ export class MessageHandler {
    */
   handleTextContent(data) {
     let currentMessage = this.appState.getCurrentAiMessage();
-    let thinkingMessage = this.appState.getThinkingMessage();
 
     // Extract text content using universal parser (handles both OpenAI and Anthropic formats)
     const textContent = this.normalizeLLMStreamingContent(data.content);
@@ -113,11 +112,6 @@ export class MessageHandler {
       const parser = this.messageRenderer.markdownParser;
       let fullMessage = this.appState.getMessageBuffer();
       currentMessage.innerHTML = parser.parse(fullMessage);
-    }
-
-    // Always reposition thinking indicator to ensure it stays at the very bottom
-    if (thinkingMessage && thinkingMessage.parentNode) {
-      this.messageRenderer.repositionThinkingIndicator(thinkingMessage);
     }
 
     // Handle scrolling
@@ -294,9 +288,8 @@ export class MessageHandler {
    * Handle generic messages (tool, error, end, etc.)
    */
   handleGenericMessage(data) {
-    // Pass appState to handleEndMessage for typing indicator cleanup
     if (data.type === 'end') {
-      this.messageRenderer.handleEndMessage(this.appState);
+      this.messageRenderer.handleEndMessage();
       // Clear plan tracking when conversation ends
       this.activePlanId = null;
       this.planStepMapping.clear();
