@@ -23,6 +23,15 @@ export class IframeManager {
     // RAILS APP PREVIEW iframe (for live Rails app)
     this.liveSiteFrame = document.getElementById('liveSiteFrame');
 
+    // URL input element
+    this.urlInput = document.getElementById('urlInput');
+
+    // URL dropdown element
+    this.urlDropdown = document.getElementById('urlDropdown');
+
+    // Cached routes
+    this.cachedRoutes = null;
+
     this.overlayElement = null;
   }
 
@@ -202,6 +211,165 @@ export class IframeManager {
     setTimeout(() => {
       this.contentFrame.src = this.contentFrame.src;
     }, 100);
+  }
+
+  /**
+   * Navigate the Rails iframe to a specific path
+   * @param {string} path - The path to navigate to (e.g., '/users', '/posts/123')
+   */
+  navigateToPath(path) {
+    if (!this.liveSiteFrame) return;
+
+    // Ensure path starts with /
+    if (!path.startsWith('/')) {
+      path = '/' + path;
+    }
+
+    // Update iframe src
+    this.liveSiteFrame.src = getRailsUrl() + path;
+
+    // Update URL input
+    if (this.urlInput) {
+      this.urlInput.value = path;
+    }
+  }
+
+  /**
+   * Extract relative path from iframe URL
+   * @param {string} url - Full URL from iframe
+   * @returns {string} - Relative path (e.g., '/users')
+   */
+  extractRelativePath(url) {
+    try {
+      const urlObj = new URL(url);
+      return urlObj.pathname || '/';
+    } catch (e) {
+      return '/';
+    }
+  }
+
+  /**
+   * Update URL input to show current iframe path
+   */
+  updateUrlDisplay() {
+    if (!this.liveSiteFrame || !this.urlInput) return;
+
+    try {
+      const iframeSrc = this.liveSiteFrame.src;
+      const relativePath = this.extractRelativePath(iframeSrc);
+      this.urlInput.value = relativePath;
+    } catch (e) {
+      console.log('Could not update URL display:', e);
+    }
+  }
+
+  /**
+   * Fetch available routes from the backend
+   */
+  async fetchRoutes() {
+    if (this.cachedRoutes) {
+      return this.cachedRoutes;
+    }
+
+    try {
+      const response = await fetch('/rails-routes');
+      const data = await response.json();
+      this.cachedRoutes = data.routes || [];
+      return this.cachedRoutes;
+    } catch (e) {
+      console.error('Error fetching routes:', e);
+      return [{ path: '/', name: 'Home' }];
+    }
+  }
+
+  /**
+   * Show the URL dropdown with available routes
+   */
+  async showUrlDropdown() {
+    if (!this.urlDropdown) return;
+
+    const routes = await this.fetchRoutes();
+
+    // Clear existing dropdown content
+    this.urlDropdown.innerHTML = '';
+
+    // Populate dropdown with routes
+    routes.forEach(route => {
+      const item = document.createElement('div');
+      item.className = 'url-dropdown-item';
+      item.innerHTML = `
+        <span class="url-dropdown-path">${route.path}</span>
+        <span class="url-dropdown-name">${route.name}</span>
+      `;
+
+      item.addEventListener('click', () => {
+        this.navigateToPath(route.path);
+        this.hideUrlDropdown();
+      });
+
+      this.urlDropdown.appendChild(item);
+    });
+
+    // Show dropdown
+    this.urlDropdown.classList.remove('hidden');
+  }
+
+  /**
+   * Hide the URL dropdown
+   */
+  hideUrlDropdown() {
+    if (!this.urlDropdown) return;
+    this.urlDropdown.classList.add('hidden');
+  }
+
+  /**
+   * Initialize URL navigation functionality
+   */
+  initUrlNavigation() {
+    if (!this.urlInput) return;
+
+    // Show dropdown when input is focused/clicked
+    this.urlInput.addEventListener('focus', () => {
+      this.showUrlDropdown();
+    });
+
+    this.urlInput.addEventListener('click', () => {
+      this.showUrlDropdown();
+    });
+
+    // Hide dropdown when clicking outside
+    document.addEventListener('click', (e) => {
+      if (!this.urlInput.contains(e.target) && !this.urlDropdown?.contains(e.target)) {
+        this.hideUrlDropdown();
+      }
+    });
+
+    // Handle Enter key to navigate
+    this.urlInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const path = this.urlInput.value.trim();
+        this.navigateToPath(path);
+        this.urlInput.blur(); // Remove focus after navigation
+        this.hideUrlDropdown();
+      } else if (e.key === 'Escape') {
+        this.hideUrlDropdown();
+        this.urlInput.blur();
+      }
+    });
+
+    // Update URL display when iframe loads
+    if (this.liveSiteFrame) {
+      this.liveSiteFrame.addEventListener('load', () => {
+        this.updateUrlDisplay();
+      });
+    }
+
+    // Initialize with current path
+    this.updateUrlDisplay();
+
+    // Pre-fetch routes for faster dropdown display
+    this.fetchRoutes();
   }
 
   // ============================================================================

@@ -104,6 +104,7 @@ class ChatApp {
     this.iframeManager.initNavigationButtons();
     this.iframeManager.initTabSwitching();
     this.iframeManager.initViewModeToggle();
+    this.iframeManager.initUrlNavigation();
 
     // Load threads
     this.threadManager.fetchThreads();

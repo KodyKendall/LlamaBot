@@ -705,6 +705,7 @@ body {
 
 /* URL bar */
 .browser-urlbar {
+    position: relative;
     flex-grow: 1;
     height: 28px;
     background-color: #2a2a2a;
@@ -718,6 +719,84 @@ body {
     font-size: 0.85rem;
     font-family: -apple-system, BlinkMacSystemFont, sans-serif;
     width: 100%;
+}
+
+/* URL input field */
+.url-input {
+    background: transparent;
+    border: none;
+    outline: none;
+    color: #888;
+    font-size: 0.85rem;
+    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+    flex-grow: 1;
+    width: 100%;
+    padding: 0;
+}
+
+.url-input:focus {
+    color: #fff;
+}
+
+.url-input::selection {
+    background-color: rgba(100, 150, 255, 0.3);
+}
+
+/* URL dropdown for route suggestions */
+.url-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    margin-top: 4px;
+    background-color: #2a2a2a;
+    border: 1px solid #3a3a3a;
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    max-height: 300px;
+    overflow-y: auto;
+    z-index: 1000;
+}
+
+.url-dropdown.hidden {
+    display: none;
+}
+
+.url-dropdown-item {
+    padding: 8px 12px;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    color: #888;
+    font-size: 0.85rem;
+    transition: background-color 0.15s ease;
+}
+
+.url-dropdown-item:hover {
+    background-color: #3a3a3a;
+    color: #fff;
+}
+
+.url-dropdown-item:first-child {
+    border-top-left-radius: 6px;
+    border-top-right-radius: 6px;
+}
+
+.url-dropdown-item:last-child {
+    border-bottom-left-radius: 6px;
+    border-bottom-right-radius: 6px;
+}
+
+.url-dropdown-path {
+    font-family: monospace;
+    color: #6c9;
+}
+
+.url-dropdown-name {
+    margin-left: 12px;
+    color: #888;
+    font-size: 0.8rem;
 }
 
 /* Browser navigation controls container */

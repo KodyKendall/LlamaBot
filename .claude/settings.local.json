@@ -20,7 +20,9 @@
       "Bash(pip uninstall:*)",
       "Bash(tree:*)",
       "Bash(cat:*)",
-      "Bash(timeout 10 python:*)"
+      "Bash(timeout 10 python:*)",
+      "Bash(docker compose restart:*)",
+      "Bash(node --check:*)"
     ],
     "deny": [],
     "ask": []

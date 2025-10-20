@@ -404,6 +404,65 @@ async def available_agents():
         langgraph_json = json.load(f)
     return {"agents": list(langgraph_json["graphs"].keys())}
 
+@app.get("/rails-routes", response_class=JSONResponse)
+async def rails_routes():
+    """Parse routes.rb and return available GET routes for index actions and home page"""
+    import re
+    import os
+
+    routes = []
+    routes_file = "rails/config/routes.rb"
+
+    # Check if routes file exists
+    if not os.path.exists(routes_file):
+        return {"routes": [{"path": "/", "name": "Home"}]}
+
+    try:
+        with open(routes_file, "r") as f:
+            content = f.read()
+
+        # Extract root path
+        root_match = re.search(r'root\s+"([^"]+)#([^"]+)"', content)
+        if root_match:
+            routes.append({"path": "/", "name": "Home"})
+
+        # Extract explicit home route
+        home_match = re.search(r'get\s+"home"\s*=>', content)
+        if home_match and not any(r["path"] == "/" for r in routes):
+            routes.append({"path": "/", "name": "Home"})
+
+        # Extract resources (which create index routes)
+        resource_matches = re.findall(r'resources\s+:(\w+)', content)
+        for resource in resource_matches:
+            routes.append({
+                "path": f"/{resource}",
+                "name": resource.capitalize()
+            })
+
+        # Extract custom GET routes
+        get_matches = re.findall(r'get\s+"([^"]+)"\s*=>\s*"([^"]+)#([^"]+)"', content)
+        for path, controller, action in get_matches:
+            if path not in ["/", "home", "up", "service-worker", "manifest"]:
+                display_name = path.replace("/", "").replace("_", " ").title() or "Home"
+                routes.append({
+                    "path": f"/{path}" if not path.startswith("/") else path,
+                    "name": display_name
+                })
+
+        # Remove duplicates based on path
+        seen = set()
+        unique_routes = []
+        for route in routes:
+            if route["path"] not in seen:
+                seen.add(route["path"])
+                unique_routes.append(route)
+
+        return {"routes": unique_routes}
+
+    except Exception as e:
+        print(f"Error parsing routes: {e}")
+        return {"routes": [{"path": "/", "name": "Home"}]}
+
 @app.get("/check")
 def check_timestamp():
     # returns the timestamp of last message from user in utc

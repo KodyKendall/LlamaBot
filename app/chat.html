@@ -9,7 +9,7 @@
     <!-- Font Awesome for icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <!-- Link to external CSS -->
-    <link rel="stylesheet" href="/assets/style.css?v=5">
+    <link rel="stylesheet" href="/assets/style.css?v=7">
 </head>
 <body>
     <div class="chat-section">
@@ -105,7 +105,8 @@
             </div>
             <div class="browser-addressbar">
                 <div class="browser-urlbar">
-                    <span>localhost:3000</span>
+                    <input type="text" id="urlInput" class="url-input" value="/" placeholder="/">
+                    <div class="url-dropdown hidden" id="urlDropdown"></div>
                     <div class="browser-controls-right">
                         <div class="view-mode-toggle">
                             <button class="view-mode-btn active" id="desktopModeBtn" title="Desktop View">
@@ -148,6 +149,6 @@
     </audio>
 
     <!-- Link to external JavaScript -->
-    <script type="module" src="/assets/chat/index.js"></script>
+    <script type="module" src="/assets/chat/index.js?v=3"></script>
 </body>
 </html>
