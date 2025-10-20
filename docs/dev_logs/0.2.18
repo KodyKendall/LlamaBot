@@ -1,0 +1,9 @@
+10.20.25 - Major Release
+- Includes all the changes from 0.2.15 - 0.2.17.
+- Massive UI/UX overhaul, for the user message view and iframe.
+- Refactored massive chat.html file into JavaScript modules and separate CSS
+- Added support for any model - Claude, Gemini, GPT Codex, or Traditional GPT series
+- Added task/planning component for a clearer understanding of the agent's current task & completed tasks
+- Fixed slipping tool calls, specifically edit_file, read_file, and write_file for much better LLM consistency
+- iFrame auto refreshes as edits are made, helping the user see what Leonardo is changing in real time.
+- Allow user to double message the agent, and have it queue their message and take it into account immediately.

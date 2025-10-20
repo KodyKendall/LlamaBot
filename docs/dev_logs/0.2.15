@@ -1,5 +1,5 @@
 10/09/2025
-- Introducing, Design Mode!
+- Introducing, Design Mode! (Previously prototyping mode).
 - Design Mode allows you to have Leonardo focus on the user interface, which makes it much easier to get started building with Leonardo.
 - Format the agent's TODO list in the Leonardo chat window for more clarity on what the agent is focusing on.
 - Begin trying to support Claude's LLM output data shape in our chat.html. 
