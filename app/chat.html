@@ -6,6 +6,8 @@
     <title>LlamaBot Chat Interface</title>
     <!-- Add marked.js for markdown parsing -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- Font Awesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <!-- Link to external CSS -->
     <link rel="stylesheet" href="/assets/style.css?v=5">
 </head>
@@ -55,7 +57,7 @@
             </button>
         </div>
         <div class="input-area">
-            <textarea placeholder="Type your message..." id="messageInput"></textarea>
+            <textarea placeholder="Ask Leonardo..." id="messageInput"></textarea>
             <div class="button-row">
                 <div class="send-controls">
                     <span id="thinkingIndicator" class="typing-indicator hidden"></span>
@@ -73,7 +75,9 @@
                             <!-- <option value="ask">Ask Mode</option> -->
                         </select>
                     </div>
-                    <button id="sendButton" disabled>Send</button>
+                    <button id="sendButton" class="send-icon-button" disabled title="Send message">
+                        <i class="fa-solid fa-arrow-up"></i>
+                    </button>
                 </div>
             </div>
         </div>
