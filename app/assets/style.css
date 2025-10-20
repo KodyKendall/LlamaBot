@@ -10,7 +10,7 @@
     --accent-color: #4CAF50;
     --message-user-bg: #3d3d3d;
     --message-ai-bg: #4a4a4a;
-    --message-tool-bg: #2d5fad;
+    --message-tool-bg: rgba(139, 92, 246, 0.08);
     --header-height: 60px;
     --status-color: rgba(76, 175, 80, 0.7);
 }
@@ -257,13 +257,13 @@ body {
 }
 
 .message {
-    padding: 0.8rem 1rem;
+    padding: 0.65rem 0.85rem;
     border-radius: 12px;
     line-height: 1.4;
-    max-width: 85%;
+    max-width: 80%;
     word-wrap: break-word;
     position: relative;
-    font-size: 0.95rem;
+    font-size: 0.875rem;
 }
 
 .message.user-message {
@@ -287,7 +287,7 @@ body {
 .tool-collapsible {
     cursor: pointer;
     user-select: none;
-    padding: 8px 12px;
+    padding: 6px 10px;
     border-radius: 4px;
     background-color: var(--message-tool-bg);
     border: 1px solid rgba(255, 255, 255, 0.1);
@@ -295,7 +295,7 @@ body {
 }
 
 .tool-collapsible:hover {
-    background-color: rgba(45, 95, 173, 0.8);
+    background-color: rgba(139, 92, 246, 0.12);
 }
 
 .tool-collapsible::before {
@@ -326,15 +326,88 @@ body {
 }
 
 .tool-summary {
-    font-weight: bold;
+    font-weight: 600;
     color: rgba(255, 255, 255, 0.9);
 }
 
 .tool-details {
     color: rgba(255, 255, 255, 0.7);
-    font-size: 0.9em;
+    font-size: 0.85em;
     margin-top: 4px;
     word-break: break-word;
+}
+
+/* ============================================
+   COMPACT TOOL MESSAGES (Minimal Design)
+   ============================================ */
+
+.tool-compact {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    background: rgba(139, 92, 246, 0.06);
+    border-radius: 6px;
+    font-size: 0.75rem;
+    color: rgba(255, 255, 255, 0.7);
+    border: 1px solid rgba(139, 92, 246, 0.15);
+    transition: all 0.2s ease;
+}
+
+.tool-compact:hover {
+    background: rgba(139, 92, 246, 0.1);
+    border-color: rgba(139, 92, 246, 0.25);
+}
+
+.tool-compact.tool-success {
+    background: rgba(52, 211, 153, 0.08);
+    border-color: rgba(52, 211, 153, 0.2);
+}
+
+.tool-compact.tool-error {
+    background: rgba(239, 68, 68, 0.08);
+    border-color: rgba(239, 68, 68, 0.2);
+}
+
+/* Tool icons (SVG) */
+.tool-icon {
+    width: 12px;
+    height: 12px;
+    flex-shrink: 0;
+    color: rgba(139, 92, 246, 0.8);
+}
+
+.tool-compact.tool-success .tool-icon {
+    color: #34d399;
+}
+
+.tool-compact.tool-error .tool-icon {
+    color: #ef4444;
+}
+
+.tool-icon-spin {
+    animation: tool-icon-spin 1s linear infinite;
+}
+
+@keyframes tool-icon-spin {
+    to { transform: rotate(360deg); }
+}
+
+/* Tool text elements */
+.tool-compact-name {
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 0.75rem;
+}
+
+.tool-compact-target {
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 0.7rem;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .message.error-message {
@@ -762,12 +835,12 @@ body {
     font-weight: 600;
 }
 
-.message.ai-message h1 { font-size: 1.4em; }
-.message.ai-message h2 { font-size: 1.3em; }
-.message.ai-message h3 { font-size: 1.2em; }
-.message.ai-message h4 { font-size: 1.1em; }
-.message.ai-message h5 { font-size: 1.05em; }
-.message.ai-message h6 { font-size: 1em; }
+.message.ai-message h1 { font-size: 1.3em; }
+.message.ai-message h2 { font-size: 1.2em; }
+.message.ai-message h3 { font-size: 1.15em; }
+.message.ai-message h4 { font-size: 1.05em; }
+.message.ai-message h5 { font-size: 1em; }
+.message.ai-message h6 { font-size: 0.95em; }
 
 .message.ai-message p {
     margin: 0.5em 0;
@@ -1024,7 +1097,8 @@ body {
     }
 
     .message {
-        max-width: 90%;
+        max-width: 85%;
+        padding: 0.6rem 0.75rem;
     }
 
     /* Adjust input area for mobile */
@@ -1292,4 +1366,219 @@ body {
 .todo-completed .todo-text {
     text-decoration: line-through;
     color: #94a3b8;
+}
+
+/* ============================================
+   MODERN MINIMALIST PLAN UI (2025 Design)
+   ============================================ */
+
+/* Main container - minimal, no background */
+.plan-modern {
+    margin: 8px 0;
+    padding: 0;
+}
+
+/* Active task - only shown when in progress */
+.plan-active-task {
+    position: relative;
+    padding: 12px 16px;
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 8px;
+    margin-bottom: 8px;
+    overflow: hidden;
+    transition: all 0.3s ease;
+}
+
+/* Shimmer bar at top of active task */
+.plan-shimmer-container {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: rgba(255, 255, 255, 0.1);
+    overflow: hidden;
+}
+
+.plan-shimmer-bar {
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 50%;
+    height: 100%;
+    background: linear-gradient(
+        90deg,
+        rgba(139, 92, 246, 0) 0%,
+        rgba(139, 92, 246, 0.8) 50%,
+        rgba(139, 92, 246, 0) 100%
+    );
+    animation: shimmer-slide 2s ease-in-out infinite;
+}
+
+@keyframes shimmer-slide {
+    0% { left: -50%; }
+    100% { left: 100%; }
+}
+
+/* Active task content */
+.plan-active-content {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.plan-spinner-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #8b5cf6;
+    animation: pulse-dot 1.5s ease-in-out infinite;
+    flex-shrink: 0;
+}
+
+@keyframes pulse-dot {
+    0%, 100% {
+        opacity: 0.4;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 1;
+        transform: scale(1.3);
+    }
+}
+
+.plan-active-text {
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 0.9em;
+    line-height: 1.4;
+}
+
+/* Minimal progress bar */
+.plan-progress-bar {
+    height: 2px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 2px;
+    overflow: hidden;
+    margin: 8px 0;
+}
+
+.plan-progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #8b5cf6, #a78bfa);
+    transition: width 0.4s ease;
+    border-radius: 2px;
+}
+
+/* Progress text - subtle, clickable */
+.plan-progress-text {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 8px;
+    cursor: pointer;
+    border-radius: 6px;
+    transition: all 0.2s ease;
+    font-size: 0.85em;
+}
+
+.plan-progress-text:hover {
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.plan-count {
+    color: rgba(255, 255, 255, 0.5);
+    font-weight: 500;
+}
+
+.plan-done-badge {
+    color: #34d399;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.plan-expand-hint {
+    color: rgba(255, 255, 255, 0.3);
+    font-size: 0.8em;
+    transition: color 0.2s ease;
+}
+
+.plan-progress-text:hover .plan-expand-hint {
+    color: rgba(255, 255, 255, 0.5);
+}
+
+/* Arrow icon for expand/collapse */
+.plan-expand-arrow {
+    width: 14px;
+    height: 14px;
+    color: rgba(255, 255, 255, 0.4);
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+}
+
+.plan-progress-text:hover .plan-expand-arrow {
+    color: rgba(255, 255, 255, 0.6);
+}
+
+/* Rotate arrow when expanded */
+.plan-completed-list[style*="display: block"] ~ .plan-progress-text .plan-expand-arrow,
+.plan-progress-text.expanded .plan-expand-arrow {
+    transform: rotate(180deg);
+}
+
+/* Collapsed completed tasks list */
+.plan-completed-list {
+    margin-top: 8px;
+    padding: 12px;
+    background: rgba(255, 255, 255, 0.02);
+    border-radius: 8px;
+    transition: opacity 0.3s ease;
+}
+
+.plan-completed-header {
+    font-size: 0.75em;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: rgba(255, 255, 255, 0.4);
+    margin-bottom: 8px;
+    font-weight: 600;
+}
+
+.plan-completed-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 0;
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 0.85em;
+    line-height: 1.4;
+}
+
+.plan-check-tiny {
+    width: 14px;
+    height: 14px;
+    border-radius: 3px;
+    background: rgba(52, 211, 153, 0.15);
+    color: #34d399;
+    font-size: 0.7em;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+/* Responsive */
+@media (max-width: 640px) {
+    .plan-active-task {
+        padding: 10px 12px;
+    }
+
+    .plan-active-text {
+        font-size: 0.85em;
+    }
+
+    .plan-expand-hint {
+        display: none;
+    }
 }

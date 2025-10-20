@@ -11,6 +11,10 @@ export class MessageHandler {
     this.messageRenderer = messageRenderer;
     this.iframeManager = iframeManager;
     this.scrollManager = scrollManager;
+
+    // Track active plan for real-time updates
+    this.activePlanId = null;
+    this.planStepMapping = new Map(); // Maps step content to step DOM IDs
   }
 
   /**
@@ -207,11 +211,63 @@ export class MessageHandler {
       // Extract text content (handles all model formats including GPT-5 Codex)
       const textContent = this.normalizeLLMStreamingContent(data.content);
       this.messageRenderer.addMessage(textContent, data.type, data.base_message);
+
+      // Track plan if this is a write_todos tool call
+      this.trackPlanFromToolCall(data.base_message.tool_calls);
     } else {
       // No tool calls - the message was already streamed via AIMessageChunk
       // Just reset state so next message starts fresh
       this.appState.resetMessageState();
     }
+  }
+
+  /**
+   * Track plan creation and build step mapping for real-time updates
+   */
+  trackPlanFromToolCall(toolCalls) {
+    const writeTodosTool = toolCalls.find(tc => tc.name === 'write_todos');
+    if (!writeTodosTool) return;
+
+    try {
+      const todos = JSON.parse(writeTodosTool.args)?.todos;
+      if (!todos || !Array.isArray(todos)) return;
+
+      // Find the plan element that was just created
+      setTimeout(() => {
+        const planElements = document.querySelectorAll('[data-plan-id]');
+        const latestPlan = planElements[planElements.length - 1];
+
+        if (latestPlan) {
+          this.activePlanId = latestPlan.getAttribute('data-plan-id');
+
+          // Build mapping of todo content to step IDs
+          this.planStepMapping.clear();
+          const stepElements = latestPlan.querySelectorAll('[data-step-id]');
+          stepElements.forEach((stepEl, index) => {
+            if (todos[index]) {
+              this.planStepMapping.set(todos[index].content, stepEl.getAttribute('data-step-id'));
+            }
+          });
+        }
+      }, 100);
+    } catch (error) {
+      console.warn('Failed to track plan:', error);
+    }
+  }
+
+  /**
+   * Update plan step status in real-time
+   * Called when receiving updated todo list from streaming
+   */
+  updatePlanSteps(newTodos) {
+    if (!this.activePlanId || !this.messageRenderer.toolRenderer?.planRenderer) {
+      return;
+    }
+
+    const planRenderer = this.messageRenderer.toolRenderer.planRenderer;
+
+    // Use the new updatePlanMessage method which updates the entire plan state
+    planRenderer.updatePlanMessage(this.activePlanId, newTodos);
   }
 
   /**
@@ -221,8 +277,26 @@ export class MessageHandler {
     // Pass appState to handleEndMessage for typing indicator cleanup
     if (data.type === 'end') {
       this.messageRenderer.handleEndMessage(this.appState);
+      // Clear plan tracking when conversation ends
+      this.activePlanId = null;
+      this.planStepMapping.clear();
     } else {
       this.messageRenderer.addMessage(data.content, data.type, data.base_message);
+
+      // Check if this is an updated todo list and update plan steps in real-time
+      if (data.base_message?.name === 'write_todos' && data.base_message?.args) {
+        try {
+          const argsObj = typeof data.base_message.args === 'string'
+            ? JSON.parse(data.base_message.args)
+            : data.base_message.args;
+
+          if (argsObj?.todos) {
+            this.updatePlanSteps(argsObj.todos);
+          }
+        } catch (error) {
+          console.warn('Failed to parse updated todos:', error);
+        }
+      }
     }
   }
 }

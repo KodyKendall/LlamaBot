@@ -3,11 +3,14 @@
  */
 
 import { generateUniqueId } from '../utils/domHelpers.js';
+import { PlanMessageRenderer } from './PlanMessageRenderer.js';
+import { ToolIcons } from '../utils/icons.js';
 
 export class ToolMessageRenderer {
   constructor(iframeManager = null, getRailsDebugInfoCallback = null) {
     this.iframeManager = iframeManager;
     this.getRailsDebugInfoCallback = getRailsDebugInfoCallback;
+    this.planRenderer = new PlanMessageRenderer(iframeManager, getRailsDebugInfoCallback);
   }
 
   /**
@@ -30,114 +33,110 @@ export class ToolMessageRenderer {
   }
 
   /**
-   * Render todo list tool
+   * Render todo list tool using new plan-based renderer
    */
   renderTodoList(uniqueId, toolArgs) {
-    let todos = JSON.parse(toolArgs)['todos'];
+    const todos = JSON.parse(toolArgs)['todos'];
 
-    // Sort todos: in_progress → pending → completed
-    const statusOrder = { 'in_progress': 0, 'pending': 1, 'completed': 2 };
-    todos.sort((a, b) => statusOrder[a.status] - statusOrder[b.status]);
-
-    let todoListHTML = '';
-    let currentStatus = null;
-
-    todos.forEach((todo, index) => {
-      // Add section header if status changed
-      if (todo.status !== currentStatus) {
-        currentStatus = todo.status;
-        const sectionTitle = todo.status === 'in_progress' ? 'In Progress' :
-                            todo.status === 'pending' ? 'Pending' : 'Completed';
-        todoListHTML += `<div class="todo-section-header">${sectionTitle}</div>`;
-      }
-
-      const todoId = `todo-${uniqueId}-${index}`;
-      const statusClass = `todo-status-${todo.status.replace('_', '-')}`;
-      const icon = todo.status === 'completed' ? '✅' :
-                   todo.status === 'in_progress' ? '🎯' : '🕒';
-
-      todoListHTML += `
-        <div class="todo-item ${statusClass}" onclick="toggleTodo('${todoId}')">
-          <span class="todo-icon">${icon}</span>
-          <span class="todo-text" id="${todoId}">${todo.content}</span>
-        </div>
-      `;
-    });
-
-    return `
-      <div class="tool-collapsible" onclick="toggleToolCollapsible('${uniqueId}')">
-        <span class="tool-summary">🎯 Todo List (${todos.length} tasks)</span>
-      </div>
-      <div class="tool-content" id="${uniqueId}">
-        <div class="todo-container">
-          ${todoListHTML}
-        </div>
-      </div>
-    `;
+    // Use the new plan-based renderer for a sleeker UI
+    // Note: uniqueId is generated in createCollapsibleToolMessage but not needed here
+    // as PlanMessageRenderer generates its own unique IDs
+    return this.planRenderer.createPlanMessage(
+      'Task Plan',
+      todos,
+      { collapsible: true, showHeader: true }
+    );
   }
 
   /**
-   * Render edit file tool
+   * Render edit file tool - minimal compact version
    */
   renderEditFile(uniqueId, firstArgument, toolArgs, toolResult) {
+    const icon = ToolIcons.getIcon('edit_file');
+    const filename = this._extractFilename(firstArgument);
+
     return `
-      <div class="tool-collapsible" onclick="toggleToolCollapsible('${uniqueId}')">
-        <span class="tool-summary">Edit ${firstArgument}</span>
-      </div>
-      <div class="tool-content" id="${uniqueId}">
-        <div class="tool-details">
-          <strong>Arguments:</strong><br>
-          <pre style="margin: 4px 0; font-size: 0.85em; white-space: pre-wrap;">${toolArgs}</pre>
-          ${toolResult ? `<strong>Result:</strong><br><pre style="margin: 4px 0; font-size: 0.85em; white-space: pre-wrap;">${toolResult}</pre>` : ''}
-        </div>
+      <div class="tool-compact">
+        ${icon}
+        <span class="tool-compact-name">Edit</span>
+        <span class="tool-compact-target">${this._escapeHtml(filename)}</span>
       </div>
     `;
   }
 
   /**
-   * Render default tool
+   * Render default tool - minimal compact version
    */
   renderDefaultTool(uniqueId, toolName, firstArgument, toolArgs, toolResult) {
+    const icon = ToolIcons.getIcon(toolName);
+    const displayName = this._formatToolName(toolName);
+    const displayTarget = firstArgument ? this._extractFilename(firstArgument) : '';
+
     return `
-      <div class="tool-collapsible" onclick="toggleToolCollapsible('${uniqueId}')">
-        <span class="tool-summary">🔨${toolName} ${firstArgument}</span>
-      </div>
-      <div class="tool-content" id="${uniqueId}">
-        <div class="tool-details">
-          <strong>Arguments:</strong><br>
-          <pre style="margin: 4px 0; font-size: 0.85em; white-space: pre-wrap;">${toolArgs}</pre>
-          ${toolResult ? `<strong>Result:</strong><br><pre style="margin: 4px 0; font-size: 0.85em; white-space: pre-wrap;">${toolResult}</pre>` : ''}
-        </div>
+      <div class="tool-compact">
+        ${icon}
+        <span class="tool-compact-name">${displayName}</span>
+        ${displayTarget ? `<span class="tool-compact-target">${this._escapeHtml(displayTarget)}</span>` : ''}
       </div>
     `;
   }
 
   /**
-   * Update existing tool message with result
+   * Format tool name for display (remove underscores, title case, remove "file" suffix)
+   */
+  _formatToolName(toolName) {
+    return toolName
+      .replace(/_file$/, '')  // Remove "_file" suffix
+      .split('_')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
+  }
+
+  /**
+   * Extract filename from full path
+   */
+  _extractFilename(path) {
+    if (!path) return '';
+    // Handle both forward and backward slashes
+    const parts = path.replace(/\\/g, '/').split('/');
+    return parts[parts.length - 1];
+  }
+
+  /**
+   * Escape HTML to prevent XSS
+   */
+  _escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  /**
+   * Update existing tool message with result (for compact format)
    */
   updateCollapsibleToolMessage(messageDiv, toolResult, baseMessage) {
-    const toolContent = messageDiv.querySelector('.tool-content .tool-details');
-
     // Special handling for edit_file
     if (baseMessage.name === 'edit_file') {
-      const toolHeaderLabel = messageDiv.querySelector('.tool-collapsible');
-      if (baseMessage.artifact?.status === 'success') {
-        toolHeaderLabel.innerHTML = toolHeaderLabel.innerHTML.replace('Edit', '✅ Edit');
+      const toolCompact = messageDiv.querySelector('.tool-compact');
+      if (toolCompact) {
+        if (baseMessage.artifact?.status === 'success') {
+          toolCompact.classList.add('tool-success');
+          const icon = toolCompact.querySelector('.tool-icon');
+          if (icon) {
+            icon.outerHTML = ToolIcons.successIcon();
+          }
 
-        // Refresh the main iframe when edit_file succeeds
-        // This allows the user to see their code changes in real-time
-        if (this.iframeManager && this.getRailsDebugInfoCallback) {
-          this.iframeManager.refreshRailsApp(this.getRailsDebugInfoCallback);
+          // Refresh the main iframe when edit_file succeeds
+          if (this.iframeManager && this.getRailsDebugInfoCallback) {
+            this.iframeManager.refreshRailsApp(this.getRailsDebugInfoCallback);
+          }
+        } else if (baseMessage.artifact?.status === 'error') {
+          toolCompact.classList.add('tool-error');
+          const icon = toolCompact.querySelector('.tool-icon');
+          if (icon) {
+            icon.outerHTML = ToolIcons.errorIcon();
+          }
         }
-      } else if (baseMessage.artifact?.status === 'error') {
-        toolHeaderLabel.innerHTML = toolHeaderLabel.innerHTML.replace('Edit', '❌ Edit');
-      }
-    }
-
-    if (toolContent) {
-      // Check if result already exists to avoid duplication
-      if (!toolContent.innerHTML.includes('<strong>Result:</strong>')) {
-        toolContent.innerHTML += `<br><strong>Result:</strong><br><pre style="margin: 4px 0; font-size: 0.85em; white-space: pre-wrap;">${toolResult}</pre>`;
       }
     }
   }
