@@ -140,6 +140,14 @@ class ChatApp {
       });
     }
 
+    // Model selector
+    const modelSelect = document.getElementById('modelSelect');
+    if (modelSelect) {
+      modelSelect.addEventListener('change', (e) => {
+        setCookie('llmModel', e.target.value, CONFIG.COOKIE_EXPIRY_DAYS);
+      });
+    }
+
     // LEGACY: Listen for stream end event
     // This was used for HTML streaming preview feature
     // Keeping for backwards compatibility but may be deprecated
@@ -176,6 +184,7 @@ class ChatApp {
     const input = document.getElementById('messageInput');
     const message = input.value.trim();
     const agentMode = document.getElementById('agentModeSelect')?.value;
+    const llmModel = document.getElementById('modelSelect')?.value;
 
     if (!message || !this.webSocketManager) return;
 
@@ -210,7 +219,8 @@ class ChatApp {
       origin: window.location.host,
       debug_info: debugInfo,
       agent_name: this.appState.getAgentConfig().name,
-      agent_mode: agentMode
+      agent_mode: agentMode,
+      llm_model: llmModel
     };
 
     this.webSocketManager.send(messageData);
@@ -262,6 +272,16 @@ class ChatApp {
         if (Array.from(selectElement.options).some(option => option.value === savedMode)) {
           selectElement.value = savedMode;
           this.appState.setAgentMode(savedMode);
+        }
+      }
+    }
+
+    const savedModel = getCookie('llmModel');
+    if (savedModel) {
+      const modelSelect = document.getElementById('modelSelect');
+      if (modelSelect) {
+        if (Array.from(modelSelect.options).some(option => option.value === savedModel)) {
+          modelSelect.value = savedModel;
         }
       }
     }

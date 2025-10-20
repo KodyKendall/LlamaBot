@@ -59,6 +59,13 @@
                 <div class="send-controls">
                     <span id="thinkingIndicator" class="typing-indicator hidden"></span>
                     <div class="custom-dropdown-container">
+                        <select id="modelSelect" class="custom-dropdown">
+                            <option value="gpt-5-codex">GPT-5 Codex</option>
+                            <option value="claude-4.5-sonnet" selected>Claude 4.5 Sonnet</option>
+                            <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+                        </select>
+                    </div>
+                    <div class="custom-dropdown-container">
                         <select id="agentModeSelect" class="custom-dropdown">
                             <option value="prototype">Design Mode</option>
                             <option value="engineer">Engineer Mode</option>

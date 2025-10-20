@@ -465,23 +465,30 @@ body {
 }
 
 .input-area button {
-    padding: 0.8rem 1.2rem;
-    background-color: var(--button-bg);
-    color: white;
-    border: none;
-    border-radius: 8px;
+    padding: 0.5rem 1rem;
+    background: rgba(139, 92, 246, 0.12);
+    color: rgba(255, 255, 255, 0.85);
+    border: 1px solid rgba(139, 92, 246, 0.25);
+    border-radius: 6px;
     cursor: pointer;
-    transition: background-color 0.2s;
+    transition: all 0.2s ease;
     font-weight: 500;
+    font-size: 0.85rem;
+    backdrop-filter: blur(10px);
 }
 
 .input-area button:hover:not(:disabled) {
-    background-color: var(--button-hover);
+    background: rgba(139, 92, 246, 0.18);
+    border-color: rgba(139, 92, 246, 0.35);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(139, 92, 246, 0.2);
 }
 
 .input-area button:disabled {
-    opacity: 0.5;
+    opacity: 0.4;
     cursor: not-allowed;
+    background: rgba(139, 92, 246, 0.06);
+    border-color: rgba(139, 92, 246, 0.15);
 }
 
 /* Connection status */
@@ -518,31 +525,43 @@ body {
     -webkit-appearance: none;
     -moz-appearance: none;
     appearance: none;
-    background-color: var(--input-bg);
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
-    color: var(--text-color);
-    padding: 0.5rem 1.8rem 0.5rem 0.8rem;
-    font-size: 0.85rem;
+    background: rgba(139, 92, 246, 0.06);
+    border: 1px solid rgba(139, 92, 246, 0.15);
+    border-radius: 6px;
+    color: rgba(255, 255, 255, 0.8);
+    padding: 0.5rem 1.8rem 0.5rem 0.75rem;
+    font-size: 0.8rem;
     cursor: pointer;
-    transition: border-color 0.2s;
+    transition: all 0.2s ease;
     font-family: inherit;
+    backdrop-filter: blur(10px);
+}
+
+.custom-dropdown:hover {
+    background: rgba(139, 92, 246, 0.1);
+    border-color: rgba(139, 92, 246, 0.25);
 }
 
 .custom-dropdown:focus {
     outline: none;
-    border-color: var(--accent-color);
+    border-color: rgba(139, 92, 246, 0.35);
+    background: rgba(139, 92, 246, 0.12);
 }
 
 .custom-dropdown-container::after {
     content: '▾';
-    font-size: 1rem;
-    color: var(--text-color);
+    font-size: 0.85rem;
+    color: rgba(255, 255, 255, 0.6);
     position: absolute;
-    right: 0.8rem;
+    right: 0.65rem;
     top: 50%;
     transform: translateY(-50%);
     pointer-events: none;
+    transition: color 0.2s ease;
+}
+
+.custom-dropdown-container:hover::after {
+    color: rgba(255, 255, 255, 0.8);
 }
 
 /* IFrame section (right 2/3) */

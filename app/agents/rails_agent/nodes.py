@@ -52,35 +52,33 @@ default_tools = [write_todos,
          ls, read_file, write_file, edit_file, search_file, bash_command, 
          git_status, git_commit, git_command, github_cli_command, internet_search]
 
+# Helper function to get LLM based on user selection
+def get_llm(model_name: str):
+   """Get LLM instance based on model name from frontend"""
+   if model_name == "gpt-5-codex":
+      return ChatOpenAI(
+         model="gpt-5-codex",
+         use_responses_api=True,
+         reasoning={"effort": "low"}
+      )
+   elif model_name == "claude-4.5-sonnet":
+      return ChatAnthropic(model="claude-sonnet-4-5-20250929")
+   elif model_name == "gemini-2.5-pro":
+      return ChatGoogleGenerativeAI(
+         model="gemini-2.5-pro-preview-03-25",
+         google_api_key=os.getenv("GOOGLE_API_KEY")
+      )
+   else:
+      # Default to Claude 4.5 Sonnet
+      return ChatAnthropic(model="claude-sonnet-4-5-20250929")
+
 # Node
 def leonardo(state: RailsAgentState) -> Command[Literal["tools"]]:
    # ==================== LLM Model Selection ====================
-   # The frontend now supports ALL models automatically!
-   # No config changes needed - just uncomment the model you want:
-
-   # OpenAI models (content format: string)
-   # llm = ChatOpenAI(model="gpt-4.1")
-   # llm = ChatOpenAI(model="gpt-5", extra_body={"reasoning_effort": "minimal"})
-   llm = ChatOpenAI(
-      model="gpt-5-codex",
-      use_responses_api=True,
-      reasoning={"effort": "low"}
-   )
-
-   # Anthropic models (content format: array of content blocks)
-#    llm = ChatAnthropic(model="claude-sonnet-4-5-20250929")
-
-   # Google Gemini models (content format: array of content blocks)
-   # NOTE: Requires GOOGLE_API_KEY in .env (not Google Cloud ADC)
-   # Get your API key from: https://aistudio.google.com/app/apikey
-#    llm = ChatGoogleGenerativeAI(
-#       model="gemini-2.5-pro-preview-03-25",
-#       google_api_key=os.getenv("GOOGLE_API_KEY")
-#    )
-   # llm = ChatGoogleGenerativeAI(
-   #    model="gemini-2.5-flash-preview-04-17",
-   #    google_api_key=os.getenv("GOOGLE_API_KEY")
-   # )
+   # Get model selection from state (passed from frontend)
+   llm_model = state.get('llm_model', 'claude-4.5-sonnet')
+   logger.info(f"🤖 Using LLM model: {llm_model}")
+   llm = get_llm(llm_model)
    # =============================================================
 
    view_path = (state.get('debug_info') or {}).get('view_path')
