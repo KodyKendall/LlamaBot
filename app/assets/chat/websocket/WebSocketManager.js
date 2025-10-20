@@ -114,10 +114,10 @@ export class WebSocketManager {
 
     if (connected) {
       status.className = 'connection-status connected';
-      status.innerHTML = '<span class="status-dot"></span><span>Connected</span>';
+      status.innerHTML = '<span class="status-dot"></span>';
     } else {
       status.className = 'connection-status disconnected';
-      status.innerHTML = '<span class="status-dot"></span><span>Disconnected</span>';
+      status.innerHTML = '<span class="status-dot"></span>';
     }
   }
 

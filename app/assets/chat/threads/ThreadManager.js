@@ -40,10 +40,7 @@ export class ThreadManager {
 
     menuItems.innerHTML = `
       <div class="menu-item" style="opacity: 0.6; cursor: default;">
-        <div class="typing-indicator" style="justify-content: center;">
-          <span></span><span></span><span></span>
-        </div>
-        Loading conversations...
+        <div class="typing-indicator" style="justify-content: center;"></div>
       </div>
     `;
   }

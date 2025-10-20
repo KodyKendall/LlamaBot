@@ -53,10 +53,40 @@ body {
     gap: 0.8rem;
 }
 
+/* Logo container with status dot overlay */
+.logo-container {
+    position: relative;
+    width: 42px;
+    height: 42px;
+    margin-right: 0.3rem;
+}
+
 .chat-header img {
-    width: 32px;
-    height: 32px;
+    width: 42px;
+    height: 42px;
     border-radius: 8px;
+}
+
+.logo-container .connection-status {
+    position: absolute;
+    bottom: -1px;
+    right: -1px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background-color: var(--chat-bg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1px;
+    box-shadow: 0 0 0 1px var(--chat-bg);
+}
+
+.logo-container .status-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background-color: currentColor;
 }
 
 .chat-header h1 {
@@ -350,7 +380,7 @@ body {
 
 .button-row {
     display: flex;
-    justify-content: space-between;
+    justify-content: flex-end;
     align-items: center;
     gap: 0.5rem;
 }
@@ -693,29 +723,27 @@ body {
     display: block;
 }
 
-/* Loading animation */
+/* Loading animation - Thinking shimmer effect */
 .typing-indicator {
     display: inline-flex;
     align-items: center;
-    gap: 0.25rem;
+    gap: 8px;
+    font-size: 0.85rem;
 }
 
-.typing-indicator span {
-    width: 4px;
-    height: 4px;
-    background-color: var(--accent-color);
-    border-radius: 50%;
-    opacity: 0.6;
-    animation: bounce 1s infinite;
+.typing-indicator::before {
+    content: '🦙 Thinking...';
+    background: linear-gradient(90deg, #666 0%, #aaa 50%, #666 100%);
+    background-size: 200% 100%;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    animation: thinking-shimmer 2s infinite;
 }
 
-.typing-indicator span:nth-child(1) { animation-delay: 0s; }
-.typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
-.typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
-
-@keyframes bounce {
-    0%, 60%, 100% { transform: translateY(0); }
-    30% { transform: translateY(-4px); }
+@keyframes thinking-shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
 }
 
 .hidden {

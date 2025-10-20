@@ -7,7 +7,7 @@
     <!-- Add marked.js for markdown parsing -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <!-- Link to external CSS -->
-    <link rel="stylesheet" href="/assets/style.css">
+    <link rel="stylesheet" href="/assets/style.css?v=5">
 </head>
 <body>
     <div class="chat-section">
@@ -17,7 +17,12 @@
                 <span></span>
                 <span></span>
             </button>
-            <img src="https://service-jobs-images.s3.us-east-2.amazonaws.com/7rl98t1weu387r43il97h6ipk1l7" alt="LlamaBot Logo">
+            <div class="logo-container">
+                <img src="https://service-jobs-images.s3.us-east-2.amazonaws.com/7rl98t1weu387r43il97h6ipk1l7" alt="LlamaBot Logo">
+                <div class="connection-status disconnected" id="connectionStatus">
+                    <span class="status-dot"></span>
+                </div>
+            </div>
             <h1>Leonardo</h1>
             <button class="mobile-view-toggle" id="showPreviewBtn" onclick="switchToMobileView('iframe')">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -51,14 +56,8 @@
         <div class="input-area">
             <textarea placeholder="Type your message..." id="messageInput"></textarea>
             <div class="button-row">
-                <div class="connection-status disconnected" id="connectionStatus">
-                    <span class="status-dot"></span>
-                    <span>Disconnected</span>
-                </div>
                 <div class="send-controls">
-                    <span id="thinkingIndicator" class="typing-indicator hidden">
-                        <span></span><span></span><span></span>
-                    </span>
+                    <span id="thinkingIndicator" class="typing-indicator hidden"></span>
                     <div class="custom-dropdown-container">
                         <select id="agentModeSelect" class="custom-dropdown">
                             <option value="prototype">Design Mode</option>

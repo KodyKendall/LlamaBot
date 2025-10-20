@@ -93,7 +93,7 @@ export class MessageHandler {
       this.appState.setCurrentAiMessage(messageElement);
 
       // Add typing indicator initially
-      messageElement.innerHTML = '<div class="typing-indicator"><span></span><span></span><span></span></div>';
+      messageElement.innerHTML = '<div class="typing-indicator"></div>';
     }
 
     const currentMessage = this.appState.getCurrentAiMessage();
