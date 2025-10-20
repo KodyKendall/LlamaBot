@@ -1,5 +1,6 @@
 from langchain_openai import ChatOpenAI
 from langchain_anthropic import ChatAnthropic
+from langchain_google_genai import ChatGoogleGenerativeAI
 
 from langchain_core.tools import tool
 from dotenv import load_dotenv
@@ -52,13 +53,34 @@ content = current_page_html.read_text()
 default_tools = [write_todos,
          ls, read_file, write_file, edit_file, search_file]
 
+# Helper function to get LLM based on user selection
+def get_llm(model_name: str):
+   """Get LLM instance based on model name from frontend"""
+   if model_name == "gpt-5-codex":
+      return ChatOpenAI(
+         model="gpt-5-codex",
+         use_responses_api=True,
+         reasoning={"effort": "low"}
+      )
+   elif model_name == "claude-4.5-sonnet":
+      return ChatAnthropic(model="claude-sonnet-4-5-20250929")
+   elif model_name == "gemini-2.5-pro":
+      return ChatGoogleGenerativeAI(
+         model="gemini-2.5-pro-preview-03-25",
+         google_api_key=os.getenv("GOOGLE_API_KEY")
+      )
+   else:
+      # Default to Claude 4.5 Sonnet
+      return ChatAnthropic(model="claude-sonnet-4-5-20250929")
+
 # Node
 def leonardo(state: RailsAgentState) -> Command[Literal["tools"]]:
-   # llm = ChatOpenAI(model="gpt-5")
-   llm = ChatOpenAI(model="gpt-5", extra_body={"reasoning_effort": "minimal"})
-   # llm = ChatOpenAI(model="gpt-5", extra_body={"reasoning_effort": "high"})
-   
-#    llm = ChatAnthropic(model="claude-sonnet-4-5-20250929")
+   # ==================== LLM Model Selection ====================
+   # Get model selection from state (passed from frontend)
+   llm_model = state.get('llm_model', 'claude-4.5-sonnet')
+   logger.info(f"🤖 Using LLM model: {llm_model}")
+   llm = get_llm(llm_model)
+   # =============================================================
 
    view_path = (state.get('debug_info') or {}).get('view_path')
 

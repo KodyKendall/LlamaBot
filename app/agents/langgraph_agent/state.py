@@ -6,12 +6,12 @@ import operator
 
 class Todo(TypedDict):
     """Todo to track."""
+
     content: str
     status: Literal["pending", "in_progress", "completed"]
 
 class RailsAgentState(AgentState):
-    todos: Annotated[NotRequired[list[Todo]], operator.add]
+    todos: Annotated[NotRequired[list[Todo]], operator.add] # why did claude code change to annotated.?
     debug_info: NotRequired[dict[str, any]]
     agent_mode: NotRequired[str]
-    llm_model: NotRequired[str]
     failed_tool_calls_count: Annotated[NotRequired[int], operator.add]

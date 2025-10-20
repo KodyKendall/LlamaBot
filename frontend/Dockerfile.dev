@@ -1,0 +1,19 @@
+# Development Dockerfile for React app with hot-reload
+FROM node:18-alpine
+
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Install dependencies
+RUN npm install
+
+# Copy the rest of the application
+COPY . .
+
+# Expose port 3001 (we'll use 3001 to avoid conflict with Rails on 3000)
+EXPOSE 3001
+
+# Start the development server
+CMD ["npm", "start"]

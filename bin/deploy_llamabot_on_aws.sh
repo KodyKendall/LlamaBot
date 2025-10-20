@@ -1,14 +1,14 @@
 set -e
 
 read -p "Name of instance: " INSTANCE
-read -p "Path to identity file: (defaults to ~/.ssh/LightsailDefaultKey-us-east-2.pem)" IDENTITY_FILE
+read -p "Path to identity file: (defaults to ~/LightsailDefaultKey-us-east-2.pem)" IDENTITY_FILE
 export INSTANCE
 export DOMAIN=llamapress.ai.
 export REGION=us-east-2
 export AZ=${REGION}a
 export BLUEPRINT=ubuntu_24_04
 export BUNDLE=small_2_0
-export IDENTITY_FILE=${IDENTITY_FILE:-~/.ssh/LightsailDefaultKey-us-east-2.pem}
+export IDENTITY_FILE=${IDENTITY_FILE:-~/LightsailDefaultKey-us-east-2.pem}
 
 aws lightsail create-instances \
   --instance-names "$INSTANCE" \
@@ -39,6 +39,7 @@ echo $ZONE_ID
 
 TARGET_FQDN=$INSTANCE.llamapress.ai.
 RAILS_TARGET_FQDN=rails-$TARGET_FQDN
+VSCODE_TARGET_FQDN=vscode-$TARGET_FQDN
 
 cat > new-a-record.json <<EOF
 {
@@ -48,6 +49,17 @@ cat > new-a-record.json <<EOF
       "Action": "UPSERT",
       "ResourceRecordSet": {
         "Name": "${TARGET_FQDN}",
+        "Type": "A",
+        "TTL": 60,
+        "ResourceRecords": [
+          { "Value": "${IPADDRESS}" }
+        ]
+      }
+    },
+    {
+      "Action": "UPSERT",
+      "ResourceRecordSet": {
+        "Name": "${VSCODE_TARGET_FQDN}",
         "Type": "A",
         "TTL": 60,
         "ResourceRecords": [

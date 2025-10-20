@@ -22,7 +22,7 @@ from dotenv import load_dotenv
 
 from langchain_core.load import dumpd
 from langchain_openai import ChatOpenAI
-from langchain.schema import HumanMessage
+from langchain_core.messages import HumanMessage
 
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.checkpoint.base import CheckpointTuple

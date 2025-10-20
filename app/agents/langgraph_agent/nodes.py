@@ -1,6 +1,5 @@
 from langchain_openai import ChatOpenAI
 from langchain_anthropic import ChatAnthropic
-from langchain_google_genai import ChatGoogleGenerativeAI
 
 from langchain_core.tools import tool
 from dotenv import load_dotenv
@@ -28,7 +27,7 @@ from app.agents.rails_agent.state import RailsAgentState
 from app.agents.rails_agent.tools import write_todos, write_file, read_file, ls, edit_file, search_file, internet_search, bash_command, git_status, git_commit, git_command, view_page, github_cli_command
 from app.agents.rails_agent.prompts import RAILS_AGENT_PROMPT
 
-# from app.agents.rails_agent.prototype_agent.nodes import build_workflow as build_prototype_agent
+from app.agents.rails_agent.prototype_agent.nodes import build_workflow as build_prototype_agent
 # from app.agents.rails_agent.planning_agent import build_workflow as build_planning_agent
 
 import logging
@@ -52,38 +51,15 @@ default_tools = [write_todos,
          ls, read_file, write_file, edit_file, search_file, bash_command, 
          git_status, git_commit, git_command, github_cli_command, internet_search]
 
-# Helper function to get LLM based on user selection
-def get_llm(model_name: str):
-   """Get LLM instance based on model name from frontend"""
-   if model_name == "gpt-5-codex":
-      return ChatOpenAI(
-         model="gpt-5-codex",
-         use_responses_api=True,
-         reasoning={"effort": "low"}
-      )
-   elif model_name == "claude-4.5-sonnet":
-      return ChatAnthropic(model="claude-sonnet-4-5-20250929")
-   elif model_name == "gemini-2.5-pro":
-      return ChatGoogleGenerativeAI(
-         model="gemini-2.5-pro-preview-03-25",
-         google_api_key=os.getenv("GOOGLE_API_KEY")
-      )
-   else:
-      # Default to Claude 4.5 Sonnet
-      return ChatAnthropic(model="claude-sonnet-4-5-20250929")
-
 # Node
 def leonardo(state: RailsAgentState) -> Command[Literal["tools"]]:
-   # ==================== LLM Model Selection ====================
-   # Get model selection from state (passed from frontend)
-   llm_model = state.get('llm_model', 'claude-4.5-sonnet')
-   logger.info(f"🤖 Using LLM model: {llm_model}")
-   llm = get_llm(llm_model)
-   # =============================================================
+   llm = ChatOpenAI(model="gpt-4.1")
+#    llm = ChatOpenAI(model="gpt-5", extra_body={"reasoning_effort": "minimal"})
+#    llm = ChatAnthropic(model="claude-sonnet-4-5-20250929")
 
    view_path = (state.get('debug_info') or {}).get('view_path')
 
-   show_full_html = False
+   show_full_html = True
    messages = [sys_msg] + state["messages"]
    
    if show_full_html:
@@ -104,12 +80,11 @@ def leonardo(state: RailsAgentState) -> Command[Literal["tools"]]:
          ls, read_file, write_file, edit_file, search_file, bash_command, 
          git_status, git_commit, git_command, github_cli_command, internet_search]
 
-   agent_mode = 'engineer' #state.get('agent_mode')
+   agent_mode = state.get('agent_mode')
    if agent_mode:
         logger.info(f"🎯 User is in current mode: {agent_mode}")
         if agent_mode == 'prototype':
-            messages = messages + [HumanMessage(content="<NOTE_FROM_SYSTEM> The user is in engineer mode. You are allowed to use the tools. Here are the tools you can use: tools = [write_todos, ls, read_file, write_file, edit_file, search_file, bash_command, git_status, git_commit, git_command, github_cli_command, internet_search] </NOTE_FROM_SYSTEM>")]
-            # return Command(goto="prototype_agent", update={})
+            return Command(goto="prototype_agent", update={})
 
         elif agent_mode == 'engineer': # just fall through here and let the tools_condition handle it
             messages = messages + [HumanMessage(content="<NOTE_FROM_SYSTEM> The user is in engineer mode. You are allowed to use the tools. Here are the tools you can use: tools = [write_todos, ls, read_file, write_file, edit_file, search_file, bash_command, git_status, git_commit, git_command, github_cli_command, internet_search] </NOTE_FROM_SYSTEM>")]
@@ -153,7 +128,7 @@ def build_workflow(checkpointer=None):
     builder.add_node("tools", ToolNode(default_tools))
     
     # sub-agents:
-    # builder.add_node("prototype_agent", build_prototype_agent(checkpointer=checkpointer))
+    builder.add_node("prototype_agent", build_prototype_agent(checkpointer=checkpointer))
    #  builder.add_node("planning_agent", build_planning_agent(checkpointer=checkpointer))
 
     # Define edges: these determine how the control flow moves
@@ -162,11 +137,11 @@ def build_workflow(checkpointer=None):
     builder.add_conditional_edges(
         "leonardo",
         tools_condition,
-        {"tools": "tools", END: END}, #"prototype_agent": "prototype_agent", END: END},
+        {"tools": "tools", "prototype_agent": "prototype_agent", END: END},
     )
 
     builder.add_edge("tools", "leonardo")
-    # builder.add_edge("prototype_agent", END)
+    builder.add_edge("prototype_agent", END)
    #  builder.add_edge("planning_agent", END)
 
     react_graph = builder.compile(checkpointer=checkpointer)

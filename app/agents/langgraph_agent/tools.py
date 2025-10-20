@@ -65,26 +65,8 @@ def write_todos(
     )
 
 def guard_against_beginning_slash_argument(argument: str) -> str:
-    """
-    Normalize file paths that LLMs might format incorrectly.
-    Handles cases like:
-    - /rails/app/views -> app/views
-    - rails/app/views -> app/views
-    - app/app/views -> app/views
-    - /app/views -> app/views
-    """
-    # Strip leading slashes
     if argument.startswith("/"):
-        argument = argument[1:]
-
-    # Strip 'rails/' prefix if present
-    if argument.startswith("rails/"):
-        argument = argument[6:]  # len("rails/") = 6
-
-    # Reduce 'app/app/' to just 'app/'
-    if argument.startswith("app/app/"):
-        argument = argument[4:]  # Remove the first "app/"
-
+        return argument[1:]
     return argument
 
 def normalize_whitespace(s: str) -> str:
