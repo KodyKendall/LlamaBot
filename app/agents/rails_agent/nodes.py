@@ -63,6 +63,8 @@ def get_llm(model_name: str):
       )
    elif model_name == "claude-4.5-sonnet":
       return ChatAnthropic(model="claude-sonnet-4-5-20250929", max_tokens=16384)
+   elif model_name == "claude-4.5-haiku":
+      return ChatAnthropic(model="claude-haiku-4-5", max_tokens=16384)
    elif model_name == "gemini-2.5-pro":
       return ChatGoogleGenerativeAI(
          model="gemini-2.5-pro-preview-03-25",
