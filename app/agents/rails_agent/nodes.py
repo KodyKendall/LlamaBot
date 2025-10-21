@@ -71,14 +71,14 @@ def get_llm(model_name: str):
          google_api_key=os.getenv("GOOGLE_API_KEY")
       )
    else:
-      # Default to Claude 4.5 Sonnet
-      return ChatAnthropic(model="claude-sonnet-4-5-20250929", max_tokens=16384)
+      # Default to Claude 4.5 Haiku
+      return ChatAnthropic(model="claude-haiku-4-5", max_tokens=16384)
 
 # Node
 def leonardo(state: RailsAgentState) -> Command[Literal["tools"]]:
    # ==================== LLM Model Selection ====================
    # Get model selection from state (passed from frontend)
-   llm_model = state.get('llm_model', 'claude-4.5-sonnet')
+   llm_model = state.get('llm_model', 'claude-4.5-haiku')
    logger.info(f"🤖 Using LLM model: {llm_model}")
    llm = get_llm(llm_model)
    # =============================================================
