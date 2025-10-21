@@ -169,14 +169,22 @@ def read_file(
     return "\n".join(result_lines)
 
 
-@tool(description="Write to a file.")
+@tool(description="""This creates and writes to a file at the specicied path, creating the file and any necessary directories if they don't exist.
+    Usage:
+    - file_path: The path to the file to write to. This should be a relative path from the root of the Rails project. Never include a leading slash "/" at the beginning of the file_path.
+    - content: The content to write to the file. You must specify this argument or this tool call will fail.""")
 def write_file(
     file_path: str,
     content: str,
     state: Annotated[RailsAgentState, InjectedState],
     tool_call_id: Annotated[str, InjectedToolCallId],
 ) -> Command:
-    """Write to a file."""
+    """
+    This creates and writes to a file at the specicied path, creating the file and any necessary directories if they don't exist.
+    Usage:
+    - file_path: The path to the file to write to. This should be a relative path from the root of the Rails project. Never include a leading slash "/" at the beginning of the file_path.
+    - content: The content to write to the file. You must specify this argument or this tool call will fail.
+    """
     file_path = guard_against_beginning_slash_argument(file_path)
     full_path = APP_DIR / "rails" / file_path
     

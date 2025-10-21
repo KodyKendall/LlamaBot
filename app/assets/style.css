@@ -510,7 +510,7 @@ body {
     justify-content: center;
     background: rgba(139, 92, 246, 0.08);
     border: 1px solid rgba(139, 92, 246, 0.2);
-    border-radius: 50% !important;
+    border-radius: 6px;
     flex-shrink: 0;
     font-size: 14px;
     font-weight: 400;
@@ -1341,7 +1341,7 @@ body {
         width: 28px;
         height: 28px;
         font-size: 14px;
-        border-radius: 50% !important;
+        border-radius: 6px;
     }
 
     /* Browser window adjustments for mobile */
@@ -1429,7 +1429,7 @@ body {
         width: 28px;
         height: 28px;
         font-size: 14px;
-        border-radius: 50% !important;
+        border-radius: 6px;
     }
 }
 
