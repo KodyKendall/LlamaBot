@@ -63,7 +63,7 @@ def get_llm(model_name: str):
          reasoning={"effort": "low"}
       )
    elif model_name == "claude-4.5-sonnet":
-      return ChatAnthropic(model="claude-sonnet-4-5-20250929")
+      return ChatAnthropic(model="claude-sonnet-4-5-20250929", max_tokens=16384)
    elif model_name == "gemini-2.5-pro":
       return ChatGoogleGenerativeAI(
          model="gemini-2.5-pro-preview-03-25",
@@ -71,7 +71,7 @@ def get_llm(model_name: str):
       )
    else:
       # Default to Claude 4.5 Sonnet
-      return ChatAnthropic(model="claude-sonnet-4-5-20250929")
+      return ChatAnthropic(model="claude-sonnet-4-5-20250929", max_tokens=16384)
 
 # Node
 def leonardo(state: RailsAgentState) -> Command[Literal["tools"]]:
