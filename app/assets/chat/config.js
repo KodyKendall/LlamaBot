@@ -13,7 +13,8 @@ export const CONFIG = {
   // Agent mode mappings
   AGENT_MODES: {
     prototype: 'rails_frontend_starter_agent',
-    engineer: 'rails_agent'
+    engineer: 'rails_agent',
+    ai_builder: 'rails_ai_builder_agent'
   },
 
   // Streaming configuration
