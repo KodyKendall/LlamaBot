@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LlamaBot 0.2.18 Release Notes</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 40px 20px;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 60px 40px;
+            text-align: center;
+        }
+
+        .version {
+            font-size: 18px;
+            font-weight: 600;
+            opacity: 0.9;
+            margin-bottom: 10px;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+        }
+
+        h1 {
+            font-size: 48px;
+            font-weight: 800;
+            margin-bottom: 10px;
+        }
+
+        .release-date {
+            font-size: 16px;
+            opacity: 0.9;
+            margin-top: 10px;
+        }
+
+        .badge {
+            display: inline-block;
+            background: rgba(255, 255, 255, 0.2);
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 600;
+            margin-top: 20px;
+            backdrop-filter: blur(10px);
+        }
+
+        .content {
+            padding: 50px 40px;
+        }
+
+        .summary {
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            border-left: 4px solid #667eea;
+            padding: 25px 30px;
+            margin-bottom: 40px;
+            border-radius: 8px;
+            font-size: 18px;
+            font-weight: 500;
+            color: #555;
+        }
+
+        .section {
+            margin-bottom: 50px;
+        }
+
+        .section-title {
+            font-size: 28px;
+            font-weight: 700;
+            color: #667eea;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .feature-list {
+            list-style: none;
+        }
+
+        .feature-item {
+            background: #f8f9fa;
+            border-left: 4px solid #764ba2;
+            padding: 20px 25px;
+            margin-bottom: 15px;
+            border-radius: 8px;
+            transition: all 0.3s ease;
+        }
+
+        .feature-item:hover {
+            transform: translateX(5px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+
+        .feature-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .feature-description {
+            font-size: 15px;
+            color: #666;
+            line-height: 1.6;
+        }
+
+        .icon {
+            font-size: 22px;
+        }
+
+        .improvement-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+
+        .improvement-card {
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            padding: 20px;
+            border-radius: 12px;
+            transition: all 0.3s ease;
+        }
+
+        .improvement-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.15);
+        }
+
+        .improvement-card .icon {
+            font-size: 32px;
+            margin-bottom: 10px;
+        }
+
+        .improvement-card h3 {
+            font-size: 16px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 8px;
+        }
+
+        .improvement-card p {
+            font-size: 14px;
+            color: #666;
+            line-height: 1.5;
+        }
+
+        .footer {
+            background: #f8f9fa;
+            padding: 30px 40px;
+            text-align: center;
+            color: #666;
+            font-size: 14px;
+            border-top: 1px solid #e9ecef;
+        }
+
+        .footer a {
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 600;
+        }
+
+        .footer a:hover {
+            text-decoration: underline;
+        }
+
+        @media (max-width: 768px) {
+            body {
+                padding: 20px 10px;
+            }
+
+            .header {
+                padding: 40px 20px;
+            }
+
+            h1 {
+                font-size: 36px;
+            }
+
+            .content {
+                padding: 30px 20px;
+            }
+
+            .improvement-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="version">Version 0.2.18</div>
+            <h1>🦙 LlamaBot</h1>
+            <div class="release-date">October 20, 2025</div>
+            <div class="badge">Major Release</div>
+        </div>
+
+        <div class="content">
+            <div class="summary">
+                ✨ This major release brings a comprehensive UI/UX overhaul with significant improvements to usability, code architecture, and Leonardo's AI capabilities. Experience better navigation, cleaner code organization, and enhanced real-time development feedback.
+            </div>
+
+            <div class="section">
+                <h2 class="section-title"><span class="icon">🎨</span> User Interface Enhancements</h2>
+                <ul class="feature-list">
+                    <li class="feature-item">
+                        <div class="feature-title">
+                            <span class="icon">🔘</span>
+                            Redesigned Send Button
+                        </div>
+                        <div class="feature-description">
+                            The send button is now a perfectly circular icon, providing a cleaner and more modern look that aligns with contemporary UI design patterns.
+                        </div>
+                    </li>
+                    <li class="feature-item">
+                        <div class="feature-title">
+                            <span class="icon">🗺️</span>
+                            Route Navigation Controls
+                        </div>
+                        <div class="feature-description">
+                            Added a route dropdown and the ability to manually change the iFrame route by typing it directly. This gives you complete control over navigating your Rails application during development.
+                        </div>
+                    </li>
+                    <li class="feature-item">
+                        <div class="feature-title">
+                            <span class="icon">📍</span>
+                            Enhanced Thinking Indicator
+                        </div>
+                        <div class="feature-description">
+                            Moved the thinking indicator above the text field for better visibility and improved the message queuing system to display "Queued message" instead of "Cancelled!" for a more positive user experience.
+                        </div>
+                    </li>
+                    <li class="feature-item">
+                        <div class="feature-title">
+                            <span class="icon">💬</span>
+                            Massive Message View Overhaul
+                        </div>
+                        <div class="feature-description">
+                            Completely redesigned the user message view with improved layout, better visual hierarchy, and enhanced readability throughout the chat interface.
+                        </div>
+                    </li>
+                </ul>
+            </div>
+
+            <div class="section">
+                <h2 class="section-title"><span class="icon">🏗️</span> Architecture & Code Quality</h2>
+                <ul class="feature-list">
+                    <li class="feature-item">
+                        <div class="feature-title">
+                            <span class="icon">📦</span>
+                            Modular JavaScript Architecture
+                        </div>
+                        <div class="feature-description">
+                            Refactored the massive chat.html file into clean, maintainable JavaScript modules and separated CSS packages. This dramatically improves code organization, maintainability, and sets the foundation for the upcoming React with TypeScript frontend.
+                        </div>
+                    </li>
+                    <li class="feature-item">
+                        <div class="feature-title">
+                            <span class="icon">🧩</span>
+                            Specialized Component Modules
+                        </div>
+                        <div class="feature-description">
+                            Created dedicated modules including MessageRenderer, PlanMessageRenderer, ToolMessageRenderer, ThreadManager, IframeManager, ScrollManager, and WebSocketManager for better separation of concerns.
+                        </div>
+                    </li>
+                </ul>
+            </div>
+
+            <div class="section">
+                <h2 class="section-title"><span class="icon">🤖</span> AI & Tool Improvements</h2>
+                <ul class="feature-list">
+                    <li class="feature-item">
+                        <div class="feature-title">
+                            <span class="icon">🎯</span>
+                            Universal Model Support
+                        </div>
+                        <div class="feature-description">
+                            Added frontend support for any AI model including Claude, Gemini, GPT Codex, and traditional GPT series. Implemented the extractTextContent method to handle different model output formats seamlessly.
+                        </div>
+                    </li>
+                    <li class="feature-item">
+                        <div class="feature-title">
+                            <span class="icon">🛠️</span>
+                            Enhanced Tool Call Reliability
+                        </div>
+                        <div class="feature-description">
+                            Fixed slipping tool calls by normalizing file path arguments when Leonardo calls tools. This significantly reduces tool argument formatting issues and improves LLM accuracy, especially for edit_file, read_file, and write_file operations.
+                        </div>
+                    </li>
+                    <li class="feature-item">
+                        <div class="feature-title">
+                            <span class="icon">📋</span>
+                            Task Planning Component
+                        </div>
+                        <div class="feature-description">
+                            Added a dedicated task/planning component that provides clearer visibility into Leonardo's current task and completed tasks, helping you understand exactly what the agent is focusing on.
+                        </div>
+                    </li>
+                </ul>
+            </div>
+
+            <div class="section">
+                <h2 class="section-title"><span class="icon">⚡</span> Developer Experience</h2>
+                <div class="improvement-grid">
+                    <div class="improvement-card">
+                        <div class="icon">🔄</div>
+                        <h3>Auto-Refresh iFrame</h3>
+                        <p>The iFrame automatically refreshes as edits are made, giving you real-time visibility into Leonardo's changes without manual page reloads.</p>
+                    </div>
+                    <div class="improvement-card">
+                        <div class="icon">💬</div>
+                        <h3>Message Queuing</h3>
+                        <p>Double message the agent without interruption! Messages are now queued and processed immediately, making interactions more fluid and natural.</p>
+                    </div>
+                    <div class="improvement-card">
+                        <div class="icon">🐳</div>
+                        <h3>VSCode Container</h3>
+                        <p>Added VSCode Dev Container configuration for a better developer experience in hosted developer instances.</p>
+                    </div>
+                    <div class="improvement-card">
+                        <div class="icon">🔔</div>
+                        <h3>Completion Sound</h3>
+                        <p>A subtle sound notification plays when Leonardo completes a task, helping you stay focused on other work.</p>
+                    </div>
+                    <div class="improvement-card">
+                        <div class="icon">🎨</div>
+                        <h3>Design Mode</h3>
+                        <p>Previously introduced Design Mode is now fully integrated, allowing Leonardo to focus specifically on user interface development.</p>
+                    </div>
+                    <div class="improvement-card">
+                        <div class="icon">🔧</div>
+                        <h3>Bug Fixes</h3>
+                        <p>Fixed button scrolling issues, streaming message order problems, and improved dropdown label clarity throughout the interface.</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="section">
+                <h2 class="section-title"><span class="icon">🎉</span> What This Means for You</h2>
+                <ul class="feature-list">
+                    <li class="feature-item">
+                        <div class="feature-description">
+                            <strong>🚀 Faster Development:</strong> Real-time iFrame updates and improved tool reliability mean less waiting and more building.
+                        </div>
+                    </li>
+                    <li class="feature-item">
+                        <div class="feature-description">
+                            <strong>🎯 Better Navigation:</strong> Take control of your Rails app navigation with the new route controls and dropdown.
+                        </div>
+                    </li>
+                    <li class="feature-item">
+                        <div class="feature-description">
+                            <strong>🧠 Smarter AI:</strong> Support for multiple AI models and improved tool accuracy means Leonardo can help with a wider range of tasks more reliably.
+                        </div>
+                    </li>
+                    <li class="feature-item">
+                        <div class="feature-description">
+                            <strong>📱 Cleaner Interface:</strong> The UI overhaul provides a more intuitive and pleasant development experience.
+                        </div>
+                    </li>
+                    <li class="feature-item">
+                        <div class="feature-description">
+                            <strong>🔮 Future Ready:</strong> The modular architecture paves the way for the upcoming React + TypeScript frontend, ensuring long-term stability.
+                        </div>
+                    </li>
+                </ul>
+            </div>
+
+            <div class="section">
+                <h2 class="section-title"><span class="icon">📜</span> Release History</h2>
+                <div class="feature-description" style="padding: 20px; background: #f8f9fa; border-radius: 8px;">
+                    <p style="margin-bottom: 10px;"><strong>This release includes all changes from versions 0.2.15 through 0.2.17:</strong></p>
+                    <ul style="list-style-position: inside; color: #666;">
+                        <li style="margin-bottom: 8px;">0.2.15: Introduction of Design Mode and Rails starter agent</li>
+                        <li style="margin-bottom: 8px;">0.2.15b: Improved iframe refresh error handling</li>
+                        <li style="margin-bottom: 8px;">0.2.16: GPT-5 integration, VSCode Container, completion sounds</li>
+                        <li style="margin-bottom: 8px;">0.2.17: JavaScript modularization, universal model support, normalized tool calls</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <div class="footer">
+            <p><strong>LlamaBot v0.2.18</strong> | October 20, 2025</p>
+            <p style="margin-top: 10px;">Built with ❤️ by the LlamaBot Team</p>
+            <p style="margin-top: 10px;">
+                <a href="https://github.com/KodyKendall/LlamaBot" target="_blank">View on GitHub</a> |
+                <a href="#" target="_blank">Documentation</a> |
+                <a href="#" target="_blank">Report Issues</a>
+            </p>
+        </div>
+    </div>
+</body>
+</html>
