@@ -75,7 +75,7 @@ def get_llm(model_name: str):
       return ChatAnthropic(model="claude-haiku-4-5", max_tokens=16384)
 
 # Node
-def leonardo(state: RailsAgentState) -> Command[Literal["tools"]]:
+def leonardo_engineer(state: RailsAgentState) -> Command[Literal["tools"]]:
    # ==================== LLM Model Selection ====================
    # Get model selection from state (passed from frontend)
    llm_model = state.get('llm_model', 'claude-4.5-haiku')
@@ -151,7 +151,7 @@ def build_workflow(checkpointer=None):
     builder = StateGraph(RailsAgentState)
 
     # Define nodes: these do the work
-    builder.add_node("leonardo", leonardo)
+    builder.add_node("leonardo_engineer", leonardo_engineer)
     builder.add_node("tools", ToolNode(default_tools))
     
     # sub-agents:
@@ -159,15 +159,15 @@ def build_workflow(checkpointer=None):
    #  builder.add_node("planning_agent", build_planning_agent(checkpointer=checkpointer))
 
     # Define edges: these determine how the control flow moves
-    builder.add_edge(START, "leonardo")
+    builder.add_edge(START, "leonardo_engineer")
 
     builder.add_conditional_edges(
-        "leonardo",
+        "leonardo_engineer",
         tools_condition,
         {"tools": "tools", END: END}, #"prototype_agent": "prototype_agent", END: END},
     )
 
-    builder.add_edge("tools", "leonardo")
+    builder.add_edge("tools", "leonardo_engineer")
     # builder.add_edge("prototype_agent", END)
    #  builder.add_edge("planning_agent", END)
 

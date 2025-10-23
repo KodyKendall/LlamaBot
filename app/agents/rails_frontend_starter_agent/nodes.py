@@ -76,7 +76,7 @@ def get_llm(model_name: str):
       return ChatAnthropic(model="claude-haiku-4-5", max_tokens=16384)
 
 # Node
-def leonardo(state: RailsAgentState) -> Command[Literal["tools"]]:
+def leonardo_design(state: RailsAgentState) -> Command[Literal["tools"]]:
    # ==================== LLM Model Selection ====================
    # Get model selection from state (passed from frontend)
    llm_model = state.get('llm_model', 'claude-4.5-haiku')
@@ -145,18 +145,18 @@ def build_workflow(checkpointer=None):
     builder = StateGraph(RailsAgentState)
 
     # Define nodes: these do the work
-    builder.add_node("leonardo", leonardo)
+    builder.add_node("leonardo_design", leonardo_design)
     builder.add_node("tools", ToolNode(default_tools))
     # Define edges: these determine how the control flow moves
-    builder.add_edge(START, "leonardo")
+    builder.add_edge(START, "leonardo_design")
 
     builder.add_conditional_edges(
-        "leonardo",
+        "leonardo_design",
         tools_condition,
         {"tools": "tools", END: END},
     )
 
-    builder.add_edge("tools", "leonardo")
+    builder.add_edge("tools", "leonardo_design")
 
     react_graph = builder.compile(checkpointer=checkpointer)
 
