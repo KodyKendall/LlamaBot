@@ -4,6 +4,8 @@
       "llamabot": "./app/agents/llamabot/nodes.py:build_workflow",
       "leo": "./app/agents/llamabot/nodes.py:build_workflow",
       "llamapress": "./app/agents/llamapress/nodes.py:build_workflow",
-      "rails_agent": "./app/agents/rails_agent/nodes.py:build_workflow"
+      "rails_agent": "./app/agents/rails_agent/nodes.py:build_workflow",
+      "rails_ai_builder_agent": "./agents/rails_ai_builder_agent/nodes.py:build_workflow",
+      "rails_frontend_starter_agent": "./agents/rails_frontend_starter_agent/nodes.py:build_workflow"
     }
   }
