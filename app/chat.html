@@ -101,11 +101,29 @@
                     <div class="browser-control maximize"></div>
                 </div>
                 <div class="browser-tabs">
-                    <div class="tab active" data-target="liveSiteFrame">Your Rails App</div>
-                    <div class="tab" data-target="gitFrame">Git Status</div>
+                    <div class="tab active" data-target="liveSiteFrame">
+                        <span class="tab-text">Your Rails App</span>
+                        <button class="tab-external-link" data-iframe="liveSiteFrame" title="Open in new tab">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                                <polyline points="15 3 21 3 21 9"></polyline>
+                                <line x1="10" y1="14" x2="21" y2="3"></line>
+                            </svg>
+                        </button>
+                    </div>
+                    <div class="tab" data-target="vsCodeFrame">
+                        <span class="tab-text">VS Code</span>
+                        <button class="tab-external-link" data-iframe="vsCodeFrame" title="Open in new tab">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                                <polyline points="15 3 21 3 21 9"></polyline>
+                                <line x1="10" y1="14" x2="21" y2="3"></line>
+                            </svg>
+                        </button>
+                    </div>
+                    <!-- <div class="tab" data-target="gitFrame">Git Status</div> -->
                     <!-- <div class="tab" data-target="logsFrame">Logs</div> -->
-                    <!-- <div class="tab" data-target="vsCodeFrame">VS Code</div>
-                    <div class="tab" data-target="pgWebFrame">Database</div> -->
+                    <!-- <div class="tab" data-target="pgWebFrame">Database</div> -->
                     <!-- <div class="tab" data-target="contentFrame">Agent TODO List</div> -->
                 </div>
             </div>
@@ -140,10 +158,10 @@
                 </div>
             </div>
             <div class="browser-content">
-                <iframe src="http://localhost:3000" title="Live Site Frame" id="liveSiteFrame" class="content-iframe active"></iframe>
-                <iframe src="/agent_page/rails_agent" title="Git Status Frame" id="gitFrame" class="content-iframe"></iframe>
+                <iframe id="liveSiteFrame" title="Live Site Frame" class="content-iframe active"></iframe>
+                <iframe id="vsCodeFrame" title="VS Code Frame" class="content-iframe"></iframe>
+                <!-- <iframe src="/agent_page/rails_agent" title="Git Status Frame" id="gitFrame" class="content-iframe"></iframe> -->
                 <!-- <iframe src="/logs" title="Logs Frame" id="logsFrame" class="content-iframe"></iframe> -->
-                <!-- <iframe src="http://localhost:8443" title="VS Code Frame" id="vsCodeFrame" class="content-iframe"></iframe> -->
                 <!-- <iframe src="/page" title="Content Frame" id="contentFrame" class="content-iframe"></iframe> -->
                 <!-- <iframe src="http://localhost:8082" title="Database Frame" id="pgWebFrame" class="content-iframe"></iframe> -->
             </div>

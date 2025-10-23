@@ -53,6 +53,16 @@ export function getRailsUrl() {
 }
 
 /**
+ * Get VS Code URL based on current protocol
+ */
+export function getVSCodeUrl() {
+  if (window.location.protocol === 'https:') {
+    return 'https://vscode-' + window.location.host;
+  }
+  return 'http://localhost:8443';
+}
+
+/**
  * Get WebSocket URL based on current protocol
  */
 export function getWebSocketUrl() {

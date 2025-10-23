@@ -689,6 +689,50 @@ body {
     opacity: 1;
 }
 
+/* Tab text and external link button layout */
+.tab {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.tab-text {
+    flex: 1;
+}
+
+.tab-external-link {
+    background: none;
+    border: none;
+    padding: 2px;
+    cursor: pointer;
+    color: var(--text-color);
+    opacity: 0;
+    transition: opacity 0.2s ease, transform 0.1s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 3px;
+    margin-left: auto;
+}
+
+.tab:hover .tab-external-link {
+    opacity: 0.6;
+}
+
+.tab-external-link:hover {
+    opacity: 1 !important;
+    background-color: rgba(255, 255, 255, 0.1);
+    transform: scale(1.1);
+}
+
+.tab-external-link:active {
+    transform: scale(0.95);
+}
+
+.tab-external-link svg {
+    display: block;
+}
+
 /* Browser title bar */
 .browser-titlebar {
     height: 40px;

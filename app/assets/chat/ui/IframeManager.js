@@ -13,7 +13,7 @@
  *    - Requires Rails debug info to maintain state
  */
 
-import { getRailsUrl, CONFIG } from '../config.js';
+import { getRailsUrl, getVSCodeUrl, CONFIG } from '../config.js';
 
 export class IframeManager {
   constructor() {
@@ -22,6 +22,9 @@ export class IframeManager {
 
     // RAILS APP PREVIEW iframe (for live Rails app)
     this.liveSiteFrame = document.getElementById('liveSiteFrame');
+
+    // VS CODE iframe
+    this.vsCodeFrame = document.getElementById('vsCodeFrame');
 
     // URL input element
     this.urlInput = document.getElementById('urlInput');
@@ -33,6 +36,24 @@ export class IframeManager {
     this.cachedRoutes = null;
 
     this.overlayElement = null;
+
+    // Initialize iframe URLs
+    this.initIframeSources();
+  }
+
+  /**
+   * Initialize iframe sources based on environment
+   */
+  initIframeSources() {
+    // Set Rails iframe URL
+    if (this.liveSiteFrame) {
+      this.liveSiteFrame.src = getRailsUrl();
+    }
+
+    // Set VS Code iframe URL
+    if (this.vsCodeFrame) {
+      this.vsCodeFrame.src = getVSCodeUrl();
+    }
   }
 
   // ============================================================================
@@ -428,7 +449,12 @@ export class IframeManager {
     const iframes = document.querySelectorAll('.content-iframe');
 
     tabs.forEach(tab => {
-      tab.addEventListener('click', () => {
+      tab.addEventListener('click', (e) => {
+        // Don't switch tabs if clicking the external link button
+        if (e.target.closest('.tab-external-link')) {
+          return;
+        }
+
         tabs.forEach(t => t.classList.remove('active'));
         iframes.forEach(i => i.classList.remove('active'));
 
@@ -437,6 +463,30 @@ export class IframeManager {
         const targetIframe = document.getElementById(targetIframeId);
         if (targetIframe) {
           targetIframe.classList.add('active');
+        }
+      });
+    });
+
+    // Initialize external link buttons
+    this.initExternalLinkButtons();
+  }
+
+  /**
+   * Initialize external link buttons on tabs
+   */
+  initExternalLinkButtons() {
+    const externalLinkButtons = document.querySelectorAll('.tab-external-link');
+
+    externalLinkButtons.forEach(button => {
+      button.addEventListener('click', (e) => {
+        e.stopPropagation(); // Prevent tab switching
+
+        const iframeId = button.dataset.iframe;
+        const iframe = document.getElementById(iframeId);
+
+        if (iframe && iframe.src) {
+          // Open the iframe's current URL in a new tab
+          window.open(iframe.src, '_blank');
         }
       });
     });
