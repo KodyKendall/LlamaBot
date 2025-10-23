@@ -22,7 +22,19 @@
       "Bash(cat:*)",
       "Bash(timeout 10 python:*)",
       "Bash(docker compose restart:*)",
-      "Bash(node --check:*)"
+      "Bash(node --check:*)",
+      "Bash(git tag:*)",
+      "Bash(git log:*)",
+      "Bash(git stash show:*)",
+      "Bash(git branch:*)",
+      "Bash(docker exec:*)",
+      "Bash(docker ps:*)",
+      "Bash(python3:*)",
+      "Bash(docker-compose restart:*)",
+      "Bash(docker logs:*)",
+      "Bash(docker-compose build:*)",
+      "Read(//Users/kodykendall/SoftEngineering/LLMPress/Leonardo/**)",
+      "Read(//Users/kodykendall/SoftEngineering/LLMPress/**)"
     ],
     "deny": [],
     "ask": []
