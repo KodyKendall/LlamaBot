@@ -37,6 +37,50 @@ All LangGraph tools use `make_api_request_to_llamapress(method, endpoint, api_to
 
 ---
 
+## AGENT FILE PATHS & REGISTRATION
+
+**Creating New Custom Agents:**
+1. Create files in Leonardo filesystem: `langgraph/agents/{agent_name}/nodes.py`
+2. Files mount to container path: `/app/app/user_agents/{agent_name}/nodes.py`
+3. Register in `langgraph/langgraph.json`: `"{agent_name}": "./user_agents/{agent_name}/nodes.py:build_workflow"`
+
+**Built-in Agents (Pre-installed in LlamaBot):**
+These must ALWAYS be included in your `langgraph.json`:
+```json
+{
+  "rails_agent": "./agents/rails_agent/nodes.py:build_workflow",
+  "rails_ai_builder": "./agents/rails_ai_builder_agent/nodes.py:build_workflow",
+  "rails_frontend_starter": "./agents/rails_frontend_starter_agent/nodes.py:build_workflow"
+}
+```
+
+**Example Full langgraph.json:**
+```json
+{
+  "dependencies": ["."],
+  "graphs": {
+    "leo": "./user_agents/leo/nodes.py:build_workflow",
+    "student": "./user_agents/student/nodes.py:build_workflow",
+    "rails_agent": "./agents/rails_agent/nodes.py:build_workflow",
+    "rails_ai_builder": "./agents/rails_ai_builder_agent/nodes.py:build_workflow",
+    "rails_frontend_starter": "./agents/rails_frontend_starter_agent/nodes.py:build_workflow"
+  },
+  "env": ".env"
+}
+```
+
+**Path Convention:**
+- **Custom agents:** `./user_agents/{agent_name}/nodes.py:build_workflow`
+- **Built-in agents:** `./agents/{agent_name}/nodes.py:build_workflow`
+
+**Critical Rules:**
+- The `agent_name` in AgentStateBuilder's `build()` method must match the key in `langgraph.json`
+- Always include all built-in agent routes when modifying `langgraph.json`
+- Custom agent files exist in Leonardo's `langgraph/agents/` directory
+- Built-in agent files exist in LlamaBot's `/app/app/agents/` directory (read-only)
+
+---
+
 ## IMPLEMENTATION PHASES
 
 ### 1) Research Phase
@@ -214,7 +258,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 # System message
-sys_msg = """You are a helpful assistant for managing books..."""
+sys_msg = \"\"\"You are a helpful assistant for managing books...\"\"\"
 
 # Define custom state (extends AgentState)
 class StudentAgentState(AgentState):
@@ -276,12 +320,12 @@ async def tool_name(
     state: Annotated[dict, InjectedState],
     optional_param: Optional[str] = None,
 ) -> str:
-    """Clear description. Explain what this does and when to use it.
+    \"\"\"Clear description. Explain what this does and when to use it.
 
     Args:
         required_param (str): Description.
         optional_param (Optional[str]): Description.
-    """
+    \"\"\"
     logger.info(f"Calling tool_name with {required_param}")
 
     # 1. Validate API token
@@ -326,13 +370,21 @@ async def tool_name(
 {
     "dependencies": ["."],
     "graphs": {
-      "leo": "./agents/leo/nodes.py:build_workflow",
-      "student": "./agents/student/nodes.py:build_workflow"
-    }
+      "leo": "./user_agents/leo/nodes.py:build_workflow",
+      "student": "./user_agents/student/nodes.py:build_workflow",
+      "rails_agent": "./agents/rails_agent/nodes.py:build_workflow",
+      "rails_ai_builder": "./agents/rails_ai_builder_agent/nodes.py:build_workflow",
+      "rails_frontend_starter": "./agents/rails_frontend_starter_agent/nodes.py:build_workflow"
+    },
+    "env": ".env"
 }
 ```
 
-**Note:** The key (`"student"`) must match the `agent_name` field returned by your AgentStateBuilder.
+**Important Notes:**
+- Custom agents use `./user_agents/` prefix (mounted from Leonardo's `langgraph/agents/`)
+- Built-in agents use `./agents/` prefix (baked into LlamaBot)
+- Always include all built-in agent routes
+- The key (`"student"`) must match the `agent_name` field returned by your AgentStateBuilder
 
 ---
 
@@ -342,7 +394,7 @@ async def tool_name(
 ```python
 @tool
 async def list_books(state: Annotated[dict, InjectedState]) -> str:
-    """List all books for the authenticated user."""
+    \"\"\"List all books for the authenticated user.\"\"\"
     logger.info("Listing books!")
 
     api_token = state.get("api_token")
@@ -368,7 +420,7 @@ async def get_book(
     book_id: int,
     state: Annotated[dict, InjectedState],
 ) -> str:
-    """Get a specific book by ID."""
+    \"\"\"Get a specific book by ID.\"\"\"
     logger.info(f"Getting book {book_id}")
 
     api_token = state.get("api_token")
@@ -396,7 +448,7 @@ async def create_book(
     reading_level: str,
     state: Annotated[dict, InjectedState],
 ) -> str:
-    """Create a new book. Returns the created book object including its ID."""
+    \"\"\"Create a new book. Returns the created book object including its ID.\"\"\"
     logger.info(f"Creating book with title: {title}")
 
     api_token = state.get("api_token")
@@ -433,7 +485,7 @@ async def update_book(
     title: Optional[str] = None,
     learning_outcome: Optional[str] = None,
 ) -> str:
-    """Update an existing book. Only provided fields will be updated."""
+    \"\"\"Update an existing book. Only provided fields will be updated.\"\"\"
     logger.info(f"Updating book {book_id}")
 
     api_token = state.get("api_token")
@@ -470,7 +522,7 @@ async def delete_book(
     book_id: int,
     state: Annotated[dict, InjectedState],
 ) -> str:
-    """Delete a book by ID."""
+    \"\"\"Delete a book by ID.\"\"\"
     logger.info(f"Deleting book {book_id}")
 
     api_token = state.get("api_token")
@@ -498,7 +550,7 @@ async def create_chapter(
     description: str,
     state: Annotated[dict, InjectedState],
 ) -> str:
-    """Create a new chapter for a given book. Requires book_id."""
+    \"\"\"Create a new chapter for a given book. Requires book_id.\"\"\"
     logger.info(f"Creating chapter for book {book_id}")
 
     api_token = state.get("api_token")
@@ -534,7 +586,7 @@ async def get_chart_data(
     state: Annotated[dict, InjectedState],
     starting_balance: Optional[float] = None,
 ) -> str:
-    """Get forecast chart data for a scenario."""
+    \"\"\"Get forecast chart data for a scenario.\"\"\"
     logger.info(f"Getting chart data for scenario {scenario_id}")
 
     api_token = state.get("api_token")
