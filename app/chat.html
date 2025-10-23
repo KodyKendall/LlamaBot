@@ -39,6 +39,9 @@
             <div class="drawer-content">
                 <div class="drawer-header">
                     <h3>Conversations</h3>
+                    <button class="new-thread-btn" id="newThreadBtn" title="Start new conversation">
+                        <i class="fa-solid fa-plus"></i>
+                    </button>
                     <!-- <button class="close-drawer" id="closeDrawer">&times;</button> -->
                 </div>
                 <div class="menu-items">
@@ -72,6 +75,7 @@
                         <select id="agentModeSelect" class="custom-dropdown">
                             <option value="prototype" data-short-label="Design">Design Mode</option>
                             <option value="engineer" data-short-label="Engineer">Engineer Mode</option>
+                            <option value="ai_builder" data-short-label="AI Builder">AI Builder Mode</option>
                             <!-- <option value="ask">Ask Mode</option> -->
                         </select>
                     </div>
@@ -99,6 +103,7 @@
                 <div class="browser-tabs">
                     <div class="tab active" data-target="liveSiteFrame">Your Rails App</div>
                     <div class="tab" data-target="gitFrame">Git Status</div>
+                    <!-- <div class="tab" data-target="logsFrame">Logs</div> -->
                     <!-- <div class="tab" data-target="vsCodeFrame">VS Code</div>
                     <div class="tab" data-target="pgWebFrame">Database</div> -->
                     <!-- <div class="tab" data-target="contentFrame">Agent TODO List</div> -->
@@ -137,6 +142,7 @@
             <div class="browser-content">
                 <iframe src="http://localhost:3000" title="Live Site Frame" id="liveSiteFrame" class="content-iframe active"></iframe>
                 <iframe src="/agent_page/rails_agent" title="Git Status Frame" id="gitFrame" class="content-iframe"></iframe>
+                <!-- <iframe src="/logs" title="Logs Frame" id="logsFrame" class="content-iframe"></iframe> -->
                 <!-- <iframe src="http://localhost:8443" title="VS Code Frame" id="vsCodeFrame" class="content-iframe"></iframe> -->
                 <!-- <iframe src="/page" title="Content Frame" id="contentFrame" class="content-iframe"></iframe> -->
                 <!-- <iframe src="http://localhost:8082" title="Database Frame" id="pgWebFrame" class="content-iframe"></iframe> -->
