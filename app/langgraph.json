@@ -2,7 +2,6 @@
     "dependencies": ["."],
     "graphs": {
       "llamabot": "./agents/llamabot/nodes.py:build_workflow",
-      "leo": "./agents/llamabot/nodes.py:build_workflow",
       "llamapress": "./agents/llamapress/nodes.py:build_workflow",
       "rails_agent": "./agents/rails_agent/nodes.py:build_workflow",
       "rails_frontend_starter_agent": "./agents/rails_frontend_starter_agent/nodes.py:build_workflow",
