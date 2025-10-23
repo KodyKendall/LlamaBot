@@ -193,21 +193,33 @@ def write_file(
         full_path.write_text(content)
         # git_status(tool_call_id) # hacky - this will update the git status page so the user can see the changes.
     except Exception as e:
+        error_message = f"Error writing file {file_path}: {e}"
+        tool_output = {
+            "status": "error",
+            "message": error_message
+        }
         return Command(
             update={
                 "messages": [
                     ToolMessage(
-                        f"Error writing file {file_path}: {e}",
+                        error_message,
+                        artifact=tool_output,
                         tool_call_id=tool_call_id,
                     )
                 ]
             }
         )
 
+    success_message = f"Updated file {file_path}"
+    tool_output = {
+        "status": "success",
+        "message": success_message
+    }
+
     return Command(
         update={
             "messages": [
-                ToolMessage(f"Updated file {file_path}", tool_call_id=tool_call_id)
+                ToolMessage(success_message, artifact=tool_output, tool_call_id=tool_call_id)
             ],
         }
     )

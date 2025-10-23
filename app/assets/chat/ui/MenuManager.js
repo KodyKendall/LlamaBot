@@ -6,6 +6,7 @@ export class MenuManager {
   constructor() {
     this.hamburger = null;
     this.drawer = null;
+    this.newThreadBtn = null;
     this.init();
   }
 
@@ -15,6 +16,7 @@ export class MenuManager {
   init() {
     this.hamburger = document.getElementById('hamburgerMenu');
     this.drawer = document.getElementById('menuDrawer');
+    this.newThreadBtn = document.getElementById('newThreadBtn');
 
     this.initEventListeners();
   }
@@ -28,6 +30,15 @@ export class MenuManager {
       this.hamburger.addEventListener('click', (e) => {
         e.stopPropagation();
         this.toggleMenu();
+      });
+    }
+
+    // New thread button click
+    if (this.newThreadBtn) {
+      this.newThreadBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        // Dispatch event that ThreadManager can listen to
+        window.dispatchEvent(new CustomEvent('createNewThread'));
       });
     }
 

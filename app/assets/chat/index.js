@@ -177,6 +177,11 @@ class ChatApp {
     window.addEventListener('threadChanged', (e) => {
       this.appState.setThreadId(e.detail.threadId);
     });
+
+    // Listen for new thread creation
+    window.addEventListener('createNewThread', () => {
+      this.threadManager.createNewThread();
+    });
   }
 
   /**

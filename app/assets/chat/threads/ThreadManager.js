@@ -243,4 +243,51 @@ export class ThreadManager {
     // Fallback for null/undefined
     return '';
   }
+
+  /**
+   * Create a new thread - clears messages and generates new thread ID
+   */
+  createNewThread() {
+    // Clear current messages
+    this.messageRenderer.clearMessages();
+
+    // Show default welcome message
+    const defaultMessage = document.createElement('div');
+    defaultMessage.className = 'message ai-message';
+    defaultMessage.textContent = "Hi! I'm Leonardo. What are we building today?";
+
+    const messageHistory = this.messageRenderer.getMessageHistory();
+    const scrollButton = document.getElementById('scrollToBottomBtn');
+
+    if (scrollButton) {
+      messageHistory.insertBefore(defaultMessage, scrollButton);
+    } else {
+      messageHistory.appendChild(defaultMessage);
+    }
+
+    // Generate new thread ID and dispatch event to update app state
+    const newThreadId = this.generateThreadId();
+    window.dispatchEvent(new CustomEvent('threadChanged', {
+      detail: { threadId: newThreadId }
+    }));
+
+    // Close menu
+    if (this.menuManager) {
+      this.menuManager.closeMenu();
+    }
+
+    // Scroll to bottom
+    if (this.scrollManager) {
+      this.scrollManager.scrollToBottom(true);
+    }
+
+    console.log('Created new thread:', newThreadId);
+  }
+
+  /**
+   * Generate a new thread ID
+   */
+  generateThreadId() {
+    return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  }
 }

@@ -172,7 +172,8 @@ body {
     border-bottom: 1px solid var(--border-color);
     display: flex;
     align-items: center;
-    justify-content: flex-start; /* Align to left instead of space-between */
+    justify-content: space-between; /* Space between title and button */
+    gap: 0.8rem;
 }
 
 .drawer-header h3 {
@@ -180,6 +181,38 @@ body {
     font-weight: 600;
     color: var(--text-color);
     margin: 0;
+    flex: 1;
+}
+
+.new-thread-btn {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(139, 92, 246, 0.12);
+    border: 1px solid rgba(139, 92, 246, 0.25);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    color: rgba(255, 255, 255, 0.85);
+    flex-shrink: 0;
+}
+
+.new-thread-btn:hover {
+    background: rgba(139, 92, 246, 0.18);
+    border-color: rgba(139, 92, 246, 0.35);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(139, 92, 246, 0.2);
+}
+
+.new-thread-btn:active {
+    transform: translateY(0);
+}
+
+.new-thread-btn i {
+    font-size: 14px;
 }
 
 .close-drawer {

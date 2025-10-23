@@ -126,8 +126,8 @@ export class ToolMessageRenderer {
    * Update existing tool message with result (for compact format)
    */
   updateCollapsibleToolMessage(messageDiv, toolResult, baseMessage) {
-    // Special handling for edit_file
-    if (baseMessage.name === 'edit_file') {
+    // Special handling for edit_file and write_file
+    if (baseMessage.name === 'edit_file' || baseMessage.name === 'write_file') {
       const toolCompact = messageDiv.querySelector('.tool-compact');
       if (toolCompact) {
         if (baseMessage.artifact?.status === 'success') {
@@ -137,7 +137,7 @@ export class ToolMessageRenderer {
             icon.outerHTML = ToolIcons.successIcon();
           }
 
-          // Refresh the main iframe when edit_file succeeds
+          // Refresh the main iframe when edit_file or write_file succeeds
           if (this.iframeManager && this.getRailsDebugInfoCallback) {
             this.iframeManager.refreshRailsApp(this.getRailsDebugInfoCallback);
           }
