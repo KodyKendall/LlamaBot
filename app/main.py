@@ -360,12 +360,102 @@ async def agent_page(agent_name: str, username: str = Depends(auth)):
     # Get the absolute path to the project root
     project_root = Path(__file__).parent.parent
     page_path = project_root / "app" / "agents" / agent_name / "page.html"
-    
     if not page_path.exists():
         raise HTTPException(status_code=404, detail=f"Page not found for agent: {agent_name}")
-    
     with open(page_path) as f:
         return f.read()
+
+@app.get("/logs", response_class=HTMLResponse)
+async def logs_viewer(username: str = Depends(auth)):
+    with open("logs_viewer.html") as f:
+        return f.read()
+
+# Docker-native log streaming infrastructure
+clients = set()  # Set of client queues
+log_queue = asyncio.Queue(maxsize=2000)  # Central buffer
+
+async def tail_docker_logs():
+    """Tail Rails container logs using docker logs --follow (single shared subprocess)"""
+    container_name = "leonardo-llamapress-1"
+
+    while True:  # Auto-restart on failure
+        try:
+            logger.info(f"Starting Docker log tailer for container: {container_name}")
+            process = await asyncio.create_subprocess_exec(
+                'docker', 'logs', '--follow', '--tail', '0', container_name,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+
+            async def read_stream(stream, stream_name):
+                """Read from stdout or stderr"""
+                async for line in stream:
+                    try:
+                        entry = line.decode('utf-8', errors='ignore').strip()
+                        if not entry:
+                            continue
+
+                        log_entry = {
+                            'type': 'log',
+                            'source': 'rails',
+                            'message': entry,
+                            'timestamp': datetime.now(timezone.utc).isoformat(),
+                            'level': 'INFO'
+                        }
+
+                        # Add to central queue with FIFO eviction
+                        try:
+                            log_queue.put_nowait(log_entry)
+                        except asyncio.QueueFull:
+                            # Evict oldest, add newest
+                            try:
+                                log_queue.get_nowait()
+                                log_queue.put_nowait(log_entry)
+                            except:
+                                pass
+                    except Exception as e:
+                        logger.error(f"Error processing log line: {e}")
+
+            # Read both stdout and stderr concurrently
+            await asyncio.gather(
+                read_stream(process.stdout, 'stdout'),
+                read_stream(process.stderr, 'stderr'),
+                return_exceptions=True
+            )
+
+            await process.wait()
+            logger.warning(f"Docker log tailer exited with code {process.returncode}")
+
+        except Exception as e:
+            logger.error(f"Error in Docker log tailer: {e}")
+
+        # Wait before restarting
+        logger.info("Restarting Docker log tailer in 5 seconds...")
+        await asyncio.sleep(5)
+
+async def broadcast_logs():
+    """Fan-out logs from central queue to all connected SSE clients"""
+    while True:
+        try:
+            log_entry = await log_queue.get()
+
+            # Broadcast to all connected clients
+            for client_queue in list(clients):
+                try:
+                    client_queue.put_nowait(log_entry)
+                except asyncio.QueueFull:
+                    pass  # Skip slow clients
+        except Exception as e:
+            logger.error(f"Error in broadcast_logs: {e}")
+            await asyncio.sleep(0.1)
+
+@app.on_event("startup")
+async def startup_log_streaming():
+    """Start background tasks for log streaming"""
+    pass
+    # asyncio.create_task(tail_docker_logs())
+    # asyncio.create_task(broadcast_logs())
+    # logger.info("✅ Docker log streaming started")
 
 @app.get("/conversations", response_class=HTMLResponse)
 async def conversations(username: str = Depends(auth)):
@@ -467,3 +557,45 @@ async def rails_routes():
 def check_timestamp():
     # returns the timestamp of last message from user in utc
     return {"timestamp": app.state.timestamp}
+
+@app.get("/logs/stream")
+async def stream_logs(username: str = Depends(auth)):
+    """Stream real-time Rails logs via Docker to browser using SSE"""
+
+    async def log_generator():
+        # Create queue for this client
+        client_queue = asyncio.Queue(maxsize=500)
+        clients.add(client_queue)
+
+        try:
+            # Send initial connection message
+            yield f"data: {json.dumps({'type': 'connected', 'sources': ['rails']})}\n\n"
+
+            # Stream logs as they arrive from broadcast
+            while True:
+                try:
+                    log_entry = await asyncio.wait_for(client_queue.get(), timeout=30.0)
+                    yield f"data: {json.dumps(log_entry)}\n\n"
+                except asyncio.TimeoutError:
+                    # Send keepalive to prevent connection timeout
+                    yield f"data: {json.dumps({'type': 'keepalive'})}\n\n"
+
+        except asyncio.CancelledError:
+            logger.info("Log streaming cancelled by client")
+        except Exception as e:
+            logger.error(f"Error in log stream: {e}")
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+        finally:
+            # Cleanup: remove client queue
+            clients.discard(client_queue)
+            logger.info(f"Client disconnected. Active clients: {len(clients)}")
+
+    return StreamingResponse(
+        log_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
