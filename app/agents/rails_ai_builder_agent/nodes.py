@@ -25,7 +25,12 @@ from openai import OpenAI
 from app.agents.utils.images import encode_image
 
 from app.agents.rails_agent.state import RailsAgentState
-from app.agents.rails_agent.tools import write_todos, write_file, read_file, ls, edit_file, search_file, internet_search, bash_command, git_status, git_commit, git_command, view_page, github_cli_command
+from app.agents.rails_agent.tools import (
+    write_todos, write_file, read_file, ls, edit_file, search_file, bash_command,
+    # Agent file tools
+    ls_agents, read_agent_file, write_agent_file, edit_agent_file,
+    read_langgraph_json, edit_langgraph_json
+)
 from app.agents.rails_ai_builder_agent.prompts import RAILS_AI_BUILDER_AGENT_PROMPT
 
 # from app.agents.rails_agent.prototype_agent.nodes import build_workflow as build_prototype_agent
@@ -48,9 +53,13 @@ sys_msg = SystemMessage(content=RAILS_AI_BUILDER_AGENT_PROMPT)
 current_page_html = APP_DIR / 'page.html'
 content = current_page_html.read_text()
 
-default_tools = [write_todos,
-         ls, read_file, write_file, edit_file, search_file, bash_command, 
-         git_status, git_commit, git_command, github_cli_command, internet_search]
+default_tools = [
+    write_todos,
+    ls, read_file, write_file, edit_file, search_file, bash_command,
+    # Agent file tools
+    ls_agents, read_agent_file, write_agent_file, edit_agent_file,
+    read_langgraph_json, edit_langgraph_json
+]
 
 # Helper function to get LLM based on user selection
 def get_llm(model_name: str):
@@ -102,19 +111,23 @@ def leonardo_ai_builder(state: RailsAgentState) -> Command[Literal["tools"]]:
       messages = messages + [HumanMessage(content="<NOTE_FROM_SYSTEM> The user is currently viewing their Ruby on Rails webpage route at: " + view_path + " </NOTE_FROM_SYSTEM>")]
 
    # Tools
-   tools = [write_todos,
-         ls, read_file, write_file, edit_file, search_file, bash_command, 
-         git_status, git_commit, git_command, github_cli_command, internet_search]
+   tools = [
+      write_todos,
+      ls, read_file, write_file, edit_file, search_file, bash_command,
+      # Agent file tools
+      ls_agents, read_agent_file, write_agent_file, edit_agent_file,
+      read_langgraph_json, edit_langgraph_json
+   ]
 
    agent_mode = 'engineer' #state.get('agent_mode')
    if agent_mode:
         logger.info(f"🎯 User is in current mode: {agent_mode}")
         if agent_mode == 'prototype':
-            messages = messages + [HumanMessage(content="<NOTE_FROM_SYSTEM> The user is in engineer mode. You are allowed to use the tools. Here are the tools you can use: tools = [write_todos, ls, read_file, write_file, edit_file, search_file, bash_command, git_status, git_commit, git_command, github_cli_command, internet_search] </NOTE_FROM_SYSTEM>")]
+            messages = messages + [HumanMessage(content="<NOTE_FROM_SYSTEM> The user is in engineer mode. You are allowed to use the tools. Here are the tools you can use: tools = [write_todos, ls, read_file, write_file, edit_file, search_file, bash_command, internet_search, ls_agents, read_agent_file, write_agent_file, edit_agent_file, read_langgraph_json, edit_langgraph_json] </NOTE_FROM_SYSTEM>")]
             # return Command(goto="prototype_agent", update={})
 
         elif agent_mode == 'engineer': # just fall through here and let the tools_condition handle it
-            messages = messages + [HumanMessage(content="<NOTE_FROM_SYSTEM> The user is in engineer mode. You are allowed to use the tools. Here are the tools you can use: tools = [write_todos, ls, read_file, write_file, edit_file, search_file, bash_command, git_status, git_commit, git_command, github_cli_command, internet_search] </NOTE_FROM_SYSTEM>")]
+            messages = messages + [HumanMessage(content="<NOTE_FROM_SYSTEM> The user is in engineer mode. You are allowed to use the tools. Here are the tools you can use: tools = [write_todos, ls, read_file, write_file, edit_file, search_file, bash_command, internet_search, ls_agents, read_agent_file, write_agent_file, edit_agent_file, read_langgraph_json, edit_langgraph_json] </NOTE_FROM_SYSTEM>")]
         
       #   elif agent_mode == 'planning':
       #       return Command(goto="planning_agent", update={})
@@ -130,7 +143,7 @@ def leonardo_ai_builder(state: RailsAgentState) -> Command[Literal["tools"]]:
       # Reset counter by subtracting current count (since reducer uses operator.add)
       return {"messages": [response], "failed_tool_calls_count": -failed_tool_calls_count} # by adding a negative number, we subtract the current count and reset it to 0.
 
-   messages = messages + [HumanMessage(content="<NOTE_FROM_SYSTEM> The user is in engineer mode. You are allowed to use the tools. Here are the tools you can use: tools = [write_todos, ls, read_file, write_file, edit_file, search_file, bash_command, git_status, git_commit, git_command, github_cli_command, internet_search] </NOTE_FROM_SYSTEM>")]
+   messages = messages + [HumanMessage(content="<NOTE_FROM_SYSTEM> The user is in engineer mode. You are allowed to use the tools. Here are the tools you can use: tools = [write_todos, ls, read_file, write_file, edit_file, search_file, bash_command, internet_search, ls_agents, read_agent_file, write_agent_file, edit_agent_file, read_langgraph_json, edit_langgraph_json] </NOTE_FROM_SYSTEM>")]
    llm_with_tools = llm.bind_tools(tools, parallel_tool_calls=False)
    response = llm_with_tools.invoke(messages)
    return {"messages": [response]}

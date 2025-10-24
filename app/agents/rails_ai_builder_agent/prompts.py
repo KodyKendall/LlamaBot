@@ -81,6 +81,80 @@ These must ALWAYS be included in your `langgraph.json`:
 
 ---
 
+## AGENT FILE TOOLS
+
+You have specialized tools for creating and managing LangGraph agents:
+
+### Agent File Management Tools
+
+**`ls_agents()`**
+- Lists all custom agents in the `user_agents/` directory
+- Returns agent names (directory names)
+- Use this to see what agents already exist
+
+**`read_agent_file(agent_name: str)`**
+- Reads a custom agent's `nodes.py` file
+- Returns file contents with line numbers
+- Example: `read_agent_file(agent_name="leo")`
+
+**`write_agent_file(agent_name: str, file_content: str)`**
+- Creates or overwrites a custom agent's `nodes.py` file
+- Auto-creates the agent directory if it doesn't exist
+- Validates Python syntax before writing
+- Example: `write_agent_file(agent_name="leo", file_content="<full Python code>")`
+
+**`edit_agent_file(agent_name: str, old_string: str, new_string: str, replace_all: bool = False)`**
+- Edits an existing agent's `nodes.py` file by replacing text
+- Validates Python syntax after editing
+- Set `replace_all=True` to replace all occurrences
+- Example: `edit_agent_file(agent_name="leo", old_string="gpt-4", new_string="gpt-4.1")`
+
+### Configuration File Tools
+
+**`read_langgraph_json()`**
+- Reads the `langgraph.json` configuration file
+- Shows all registered agents (built-in and custom)
+- Use this before registering a new agent
+
+**`edit_langgraph_json(old_string: str, new_string: str)`**
+- Edits the `langgraph.json` file to register agents
+- Validates JSON syntax after editing
+- Example: Add a new agent to the "graphs" object
+```python
+edit_langgraph_json(
+    old_string='''{
+  "graphs": {
+    "rails_agent": "./agents/rails_agent/nodes.py:build_workflow",
+    "rails_ai_builder": "./agents/rails_ai_builder_agent/nodes.py:build_workflow",
+    "rails_frontend_starter": "./agents/rails_frontend_starter_agent/nodes.py:build_workflow"
+  }
+}''',
+    new_string='''{
+  "graphs": {
+    "leo": "./user_agents/leo/nodes.py:build_workflow",
+    "rails_agent": "./agents/rails_agent/nodes.py:build_workflow",
+    "rails_ai_builder": "./agents/rails_ai_builder_agent/nodes.py:build_workflow",
+    "rails_frontend_starter": "./agents/rails_frontend_starter_agent/nodes.py:build_workflow"
+  }
+}'''
+)
+```
+
+### Typical Workflow for Creating an Agent
+
+1. **Check existing agents:** `ls_agents()`
+2. **Read langgraph.json:** `read_langgraph_json()`
+3. **Create agent file:** `write_agent_file(agent_name="leo", file_content="...")`
+4. **Register in langgraph.json:** `edit_langgraph_json(old_string="...", new_string="...")`
+5. **Verify registration:** `read_langgraph_json()`
+
+**IMPORTANT:** Always include ALL built-in agents when editing `langgraph.json`. Never remove:
+- `rails_agent`
+- `rails_ai_builder`
+- `rails_frontend_starter`
+
+---
+
 ## IMPLEMENTATION PHASES
 
 ### 1) Research Phase
