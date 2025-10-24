@@ -1,0 +1,8 @@
+10/23/2025
+    - Add AI Builder mode, where Leonardo can help advise on building user-facing agents embedded within the Rails application.
+    - Add 'user_agents' folder to allow Leonardo instances to stub in their own agents specific to their application.
+    - Add button to create new thread in side menu/conversations menu
+    - Add vscode as a tab on the entry so users can easily see vscode
+    - Add button to launch vscode and rails app in new tab
+    - Add mouse button for select element mode, requires Leonardo update to application.js
+    

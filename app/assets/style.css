@@ -562,6 +562,93 @@ body {
     border-color: rgba(139, 92, 246, 0.1);
 }
 
+/* Element selector button */
+.element-selector-btn {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(76, 175, 80, 0.08);
+    border: 1px solid rgba(76, 175, 80, 0.2);
+    border-radius: 6px;
+    flex-shrink: 0;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    color: var(--text-color);
+}
+
+.element-selector-btn:hover {
+    background: rgba(76, 175, 80, 0.15);
+    border-color: rgba(76, 175, 80, 0.3);
+    transform: translateY(-1px) scale(1.05);
+}
+
+.element-selector-btn.active {
+    background: rgba(76, 175, 80, 0.25);
+    border-color: rgba(76, 175, 80, 0.5);
+    color: #4CAF50;
+    animation: pulse-selector 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-selector {
+    0%, 100% {
+        box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.7);
+    }
+    50% {
+        box-shadow: 0 0 0 4px rgba(76, 175, 80, 0);
+    }
+}
+
+/* Selected element badge */
+.selected-element-badge {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    margin-bottom: 0.5rem;
+    background: rgba(76, 175, 80, 0.15);
+    border: 1px solid rgba(76, 175, 80, 0.3);
+    border-radius: 8px;
+    font-size: 0.85rem;
+    color: var(--text-color);
+}
+
+.selected-element-badge .badge-icon {
+    font-size: 1rem;
+}
+
+.selected-element-badge .badge-text {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #4CAF50;
+    font-weight: 500;
+}
+
+.selected-element-badge .badge-close {
+    background: none;
+    border: none;
+    color: var(--text-color);
+    font-size: 1.2rem;
+    cursor: pointer;
+    padding: 0;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.6;
+    transition: opacity 0.2s ease;
+}
+
+.selected-element-badge .badge-close:hover {
+    opacity: 1;
+}
+
 /* Connection status */
 .connection-status {
     font-size: 0.75rem;

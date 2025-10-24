@@ -12,6 +12,7 @@ import { WebSocketManager } from './websocket/WebSocketManager.js';
 import { MessageHandler } from './websocket/MessageHandler.js';
 import { ScrollManager } from './ui/ScrollManager.js';
 import { IframeManager } from './ui/IframeManager.js';
+import { ElementSelector } from './ui/ElementSelector.js';
 import { MenuManager } from './ui/MenuManager.js';
 import { MobileViewManager } from './ui/MobileViewManager.js';
 import { ThreadManager } from './threads/ThreadManager.js';
@@ -30,6 +31,7 @@ class ChatApp {
     this.messageRenderer = null;
     this.scrollManager = null;
     this.iframeManager = null;
+    this.elementSelector = null;
     this.menuManager = null;
     this.mobileViewManager = null;
     this.threadManager = null;
@@ -105,6 +107,12 @@ class ChatApp {
     this.iframeManager.initTabSwitching();
     this.iframeManager.initViewModeToggle();
     this.iframeManager.initUrlNavigation();
+
+    // Initialize element selector
+    this.elementSelector = new ElementSelector(this.iframeManager);
+    const elementSelectorBtn = document.getElementById('elementSelectorBtn');
+    const messageInput = document.getElementById('messageInput');
+    this.elementSelector.init(elementSelectorBtn, messageInput);
 
     // Load threads
     this.threadManager.fetchThreads();
@@ -198,19 +206,25 @@ class ChatApp {
    */
   sendMessage(debugInfo = null) {
     const input = document.getElementById('messageInput');
-    const message = input.value.trim();
+    let message = input.value.trim();
     const agentMode = document.getElementById('agentModeSelect')?.value;
     const llmModel = document.getElementById('modelSelect')?.value;
 
     if (!message || !this.webSocketManager) return;
+
+    // Check if there's a selected element and append it to the message
+    const selectedHTML = this.elementSelector?.getSelectedElementHTML();
+    if (selectedHTML) {
+      message = `${message}\n\n<SELECTED_ELEMENT>\n${selectedHTML}\n</SELECTED_ELEMENT>`;
+    }
 
     // Reset state
     this.appState.resetMessageState();
     this.streamingState.reset();
     this.iframeManager.removeStreamingOverlay();
 
-    // Add user message
-    this.messageRenderer.addMessage(message, 'human', null);
+    // Add user message (show original without HTML)
+    this.messageRenderer.addMessage(input.value.trim(), 'human', null);
 
     // Show thinking indicator in the dedicated thinking area
     const thinkingArea = document.getElementById('thinkingArea');
@@ -238,6 +252,11 @@ class ChatApp {
     // Clear input
     input.value = '';
     input.style.height = 'auto';
+
+    // Clear selected element badge
+    if (this.elementSelector) {
+      this.elementSelector.clearSelection();
+    }
 
     // Ensure thread ID exists
     const threadId = this.appState.ensureThreadId();
