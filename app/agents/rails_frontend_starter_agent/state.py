@@ -5,7 +5,12 @@ from typing_extensions import TypedDict
 import operator
 
 class Todo(TypedDict):
-    """Todo to track."""
+    """A structured task item for tracking progress through complex workflows.
+
+    Attributes:
+        content: Short, specific description of the task
+        status: Current state - pending, in_progress, or completed
+    """
     content: str
     status: Literal["pending", "in_progress", "completed"]
 
