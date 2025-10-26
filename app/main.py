@@ -70,6 +70,7 @@ manager = WebSocketConnectionManager(app)
 app.state.checkpointer = None
 app.state.async_checkpointer = None
 app.state.timestamp = datetime.now(timezone.utc)
+app.state.compiled_graphs = {}  # Cache for pre-compiled LangGraph workflows
 
 # Initialize HTTP Basic Auth
 security = HTTPBasic()
@@ -88,10 +89,11 @@ def get_or_create_checkpointer():
         if db_uri and db_uri.strip():
             try:
                 # Create connection pool with limited retries and timeout
+                # Reduced pool size for single worker (was max_size=5)
                 pool = ConnectionPool(
                     db_uri,
                     min_size=1,
-                    max_size=5,
+                    max_size=2,  # Reduced from 5 (single worker doesn't need many)
                     timeout=5.0,  # 5 second connection timeout
                     max_idle=300.0,  # 5 minute idle timeout
                     max_lifetime=3600.0,  # 1 hour max connection lifetime
@@ -117,10 +119,11 @@ def get_or_create_async_checkpointer():
         if db_uri and db_uri.strip():
             try:
                 # Create async connection pool with limited retries and timeout
+                # Reduced pool size for single worker (was max_size=5)
                 pool = AsyncConnectionPool(
                     db_uri,
                     min_size=1,
-                    max_size=5,
+                    max_size=2,  # Reduced from 5 (single worker doesn't need many)
                     timeout=5.0,  # 5 second connection timeout
                     max_idle=300.0,  # 5 minute idle timeout
                     max_lifetime=3600.0,  # 1 hour max connection lifetime
@@ -451,7 +454,44 @@ async def broadcast_logs():
 
 @app.on_event("startup")
 async def startup_log_streaming():
-    """Start background tasks for log streaming"""
+    """Start background tasks for log streaming and compile LangGraph workflows"""
+    # Compile all LangGraph workflows once at startup (singleton pattern)
+    logger.info("🔨 Compiling LangGraph workflows...")
+    try:
+        checkpointer = get_or_create_async_checkpointer()
+
+        # Import all build_workflow functions
+        from app.agents.llamabot.nodes import build_workflow as build_llamabot
+        from app.agents.llamapress.nodes import build_workflow as build_llamapress
+        from app.agents.rails_agent.nodes import build_workflow as build_rails_agent
+
+        # Compile once and cache - these are thread-safe singletons
+        app.state.compiled_graphs = {
+            "llamabot": build_llamabot(checkpointer=checkpointer),
+            "llamapress": build_llamapress(checkpointer=checkpointer),
+            "rails_agent": build_rails_agent(checkpointer=checkpointer),
+        }
+
+        # Optional agents (may not exist in all deployments)
+        try:
+            from app.agents.rails_ai_builder_agent.nodes import build_workflow as build_rails_ai_builder
+            app.state.compiled_graphs["rails_ai_builder_agent"] = build_rails_ai_builder(checkpointer=checkpointer)
+        except ImportError:
+            logger.info("rails_ai_builder_agent not found, skipping")
+
+        try:
+            from app.agents.rails_frontend_starter_agent.nodes import build_workflow as build_rails_frontend
+            app.state.compiled_graphs["rails_frontend_starter_agent"] = build_rails_frontend(checkpointer=checkpointer)
+        except ImportError:
+            logger.info("rails_frontend_starter_agent not found, skipping")
+
+        logger.info(f"✅ Compiled {len(app.state.compiled_graphs)} LangGraph workflows: {list(app.state.compiled_graphs.keys())}")
+    except Exception as e:
+        logger.error(f"❌ Error compiling LangGraph workflows: {e}", exc_info=True)
+        # Don't fail startup - fall back to per-request compilation
+        app.state.compiled_graphs = {}
+
+    # Log streaming disabled for now
     pass
     # asyncio.create_task(tail_docker_logs())
     # asyncio.create_task(broadcast_logs())
@@ -467,21 +507,51 @@ async def threads(username: str = Depends(auth)):
     checkpointer = get_or_create_checkpointer()
     config = {}
     checkpoint_generator = checkpointer.list(config=config)
-    all_checkpoints :list[CheckpointTuple] = list(checkpoint_generator) #convert to list
-    
-    # reduce only to the unique thread_ids  
-    unique_thread_ids = list(set([checkpoint[0]["configurable"]["thread_id"] for checkpoint in all_checkpoints]))
+
+    # ❌ OLD: all_checkpoints = list(checkpoint_generator)  # Loads ALL checkpoints into memory!
+    # ✅ NEW: Stream through generator to extract unique thread_ids without loading all data
+    unique_thread_ids = set()
+    for checkpoint in checkpoint_generator:
+        thread_id = checkpoint[0]["configurable"]["thread_id"]
+        unique_thread_ids.add(thread_id)
+
+    unique_thread_ids = list(unique_thread_ids)
+    logger.info(f"📊 Found {len(unique_thread_ids)} unique threads (memory-efficient extraction)")
+
+    # Optional: Limit threads returned to prevent excessive memory usage
+    MAX_THREADS = 100
+    if len(unique_thread_ids) > MAX_THREADS:
+        logger.warning(f"⚠️ Limiting threads response from {len(unique_thread_ids)} to {MAX_THREADS} threads")
+        unique_thread_ids = unique_thread_ids[:MAX_THREADS]
+
     state_history = []
-    for thread_id in unique_thread_ids:
+
+    # ✅ Use cached graph from startup (singleton pattern)
+    graph = app.state.compiled_graphs.get("llamabot")
+    if not graph:
+        from app.agents.llamabot.nodes import build_workflow
         graph = build_workflow(checkpointer=checkpointer)
+        logger.warning("⚠️ /threads endpoint using fallback graph compilation")
+
+    # Get only the LATEST state for each thread (not full history)
+    for thread_id in unique_thread_ids:
         config = {"configurable": {"thread_id": thread_id}}
-        state_history.append({"thread_id": thread_id, "state": graph.get_state(config=config)}) #graph.get_state returns a StateSnapshot object, which inherits from Named Tuple. Serializes into an Array.
+        state_history.append({"thread_id": thread_id, "state": graph.get_state(config=config)})
+
     return state_history
 
 @app.get("/chat-history/{thread_id}")
 async def chat_history(thread_id: str, username: str = Depends(auth)):
     checkpointer = get_or_create_checkpointer()
-    graph = build_workflow(checkpointer=checkpointer)
+
+    # ✅ Use cached graph from startup (singleton pattern)
+    graph = app.state.compiled_graphs.get("llamabot")
+    if not graph:
+        # Fallback: compile once if not in cache
+        from app.agents.llamabot.nodes import build_workflow
+        graph = build_workflow(checkpointer=checkpointer)
+        logger.warning("⚠️ /chat-history endpoint using fallback graph compilation")
+
     config = {"configurable": {"thread_id": thread_id}}
     state_history = graph.get_state(config=config) #graph.get_state returns a StateSnapshot object, which inherits from a Named Tuple. Serializes into an Array.
     print(state_history)

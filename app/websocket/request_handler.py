@@ -55,6 +55,16 @@ class RequestHandler:
         async with lock:
             try:
                 app, state = self.get_langgraph_app_and_state(message)
+
+                # Message history trimming to prevent unbounded memory growth
+                MAX_MESSAGES = 30  # Keep last 30 messages to prevent memory issues
+                if "messages" in state and len(state["messages"]) > MAX_MESSAGES:
+                    # Preserve system messages + recent messages
+                    system_msgs = [m for m in state["messages"] if hasattr(m, 'type') and m.type == "system"]
+                    recent_msgs = state["messages"][-MAX_MESSAGES:]
+                    state["messages"] = system_msgs + recent_msgs
+                    logger.info(f"🔧 Trimmed message history from {len(state['messages'])} to {len(state['messages'])} messages (prevents memory growth)")
+
                 config = {
                     "configurable": {
                         "thread_id": f"{message.get('thread_id')}",
@@ -313,6 +323,23 @@ class RequestHandler:
     # This method resolves an agent name to a workflow with the checkpointer.
     # Super important for routing to the right agent workflow for websockets requests.
     def get_app_from_workflow_string(self, workflow_string: str):
+        """Get pre-compiled graph from cache (singleton pattern for memory efficiency)"""
+
+        # Extract agent name from workflow_string
+        # e.g., "./app/agents/llamabot/nodes.py:build_workflow" → "llamabot"
+        # or "./agents/rails_agent/nodes.py:build_workflow" → "rails_agent"
+        parts = workflow_string.split('/')
+        # Find the agent name (typically second-to-last component)
+        agent_name = parts[-2] if len(parts) >= 2 else None
+
+        # Try to get from cache first (compiled at startup)
+        if agent_name and hasattr(self.app.state, 'compiled_graphs') and agent_name in self.app.state.compiled_graphs:
+            logger.info(f"✅ Using cached compiled graph for agent: {agent_name}")
+            return self.app.state.compiled_graphs[agent_name]
+
+        # Fallback: compile on-demand (for backward compatibility or new agents)
+        logger.warning(f"⚠️ Compiling graph on-demand for: {agent_name} (not found in cache). Consider adding to startup compilation.")
+
         # Split the path into module path and function name
         module_path, function_name = workflow_string.split(':')
         # Remove './' if present and convert path to module format

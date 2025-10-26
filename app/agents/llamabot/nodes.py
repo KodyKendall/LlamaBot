@@ -29,16 +29,24 @@ tools = []
 
 # System message
 sys_msg = "You are a helpful assistant. Your favorite animal is cyborg llama."
+
+# ====================================================================================
+# SINGLETON LLM INSTANCE - Created once at module load, reused across all requests
+# This eliminates duplicate httpx connection pools and reduces memory usage
+# LangChain chat models are thread-safe and designed for this pattern
+# ====================================================================================
+_llm_instance = ChatOpenAI(model="gpt-4.1")
+
 # Warning: Brittle - None type will break this when it's injected into the state for the tool call, and it silently fails. So if it doesn't map state types properly from the frontend, it will break. (must be exactly what's defined here).
-class LlamaPressState(AgentState): 
+class LlamaPressState(AgentState):
     api_token: str
     agent_prompt: str
 
 # Node
 def leo(state: LlamaPressState):
 #    read_rails_file("app/agents/llamabot/nodes.py") # Testing.
-   llm = ChatOpenAI(model="gpt-4.1")
-   llm_with_tools = llm.bind_tools(tools)
+   # Reuse singleton LLM instance (memory efficient, thread-safe)
+   llm_with_tools = _llm_instance.bind_tools(tools)
 
    custom_prompt_instructions_from_llamapress_dev = state.get("agent_prompt")
    full_sys_msg = SystemMessage(content=f"""{sys_msg} Here are additional instructions provided by the developer: <DEVELOPER_INSTRUCTIONS> {custom_prompt_instructions_from_llamapress_dev} </DEVELOPER_INSTRUCTIONS>""")
