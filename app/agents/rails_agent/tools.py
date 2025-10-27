@@ -46,14 +46,6 @@ GIT_HTML_OUTPUT_PATH = APP_DIR / 'agents' / 'rails_agent' / 'page.html'
 def write_todos(
     todos: list[Todo], tool_call_id: Annotated[str, InjectedToolCallId]
 ) -> Command:
-    
-    env = Environment(loader=FileSystemLoader(APP_DIR / 'agents' / 'rails_agent' / 'templates'))
-    template = env.get_template("todo.html.j2")
-
-    html = template.render(todos=todos)
-
-    with open(HTML_OUTPUT_PATH, "w", encoding='utf-8') as f:
-        f.write(html)
 
     return Command(
         update={
