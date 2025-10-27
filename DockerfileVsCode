@@ -13,6 +13,9 @@ RUN apt-get update && apt-get install -y \
 # Configure default user settings directory
 ENV HOME=/config
 
+# inside your llamabot-vscode image build
+RUN usermod -u 1000 abc && groupmod -g 1000 abc
+
 # Pre-create necessary directories
 RUN mkdir -p /config/.local/share/code-server/extensions && \
     mkdir -p /config/data/User
@@ -34,7 +37,17 @@ RUN echo '{\n\
 RUN git config --system credential.helper store && \
     git config --system --add safe.directory '*'
 
-# docker buildx build --file DockerfileVsCode --platform linux/amd64,linux/arm64 --tag kody06/llamabot-vscode:latest --push .
+RUN echo '\
+if [ -t 1 ]; then \
+  if ! ssh -q Leonardo exit 2>/dev/null; then \
+    echo "⚠️  SSH connection to 'Leonardo' failed." \
+         "To set it up, run:" \
+         "bash bin/install/setup-ssh-for-vscode-container.sh"; \
+  fi; \
+fi' > /etc/profile.d/check_ssh.sh
+
+
+# docker buildx build --file DockerfileVsCode --platform linux/amd64,linux/arm64 --tag kody06/llamabot-vscode:0.2.0 --push .
 # TODO: set up VS Code SSH:
     # Dockerfile for VSCode container with Leonardo SSH auto-setup
 # Base image: linuxserver/code-server or your preferred VSCode image
