@@ -208,7 +208,7 @@ class ChatApp {
     const input = document.getElementById('messageInput');
     let message = input.value.trim();
     const agentMode = document.getElementById('agentModeSelect')?.value;
-    const llmModel = document.getElementById('modelSelect')?.value;
+    const llmModel = document.getElementById('modelSelect')?.value || 'claude-4.5-haiku';
 
     if (!message || !this.webSocketManager) return;
 
