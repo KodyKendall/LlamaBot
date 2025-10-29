@@ -117,7 +117,34 @@ export class MessageRenderer {
     messageDiv.className = 'message error-message';
     messageDiv.textContent = content;
     this.insertMessage(messageDiv);
+
+    // Stop the thinking indicator when an error occurs
+    this.stopThinking();
+
     return messageDiv;
+  }
+
+  /**
+   * Stop the thinking indicator and restore input state
+   */
+  stopThinking() {
+    // Stop cycling verbs
+    if (this.loadingVerbs) {
+      this.loadingVerbs.stopCycling();
+    }
+
+    // Hide thinking area in input area
+    const thinkingArea = document.getElementById('thinkingArea');
+    if (thinkingArea) {
+      thinkingArea.classList.add('hidden');
+      thinkingArea.innerHTML = '';
+    }
+
+    // Restore original placeholder text
+    const messageInput = document.getElementById('messageInput');
+    if (messageInput) {
+      messageInput.placeholder = 'Ask Leonardo...';
+    }
   }
 
   /**
@@ -137,23 +164,8 @@ export class MessageRenderer {
   handleEndMessage() {
     console.log('end of stream');
 
-    // Stop cycling verbs
-    if (this.loadingVerbs) {
-      this.loadingVerbs.stopCycling();
-    }
-
-    // Hide thinking area in input area
-    const thinkingArea = document.getElementById('thinkingArea');
-    if (thinkingArea) {
-      thinkingArea.classList.add('hidden');
-      thinkingArea.innerHTML = '';
-    }
-
-    // Restore original placeholder text
-    const messageInput = document.getElementById('messageInput');
-    if (messageInput) {
-      messageInput.placeholder = 'Ask Leonardo...';
-    }
+    // Stop the thinking indicator
+    this.stopThinking();
 
     // Play task completed sound
     const taskCompletedSound = document.getElementById('taskCompletedSound');
