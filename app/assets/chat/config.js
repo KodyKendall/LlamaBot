@@ -14,7 +14,8 @@ export const CONFIG = {
   AGENT_MODES: {
     prototype: 'rails_frontend_starter_agent',
     engineer: 'rails_agent',
-    ai_builder: 'rails_ai_builder_agent'
+    ai_builder: 'rails_ai_builder_agent',
+    testing: 'rails_testing_agent'
   },
 
   // Streaming configuration
