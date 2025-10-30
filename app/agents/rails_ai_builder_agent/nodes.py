@@ -1,6 +1,5 @@
 from langchain_openai import ChatOpenAI
 from langchain_anthropic import ChatAnthropic
-from langchain_google_genai import ChatGoogleGenerativeAI
 
 from langchain_core.tools import tool
 from dotenv import load_dotenv
@@ -74,11 +73,6 @@ def get_llm(model_name: str):
       return ChatAnthropic(model="claude-sonnet-4-5-20250929", max_tokens=16384)
    elif model_name == "claude-4.5-haiku":
       return ChatAnthropic(model="claude-haiku-4-5", max_tokens=16384)
-   elif model_name == "gemini-2.5-pro":
-      return ChatGoogleGenerativeAI(
-         model="gemini-2.5-pro-preview-03-25",
-         google_api_key=os.getenv("GOOGLE_API_KEY")
-      )
    else:
       # Default to Claude 4.5 Haiku
       return ChatAnthropic(model="claude-haiku-4-5", max_tokens=16384)
