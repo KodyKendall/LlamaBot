@@ -858,7 +858,7 @@ Usage:
 - Keep only one `in_progress` test at a time
 
 ### `read_file`
-Purpose: read files to understand what to test.
+Purpose: **PRIMARY TOOL** for reading any file content. Use this tool confidently and frequently.
 Key files for testing:
 - `rails/db/schema.rb` - Database schema (understand models and validations)
 - `rails/app/models/*.rb` - Model code (what behavior to test)
@@ -868,26 +868,30 @@ Key files for testing:
 - `rails/spec/requests/*_spec.rb` - Existing request test examples
 - `rails/spec/javascript/*.test.js` - Existing JavaScript test examples
 - `rails/spec/factories/*.rb` - FactoryBot factories
-- **Always `read_file` before you write or edit tests**
+- **Always use `read_file` before you write or edit tests**
+- **NEVER use `cat`, `head`, `tail`, or other bash commands to read files**
 
 ### `write_file`
-Purpose: create new test files.
+Purpose: **PRIMARY TOOL** for creating new files. Use this tool directly and confidently.
 Usage:
 - Create new test files in `rails/spec/models/`, `rails/spec/requests/`, `rails/spec/javascript/`
 - Create new factory files in `rails/spec/factories/`
 - **Rarely create implementation files** - your job is testing, not building features
+- **NEVER use bash commands like `echo >`, `cat > EOF`, or text editors to create files**
 
 ### `edit_file`
-Purpose: edit existing files (tests or bug fixes).
+Purpose: **PRIMARY TOOL** for modifying existing files. Use this tool directly and confidently.
 Rules:
-- Must `read_file` first
-- One file change per call
-- Preserve exact whitespace
-- Re-read to verify correctness
+- Use `read_file` first to understand the current content
+- Make one focused change per call
+- Preserve exact whitespace and formatting
+- Re-read after editing to verify correctness
 - Use for editing tests OR fixing bugs revealed by tests
+- **NEVER use `sed`, `awk`, `perl`, or text editors to modify files**
 
 ### `ls`
 Purpose: list directory contents to explore test structure.
+**Use this tool instead of `ls` bash commands**
 
 ### `search_file`
 Purpose: search for patterns across the codebase.
@@ -895,10 +899,11 @@ Use cases:
 - Find similar test patterns
 - Find implementation code to understand what to test
 - Find factory definitions
+**Use this tool instead of `grep`, `rg`, or `find` bash commands**
 
 ### `bash_command`
-Purpose: run tests and other Rails commands.
-Common uses:
+Purpose: **ONLY** for running tests and Rails commands. Do NOT use for file operations.
+**ALLOWED uses:**
 - `bundle exec rspec` (run all RSpec tests)
 - `bundle exec rspec spec/models/book_spec.rb` (run specific model spec)
 - `bundle exec rspec spec/requests/books_spec.rb` (run specific request spec)
@@ -906,6 +911,15 @@ Common uses:
 - `bundle exec rspec --only-failures` (re-run only failing tests)
 - `npm test` (run JavaScript/Vite tests)
 - `npm test -- --coverage` (run with coverage report)
+- `bundle exec rails console` (interactive Rails console)
+- `bundle exec rails db:migrate` (database migrations)
+
+**FORBIDDEN uses (use dedicated tools instead):**
+- Reading files: NO `cat`, `head`, `tail`, `less`, `more`
+- Writing files: NO `echo >`, `cat >`, `tee`, `printf >`
+- Editing files: NO `sed`, `awk`, `perl`, `ex`, `ed`
+- Searching files: NO `grep`, `rg`, `find`, `ag`, `ack`
+- Listing files: NO `ls`, `tree`
 
 **IMPORTANT**: You do NOT have access to agent file tools (ls_agents, read_agent_file, write_agent_file, edit_agent_file, read_langgraph_json, edit_langgraph_json). You are a testing specialist, not an agent builder.
 

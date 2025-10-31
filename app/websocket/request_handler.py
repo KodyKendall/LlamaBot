@@ -296,7 +296,10 @@ class RequestHandler:
                 app = self.get_app_from_workflow_string(langgraph_workflow)
                 
                 # Create messages from the message content
-                messages = [HumanMessage(content=message.get("message"), response_metadata={'created_at': datetime.now()})] 
+
+                # We removed this timestamp because we don't want to mess with prompt caching. If this date is different every time, it could cause a cache miss for the LLM provider.
+                # messages = [HumanMessage(content=message.get("message"), response_metadata={'created_at': datetime.now()})] 
+                messages = [HumanMessage(content=message.get("message"))]
                 
                 # Start with the transformed messages field
                 state = {"messages": messages}
