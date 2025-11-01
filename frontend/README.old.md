@@ -1,1 +1,0 @@
-this is a simple single page React application, of a recreation of the chat.html window.
