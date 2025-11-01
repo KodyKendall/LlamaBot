@@ -15,4 +15,10 @@
 
     0.2.19d: 
     - Implement prompt caching for all agents, refactor + clean up nodes.py for all rails agents to simplify.
+
+    0.2.19e: 
+    - Implement clipboard allow on vscode iframe for easy copy/paste in terminal commands
     
+    0.2.19f: 
+    
+    - Add ephemeral Capybara/Cuprite browser tool for Leonardo to debug JavaScript & HTML loading issues with a chromium browser.

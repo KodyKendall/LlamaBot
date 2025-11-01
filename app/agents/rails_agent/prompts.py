@@ -172,6 +172,153 @@ Usage:
 - Use when facts may be wrong/outdated in memory (versions, APIs, gem options).
 - Summarize findings and record key URLs; link in `final_report.md` only if they help operators/users.
 
+## How to self-verify your work using the browser_debug tool
+
+Use the bash_command tool to execute the following runner: spec/run_capybara.rb '<capybara_ruby_code>'
+
+This executes Ruby/Capybara code in a headless Chrome browser session to debug frontend JavaScript issues, test UI interactions, and capture console logs and errors. Also useful for debugging Rails errors since the full HTML error page is captured.
+
+Execute Capybara Ruby code in a headless Chrome browser to debug frontend JavaScript, test user interactions, capture runtime errors, console output, **and see Rails server errors through the HTML response**.
+
+### What browser_debug captures:
+- ✅ **JavaScript console output** (console.log, warn, error)
+- ✅ **Frontend JavaScript errors** (with stack traces)
+- ✅ **Unhandled promise rejections**
+- ✅ **Full HTML responses** (including Rails error pages with backtraces)
+- ✅ **Page state** (URL, title, DOM content via session.html)
+- ❌ Rails server logs directly (but extract them from error pages—see below)
+
+### Debugging Rails errors:
+When a 500 error occurs, the full HTML error page is captured. Extract the Rails error message:
+
+```ruby
+# After session.visit() returns an error state
+html_content = session.html
+start_idx = html_content.index("<pre><code>")
+if start_idx
+  end_idx = html_content.index("</code></pre>", start_idx)
+  error_msg = html_content[start_idx+11..end_idx-1]
+  puts error_msg
+end
+Or check the page title for quick identification:
+
+session.title  # "Action Controller: Exception caught" = Rails error
+
+Tool Description:
+Execute Ruby/Capybara code in a headless Chrome browser session to debug frontend JavaScript issues, test UI interactions, and capture console logs and errors.
+Tool Prompt/Documentation:
+# browser_debug - Interactive Browser Debugging Tool
+
+Execute Capybara Ruby code in a headless Chrome browser to debug frontend JavaScript, test user interactions, and capture runtime errors and console output.
+
+### Usage of browser_debug tool
+
+```bash
+rails runner spec/run_capybara.rb '<capybara_ruby_code>'
+```
+
+Returns
+JSON output with structure:
+{
+  "ok": true|false,
+  "result": <return_value_of_code>,
+  "state": {
+    "url": "current page URL",
+    "title": "page title",
+    "logs": [{"level": "log|info|warn|error", "text": "message", "ts": 1234567890}],
+    "errors": [{"type": "error|unhandledrejection", "message": "...", "source": "file.js", "line": 42, "ts": 1234567890}]
+  },
+  "error": {  // only if ok=false
+    "klass": "ErrorClassName",
+    "message": "error message",
+    "backtrace": ["line1", "line2"]
+  }
+}
+###   Available Capybara Commands
+The session variable is available in your code. Use it to control the browser:
+```ruby
+Navigation
+session.visit(url) - Navigate to a URL
+session.go_back - Browser back button
+session.go_forward - Browser forward button
+session.refresh - Reload page
+Interaction
+session.click_link("Link Text") - Click a link
+session.click_button("Button Text") - Click a button
+session.fill_in("Field Label", with: "value") - Fill in a form field
+session.check("Checkbox Label") - Check a checkbox
+session.uncheck("Checkbox Label") - Uncheck a checkbox
+session.choose("Radio Label") - Select a radio button
+session.select("Option", from: "Select Label") - Select from dropdown
+session.attach_file("File Field", "/path/to/file") - Upload a file
+Querying
+session.has_content?("text") - Check if text exists on page
+session.has_selector?(".css-class") - Check if CSS selector exists
+session.has_text?("exact text") - Check for exact text match
+session.find(".selector") - Find element by CSS selector
+session.all(".selector") - Find all matching elements
+JavaScript Execution
+session.evaluate_script("javascript code") - Execute JS and return result
+session.execute_script("javascript code") - Execute JS without return value
+session.evaluate_async_script("js with callback") - Execute async JS
+Inspection
+session.current_url - Get current URL
+session.current_path - Get current path
+session.title - Get page title
+session.html - Get page HTML source
+session.save_screenshot("/tmp/debug.png") - Capture screenshot
+```
+
+### Examples of using the browser_debug tool
+```ruby
+Example 1: Visit page and check for errors
+bin/rails runner spec/run_capybara.rb 'session.visit("http://localhost:3000/dashboard")'
+Returns all console logs and JavaScript errors that occurred during page load.
+Example 2: Test form submission
+bin/rails runner spec/run_capybara.rb '
+  session.visit("http://localhost:3000/users/new");
+  session.fill_in("Email", with: "test@example.com");
+  session.fill_in("Password", with: "password123");
+  session.click_button("Sign Up");
+  session.has_text?("Welcome")
+'
+Returns true/false for the presence of "Welcome" text, plus all console logs and errors.
+Example 3: Debug JavaScript state
+bin/rails runner spec/run_capybara.rb '
+  session.visit("http://localhost:3000/products");
+  session.evaluate_script("window.appState")
+'
+Returns the value of window.appState plus all console output.
+Example 4: Trigger event and check console
+bin/rails runner spec/run_capybara.rb '
+  session.visit("http://localhost:3000");
+  session.find("#special-button").click;
+  session.evaluate_script("window.__agent__.logs")
+'
+Returns all console logs captured during the interaction.
+Example 5: Wait for dynamic content
+bin/rails runner spec/run_capybara.rb '
+  session.visit("http://localhost:3000/async-page");
+  session.has_selector?(".loaded-content", wait: 5);
+  session.evaluate_script("document.querySelector(\".loaded-content\").innerText")
+'
+Waits up to 5 seconds for content to load, then returns its text.
+When to Use This Tool
+Use browser_debug when you need to:
+Debug JavaScript errors - See runtime errors with stack traces
+Capture console output - View all console.log/warn/error messages
+Test user interactions - Click buttons, fill forms, navigate pages
+Verify dynamic content - Check AJAX-loaded or JavaScript-rendered content
+Inspect page state - Query DOM, check element attributes, read JavaScript variables
+Reproduce user-reported bugs - Simulate exact user actions and see what happens
+Test frontend features - Verify behavior without manual browser testing
+Important Notes
+The browser runs in headless mode (no GUI)
+All console output is captured automatically via CDP (Chrome DevTools Protocol)
+JavaScript errors and unhandled promise rejections are caught and returned
+Each invocation creates a fresh browser session
+The session is cleaned up after the command completes
+Use wait: N options on queries when dealing with async content
 
 ---
 
