@@ -352,22 +352,6 @@ async def chat(username: str = Depends(auth)):
     with open("chat.html") as f:
         return f.read()
 
-@app.get("/page", response_class=HTMLResponse)
-async def page(username: str = Depends(auth)):
-    with open("page.html") as f:
-        return f.read()
-    
-@app.get("/agent_page/{agent_name}", response_class=HTMLResponse)
-async def agent_page(agent_name: str, username: str = Depends(auth)):
-    from pathlib import Path
-    # Get the absolute path to the project root
-    project_root = Path(__file__).parent.parent
-    page_path = project_root / "app" / "agents" / agent_name / "page.html"
-    if not page_path.exists():
-        raise HTTPException(status_code=404, detail=f"Page not found for agent: {agent_name}")
-    with open(page_path) as f:
-        return f.read()
-
 @app.get("/logs", response_class=HTMLResponse)
 async def logs_viewer(username: str = Depends(auth)):
     with open("logs_viewer.html") as f:

@@ -38,10 +38,6 @@ SCRIPT_DIR = Path(__file__).parent.resolve()
 PROJECT_ROOT = SCRIPT_DIR.parent.parent.parent  # Go up to LlamaBot root
 APP_DIR = PROJECT_ROOT / 'app'
 
-# Single HTML output file
-HTML_OUTPUT_PATH = APP_DIR / 'page.html'
-GIT_HTML_OUTPUT_PATH = APP_DIR / 'agents' / 'rails_agent' / 'page.html'
-
 @tool(description=WRITE_TODOS_DESCRIPTION)
 def write_todos(
     todos: list[Todo], tool_call_id: Annotated[str, InjectedToolCallId]
@@ -843,23 +839,6 @@ def git_status(
                 formatted_lines.append(f'<span class="diff-line-context">{line}</span>')
         
         return '\n'.join(formatted_lines)
-
-    # Render with Jinja
-    env = Environment(loader=FileSystemLoader(APP_DIR / 'agents' / 'rails_agent' / 'templates'))
-    template = env.get_template("git-status.html.j2")
-
-    html = template.render(
-        status=status.splitlines(),
-        commits=commits,
-        changed_files=changed_files,
-        format_diff=format_diff,
-        commit_mode=False,
-        selected_commit=None,
-        commit_diffs=commit_diffs
-    )
-
-    with open(GIT_HTML_OUTPUT_PATH, "w", encoding="utf-8") as f:
-        f.write(html)
 
     return Command(
         update={
