@@ -60,8 +60,8 @@ app.add_middleware(
 )
 
 # Mount static directories
-assets_dir = Path(__file__).parent / "assets"
-app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+frontend_dir = Path(__file__).parent / "frontend"
+app.mount("/frontend", StaticFiles(directory=str(frontend_dir)), name="frontend")
 
 # This is responsible for holding and managing all active websocket connections.
 manager = WebSocketConnectionManager(app) 
@@ -201,7 +201,7 @@ MAX_QUEUE_SIZE = 10
 @app.get("/", response_class=HTMLResponse)
 async def root(username: str = Depends(auth)):
     # Serve the chat.html file
-    with open("chat.html") as f:
+    with open(frontend_dir / "chat.html") as f:
         return f.read()
     
 @app.get("/hello", response_class=JSONResponse)
@@ -276,7 +276,7 @@ async def startup_log_streaming():
         # Import all build_workflow functions
         from app.agents.llamabot.nodes import build_workflow as build_llamabot
         from app.agents.llamapress.nodes import build_workflow as build_llamapress
-        from app.agents.rails_agent.nodes import build_workflow as build_rails_agent
+        from app.agents.leonardo.rails_agent.nodes import build_workflow as build_rails_agent
 
         # Compile once and cache - these are thread-safe singletons
         app.state.compiled_graphs = {
@@ -287,13 +287,13 @@ async def startup_log_streaming():
 
         # Optional agents (may not exist in all deployments)
         try:
-            from app.agents.rails_ai_builder_agent.nodes import build_workflow as build_rails_ai_builder
+            from app.agents.leonardo.rails_ai_builder_agent.nodes import build_workflow as build_rails_ai_builder
             app.state.compiled_graphs["rails_ai_builder_agent"] = build_rails_ai_builder(checkpointer=checkpointer)
         except ImportError:
             logger.info("rails_ai_builder_agent not found, skipping")
 
         try:
-            from app.agents.rails_frontend_starter_agent.nodes import build_workflow as build_rails_frontend
+            from app.agents.leonardo.rails_frontend_starter_agent.nodes import build_workflow as build_rails_frontend
             app.state.compiled_graphs["rails_frontend_starter_agent"] = build_rails_frontend(checkpointer=checkpointer)
         except ImportError:
             logger.info("rails_frontend_starter_agent not found, skipping")

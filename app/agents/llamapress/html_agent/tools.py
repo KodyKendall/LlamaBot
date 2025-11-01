@@ -7,7 +7,7 @@ from tavily import TavilyClient
 import os
 from bs4 import BeautifulSoup
 
-from app.agents.rails_agent.prompts import (
+from app.agents.leonardo.rails_agent.prompts import (
     WRITE_TODOS_DESCRIPTION,
     EDIT_DESCRIPTION,
     TOOL_DESCRIPTION,
@@ -22,7 +22,7 @@ from app.agents.rails_agent.prompts import (
     GITHUB_CLI_DESCRIPTION,
 )
 
-from app.agents.rails_agent.state import Todo, RailsAgentState
+from app.agents.leonardo.rails_agent.state import Todo, RailsAgentState
 
 from pathlib import Path
 import subprocess

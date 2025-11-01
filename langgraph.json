@@ -1,11 +1,11 @@
 {
     "dependencies": ["."],
     "graphs": {
-      "llamabot": "./app/agents/llamabot/nodes.py:build_workflow",
-      "llamapress": "./app/agents/llamapress/nodes.py:build_workflow",
-      "rails_agent": "./app/agents/rails_agent/nodes.py:build_workflow",
-      "rails_ai_builder_agent": "./agents/rails_ai_builder_agent/nodes.py:build_workflow",
-      "rails_frontend_starter_agent": "./agents/rails_frontend_starter_agent/nodes.py:build_workflow",
-      "rails_testing_agent": "./agents/rails_testing_agent/nodes.py:build_workflow"
+      "llamabot": "./agents/llamabot/nodes.py:build_workflow",
+      "llamapress": "./agents/llamapress/nodes.py:build_workflow",
+      "rails_agent": "./agents/leonardo/rails_agent/nodes.py:build_workflow",
+      "rails_frontend_starter_agent": "./agents/leonardo/rails_frontend_starter_agent/nodes.py:build_workflow",
+      "rails_ai_builder_agent": "./agents/leonardo/rails_ai_builder_agent/nodes.py:build_workflow",
+      "rails_testing_agent": "./agents/leonardo/rails_testing_agent/nodes.py:build_workflow"
     }
   }

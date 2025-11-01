@@ -7,7 +7,7 @@ from tavily import TavilyClient
 import os
 from bs4 import BeautifulSoup
 
-from app.agents.rails_agent.prompts import (
+from app.agents.leonardo.rails_agent.prompts import (
     WRITE_TODOS_DESCRIPTION,
     EDIT_DESCRIPTION,
     TOOL_DESCRIPTION,
@@ -22,7 +22,7 @@ from app.agents.rails_agent.prompts import (
     GITHUB_CLI_DESCRIPTION,
 )
 
-from app.agents.rails_agent.state import Todo, RailsAgentState
+from app.agents.leonardo.rails_agent.state import Todo, RailsAgentState
 
 from pathlib import Path
 import subprocess
@@ -35,25 +35,13 @@ from jinja2 import Environment, FileSystemLoader
 
 # Define base paths relative to project root
 SCRIPT_DIR = Path(__file__).parent.resolve()
-PROJECT_ROOT = SCRIPT_DIR.parent.parent.parent  # Go up to LlamaBot root
+PROJECT_ROOT = SCRIPT_DIR.parent.parent.parent.parent  # Go up to LlamaBot root
 APP_DIR = PROJECT_ROOT / 'app'
-
-# Single HTML output file
-HTML_OUTPUT_PATH = APP_DIR / 'page.html'
-GIT_HTML_OUTPUT_PATH = APP_DIR / 'agents' / 'rails_agent' / 'page.html'
 
 @tool(description=WRITE_TODOS_DESCRIPTION)
 def write_todos(
     todos: list[Todo], tool_call_id: Annotated[str, InjectedToolCallId]
 ) -> Command:
-    
-    env = Environment(loader=FileSystemLoader(APP_DIR / 'agents' / 'rails_agent' / 'templates'))
-    template = env.get_template("todo.html.j2")
-
-    html = template.render(todos=todos)
-
-    with open(HTML_OUTPUT_PATH, "w", encoding='utf-8') as f:
-        f.write(html)
 
     return Command(
         update={
@@ -398,7 +386,6 @@ def edit_file(
     return Command(
         update={
             "messages": [ToolMessage(result_msg, artifact=tool_output, tool_call_id=tool_call_id)],
-            "failed_tool_calls_count": -state.get("failed_tool_calls_count", 0)  # This will be added to the existing count due to operator.add reducer
         }
     )
 
@@ -853,23 +840,6 @@ def git_status(
         
         return '\n'.join(formatted_lines)
 
-    # Render with Jinja
-    env = Environment(loader=FileSystemLoader(APP_DIR / 'agents' / 'rails_agent' / 'templates'))
-    template = env.get_template("git-status.html.j2")
-
-    html = template.render(
-        status=status.splitlines(),
-        commits=commits,
-        changed_files=changed_files,
-        format_diff=format_diff,
-        commit_mode=False,
-        selected_commit=None,
-        commit_diffs=commit_diffs
-    )
-
-    with open(GIT_HTML_OUTPUT_PATH, "w", encoding="utf-8") as f:
-        f.write(html)
-
     return Command(
         update={
             "messages": [
@@ -962,4 +932,412 @@ def view_page(state: Annotated[RailsAgentState, InjectedState], tool_call_id: An
         update={
             "messages": [ToolMessage(debug_info, tool_call_id=tool_call_id)],
     }
+    )
+
+# ============================================================================
+# AGENT FILE TOOLS - For creating/editing LangGraph agents in user_agents/
+# ============================================================================
+
+@tool(description="""List all custom agents in the user_agents directory.
+Returns a list of agent names (directory names) found in /app/app/user_agents/.
+This helps you see what custom agents have been created.""")
+def ls_agents() -> str:
+    """List all custom agents in the user_agents directory."""
+    user_agents_dir = APP_DIR / "user_agents"
+
+    if not user_agents_dir.exists():
+        return "Error: user_agents directory not found"
+
+    try:
+        # Get all directories (agents) in user_agents/
+        agents = [d.name for d in user_agents_dir.iterdir() if d.is_dir() and not d.name.startswith('.')]
+
+        if not agents:
+            return "No custom agents found in user_agents directory"
+
+        return f"Custom agents found:\n" + "\n".join(f"  - {agent}" for agent in sorted(agents))
+    except Exception as e:
+        return f"Error listing agents: {e}"
+
+@tool(description="""Read a custom agent's nodes.py file.
+Usage:
+- agent_name: The name of the agent to read (e.g., 'leo', 'student')
+Returns the contents of /app/app/user_agents/{agent_name}/nodes.py with line numbers.""")
+def read_agent_file(
+    agent_name: str,
+    state: Annotated[RailsAgentState, InjectedState],
+) -> str:
+    """Read a custom agent's nodes.py file."""
+    # Construct the full path
+    full_path = APP_DIR / "user_agents" / agent_name / "nodes.py"
+
+    # Check if file exists
+    if not full_path.exists():
+        return f"Error: Agent file not found at user_agents/{agent_name}/nodes.py"
+
+    # Read the file contents
+    try:
+        content = full_path.read_text()
+    except Exception as e:
+        return f"Error reading agent file: {e}"
+
+    # Handle empty file
+    if not content or content.strip() == "":
+        return "System reminder: File exists but has empty contents"
+
+    # Split content into lines
+    lines = content.splitlines()
+
+    # Format output with line numbers (cat -n format)
+    result_lines = []
+    for i, line_content in enumerate(lines):
+        # Truncate lines longer than 2000 characters
+        if len(line_content) > 2000:
+            line_content = line_content[:2000]
+
+        # Line numbers start at 1
+        line_number = i + 1
+        result_lines.append(f"{line_number:6d}\t{line_content}")
+
+    return "\n".join(result_lines)
+
+@tool(description="""Create or overwrite a custom agent's nodes.py file.
+Usage:
+- agent_name: The name of the agent (e.g., 'leo', 'student'). This will create user_agents/{agent_name}/nodes.py
+- file_content: The complete Python code for the agent's nodes.py file. Must include build_workflow() function.
+This tool will create the agent directory if it doesn't exist.""")
+def write_agent_file(
+    agent_name: str,
+    file_content: str,
+    state: Annotated[RailsAgentState, InjectedState],
+    tool_call_id: Annotated[str, InjectedToolCallId],
+) -> Command:
+    """Create or overwrite a custom agent's nodes.py file."""
+    # Construct the full path
+    agent_dir = APP_DIR / "user_agents" / agent_name
+    full_path = agent_dir / "nodes.py"
+
+    try:
+        # Create agent directory if it doesn't exist
+        agent_dir.mkdir(parents=True, exist_ok=True)
+
+        # Basic Python syntax validation
+        try:
+            compile(file_content, f"user_agents/{agent_name}/nodes.py", 'exec')
+        except SyntaxError as e:
+            error_message = f"Python syntax error in agent file: {e}"
+            tool_output = {
+                "status": "error",
+                "message": error_message
+            }
+            return Command(
+                update={
+                    "messages": [
+                        ToolMessage(
+                            error_message,
+                            artifact=tool_output,
+                            tool_call_id=tool_call_id,
+                        )
+                    ]
+                }
+            )
+
+        # Write the file
+        full_path.write_text(file_content)
+
+    except Exception as e:
+        error_message = f"Error writing agent file {agent_name}/nodes.py: {e}"
+        tool_output = {
+            "status": "error",
+            "message": error_message
+        }
+        return Command(
+            update={
+                "messages": [
+                    ToolMessage(
+                        error_message,
+                        artifact=tool_output,
+                        tool_call_id=tool_call_id,
+                    )
+                ]
+            }
+        )
+
+    success_message = f"Created/updated agent file user_agents/{agent_name}/nodes.py"
+    tool_output = {
+        "status": "success",
+        "message": success_message
+    }
+
+    return Command(
+        update={
+            "messages": [
+                ToolMessage(success_message, artifact=tool_output, tool_call_id=tool_call_id)
+            ],
+        }
+    )
+
+@tool(description="""Edit a custom agent's nodes.py file by replacing text.
+Usage:
+- agent_name: The name of the agent to edit (e.g., 'leo', 'student')
+- old_string: The exact text to find and replace
+- new_string: The text to replace it with
+- replace_all: If True, replace all occurrences. If False (default), only replace first occurrence and error if not unique.
+The old_string must exist in the file or this will fail.""")
+def edit_agent_file(
+    agent_name: str,
+    old_string: str,
+    new_string: str,
+    state: Annotated[RailsAgentState, InjectedState],
+    tool_call_id: Annotated[str, InjectedToolCallId],
+    replace_all: bool = False,
+) -> Command:
+    """Edit a custom agent's nodes.py file by replacing text."""
+    full_path = APP_DIR / "user_agents" / agent_name / "nodes.py"
+
+    if not full_path.exists():
+        error_message = f"Error: Agent file not found at user_agents/{agent_name}/nodes.py"
+        tool_output = {
+            "status": "error",
+            "message": error_message
+        }
+
+        return Command(
+            update={
+                "messages": [ToolMessage(error_message, artifact=tool_output, tool_call_id=tool_call_id)]
+            }
+        )
+
+    try:
+        original_content = full_path.read_text()
+    except Exception as e:
+        error_message = f"Error reading agent file: {e}"
+        tool_output = {
+            "status": "error",
+            "message": error_message
+        }
+        return Command(
+            update={
+                "messages": [ToolMessage(error_message, artifact=tool_output, tool_call_id=tool_call_id)]
+            }
+        )
+
+    # Check if old_string exists
+    if old_string not in original_content:
+        # Try with normalized whitespace
+        if normalize_whitespace(old_string) not in normalize_whitespace(original_content):
+            error_message = f"Error: Could not find the specified text in user_agents/{agent_name}/nodes.py"
+            tool_output = {
+                "status": "error",
+                "message": error_message
+            }
+            return Command(
+                update={
+                    "messages": [ToolMessage(error_message, artifact=tool_output, tool_call_id=tool_call_id)]
+                }
+            )
+        # If normalized version matches, use it
+        normalized_content = normalize_whitespace(original_content)
+        normalized_old = normalize_whitespace(old_string)
+        normalized_new = normalize_whitespace(new_string)
+        new_content = normalized_content.replace(normalized_old, normalized_new, 1 if not replace_all else -1)
+    else:
+        # Check if old_string is unique (only if not replace_all)
+        if not replace_all and original_content.count(old_string) > 1:
+            error_message = f"Error: The text to replace appears {original_content.count(old_string)} times in the file. Please provide a more specific string or use replace_all=True"
+            tool_output = {
+                "status": "error",
+                "message": error_message
+            }
+            return Command(
+                update={
+                    "messages": [ToolMessage(error_message, artifact=tool_output, tool_call_id=tool_call_id)]
+                }
+            )
+
+        # Perform the replacement
+        if replace_all:
+            new_content = original_content.replace(old_string, new_string)
+        else:
+            new_content = original_content.replace(old_string, new_string, 1)
+
+    # Basic Python syntax validation
+    try:
+        compile(new_content, f"user_agents/{agent_name}/nodes.py", 'exec')
+    except SyntaxError as e:
+        error_message = f"Edit would create Python syntax error: {e}"
+        tool_output = {
+            "status": "error",
+            "message": error_message
+        }
+        return Command(
+            update={
+                "messages": [
+                    ToolMessage(
+                        error_message,
+                        artifact=tool_output,
+                        tool_call_id=tool_call_id,
+                    )
+                ]
+            }
+        )
+
+    # Write the new content
+    try:
+        full_path.write_text(new_content)
+    except Exception as e:
+        error_message = f"Error writing agent file: {e}"
+        tool_output = {
+            "status": "error",
+            "message": error_message
+        }
+        return Command(
+            update={
+                "messages": [ToolMessage(error_message, artifact=tool_output, tool_call_id=tool_call_id)]
+            }
+        )
+
+    # Generate a simple diff for the user
+    old_lines = original_content.splitlines()
+    new_lines = new_content.splitlines()
+    diff = list(difflib.unified_diff(old_lines, new_lines, lineterm='', fromfile='before', tofile='after'))
+    diff_output = '\n'.join(diff[:50])  # Limit diff output
+
+    success_message = f"Successfully edited user_agents/{agent_name}/nodes.py"
+    if diff:
+        success_message += f"\n\nDiff preview:\n{diff_output}"
+
+    tool_output = {
+        "status": "success",
+        "message": success_message
+    }
+
+    return Command(
+        update={
+            "messages": [ToolMessage(success_message, artifact=tool_output, tool_call_id=tool_call_id)]
+        }
+    )
+
+@tool(description="""Read the langgraph.json configuration file.
+Returns the contents of /app/app/langgraph.json which registers all agents (built-in and custom).
+This file maps agent names to their workflow build functions.""")
+def read_langgraph_json(
+    state: Annotated[RailsAgentState, InjectedState],
+) -> str:
+    """Read the langgraph.json configuration file."""
+    full_path = APP_DIR / "langgraph.json"
+
+    if not full_path.exists():
+        return "Error: langgraph.json not found at /app/app/langgraph.json"
+
+    try:
+        content = full_path.read_text()
+        return f"Contents of langgraph.json:\n\n{content}"
+    except Exception as e:
+        return f"Error reading langgraph.json: {e}"
+
+@tool(description="""Edit the langgraph.json configuration file to register agents.
+Usage:
+- old_string: The exact JSON text to find and replace
+- new_string: The JSON text to replace it with
+This is typically used to add new agent entries to the "graphs" object.
+Example: To add a new agent, replace the graphs object with an updated version that includes your new agent.""")
+def edit_langgraph_json(
+    old_string: str,
+    new_string: str,
+    state: Annotated[RailsAgentState, InjectedState],
+    tool_call_id: Annotated[str, InjectedToolCallId],
+) -> Command:
+    """Edit the langgraph.json configuration file."""
+    full_path = APP_DIR / "langgraph.json"
+
+    if not full_path.exists():
+        error_message = "Error: langgraph.json not found at /app/app/langgraph.json"
+        tool_output = {
+            "status": "error",
+            "message": error_message
+        }
+        return Command(
+            update={
+                "messages": [ToolMessage(error_message, artifact=tool_output, tool_call_id=tool_call_id)]
+            }
+        )
+
+    try:
+        original_content = full_path.read_text()
+    except Exception as e:
+        error_message = f"Error reading langgraph.json: {e}"
+        tool_output = {
+            "status": "error",
+            "message": error_message
+        }
+        return Command(
+            update={
+                "messages": [ToolMessage(error_message, artifact=tool_output, tool_call_id=tool_call_id)]
+            }
+        )
+
+    # Check if old_string exists
+    if old_string not in original_content:
+        error_message = "Error: Could not find the specified text in langgraph.json"
+        tool_output = {
+            "status": "error",
+            "message": error_message
+        }
+        return Command(
+            update={
+                "messages": [ToolMessage(error_message, artifact=tool_output, tool_call_id=tool_call_id)]
+            }
+        )
+
+    # Perform the replacement (only first occurrence for safety)
+    new_content = original_content.replace(old_string, new_string, 1)
+
+    # Validate JSON syntax
+    try:
+        json.loads(new_content)
+    except json.JSONDecodeError as e:
+        error_message = f"Edit would create invalid JSON: {e}"
+        tool_output = {
+            "status": "error",
+            "message": error_message
+        }
+        return Command(
+            update={
+                "messages": [
+                    ToolMessage(
+                        error_message,
+                        artifact=tool_output,
+                        tool_call_id=tool_call_id,
+                    )
+                ]
+            }
+        )
+
+    # Write the new content
+    try:
+        full_path.write_text(new_content)
+    except Exception as e:
+        error_message = f"Error writing langgraph.json: {e}"
+        tool_output = {
+            "status": "error",
+            "message": error_message
+        }
+        return Command(
+            update={
+                "messages": [ToolMessage(error_message, artifact=tool_output, tool_call_id=tool_call_id)]
+            }
+        )
+
+    success_message = "Successfully edited langgraph.json"
+    tool_output = {
+        "status": "success",
+        "message": success_message,
+        "new_content": new_content
+    }
+
+    return Command(
+        update={
+            "messages": [ToolMessage(success_message, artifact=tool_output, tool_call_id=tool_call_id)]
+        }
     )

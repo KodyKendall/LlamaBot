@@ -1,7 +1,7 @@
 import pytest
 from dotenv import load_dotenv
 from langsmith import Client, testing as t
-from app.agents.rails_agent.nodes import build_workflow
+from app.agents.leonardo.rails_agent.nodes import build_workflow
 from langgraph.checkpoint.memory import MemorySaver
 from langchain_core.messages import HumanMessage
 

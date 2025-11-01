@@ -17,30 +17,24 @@ import asyncio
 from pathlib import Path
 import os
 from typing import List, Literal, Optional, TypedDict
+from bs4 import BeautifulSoup
 
 from app.agents.utils.playwright_screenshot import capture_page_and_img_src
 
 from openai import OpenAI
 from app.agents.utils.images import encode_image
 
-from app.agents.rails_agent.state import RailsAgentState
-from app.agents.rails_agent.tools import (
-    write_todos, write_file, read_file, ls, edit_file, search_file, bash_command,
-    ls_agents, read_agent_file, write_agent_file, edit_agent_file,
-    read_langgraph_json, edit_langgraph_json
-)
-from app.agents.rails_ai_builder_agent.prompts import RAILS_AI_BUILDER_AGENT_PROMPT
+from app.agents.leonardo.rails_agent.state import RailsAgentState
+from app.agents.leonardo.rails_agent.tools import write_todos, write_file, read_file, ls, edit_file, search_file, internet_search, bash_command, git_status, git_commit, git_command, view_page, github_cli_command
+from app.agents.leonardo.rails_frontend_starter_agent.prompts import RAILS_FRONTEND_STARTER_AGENT_PROMPT
 
 import logging
 logger = logging.getLogger(__name__)
-
 
 # Define base paths relative to project root
 SCRIPT_DIR = Path(__file__).parent.resolve()
 PROJECT_ROOT = SCRIPT_DIR.parent.parent.parent  # Go up to LlamaBot root
 APP_DIR = PROJECT_ROOT / 'app'
-
-# Global tools list
 
 # System message
 sys_msg = {
@@ -48,19 +42,14 @@ sys_msg = {
         "content": [
             {
                 "type": "text",
-                "text": f"{RAILS_AI_BUILDER_AGENT_PROMPT}",
+                "text": f"{RAILS_FRONTEND_STARTER_AGENT_PROMPT}",
                 "cache_control": {"type": "ephemeral"}, # only works for Anthropic models.
             },
         ],
     }
 
-default_tools = [
-    write_todos,
-    ls, read_file, write_file, edit_file, search_file, bash_command,
-    # Agent file tools
-    ls_agents, read_agent_file, write_agent_file, edit_agent_file,
-    read_langgraph_json, edit_langgraph_json
-]
+default_tools = [write_todos,
+         ls, read_file, write_file, edit_file, search_file]
 
 # Helper function to get LLM based on user selection
 def get_llm(model_name: str):
@@ -80,7 +69,7 @@ def get_llm(model_name: str):
       return ChatAnthropic(model="claude-haiku-4-5", max_tokens=16384)
 
 # Node
-def leonardo_ai_builder(state: RailsAgentState) -> Command[Literal["tools"]]:
+def leonardo_design(state: RailsAgentState) -> Command[Literal["tools"]]:
    # ==================== LLM Model Selection ====================
    # Get model selection from state (passed from frontend)
    llm_model = state.get('llm_model', 'claude-4.5-haiku')
@@ -91,18 +80,12 @@ def leonardo_ai_builder(state: RailsAgentState) -> Command[Literal["tools"]]:
    view_path = (state.get('debug_info') or {}).get('view_path')
 
    messages = [sys_msg] + state["messages"]
-
    if view_path:
       messages = messages + [HumanMessage(content="<NOTE_FROM_SYSTEM> The user is currently viewing their Ruby on Rails webpage route at: " + view_path + " </NOTE_FROM_SYSTEM>")]
 
    # Tools
-   tools = [
-      write_todos,
-      ls, read_file, write_file, edit_file, search_file, bash_command,
-      # Agent file tools
-      ls_agents, read_agent_file, write_agent_file, edit_agent_file,
-      read_langgraph_json, edit_langgraph_json
-   ]
+   tools = [write_todos,
+         ls, read_file, write_file, edit_file, search_file]
 
    failed_tool_calls_count = state.get("failed_tool_calls_count", 0)
    if failed_tool_calls_count >= 3:
@@ -121,19 +104,19 @@ def build_workflow(checkpointer=None):
     builder = StateGraph(RailsAgentState)
 
     # Define nodes: these do the work
-    builder.add_node("leonardo_ai_builder", leonardo_ai_builder)
+    builder.add_node("leonardo_design", leonardo_design)
     builder.add_node("tools", ToolNode(default_tools))
-    
+
     # Define edges: these determine how the control flow moves
-    builder.add_edge(START, "leonardo_ai_builder")
+    builder.add_edge(START, "leonardo_design")
 
     builder.add_conditional_edges(
-        "leonardo_ai_builder",
+        "leonardo_design",
         tools_condition,
         {"tools": "tools", END: END},
     )
 
-    builder.add_edge("tools", "leonardo_ai_builder")
+    builder.add_edge("tools", "leonardo_design")
 
     react_graph = builder.compile(checkpointer=checkpointer)
 

@@ -23,12 +23,12 @@ from app.agents.utils.playwright_screenshot import capture_page_and_img_src
 from openai import OpenAI
 from app.agents.utils.images import encode_image
 
-from app.agents.rails_agent.state import RailsAgentState
-from app.agents.rails_agent.tools import write_todos, write_file, read_file, ls, edit_file, search_file, internet_search, bash_command, git_status, git_commit, git_command, view_page, github_cli_command
-from app.agents.rails_agent.prompts import RAILS_AGENT_PROMPT
+from app.agents.leonardo.rails_agent.state import RailsAgentState
+from app.agents.leonardo.rails_agent.tools import write_todos, write_file, read_file, ls, edit_file, search_file, internet_search, bash_command, git_status, git_commit, git_command, view_page, github_cli_command
+from app.agents.leonardo.rails_agent.prompts import RAILS_AGENT_PROMPT
 
-# from app.agents.rails_agent.prototype_agent.nodes import build_workflow as build_prototype_agent
-# from app.agents.rails_agent.planning_agent import build_workflow as build_planning_agent
+# from app.agents.leonardo.rails_agent.prototype_agent.nodes import build_workflow as build_prototype_agent
+# from app.agents.leonardo.rails_agent.planning_agent import build_workflow as build_planning_agent
 
 import logging
 logger = logging.getLogger(__name__)
