@@ -1,0 +1,2 @@
+This rails folder is super important, because we mount to it on Docker and this gives Leonardo access to the Ruby on Rails Docker container
+so it can read & write code to the Ruby on Rails filesystem inside the 'llamapress' docker container.
