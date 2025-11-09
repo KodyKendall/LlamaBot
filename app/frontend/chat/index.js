@@ -3,7 +3,7 @@
  * Initializes and coordinates all modules
  */
 
-import { CONFIG, getRailsUrl } from './config.js';
+import { DEFAULT_CONFIG, getRailsUrl } from './config.js';
 import { setCookie, getCookie } from './utils/cookies.js';
 import { AppState } from './state/AppState.js';
 import { StreamingState } from './state/StreamingState.js';
@@ -19,10 +19,22 @@ import { ThreadManager } from './threads/ThreadManager.js';
 import { LoadingVerbs } from './utils/LoadingVerbs.js';
 
 /**
- * Main application class
+ * Main application class - LlamaBot Client
  */
 class ChatApp {
-  constructor() {
+  constructor(containerSelector = 'body', userConfig = {}) {
+    // Store container reference
+    this.container = document.querySelector(containerSelector);
+    if (!this.container) {
+      throw new Error(`Container not found: ${containerSelector}`);
+    }
+
+    // Generate unique instance ID
+    this.instanceId = `llamabot-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+    // Merge configuration (deep merge for nested objects)
+    this.config = this.mergeConfig(DEFAULT_CONFIG, userConfig);
+
     // Initialize state
     this.appState = new AppState();
     this.streamingState = new StreamingState();
@@ -40,6 +52,26 @@ class ChatApp {
     // Initialize WebSocket components
     this.webSocketManager = null;
     this.messageHandler = null;
+
+    // Store element references (will be populated in initComponents)
+    this.elements = {};
+  }
+
+  /**
+   * Deep merge two configuration objects
+   */
+  mergeConfig(defaults, userConfig) {
+    const result = { ...defaults };
+
+    for (const key in userConfig) {
+      if (userConfig[key] !== null && typeof userConfig[key] === 'object' && !Array.isArray(userConfig[key])) {
+        result[key] = this.mergeConfig(defaults[key] || {}, userConfig[key]);
+      } else {
+        result[key] = userConfig[key];
+      }
+    }
+
+    return result;
   }
 
   /**
@@ -58,20 +90,25 @@ class ChatApp {
    * Initialize all components
    */
   initComponents() {
-    // Initialize UI managers
-    const messageHistoryElement = document.getElementById('message-history');
-    this.scrollManager = new ScrollManager(messageHistoryElement);
-    this.iframeManager = new IframeManager();
-    this.menuManager = new MenuManager();
-    this.mobileViewManager = new MobileViewManager(this.scrollManager);
+    // Cache DOM element references (scoped to container)
+    this.cacheElements();
+
+    // Initialize UI managers (pass container and config)
+    this.scrollManager = new ScrollManager(this.elements.messageHistory);
+    this.iframeManager = new IframeManager(this.container);
+    this.menuManager = new MenuManager(this.container);
+    this.mobileViewManager = new MobileViewManager(this.scrollManager, this.container, this.elements);
 
     // Initialize message renderer with iframe manager, debug info callback, scroll manager, and loading verbs
     this.messageRenderer = new MessageRenderer(
-      messageHistoryElement,
+      this.elements.messageHistory,
       this.iframeManager,
       (callback) => this.getRailsDebugInfo(callback),
       this.scrollManager,
-      this.loadingVerbs
+      this.loadingVerbs,
+      this.config,
+      this.container,
+      this.elements
     );
 
     // Initialize thread manager
@@ -81,21 +118,18 @@ class ChatApp {
       this.scrollManager
     );
 
-    // Make threadManager globally accessible for onclick handlers
-    window.threadManager = this.threadManager;
-    window.mobileViewManager = this.mobileViewManager;
-
     // Initialize message handler
     this.messageHandler = new MessageHandler(
       this.appState,
       this.streamingState,
       this.messageRenderer,
       this.iframeManager,
-      this.scrollManager
+      this.scrollManager,
+      this.config
     );
 
-    // Initialize WebSocket
-    this.webSocketManager = new WebSocketManager(this.messageHandler);
+    // Initialize WebSocket (pass config and elements)
+    this.webSocketManager = new WebSocketManager(this.messageHandler, this.config, this.elements);
     const socket = this.webSocketManager.connect();
     this.appState.setSocket(socket);
 
@@ -110,9 +144,7 @@ class ChatApp {
 
     // Initialize element selector
     this.elementSelector = new ElementSelector(this.iframeManager);
-    const elementSelectorBtn = document.getElementById('elementSelectorBtn');
-    const messageInput = document.getElementById('messageInput');
-    this.elementSelector.init(elementSelectorBtn, messageInput);
+    this.elementSelector.init(this.elements.elementSelectorBtn, this.elements.messageInput);
 
     // Load threads
     this.threadManager.fetchThreads();
@@ -120,7 +152,28 @@ class ChatApp {
     // Load settings from cookies
     this.loadSettingsFromCookies();
 
-    console.log('Chat application initialized');
+    console.log(`LlamaBot instance ${this.instanceId} initialized`);
+  }
+
+  /**
+   * Cache DOM element references scoped to this instance's container
+   */
+  cacheElements() {
+    this.elements = {
+      messageHistory: this.container.querySelector('[data-llamabot="message-history"]'),
+      messageInput: this.container.querySelector('[data-llamabot="message-input"]'),
+      sendButton: this.container.querySelector('[data-llamabot="send-button"]'),
+      agentModeSelect: this.container.querySelector('[data-llamabot="agent-mode-select"]'),
+      modelSelect: this.container.querySelector('[data-llamabot="model-select"]'),
+      thinkingArea: this.container.querySelector('[data-llamabot="thinking-area"]'),
+      elementSelectorBtn: this.container.querySelector('[data-llamabot="element-selector-btn"]'),
+      connectionStatus: this.container.querySelector('[data-llamabot="connection-status"]'),
+      hamburgerMenu: this.container.querySelector('[data-llamabot="hamburger-menu"]'),
+      menuDrawer: this.container.querySelector('[data-llamabot="menu-drawer"]'),
+      scrollToBottomBtn: this.container.querySelector('[data-llamabot="scroll-to-bottom"]'),
+      liveSiteFrame: this.container.querySelector('[data-llamabot="live-site-frame"]'),
+      vsCodeFrame: this.container.querySelector('[data-llamabot="vscode-frame"]')
+    };
   }
 
   /**
@@ -128,15 +181,13 @@ class ChatApp {
    */
   initEventListeners() {
     // Send button
-    const sendButton = document.getElementById('sendButton');
-    if (sendButton) {
-      sendButton.addEventListener('click', () => this.sendMessageWithDebugInfo());
+    if (this.elements.sendButton) {
+      this.elements.sendButton.addEventListener('click', () => this.sendMessageWithDebugInfo());
     }
 
     // Message input
-    const messageInput = document.getElementById('messageInput');
-    if (messageInput) {
-      messageInput.addEventListener('keydown', (e) => {
+    if (this.elements.messageInput) {
+      this.elements.messageInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
           e.preventDefault();
           this.sendMessageWithDebugInfo();
@@ -145,26 +196,24 @@ class ChatApp {
     }
 
     // Agent mode selector
-    const agentModeSelect = document.getElementById('agentModeSelect');
-    if (agentModeSelect) {
-      agentModeSelect.addEventListener('change', (e) => {
+    if (this.elements.agentModeSelect) {
+      this.elements.agentModeSelect.addEventListener('change', (e) => {
         this.appState.setAgentMode(e.target.value);
-        setCookie('agentMode', e.target.value, CONFIG.COOKIE_EXPIRY_DAYS);
-        this.updateDropdownLabel(agentModeSelect);
+        setCookie('agentMode', e.target.value, this.config.cookieExpiryDays);
+        this.updateDropdownLabel(this.elements.agentModeSelect);
       });
       // Initialize with short label
-      this.updateDropdownLabel(agentModeSelect);
+      this.updateDropdownLabel(this.elements.agentModeSelect);
     }
 
     // Model selector
-    const modelSelect = document.getElementById('modelSelect');
-    if (modelSelect) {
-      modelSelect.addEventListener('change', (e) => {
-        setCookie('llmModel', e.target.value, CONFIG.COOKIE_EXPIRY_DAYS);
-        this.updateDropdownLabel(modelSelect);
+    if (this.elements.modelSelect) {
+      this.elements.modelSelect.addEventListener('change', (e) => {
+        setCookie('llmModel', e.target.value, this.config.cookieExpiryDays);
+        this.updateDropdownLabel(this.elements.modelSelect);
       });
       // Initialize with short label
-      this.updateDropdownLabel(modelSelect);
+      this.updateDropdownLabel(this.elements.modelSelect);
     }
 
     // LEGACY: Listen for stream end event
@@ -205,10 +254,12 @@ class ChatApp {
    * Send message via WebSocket
    */
   sendMessage(debugInfo = null) {
-    const input = document.getElementById('messageInput');
+    const input = this.elements.messageInput;
+    if (!input) return;
+
     let message = input.value.trim();
-    const agentMode = document.getElementById('agentModeSelect')?.value;
-    const llmModel = document.getElementById('modelSelect')?.value || 'claude-4.5-haiku';
+    const agentMode = this.elements.agentModeSelect?.value;
+    const llmModel = this.elements.modelSelect?.value || 'claude-4.5-haiku';
 
     if (!message || !this.webSocketManager) return;
 
@@ -227,23 +278,20 @@ class ChatApp {
     this.messageRenderer.addMessage(input.value.trim(), 'human', null);
 
     // Show thinking indicator in the dedicated thinking area
-    const thinkingArea = document.getElementById('thinkingArea');
-    if (thinkingArea) {
+    if (this.elements.thinkingArea) {
       const verb = this.loadingVerbs.getRandomVerb();
-      thinkingArea.innerHTML = `<div class="typing-indicator">🦙 ${verb}...</div>`;
-      thinkingArea.classList.remove('hidden');
+      this.elements.thinkingArea.innerHTML = `<div class="typing-indicator">🦙 ${verb}...</div>`;
+      this.elements.thinkingArea.classList.remove('hidden');
 
       // Start cycling the verb in the thinking area
-      const thinkingDiv = thinkingArea.querySelector('.typing-indicator');
+      const thinkingDiv = this.elements.thinkingArea.querySelector('.typing-indicator');
       if (thinkingDiv) {
         this.loadingVerbs.startCycling(thinkingDiv);
       }
     }
 
     // Change placeholder text while thinking
-    if (input) {
-      input.placeholder = 'Queue another message...';
-    }
+    input.placeholder = 'Queue another message...';
 
     // Don't create content message yet - it will be created on first content chunk
     // This prevents empty message boxes from showing up
@@ -276,20 +324,26 @@ class ChatApp {
     };
 
     this.webSocketManager.send(messageData);
+
+    // Call custom callback if provided
+    if (this.config.onMessageReceived) {
+      this.config.onMessageReceived({ message, threadId, agentMode, llmModel });
+    }
   }
 
   /**
    * Get Rails debug info via postMessage
    */
-  getRailsDebugInfo(callback, timeout = CONFIG.RAILS_DEBUG_TIMEOUT) {
-    const iframe = document.getElementById('liveSiteFrame');
+  getRailsDebugInfo(callback, timeout = null) {
+    const iframe = this.elements.liveSiteFrame;
+    const timeoutMs = timeout || this.config.railsDebugTimeout;
 
     if (!iframe || !iframe.contentWindow) {
       callback(new Error("Iframe not available"));
       return;
     }
 
-    const messageId = Math.random().toString(36).substr(2, 9);
+    const messageId = Math.random().toString(36).substring(2, 11);
 
     function handleMessage(event) {
       if (event.data && event.data.source === "llamapress") {
@@ -310,7 +364,7 @@ class ChatApp {
     const timer = setTimeout(() => {
       window.removeEventListener("message", handleMessage);
       callback(new Error("No response from Rails iframe"));
-    }, timeout);
+    }, timeoutMs);
   }
 
   /**
@@ -318,25 +372,19 @@ class ChatApp {
    */
   loadSettingsFromCookies() {
     const savedMode = getCookie('agentMode');
-    if (savedMode) {
-      const selectElement = document.getElementById('agentModeSelect');
-      if (selectElement) {
-        if (Array.from(selectElement.options).some(option => option.value === savedMode)) {
-          selectElement.value = savedMode;
-          this.appState.setAgentMode(savedMode);
-          this.updateDropdownLabel(selectElement);
-        }
+    if (savedMode && this.elements.agentModeSelect) {
+      if (Array.from(this.elements.agentModeSelect.options).some(option => option.value === savedMode)) {
+        this.elements.agentModeSelect.value = savedMode;
+        this.appState.setAgentMode(savedMode);
+        this.updateDropdownLabel(this.elements.agentModeSelect);
       }
     }
 
     const savedModel = getCookie('llmModel');
-    if (savedModel) {
-      const modelSelect = document.getElementById('modelSelect');
-      if (modelSelect) {
-        if (Array.from(modelSelect.options).some(option => option.value === savedModel)) {
-          modelSelect.value = savedModel;
-          this.updateDropdownLabel(modelSelect);
-        }
+    if (savedModel && this.elements.modelSelect) {
+      if (Array.from(this.elements.modelSelect.options).some(option => option.value === savedModel)) {
+        this.elements.modelSelect.value = savedModel;
+        this.updateDropdownLabel(this.elements.modelSelect);
       }
     }
   }
@@ -379,9 +427,40 @@ class ChatApp {
   }
 }
 
-// Create and initialize the app
-const app = new ChatApp();
-app.init();
+/**
+ * LlamaBot Client Library - Public API
+ * Single global entry point for creating chat instances
+ */
+window.LlamaBot = {
+  version: '0.1.0',
 
-// Export for debugging
-window.chatApp = app;
+  /**
+   * Create a new LlamaBot chat instance
+   * @param {string} containerSelector - CSS selector for the container element
+   * @param {Object} config - Configuration options to override defaults
+   * @returns {ChatApp} The chat application instance
+   */
+  create: (containerSelector, config = {}) => {
+    const instance = new ChatApp(containerSelector, config);
+    instance.init();
+    return instance;
+  },
+
+  /**
+   * Default configuration (read-only reference)
+   */
+  get defaultConfig() {
+    return { ...DEFAULT_CONFIG };
+  }
+};
+
+// Export ChatApp class for advanced usage
+export { ChatApp, DEFAULT_CONFIG };
+
+// Auto-initialize for backward compatibility (if body contains chat elements)
+// This maintains the existing single-page app behavior
+if (document.querySelector('[data-llamabot="message-history"]')) {
+  const legacyInstance = window.LlamaBot.create('body');
+  // Expose for debugging (legacy behavior)
+  window.chatApp = legacyInstance;
+}

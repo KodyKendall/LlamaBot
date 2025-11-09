@@ -2,11 +2,13 @@
  * WebSocket connection management with auto-reconnection
  */
 
-import { getWebSocketUrl, getRailsUrl, CONFIG } from '../config.js';
+import { getWebSocketUrl, getRailsUrl } from '../config.js';
 
 export class WebSocketManager {
-  constructor(messageHandler) {
+  constructor(messageHandler, config = {}, elements = {}) {
     this.messageHandler = messageHandler;
+    this.config = config;
+    this.elements = elements;
     this.socket = null;
     this.reconnectTimer = null;
   }
@@ -15,7 +17,7 @@ export class WebSocketManager {
    * Initialize WebSocket connection
    */
   connect() {
-    const wsUrl = getWebSocketUrl();
+    const wsUrl = this.config.websocketUrl || getWebSocketUrl();
     this.socket = new WebSocket(wsUrl);
 
     this.socket.onopen = () => this.handleOpen();
@@ -24,11 +26,8 @@ export class WebSocketManager {
     this.socket.onmessage = (event) => this.handleMessage(event);
 
     // Set initial iframe src for HTTPS
-    if (window.location.protocol === 'https:') {
-      const liveSiteFrame = document.getElementById('liveSiteFrame');
-      if (liveSiteFrame) {
-        liveSiteFrame.src = getRailsUrl();
-      }
+    if (window.location.protocol === 'https:' && this.elements.liveSiteFrame) {
+      this.elements.liveSiteFrame.src = getRailsUrl();
     }
 
     return this.socket;
@@ -41,9 +40,8 @@ export class WebSocketManager {
     console.log('WebSocket connected');
     this.updateConnectionStatus(true);
 
-    const sendButton = document.getElementById('sendButton');
-    if (sendButton) {
-      sendButton.disabled = false;
+    if (this.elements.sendButton) {
+      this.elements.sendButton.disabled = false;
     }
 
     // Emit custom event
@@ -57,9 +55,8 @@ export class WebSocketManager {
     console.log('WebSocket disconnected');
     this.updateConnectionStatus(false);
 
-    const sendButton = document.getElementById('sendButton');
-    if (sendButton) {
-      sendButton.disabled = true;
+    if (this.elements.sendButton) {
+      this.elements.sendButton.disabled = true;
     }
 
     // Emit custom event
@@ -77,6 +74,11 @@ export class WebSocketManager {
 
     // Emit custom event with error
     window.dispatchEvent(new CustomEvent('websocketError', { detail: error }));
+
+    // Call custom error callback if provided
+    if (this.config.onError) {
+      this.config.onError(error);
+    }
   }
 
   /**
@@ -84,8 +86,8 @@ export class WebSocketManager {
    */
   handleMessage(event) {
     const data = JSON.parse(event.data);
-    console.log('Received:', data.type);
-    console.log('Data:', data);
+    // console.log('Received:', data.type);
+    // console.log('Data:', data);
 
     // Delegate to message handler
     if (this.messageHandler) {
@@ -109,15 +111,14 @@ export class WebSocketManager {
    * Update connection status UI
    */
   updateConnectionStatus(connected) {
-    const status = document.getElementById('connectionStatus');
-    if (!status) return;
+    if (!this.elements.connectionStatus) return;
 
     if (connected) {
-      status.className = 'connection-status connected';
-      status.innerHTML = '<span class="status-dot"></span>';
+      this.elements.connectionStatus.className = 'connection-status connected';
+      this.elements.connectionStatus.innerHTML = '<span class="status-dot"></span>';
     } else {
-      status.className = 'connection-status disconnected';
-      status.innerHTML = '<span class="status-dot"></span>';
+      this.elements.connectionStatus.className = 'connection-status disconnected';
+      this.elements.connectionStatus.innerHTML = '<span class="status-dot"></span>';
     }
   }
 
@@ -132,7 +133,7 @@ export class WebSocketManager {
     this.reconnectTimer = setTimeout(() => {
       console.log('Attempting to reconnect...');
       this.connect();
-    }, CONFIG.RECONNECT_DELAY);
+    }, this.config.reconnectDelay || 3000);
   }
 
   /**

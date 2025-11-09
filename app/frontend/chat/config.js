@@ -1,17 +1,20 @@
 /**
- * Application configuration constants
+ * Default configuration for LlamaBot Client
+ * These can be overridden when creating an instance
  */
 
-export const CONFIG = {
+export const DEFAULT_CONFIG = {
+  // WebSocket configuration
+  websocketUrl: null, // Auto-detect if null
+
   // Agent configuration
-  AGENT: {
-    NAME: 'rails_frontend_starter_agent',
-    TYPE: 'default'
-    // TYPE: 'claude_llm_model'
+  agent: {
+    name: 'rails_frontend_starter_agent',
+    type: 'default'
   },
 
   // Agent mode mappings
-  AGENT_MODES: {
+  agentModes: {
     prototype: 'rails_frontend_starter_agent',
     engineer: 'rails_agent',
     ai_builder: 'rails_ai_builder_agent',
@@ -19,19 +22,19 @@ export const CONFIG = {
   },
 
   // Streaming configuration
-  IFRAME_REFRESH_MS: 500,
+  iframeRefreshMs: 500,
 
   // Scroll configuration
-  SCROLL_THRESHOLD: 50, // pixels from bottom to consider "at bottom"
+  scrollThreshold: 50, // pixels from bottom to consider "at bottom"
 
   // Rails iframe timeout
-  RAILS_DEBUG_TIMEOUT: 250, // ms
+  railsDebugTimeout: 250, // ms
 
   // Cookie settings
-  COOKIE_EXPIRY_DAYS: 365,
+  cookieExpiryDays: 365,
 
   // Markdown configuration
-  MARKDOWN_OPTIONS: {
+  markdownOptions: {
     breaks: true,
     gfm: true,
     sanitize: false, // We'll handle XSS prevention differently
@@ -40,7 +43,16 @@ export const CONFIG = {
   },
 
   // WebSocket reconnection
-  RECONNECT_DELAY: 3000 // ms
+  reconnectDelay: 3000, // ms
+
+  // Custom renderers (can be overridden)
+  toolRenderers: {},
+  messageRenderers: {},
+
+  // Callbacks (can be overridden)
+  onMessageReceived: null,
+  onToolResult: null,
+  onError: null
 };
 
 /**

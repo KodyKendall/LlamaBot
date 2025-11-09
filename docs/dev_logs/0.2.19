@@ -22,3 +22,8 @@
     0.2.19f: 
     
     - Add ephemeral Capybara/Cuprite browser tool for Leonardo to debug JavaScript & HTML loading issues with a chromium browser.
+
+    0.2.19i:
+    - [x] Fix the broken path from /assets/ to /frontend/ for the Leonardo mp3 noise after completion.
+    - [x] Disable VSCode logs in chat.html that come from the iFrame by extending the Dockerfile VSCode image
+    - [ ] Make the iFrame refresh not force refresh VSCode, because it disrupts the user experience when they're editing vscode files if leonardo is editing at the same time

@@ -56,10 +56,10 @@ export class ToolMessageRenderer {
     const filename = this._extractFilename(firstArgument);
 
     return `
-      <div class="tool-compact">
+      <div data-llamabot="tool-compact">
         ${icon}
-        <span class="tool-compact-name">Edit</span>
-        <span class="tool-compact-target">${this._escapeHtml(filename)}</span>
+        <span data-llamabot="tool-compact-name">Edit</span>
+        <span data-llamabot="tool-compact-target">${this._escapeHtml(filename)}</span>
       </div>
     `;
   }
@@ -73,10 +73,10 @@ export class ToolMessageRenderer {
     const displayTarget = firstArgument ? this._extractFilename(firstArgument) : '';
 
     return `
-      <div class="tool-compact">
+      <div data-llamabot="tool-compact">
         ${icon}
-        <span class="tool-compact-name">${displayName}</span>
-        ${displayTarget ? `<span class="tool-compact-target">${this._escapeHtml(displayTarget)}</span>` : ''}
+        <span data-llamabot="tool-compact-name">${displayName}</span>
+        ${displayTarget ? `<span data-llamabot="tool-compact-target">${this._escapeHtml(displayTarget)}</span>` : ''}
       </div>
     `;
   }
@@ -128,11 +128,11 @@ export class ToolMessageRenderer {
   updateCollapsibleToolMessage(messageDiv, toolResult, baseMessage) {
     // Special handling for edit_file and write_file
     if (baseMessage.name === 'edit_file' || baseMessage.name === 'write_file') {
-      const toolCompact = messageDiv.querySelector('.tool-compact');
+      const toolCompact = messageDiv.querySelector('[data-llamabot="tool-compact"]');
       if (toolCompact) {
         if (baseMessage.artifact?.status === 'success') {
-          toolCompact.classList.add('tool-success');
-          const icon = toolCompact.querySelector('.tool-icon');
+          toolCompact.setAttribute('data-status', 'success');
+          const icon = toolCompact.querySelector('[data-llamabot="tool-icon"]');
           if (icon) {
             icon.outerHTML = ToolIcons.successIcon();
           }
@@ -142,8 +142,8 @@ export class ToolMessageRenderer {
             this.iframeManager.refreshRailsApp(this.getRailsDebugInfoCallback);
           }
         } else if (baseMessage.artifact?.status === 'error') {
-          toolCompact.classList.add('tool-error');
-          const icon = toolCompact.querySelector('.tool-icon');
+          toolCompact.setAttribute('data-status', 'error');
+          const icon = toolCompact.querySelector('[data-llamabot="tool-icon"]');
           if (icon) {
             icon.outerHTML = ToolIcons.errorIcon();
           }

@@ -2,13 +2,13 @@
  * Auto-scroll behavior management
  */
 
-import { CONFIG } from '../config.js';
+import { DEFAULT_CONFIG } from '../config.js';
 
 export class ScrollManager {
   constructor(messageHistoryElement) {
     this.messageHistory = messageHistoryElement;
     this.isUserAtBottom = true;
-    this.scrollThreshold = CONFIG.SCROLL_THRESHOLD;
+    this.scrollThreshold = DEFAULT_CONFIG.scrollThreshold;
     this.scrollButton = null;
     this.unreadCount = 0;
     this.unreadBadge = null;

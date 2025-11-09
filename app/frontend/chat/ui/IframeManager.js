@@ -13,24 +13,26 @@
  *    - Requires Rails debug info to maintain state
  */
 
-import { getRailsUrl, getVSCodeUrl, CONFIG } from '../config.js';
+import { getRailsUrl, getVSCodeUrl, DEFAULT_CONFIG } from '../config.js';
 
 export class IframeManager {
-  constructor() {
+  constructor(container = null) {
+    this.container = container || document;
+
     // STREAMING PREVIEW iframe (for HTML generation preview)
-    this.contentFrame = document.getElementById('contentFrame');
+    this.contentFrame = this.querySelector('[data-llamabot="content-frame"]');
 
     // RAILS APP PREVIEW iframe (for live Rails app)
-    this.liveSiteFrame = document.getElementById('liveSiteFrame');
+    this.liveSiteFrame = this.querySelector('[data-llamabot="live-site-frame"]');
 
     // VS CODE iframe
-    this.vsCodeFrame = document.getElementById('vsCodeFrame');
+    this.vsCodeFrame = this.querySelector('[data-llamabot="vscode-frame"]');
 
     // URL input element
-    this.urlInput = document.getElementById('urlInput');
+    this.urlInput = this.querySelector('[data-llamabot="url-input"]');
 
     // URL dropdown element
-    this.urlDropdown = document.getElementById('urlDropdown');
+    this.urlDropdown = this.querySelector('[data-llamabot="url-dropdown"]');
 
     // Cached routes
     this.cachedRoutes = null;
@@ -39,6 +41,20 @@ export class IframeManager {
 
     // Initialize iframe URLs
     this.initIframeSources();
+  }
+
+  /**
+   * Helper method for scoped queries with fallback to global
+   */
+  querySelector(selector) {
+    return this.container.querySelector(selector);
+  }
+
+  /**
+   * Helper method for scoped querySelectorAll with fallback to global
+   */
+  querySelectorAll(selector) {
+    return this.container.querySelectorAll(selector);
   }
 
   /**
@@ -402,7 +418,7 @@ export class IframeManager {
    */
   initNavigationButtons() {
     // Refresh button
-    const refreshButton = document.getElementById('refreshButton');
+    const refreshButton = this.querySelector('[data-llamabot="refresh-button"]');
     if (refreshButton) {
       refreshButton.addEventListener('click', (e) => {
         const button = e.currentTarget;
@@ -421,7 +437,7 @@ export class IframeManager {
     }
 
     // Back button
-    const backButton = document.getElementById('backButton');
+    const backButton = this.querySelector('[data-llamabot="back-button"]');
     if (backButton && this.liveSiteFrame) {
       backButton.addEventListener('click', () => {
         if (this.liveSiteFrame.contentWindow) {
@@ -445,8 +461,18 @@ export class IframeManager {
    * Init tab switching
    */
   initTabSwitching() {
-    const tabs = document.querySelectorAll('.tab');
-    const iframes = document.querySelectorAll('.content-iframe');
+    const tabs = this.querySelectorAll('.tab');
+    const iframes = this.querySelectorAll('.content-iframe');
+
+    // Map old ID names to new data-llamabot attribute names
+    const idToDataAttrMap = {
+      'liveSiteFrame': 'live-site-frame',
+      'vsCodeFrame': 'vscode-frame',
+      'contentFrame': 'content-frame',
+      'gitFrame': 'git-frame',
+      'logsFrame': 'logs-frame',
+      'pgWebFrame': 'pgweb-frame'
+    };
 
     tabs.forEach(tab => {
       tab.addEventListener('click', (e) => {
@@ -460,7 +486,11 @@ export class IframeManager {
 
         tab.classList.add('active');
         const targetIframeId = tab.dataset.target;
-        const targetIframe = document.getElementById(targetIframeId);
+
+        // Map old ID to new data-llamabot attribute
+        const dataAttrName = idToDataAttrMap[targetIframeId] || targetIframeId;
+        const targetIframe = this.querySelector(`[data-llamabot="${dataAttrName}"]`);
+
         if (targetIframe) {
           targetIframe.classList.add('active');
         }
@@ -475,14 +505,27 @@ export class IframeManager {
    * Initialize external link buttons on tabs
    */
   initExternalLinkButtons() {
-    const externalLinkButtons = document.querySelectorAll('.tab-external-link');
+    const externalLinkButtons = this.querySelectorAll('.tab-external-link');
+
+    // Map old ID names to new data-llamabot attribute names
+    const idToDataAttrMap = {
+      'liveSiteFrame': 'live-site-frame',
+      'vsCodeFrame': 'vscode-frame',
+      'contentFrame': 'content-frame',
+      'gitFrame': 'git-frame',
+      'logsFrame': 'logs-frame',
+      'pgWebFrame': 'pgweb-frame'
+    };
 
     externalLinkButtons.forEach(button => {
       button.addEventListener('click', (e) => {
         e.stopPropagation(); // Prevent tab switching
 
         const iframeId = button.dataset.iframe;
-        const iframe = document.getElementById(iframeId);
+
+        // Map old ID to new data-llamabot attribute
+        const dataAttrName = idToDataAttrMap[iframeId] || iframeId;
+        const iframe = this.querySelector(`[data-llamabot="${dataAttrName}"]`);
 
         if (iframe && iframe.src) {
           // Open the iframe's current URL in a new tab
@@ -496,9 +539,9 @@ export class IframeManager {
    * Init view mode toggle
    */
   initViewModeToggle() {
-    const desktopModeBtn = document.getElementById('desktopModeBtn');
-    const mobileModeBtn = document.getElementById('mobileModeBtn');
-    const browserContent = document.querySelector('.browser-content');
+    const desktopModeBtn = this.querySelector('[data-llamabot="desktop-mode-btn"]');
+    const mobileModeBtn = this.querySelector('[data-llamabot="mobile-mode-btn"]');
+    const browserContent = this.querySelector('.browser-content');
 
     if (!desktopModeBtn || !mobileModeBtn || !browserContent) return;
 

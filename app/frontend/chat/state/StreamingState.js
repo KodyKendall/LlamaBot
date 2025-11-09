@@ -2,7 +2,7 @@
  * HTML streaming state management
  */
 
-import { CONFIG } from '../config.js';
+import { DEFAULT_CONFIG } from '../config.js';
 
 export class StreamingState {
   constructor() {
@@ -89,7 +89,7 @@ export class StreamingState {
       this.iframeFlushTimer = setTimeout(() => {
         callback();
         this.iframeFlushTimer = null;
-      }, CONFIG.IFRAME_REFRESH_MS);
+      }, DEFAULT_CONFIG.iframeRefreshMs);
     }
   }
 

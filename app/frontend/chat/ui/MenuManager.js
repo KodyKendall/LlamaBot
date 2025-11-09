@@ -3,7 +3,8 @@
  */
 
 export class MenuManager {
-  constructor() {
+  constructor(container = null) {
+    this.container = container || document;
     this.hamburger = null;
     this.drawer = null;
     this.newThreadBtn = null;
@@ -11,12 +12,19 @@ export class MenuManager {
   }
 
   /**
+   * Helper method for scoped queries
+   */
+  querySelector(selector) {
+    return this.container.querySelector(selector);
+  }
+
+  /**
    * Initialize menu manager
    */
   init() {
-    this.hamburger = document.getElementById('hamburgerMenu');
-    this.drawer = document.getElementById('menuDrawer');
-    this.newThreadBtn = document.getElementById('newThreadBtn');
+    this.hamburger = this.querySelector('[data-llamabot="hamburger-menu"]');
+    this.drawer = this.querySelector('[data-llamabot="menu-drawer"]');
+    this.newThreadBtn = this.querySelector('[data-llamabot="new-thread-btn"]');
 
     this.initEventListeners();
   }
@@ -43,7 +51,7 @@ export class MenuManager {
     }
 
     // Close drawer button
-    const closeDrawer = document.getElementById('closeDrawer');
+    const closeDrawer = this.querySelector('[data-llamabot="close-drawer"]');
     if (closeDrawer) {
       closeDrawer.addEventListener('click', () => {
         this.closeMenu();

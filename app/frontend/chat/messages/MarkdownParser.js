@@ -2,13 +2,13 @@
  * Markdown parsing utilities
  */
 
-import { CONFIG } from '../config.js';
+import { DEFAULT_CONFIG } from '../config.js';
 
 export class MarkdownParser {
   constructor() {
     // Configure marked.js
     if (typeof marked !== 'undefined') {
-      marked.setOptions(CONFIG.MARKDOWN_OPTIONS);
+      marked.setOptions(DEFAULT_CONFIG.markdownOptions);
     }
   }
 
