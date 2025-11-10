@@ -157,11 +157,21 @@ export class WebSocketManager {
     if (!this.elements.connectionStatus) return;
 
     if (connected) {
-      this.elements.connectionStatus.className = 'connection-status connected';
-      this.elements.connectionStatus.innerHTML = '<span class="status-dot"></span>';
+      // Apply custom CSS class if configured, otherwise use default
+      if (this.config.cssClasses?.connectionStatusConnected) {
+        this.elements.connectionStatus.className = this.config.cssClasses.connectionStatusConnected;
+      } else {
+        this.elements.connectionStatus.className = 'connection-status connected';
+        this.elements.connectionStatus.innerHTML = '<span class="status-dot"></span>';
+      }
     } else {
-      this.elements.connectionStatus.className = 'connection-status disconnected';
-      this.elements.connectionStatus.innerHTML = '<span class="status-dot"></span>';
+      // Apply custom CSS class if configured, otherwise use default
+      if (this.config.cssClasses?.connectionStatusDisconnected) {
+        this.elements.connectionStatus.className = this.config.cssClasses.connectionStatusDisconnected;
+      } else {
+        this.elements.connectionStatus.className = 'connection-status disconnected';
+        this.elements.connectionStatus.innerHTML = '<span class="status-dot"></span>';
+      }
     }
   }
 

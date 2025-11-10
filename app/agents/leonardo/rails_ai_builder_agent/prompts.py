@@ -37,6 +37,98 @@ All LangGraph tools use `make_api_request_to_llamapress(method, endpoint, api_to
 
 ---
 
+## LLAMABOT CHAT FRONTEND INTEGRATION
+
+If the user wants to add an AI chat interface to engage with their AI Agent, this is the integration pattern for you to follow:
+
+**Overview:**
+- There are core JavaScript utilitys and helper functions. These modules are hosted on S3 CDN (no file copying needed)
+- Supports ActionCable connections (pre-configured via `llama_bot_rails` gem)
+- Uses `data-llamabot` attributes for framework-agnostic styling
+- Works with Tailwind, Bootstrap, DaisyUI, or custom CSS
+
+**Basic Integration Steps:**
+
+1. **HTML Structure** (in Rails view file):
+```erb
+<div data-llamabot="chat-container" class="flex flex-col h-screen">
+  <div class="flex items-center border-b p-4">
+    <h1>Chat with Leonardo</h1>
+    <div data-llamabot="connection-status"></div>
+  </div>
+
+  <div data-llamabot="message-history" class="flex-grow overflow-y-auto p-4"></div>
+  <div data-llamabot="thinking-area" class="hidden"></div>
+
+  <div class="border-t p-4 flex">
+    <input data-llamabot="message-input" type="text" class="flex-grow border rounded-l-lg px-4 py-2" />
+    <button data-llamabot="send-button" class="bg-indigo-600 text-white px-4 py-2 rounded-r-lg" disabled>Send</button>
+  </div>
+</div>
+```
+
+2. **JavaScript Initialization** (in same view file):
+```erb
+<script type="module">
+  function waitForCableConnection(callback) {
+    const interval = setInterval(() => {
+      if (window.LlamaBotRails && LlamaBotRails.cable) {
+        clearInterval(interval);
+        callback(LlamaBotRails.cable);
+      }
+    }, 50);
+  }
+
+  waitForCableConnection(async (consumer) => {
+    // Import from LlamaPress's S3 Bucket CDN
+    const { default: LlamaBot } = await import('https://llamapress-cdn.s3.amazonaws.com/llamabot-chat-js-v0.2.19/index.js');
+
+    const chat = LlamaBot.create('[data-llamabot="chat-container"]', {
+      actionCable: {
+        consumer: consumer,
+        channel: 'LlamaBotRails::ChatChannel',
+        session_id: crypto.randomUUID()
+      },
+      agent: {
+        name: 'YOUR_AGENT_NAME_HERE'  // Must match the langgraph.json key
+      },
+      // Optional: Tailwind CSS classes for styling
+      cssClasses: {
+        humanMessage: 'bg-indigo-100 text-indigo-900 p-3 rounded-lg mb-2',
+        aiMessage: 'bg-gray-100 text-gray-900 p-3 rounded-lg mb-2 prose',
+        errorMessage: 'bg-red-100 text-red-800 p-3 rounded-lg mb-2',
+        connectionStatusConnected: 'h-3 w-3 rounded-full bg-green-400',
+        connectionStatusDisconnected: 'h-3 w-3 rounded-full bg-red-400'
+      }
+    });
+  });
+</script>
+```
+
+3. **Optional: Suggested Prompts** (quick action buttons):
+```erb
+<div class="p-4 border-t">
+  <div class="text-sm text-gray-600 mb-2">Quick actions:</div>
+  <div class="flex flex-wrap gap-2">
+    <button data-llamabot="suggested-prompt" class="px-3 py-1 text-sm bg-gray-100 hover:bg-gray-200 rounded-full">
+      Create a new student
+    </button>
+    <button data-llamabot="suggested-prompt" class="px-3 py-1 text-sm bg-gray-100 hover:bg-gray-200 rounded-full">
+      List all courses
+    </button>
+  </div>
+</div>
+```
+
+**Key Points:**
+- ✅ Imports directly from S3 CDN
+- ✅ No importmap configuration needed
+- ✅ Works with Tailwind (pass classes via `cssClasses` config)
+- ✅ Agent name must match key in `langgraph.json`
+- ✅ ActionCable consumer comes from `llama_bot_rails` gem (already configured)
+- ✅ Suggested prompts auto-fill and send messages
+---
+
 ## AGENT FILE PATHS & REGISTRATION
 
 **Creating New Custom Agents:**

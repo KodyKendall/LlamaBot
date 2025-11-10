@@ -59,6 +59,16 @@ export const DEFAULT_CONFIG = {
   toolRenderers: {},
   messageRenderers: {},
 
+  // Custom CSS classes for styling (optional - for Tailwind/Bootstrap integration)
+  cssClasses: {
+    humanMessage: '',  // e.g., 'bg-blue-100 p-3 rounded-lg'
+    aiMessage: '',     // e.g., 'bg-gray-100 p-3 rounded-lg'
+    errorMessage: '',  // e.g., 'bg-red-100 p-3 rounded-lg text-red-800'
+    queuedMessage: '', // e.g., 'bg-yellow-50 p-3 rounded-lg'
+    connectionStatusConnected: '',    // e.g., 'bg-green-400'
+    connectionStatusDisconnected: ''  // e.g., 'bg-red-400'
+  },
+
   // Callbacks (can be overridden)
   onMessageReceived: null,
   onToolResult: null,

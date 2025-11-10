@@ -59,6 +59,12 @@ export class MessageRenderer {
     const messageDiv = document.createElement('div');
     messageDiv.setAttribute('data-llamabot', 'human-message');
     messageDiv.textContent = content;
+
+    // Apply custom CSS classes if configured
+    if (this.config.cssClasses?.humanMessage) {
+      messageDiv.className = this.config.cssClasses.humanMessage;
+    }
+
     this.insertMessage(messageDiv);
     return messageDiv;
   }
@@ -90,6 +96,11 @@ export class MessageRenderer {
         ''
       );
       messageDiv.id = baseMessage.tool_calls[0].id;
+    } else {
+      // Apply custom CSS classes if configured (only for regular AI messages, not tool messages)
+      if (this.config.cssClasses?.aiMessage) {
+        messageDiv.className = this.config.cssClasses.aiMessage;
+      }
     }
 
     this.insertMessage(messageDiv);
@@ -119,6 +130,12 @@ export class MessageRenderer {
     const messageDiv = document.createElement('div');
     messageDiv.setAttribute('data-llamabot', 'error-message');
     messageDiv.textContent = content;
+
+    // Apply custom CSS classes if configured
+    if (this.config.cssClasses?.errorMessage) {
+      messageDiv.className = this.config.cssClasses.errorMessage;
+    }
+
     this.insertMessage(messageDiv);
 
     // Stop the thinking indicator when an error occurs
@@ -157,6 +174,12 @@ export class MessageRenderer {
     const messageDiv = document.createElement('div');
     messageDiv.setAttribute('data-llamabot', 'queued-message');
     messageDiv.textContent = content;
+
+    // Apply custom CSS classes if configured
+    if (this.config.cssClasses?.queuedMessage) {
+      messageDiv.className = this.config.cssClasses.queuedMessage;
+    }
+
     this.insertMessage(messageDiv);
     return messageDiv;
   }

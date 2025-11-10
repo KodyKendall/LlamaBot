@@ -12,6 +12,75 @@ The chat application uses `data-llamabot` attributes instead of classes for comp
 - **Clean separation** - Data attributes = structure, CSS/classes = styling
 - **DevTools friendly** - Easy to inspect and debug
 
+## Styling Approaches
+
+You have two options for styling LlamaBot components:
+
+### Option 1: CSS Classes via Configuration (New!)
+
+Pass CSS classes directly through the `cssClasses` config option. This is ideal for Tailwind, Bootstrap, or DaisyUI projects where you want to apply utility classes without writing CSS files.
+
+```javascript
+const chat = LlamaBot.create('[data-llamabot="chat-container"]', {
+  cssClasses: {
+    humanMessage: 'bg-indigo-100 text-indigo-900 p-3 rounded-lg mb-2',
+    aiMessage: 'bg-gray-100 text-gray-900 p-3 rounded-lg mb-2 prose',
+    errorMessage: 'bg-red-100 text-red-800 p-3 rounded-lg mb-2',
+    queuedMessage: 'bg-yellow-50 text-yellow-800 p-3 rounded-lg mb-2',
+    connectionStatusConnected: 'h-3 w-3 rounded-full bg-green-400',
+    connectionStatusDisconnected: 'h-3 w-3 rounded-full bg-red-400'
+  }
+});
+```
+
+**Pros:**
+- No CSS file needed
+- Works perfectly with Tailwind/Bootstrap utility classes
+- Dynamic - can change classes at runtime
+- Configuration lives with initialization code
+
+**Cons:**
+- Classes specified in JavaScript, not CSS
+- Less familiar for CSS-first developers
+
+### Option 2: CSS Targeting data-llamabot Attributes (Traditional)
+
+Write CSS that targets the `data-llamabot` attributes. This is ideal for projects with custom CSS or when you prefer CSS-first approach.
+
+```css
+[data-llamabot="human-message"] {
+  background-color: #e0e7ff;
+  color: #312e81;
+  padding: 0.75rem;
+  border-radius: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+[data-llamabot="ai-message"] {
+  background-color: #f3f4f6;
+  color: #1f2937;
+  padding: 0.75rem;
+  border-radius: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+```
+
+**Pros:**
+- Traditional CSS workflow
+- Separation of concerns (styling in CSS files)
+- Can leverage CSS cascade and specificity
+- Easier to organize with preprocessors (Sass, Less)
+
+**Cons:**
+- Requires CSS file
+- Less flexible for dynamic styling
+
+### Recommendation
+
+- **Use Option 1** if you're using Tailwind, Bootstrap, or DaisyUI
+- **Use Option 2** if you have custom CSS or prefer CSS-first approach
+- **Mix both** if needed (Option 1 classes are added via JavaScript, Option 2 via CSS cascade)
+
 ## Available Attributes
 
 ### Message Types

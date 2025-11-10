@@ -368,6 +368,280 @@ const shouldAutoInit =
 # Apply via AWS Console → IAM → Users → provision-llamapress → Permissions
 ```
 
+## Complete Configuration Reference
+
+### All Config Options
+
+```javascript
+const chat = LlamaBot.create('[data-llamabot="chat-container"]', {
+  // ============================================
+  // CONNECTION (choose one)
+  // ============================================
+
+  // Option A: Native WebSocket
+  websocketUrl: 'ws://localhost:8080/ws',
+
+  // Option B: ActionCable (Rails projects)
+  actionCable: {
+    consumer: LlamaBotRails.cable,        // ActionCable consumer
+    channel: 'LlamaBotRails::ChatChannel', // Channel name
+    session_id: crypto.randomUUID()        // Unique session ID
+  },
+
+  // ============================================
+  // AGENT CONFIGURATION
+  // ============================================
+
+  agent: {
+    name: 'rails_agent',           // Agent name
+    type: 'default'                // Agent type
+  },
+
+  // Agent mode mappings (optional)
+  agentModes: {
+    prototype: 'rails_frontend_starter_agent',
+    engineer: 'rails_agent',
+    ai_builder: 'rails_ai_builder_agent',
+    testing: 'rails_testing_agent'
+  },
+
+  // ============================================
+  // CSS CLASS CUSTOMIZATION (NEW!)
+  // ============================================
+
+  cssClasses: {
+    // Message styling (Tailwind/Bootstrap/DaisyUI)
+    humanMessage: 'bg-indigo-100 text-indigo-900 p-3 rounded-lg mb-2 max-w-3xl',
+    aiMessage: 'bg-gray-100 text-gray-900 p-3 rounded-lg mb-2 max-w-4xl prose prose-sm',
+    errorMessage: 'bg-red-100 text-red-800 p-3 rounded-lg mb-2',
+    queuedMessage: 'bg-yellow-50 text-yellow-800 p-3 rounded-lg mb-2',
+
+    // Connection status styling
+    connectionStatusConnected: 'h-3 w-3 rounded-full bg-green-400 transition-colors',
+    connectionStatusDisconnected: 'h-3 w-3 rounded-full bg-red-400 transition-colors'
+  },
+
+  // ============================================
+  // CUSTOM CALLBACKS
+  // ============================================
+
+  onMessageReceived: (data) => {
+    console.log('Message received:', data);
+    // data contains: { type, content, baseMessage }
+  },
+
+  onToolResult: (result) => {
+    console.log('Tool result:', result);
+    // result contains: { tool_name, args, output }
+  },
+
+  onError: (error) => {
+    console.error('Chat error:', error);
+    // Handle errors (connection, parsing, etc.)
+  },
+
+  // ============================================
+  // CUSTOM RENDERERS (Advanced)
+  // ============================================
+
+  // Override specific message type rendering
+  messageRenderers: {
+    'custom_type': (content, baseMessage, renderer) => {
+      const div = document.createElement('div');
+      div.className = 'custom-message';
+      div.textContent = content;
+      return div;
+    }
+  },
+
+  // Override specific tool rendering
+  toolRenderers: {
+    'custom_tool': (toolName, args, result, renderer) => {
+      return `<div class="tool">${toolName}: ${result}</div>`;
+    }
+  },
+
+  // ============================================
+  // BEHAVIOR SETTINGS
+  // ============================================
+
+  autoSendSuggestedPrompts: true,    // Auto-send when clicking suggested prompt button
+  iframeRefreshMs: 500,               // Iframe refresh delay (for LlamaBot's preview)
+  scrollThreshold: 50,                // Pixels from bottom to consider "at bottom"
+  reconnectDelay: 3000,               // WebSocket reconnection delay (ms)
+  railsDebugTimeout: 250,             // Rails debug info timeout (ms)
+  cookieExpiryDays: 365,              // Cookie expiration
+
+  // ============================================
+  // MARKDOWN SETTINGS
+  // ============================================
+
+  markdownOptions: {
+    breaks: true,        // Convert \n to <br>
+    gfm: true,           // GitHub Flavored Markdown
+    sanitize: false,     // Allow HTML (we handle XSS differently)
+    smartLists: true,    // Better list parsing
+    smartypants: true    // Smart quotes, dashes
+  }
+});
+```
+
+### CSS Class Customization (New Feature)
+
+**Purpose:** Apply custom CSS classes to messages and connection status without writing CSS selectors.
+
+**When to use:**
+- **Tailwind projects** - Pass Tailwind utility classes
+- **Bootstrap projects** - Pass Bootstrap classes
+- **DaisyUI projects** - Pass DaisyUI component classes
+- **Custom CSS** - Pass your own class names
+
+**Example: Tailwind**
+
+```javascript
+cssClasses: {
+  humanMessage: 'bg-blue-50 text-blue-900 p-4 rounded-lg shadow-sm max-w-2xl ml-auto',
+  aiMessage: 'bg-gray-50 text-gray-900 p-4 rounded-lg shadow-sm max-w-3xl prose prose-slate',
+  errorMessage: 'bg-red-50 text-red-900 p-4 rounded-lg border-l-4 border-red-500',
+  connectionStatusConnected: 'w-2 h-2 rounded-full bg-green-500 animate-pulse',
+  connectionStatusDisconnected: 'w-2 h-2 rounded-full bg-red-500'
+}
+```
+
+**Example: DaisyUI**
+
+```javascript
+cssClasses: {
+  humanMessage: 'chat chat-end',
+  aiMessage: 'chat chat-start',
+  errorMessage: 'alert alert-error'
+}
+```
+
+**Alternative:** Instead of `cssClasses`, you can write CSS targeting data-llamabot attributes:
+
+```css
+[data-llamabot="human-message"] {
+  background: #e0e7ff;
+  padding: 1rem;
+  border-radius: 0.5rem;
+}
+```
+
+### Suggested Prompts (New Feature)
+
+**Purpose:** Quick action buttons that fill the input and send messages.
+
+**HTML:**
+
+```html
+<button data-llamabot="suggested-prompt" class="btn btn-sm">
+  What's the weather?
+</button>
+```
+
+**Behavior:**
+1. User clicks button
+2. Input is filled with button text
+3. Message is automatically sent (unless `autoSendSuggestedPrompts: false`)
+
+**Configuration:**
+
+```javascript
+LlamaBot.create('[data-llamabot="chat-container"]', {
+  autoSendSuggestedPrompts: false,  // Disable auto-send, just fill input
+  // ... other config
+});
+```
+
+**Use cases:**
+- Quick actions ("Show me today's tasks", "Generate a report")
+- Common questions ("What's the weather?", "Tell me a joke")
+- Template messages with placeholders
+
+### Custom Callbacks
+
+**onMessageReceived** - Called when any message arrives
+
+```javascript
+onMessageReceived: (data) => {
+  console.log('Type:', data.type);       // 'human', 'ai', 'tool', 'error'
+  console.log('Content:', data.content); // Message content
+  console.log('Base:', data.baseMessage); // Full LangGraph message object
+
+  // Example: Track analytics
+  if (data.type === 'ai') {
+    analytics.track('ai_response_received', {
+      length: data.content.length
+    });
+  }
+}
+```
+
+**onToolResult** - Called when tool execution completes
+
+```javascript
+onToolResult: (result) => {
+  console.log('Tool:', result.tool_name);
+  console.log('Args:', result.args);
+  console.log('Output:', result.output);
+
+  // Example: Log tool usage
+  if (result.tool_name === 'web_search') {
+    logToolUsage('web_search', result.args.query);
+  }
+}
+```
+
+**onError** - Called on errors (connection, parsing, etc.)
+
+```javascript
+onError: (error) => {
+  console.error('Error:', error);
+
+  // Example: Send to error tracking service
+  Sentry.captureException(error);
+
+  // Example: Show user-friendly message
+  showNotification('Oops! Something went wrong. Please try again.');
+}
+```
+
+### Custom Renderers
+
+**Message Renderers** - Override how specific message types render
+
+```javascript
+messageRenderers: {
+  'plan': (content, baseMessage, renderer) => {
+    // Custom rendering for 'plan' type messages
+    const div = document.createElement('div');
+    div.className = 'plan-message bg-blue-50 p-4 rounded-lg';
+    div.innerHTML = `
+      <h3 class="font-bold mb-2">Plan</h3>
+      <div class="prose">${renderer.markdownParser.parse(content)}</div>
+    `;
+    return div;
+  }
+}
+```
+
+**Tool Renderers** - Override how specific tools render
+
+```javascript
+toolRenderers: {
+  'web_search': (toolName, args, result, renderer) => {
+    // Custom rendering for web_search tool
+    return `
+      <div class="tool-result bg-purple-50 p-3 rounded">
+        <div class="font-semibold">🔍 Web Search: ${args.query}</div>
+        <div class="mt-2 text-sm">${result}</div>
+      </div>
+    `;
+  }
+}
+```
+
 ## Architecture Benefits
 
 ### DRY Principle

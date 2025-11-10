@@ -237,6 +237,21 @@ class ChatApp {
       this.updateDropdownLabel(this.elements.modelSelect);
     }
 
+    // Suggested prompts - handle clicks on all buttons with data-llamabot="suggested-prompt"
+    const suggestedPrompts = this.container.querySelectorAll('[data-llamabot="suggested-prompt"]');
+    suggestedPrompts.forEach(button => {
+      button.addEventListener('click', (e) => {
+        const promptText = e.target.textContent || e.target.innerText;
+        if (this.elements.messageInput) {
+          this.elements.messageInput.value = promptText;
+          // Optionally auto-send the message
+          if (this.config.autoSendSuggestedPrompts !== false) {
+            this.sendMessageWithDebugInfo();
+          }
+        }
+      });
+    });
+
     // LEGACY: Listen for stream end event
     // This was used for HTML streaming preview feature
     // Keeping for backwards compatibility but may be deprecated
