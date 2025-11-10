@@ -59,15 +59,36 @@ class ChatApp {
 
   /**
    * Deep merge two configuration objects
+   * Avoids infinite recursion on DOM/ActionCable objects
    */
   mergeConfig(defaults, userConfig) {
     const result = { ...defaults };
 
     for (const key in userConfig) {
-      if (userConfig[key] !== null && typeof userConfig[key] === 'object' && !Array.isArray(userConfig[key])) {
-        result[key] = this.mergeConfig(defaults[key] || {}, userConfig[key]);
-      } else {
-        result[key] = userConfig[key];
+      const value = userConfig[key];
+
+      // Skip null/undefined
+      if (value === null || value === undefined) {
+        result[key] = value;
+        continue;
+      }
+
+      // Don't deep merge: DOM elements, ActionCable objects, or arrays
+      if (
+        value instanceof Element ||
+        value.constructor?.name === 'Consumer' || // ActionCable Consumer
+        value.constructor?.name === 'Subscription' || // ActionCable Subscription
+        Array.isArray(value)
+      ) {
+        result[key] = value;
+      }
+      // Deep merge plain objects only
+      else if (typeof value === 'object' && value.constructor === Object) {
+        result[key] = this.mergeConfig(defaults[key] || {}, value);
+      }
+      // Primitive values
+      else {
+        result[key] = value;
       }
     }
 
@@ -454,13 +475,32 @@ window.LlamaBot = {
   }
 };
 
-// Export ChatApp class for advanced usage
+// Export LlamaBot as default for ES6 module imports
+export default window.LlamaBot;
+
+// Export ChatApp class and config for advanced usage
 export { ChatApp, DEFAULT_CONFIG };
 
 // Auto-initialize for backward compatibility (if body contains chat elements)
 // This maintains the existing single-page app behavior
-if (document.querySelector('[data-llamabot="message-history"]')) {
-  const legacyInstance = window.LlamaBot.create('body');
-  // Expose for debugging (legacy behavior)
-  window.chatApp = legacyInstance;
+// Only auto-init if:
+// 1. Chat elements exist in DOM
+// 2. Not explicitly disabled via window.LlamaBot.skipAutoInit
+// 3. Document is still loading (meaning loaded via <script> tag, not dynamic import)
+const shouldAutoInit =
+  !window.LlamaBot.skipAutoInit &&
+  document.querySelector('[data-llamabot="message-history"]') &&
+  (document.readyState === 'loading' || document.readyState === 'interactive');
+
+if (shouldAutoInit) {
+  // Wait for DOM to be ready before initializing
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+      const legacyInstance = window.LlamaBot.create('body');
+      window.chatApp = legacyInstance;
+    });
+  } else {
+    const legacyInstance = window.LlamaBot.create('body');
+    window.chatApp = legacyInstance;
+  }
 }

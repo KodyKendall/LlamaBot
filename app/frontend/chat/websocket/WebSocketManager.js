@@ -1,8 +1,10 @@
 /**
  * WebSocket connection management with auto-reconnection
+ * Supports both native WebSocket and ActionCable connections
  */
 
 import { getWebSocketUrl, getRailsUrl } from '../config.js';
+import { ActionCableAdapter } from './ActionCableAdapter.js';
 
 export class WebSocketManager {
   constructor(messageHandler, config = {}, elements = {}) {
@@ -11,14 +13,29 @@ export class WebSocketManager {
     this.elements = elements;
     this.socket = null;
     this.reconnectTimer = null;
+    this.isActionCable = false;
   }
 
   /**
    * Initialize WebSocket connection
+   * Supports both native WebSocket and ActionCable
    */
   connect() {
+    // Check if ActionCable configuration is provided
+    if (this.config.actionCable) {
+      return this.connectActionCable();
+    } else {
+      return this.connectWebSocket();
+    }
+  }
+
+  /**
+   * Initialize native WebSocket connection
+   */
+  connectWebSocket() {
     const wsUrl = this.config.websocketUrl || getWebSocketUrl();
     this.socket = new WebSocket(wsUrl);
+    this.isActionCable = false;
 
     this.socket.onopen = () => this.handleOpen();
     this.socket.onclose = () => this.handleClose();
@@ -29,6 +46,32 @@ export class WebSocketManager {
     if (window.location.protocol === 'https:' && this.elements.liveSiteFrame) {
       this.elements.liveSiteFrame.src = getRailsUrl();
     }
+
+    return this.socket;
+  }
+
+  /**
+   * Initialize ActionCable connection
+   */
+  connectActionCable() {
+    const { consumer, channel, session_id } = this.config.actionCable;
+
+    // Create ActionCable adapter with WebSocket-like interface
+    this.socket = new ActionCableAdapter(
+      consumer,
+      { channel, session_id },
+      this.messageHandler
+    );
+    this.isActionCable = true;
+
+    // Set handlers
+    this.socket.onopen = () => this.handleOpen();
+    this.socket.onclose = () => this.handleClose();
+    this.socket.onerror = (error) => this.handleError(error);
+    this.socket.onmessage = (event) => this.handleMessage(event);
+
+    // Connect
+    this.socket.connect();
 
     return this.socket;
   }
@@ -124,8 +167,15 @@ export class WebSocketManager {
 
   /**
    * Schedule reconnection attempt
+   * Note: ActionCable handles reconnection automatically
    */
   scheduleReconnect() {
+    // ActionCable handles reconnection automatically, skip for ActionCable
+    if (this.isActionCable) {
+      console.log('ActionCable will handle reconnection automatically');
+      return;
+    }
+
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
     }

@@ -34,7 +34,8 @@
       "Bash(docker logs:*)",
       "Bash(docker-compose build:*)",
       "Read(//Users/kodykendall/SoftEngineering/LLMPress/Leonardo/**)",
-      "Read(//Users/kodykendall/SoftEngineering/LLMPress/**)"
+      "Read(//Users/kodykendall/SoftEngineering/LLMPress/**)",
+      "Bash(./scripts/setup-s3-bucket.sh:*)"
     ],
     "deny": [],
     "ask": []

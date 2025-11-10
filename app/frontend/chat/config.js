@@ -7,6 +7,16 @@ export const DEFAULT_CONFIG = {
   // WebSocket configuration
   websocketUrl: null, // Auto-detect if null
 
+  // ActionCable configuration (alternative to websocketUrl)
+  // Use this when connecting through Rails ActionCable instead of direct WebSocket
+  // Example:
+  //   actionCable: {
+  //     consumer: LlamaBotRails.cable,
+  //     channel: 'LlamaBotRails::ChatChannel',
+  //     session_id: 'unique-session-id'
+  //   }
+  actionCable: null,
+
   // Agent configuration
   agent: {
     name: 'rails_frontend_starter_agent',
