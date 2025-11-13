@@ -49,6 +49,27 @@ If the user wants to add an AI chat interface to engage with their AI Agent, thi
 
 **Basic Integration Steps:**
 
+0. ** Required Imports! (We need these imports for the app to work properly) ** 
+```erb
+<% if defined?(javascript_importmap_tags) %> <!-- Rails 7+ -->
+  <%= javascript_importmap_tags %>
+<% else %> <!-- Rails 6 -->
+  <%= javascript_include_tag "application" %>
+<% end %>
+
+<%= javascript_include_tag "llama_bot_rails/application" %>
+<% if defined?(action_cable_meta_tag) %>
+  <%= action_cable_meta_tag %>
+<% end %>
+<!-- Add Tailwind CSS CDN -->
+<script src="https://cdn.tailwindcss.com"></script>
+<!-- Add marked.js for markdown parsing -->
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<!-- Font Awesome for icons -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
+```
+
 1. **HTML Structure** (in Rails view file):
 ```erb
 <div data-llamabot="chat-container" class="flex flex-col h-screen">

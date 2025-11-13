@@ -201,6 +201,7 @@ export class IframeManager {
 
   /**
    * Refresh the Rails app preview iframe
+   * Only refreshes the "Your App" iframe (liveSiteFrame), not other iframes like VSCode
    *
    * @param {Function} getRailsDebugInfoCallback - Function that accepts a callback parameter
    *                                                The callback will receive debugInfoJson
@@ -209,33 +210,27 @@ export class IframeManager {
    *   iframeManager.refreshRailsApp((callback) => this.getRailsDebugInfo(callback))
    */
   refreshRailsApp(getRailsDebugInfoCallback) {
-    const iframes = document.querySelectorAll('iframe');
+    // Only refresh the Rails app iframe (liveSiteFrame), not all iframes
+    if (!this.liveSiteFrame) return;
 
-    iframes.forEach(iframe => {
-      const isRailsIFrame = iframe.src.includes(':3000') || iframe.src.includes('https://rails-');
+    const isRailsIFrame = this.liveSiteFrame.src.includes(':3000') || this.liveSiteFrame.src.includes('https://rails-');
 
-      if (isRailsIFrame) {
-        getRailsDebugInfoCallback((debugInfoJson) => {
-          console.log('debugInfoJson', debugInfoJson);
+    if (isRailsIFrame) {
+      getRailsDebugInfoCallback((debugInfoJson) => {
+        console.log('debugInfoJson', debugInfoJson);
 
-          if (iframe.src) {
-            let additionalRequestPath = debugInfoJson.request_path;
+        if (this.liveSiteFrame.src) {
+          let additionalRequestPath = debugInfoJson.request_path;
 
-            if (!additionalRequestPath) {
-              console.warn('Warning: debugInfoJson.request_path is undefined! Rails error likely.', debugInfoJson);
-              additionalRequestPath = '/';
-            }
-
-            iframe.src = getRailsUrl() + additionalRequestPath;
+          if (!additionalRequestPath) {
+            console.warn('Warning: debugInfoJson.request_path is undefined! Rails error likely.', debugInfoJson);
+            additionalRequestPath = '/';
           }
-        });
-      } else {
-        // Refresh non-Rails iframes by reloading their current src
-        if (iframe.src) {
-          iframe.src = iframe.src;
+
+          this.liveSiteFrame.src = getRailsUrl() + additionalRequestPath;
         }
-      }
-    });
+      });
+    }
   }
 
   /**

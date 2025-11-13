@@ -26,4 +26,8 @@
     0.2.19i:
     - [x] Fix the broken path from /assets/ to /frontend/ for the Leonardo mp3 noise after completion.
     - [x] Disable VSCode logs in chat.html that come from the iFrame by extending the Dockerfile VSCode image
-    - [ ] Make the iFrame refresh not force refresh VSCode, because it disrupts the user experience when they're editing vscode files if leonardo is editing at the same time
+    - [x] Improve frontend Chat JavaScript to be modular & reusable, add s3 upload script with documentation on how to consume for Leonardo/Rails apps
+
+    0.2.19j: 
+    - [x] Make the iFrame refresh not force refresh VSCode, because it disrupts the user experience when they're editing vscode files if leonardo is editing at the same time
+    - [ ] Update the TODO UI/UX tool call, so that the initial one actually DOES show all the TODOs up front, so the user can track them as they change.
