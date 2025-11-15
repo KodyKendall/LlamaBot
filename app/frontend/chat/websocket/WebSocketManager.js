@@ -54,12 +54,12 @@ export class WebSocketManager {
    * Initialize ActionCable connection
    */
   connectActionCable() {
-    const { consumer, channel, session_id } = this.config.actionCable;
+    const { consumer, ...channelConfig } = this.config.actionCable;
 
     // Create ActionCable adapter with WebSocket-like interface
     this.socket = new ActionCableAdapter(
       consumer,
-      { channel, session_id },
+      channelConfig,
       this.messageHandler
     );
     this.isActionCable = true;

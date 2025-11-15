@@ -6,7 +6,7 @@ set -e
 
 # Configuration
 BUCKET="llamapress-cdn"
-VERSION="v0.2.19"
+VERSION="v0.2.19a"
 S3_PATH="llamabot-chat-js-$VERSION"
 SOURCE_DIR="app/frontend/chat"
 REGION="us-east-1"  # Change this to your bucket's region if different

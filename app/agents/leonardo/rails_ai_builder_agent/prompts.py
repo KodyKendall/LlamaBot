@@ -102,13 +102,14 @@ If the user wants to add an AI chat interface to engage with their AI Agent, thi
 
   waitForCableConnection(async (consumer) => {
     // Import from LlamaPress's S3 Bucket CDN
-    const { default: LlamaBot } = await import('https://llamapress-cdn.s3.amazonaws.com/llamabot-chat-js-v0.2.19/index.js');
+    const { default: LlamaBot } = await import('https://llamapress-cdn.s3.amazonaws.com/llamabot-chat-js-v0.2.19a/index.js');
 
     const chat = LlamaBot.create('[data-llamabot="chat-container"]', {
       actionCable: {
         consumer: consumer,
         channel: 'LlamaBotRails::ChatChannel',
-        session_id: crypto.randomUUID()
+        session_id: crypto.randomUUID(),
+        agent_state_builder_class: 'YourCustomStateBuilder'  // OPTIONAL: Route to custom builder
       },
       agent: {
         name: 'YOUR_AGENT_NAME_HERE'  // Must match the langgraph.json key
@@ -125,6 +126,49 @@ If the user wants to add an AI chat interface to engage with their AI Agent, thi
   });
 </script>
 ```
+
+**IMPORTANT: Routing with `agent_state_builder_class`**
+
+You can pass `agent_state_builder_class` directly in the `actionCable` configuration above. This parameter:
+- Routes to a specific AgentStateBuilder class in your Rails app
+- Enables different pages to use different agents
+- Takes precedence over the initializer configuration
+- Must match a class name in `app/llama_bot/` (e.g., `'StudentAgentStateBuilder'`)
+
+**Example: Different Agents for Different Pages**
+```erb
+<!-- Students page uses StudentAgentStateBuilder -->
+<script type="module">
+  const chat = LlamaBot.create('[data-llamabot="chat-container"]', {
+    actionCable: {
+      consumer: consumer,
+      channel: 'LlamaBotRails::ChatChannel',
+      session_id: crypto.randomUUID(),
+      agent_state_builder_class: 'StudentAgentStateBuilder'  // ← Routes to student agent
+    },
+    agent: { name: 'student' }
+  });
+</script>
+
+<!-- Teachers page uses TeacherAgentStateBuilder -->
+<script type="module">
+  const chat = LlamaBot.create('[data-llamabot="chat-container"]', {
+    actionCable: {
+      consumer: consumer,
+      channel: 'LlamaBotRails::ChatChannel',
+      session_id: crypto.randomUUID(),
+      agent_state_builder_class: 'TeacherAgentStateBuilder'  // ← Routes to teacher agent
+    },
+    agent: { name: 'teacher' }
+  });
+</script>
+```
+
+If you don't specify `agent_state_builder_class`, it will fall back to:
+1. Rails initializer config (`config.llama_bot_rails.state_builder_class`)
+2. Default (`LlamaBotRails::AgentStateBuilder`)
+
+See "4) Create AgentStateBuilder Phase" below for detailed documentation on custom state builders and parameter passing.
 
 3. **Optional: Suggested Prompts** (quick action buttons):
 ```erb
@@ -425,6 +469,209 @@ consumer.subscriptions.create({
   agent_state_builder_class: "StudentAgentStateBuilder"  // Dynamic routing
 }, ...);
 ```
+
+**CRITICAL: Understanding `agent_state_builder_class` Parameter**
+
+The `agent_state_builder_class` parameter is how you route different chat connections to different AgentStateBuilder implementations. This enables multi-agent architectures where different pages/contexts use different agents.
+
+**How It Works:**
+
+1. **Parameter Flow:** JavaScript → ActionCable → ChatChannel → AgentStateBuilder
+   - When you pass `agent_state_builder_class: "MyCustomBuilder"` in the subscription creation
+   - Rails ChatChannel receives it at `params[:agent_state_builder_class]`
+   - The class name is used to instantiate the correct builder
+
+2. **Fallback Priority (from highest to lowest):**
+   - **Subscription parameter** (passed from JavaScript) ← Highest priority
+   - **Rails initializer config** (`config.llama_bot_rails.state_builder_class`)
+   - **Default** (`'LlamaBotRails::AgentStateBuilder'`)
+
+3. **When to Use Each Approach:**
+   - **Global config (initializer):** Single agent for entire application
+   - **Per-subscription parameter:** Different agents for different pages/contexts (RECOMMENDED for multi-agent apps)
+
+**Requirements for Custom State Builders:**
+✅ Must be a string (not a class object): `"MyBuilder"` not `MyBuilder`
+✅ Must respond to `new(params:, context:)`
+✅ Must have a `build` method that returns a Hash
+✅ Hash must match your Python LangGraph state schema (Pydantic validates)
+✅ Class must be in Rails autoload paths or at `app/llama_bot/agent_state_builder.rb`
+
+**Example: Multi-Agent Routing**
+
+Different pages route to different agents:
+
+```erb
+<!-- app/views/students/dashboard.html.erb -->
+<script type="module">
+  const subscription = consumer.subscriptions.create({
+    channel: 'LlamaBotRails::ChatChannel',
+    session_id: crypto.randomUUID(),
+    agent_state_builder_class: 'StudentAgentStateBuilder'  // Routes to student agent
+  }, {
+    received(data) { /* handle student agent responses */ }
+  });
+</script>
+
+<!-- app/views/teachers/dashboard.html.erb -->
+<script type="module">
+  const subscription = consumer.subscriptions.create({
+    channel: 'LlamaBotRails::ChatChannel',
+    session_id: crypto.randomUUID(),
+    agent_state_builder_class: 'TeacherAgentStateBuilder'  // Routes to teacher agent
+  }, {
+    received(data) { /* handle teacher agent responses */ }
+  });
+</script>
+```
+
+**Passing Custom JavaScript Parameters to AgentStateBuilder:**
+
+The complete data flow: `JavaScript subscription.send(data) → ChatChannel#receive(data) → AgentStateBuilder#initialize(params: data, context: {...})`
+
+**1. Send Custom Data from JavaScript:**
+```javascript
+function sendMessage() {
+  const messageData = {
+    // REQUIRED FIELDS:
+    message: "User's message here",
+    thread_id: currentThreadId,
+
+    // YOUR CUSTOM FIELDS - Add anything you want:
+    user_id: getUserId(),
+    page_content: getCurrentPageHTML(),
+    selected_element_id: "hero-section",
+    context_type: "website_builder",
+    metadata: {
+      pageUrl: window.location.href,
+      timestamp: Date.now()
+    }
+  };
+
+  subscription.send(messageData);  // This triggers receive() in Rails
+}
+```
+
+**2. Access Parameters in Your AgentStateBuilder:**
+```ruby
+class MyCustomStateBuilder
+  def initialize(params:, context:)
+    @params = params    # ← Everything from JavaScript subscription.send()
+    @context = context  # ← Rails-injected values (api_token, etc.)
+  end
+
+  def build
+    {
+      # Required fields:
+      message: @params["message"],
+      thread_id: @params["thread_id"],
+      api_token: @context[:api_token],
+
+      # Access your custom JavaScript fields:
+      user_id: @params["user_id"],
+      page_content: @params["page_content"],
+      selected_element: @params["selected_element_id"],
+      context_type: @params["context_type"],
+      metadata: @params["metadata"],  # Nested objects work!
+
+      # Route to specific agent:
+      agent_name: "my_custom_agent",  # Must match langgraph.json key
+
+      # Mix in Rails data:
+      available_routes: fetch_user_routes
+    }
+  end
+
+  private
+
+  def fetch_user_routes
+    User.find(@params["user_id"]).available_routes
+  end
+end
+```
+
+**3. The Two Parameter Sources:**
+
+**@params (from JavaScript):**
+- Contains everything you send via `subscription.send(messageData)`
+- Access with string keys: `@params["message"]`, `@params["any_custom_field"]`
+- All JSON-serializable data passes through
+
+**@context (from Rails):**
+- Contains Rails-side data injected by ChatChannel
+- `@context[:api_token]` - Authentication token for agent API calls
+- `@context[:session_id]` - WebSocket session identifier
+- Use symbol or string keys (both work due to `with_indifferent_access`)
+
+**Complete Working Example:**
+
+```javascript
+// Frontend: Send rich context with each message
+const subscription = consumer.subscriptions.create({
+  channel: 'LlamaBotRails::ChatChannel',
+  session_id: crypto.randomUUID(),
+  agent_state_builder_class: 'WebsiteBuilderStateBuilder'
+}, {
+  received(data) {
+    const message = JSON.parse(data).message;
+    displayResponse(message);
+  }
+});
+
+function sendMessage() {
+  subscription.send({
+    message: document.getElementById('message-input').value,
+    thread_id: currentThreadId,
+    page_id: window.currentPageId,
+    selected_elements: getSelectedElements(),
+    page_content: getCurrentPageHTML(),
+    user_intent: detectUserIntent()
+  });
+}
+```
+
+```ruby
+# Backend: app/llama_bot/website_builder_state_builder.rb
+class WebsiteBuilderStateBuilder
+  def initialize(params:, context:)
+    @params = params
+    @context = context
+  end
+
+  def build
+    {
+      message: @params["message"],
+      thread_id: @params["thread_id"],
+      api_token: @context[:api_token],
+      agent_name: "website_builder_agent",  # Routes to specific LangGraph agent
+
+      # Rich context from JavaScript:
+      page_id: @params["page_id"],
+      selected_elements: @params["selected_elements"],
+      page_content: @params["page_content"],
+      user_intent: @params["user_intent"],
+
+      # Mix in Rails data:
+      user: fetch_user_data,
+      available_components: Component.where(page_id: @params["page_id"]).pluck(:id)
+    }
+  end
+
+  private
+
+  def fetch_user_data
+    User.find_by(id: @params["user_id"]).as_json
+  end
+end
+```
+
+**Key Points:**
+✅ Send any JSON-serializable data from JavaScript
+✅ Access JavaScript fields via `@params["field_name"]` (string keys)
+✅ Access Rails context via `@context[:key]` (symbol or string keys)
+✅ Mix JavaScript + Rails data in `build()` method
+✅ Types must match your Python LangGraph State schema (Pydantic validates)
+⚠️ Don't send sensitive data from JavaScript - inject it Rails-side via `@context`
 
 ### 5) Create LangGraph Agent Phase
 **Create folder:** `langgraph/agents/{agent_name}/`
