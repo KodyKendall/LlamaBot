@@ -349,7 +349,7 @@ async def threads(username: str = Depends(auth)):
     # Get only the LATEST state for each thread (not full history)
     for thread_id in unique_thread_ids:
         config = {"configurable": {"thread_id": thread_id}}
-        state_history.append({"thread_id": thread_id, "state": graph.get_state(config=config)})
+        state_history.append({"thread_id": thread_id, "state": await graph.aget_state(config=config)})
 
     return state_history
 
@@ -366,7 +366,7 @@ async def chat_history(thread_id: str, username: str = Depends(auth)):
         logger.warning("⚠️ /chat-history endpoint using fallback graph compilation")
 
     config = {"configurable": {"thread_id": thread_id}}
-    state_history = graph.get_state(config=config) #graph.get_state returns a StateSnapshot object, which inherits from a Named Tuple. Serializes into an Array.
+    state_history = await graph.aget_state(config=config) #graph.aget_state returns a StateSnapshot object, which inherits from a Named Tuple. Serializes into an Array.
     print(state_history)
     return state_history
 
