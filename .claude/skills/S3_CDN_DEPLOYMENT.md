@@ -8,7 +8,7 @@ LlamaBot's frontend JavaScript modules are now hosted on S3 and accessible via C
 
 ### Versioned (Stable - Recommended for Production)
 ```
-https://llamapress-cdn.s3.amazonaws.com/llamabot-chat-js-v0.2.19/index.js
+https://llamapress-cdn.s3.amazonaws.com/llamabot-chat-js-v0.2.19a/index.js
 ```
 
 ### Latest (Auto-updates)
