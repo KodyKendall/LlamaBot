@@ -45,4 +45,4 @@ CMD ["bash", "-c", "if [ ! -z \"$DB_URI\" ]; then python init_pg_checkpointer.py
 # These commands document how to build the Docker image quickly and deploy to dockerhub
 # docker buildx build --file Dockerfile --platform linux/amd64 --tag kody06/llamabot:0.2.14 --push .
 # docker buildx build --file Dockerfile --platform linux/amd64,linux/arm64 --tag kody06/llamabot:0.2.19 --push .
-# docker buildx build --file Dockerfile --platform linux/amd64,linux/arm64 --tag kody06/llamabot:0.2.19l --push .
+# docker buildx build --file Dockerfile --platform linux/amd64,linux/arm64 --tag kody06/llamabot:0.2.19m --push .
