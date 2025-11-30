@@ -32,7 +32,12 @@
     - [x] Make the iFrame refresh not force refresh VSCode, because it disrupts the user experience when they're editing vscode files if leonardo is editing at the same time
 
     0.2.19l: 
-    - [ ] Improve the AI Builder Prompt to specify how to pass parameters 
+    - [ ] Improve the AI Builder Prompt to specify how to pass parameters
+
+    - 0.2.19m: 
+    - [x] - Fix back button by adding navigation history
+    - [x] - Fix capybara browser tool to help debug javascript, in conjunction with Leonardo's spec/run_capybara.rb script improvements.
+    - [ ] - Add MCP to LlamaBot for integration with ChatGPT & Claude Desktop
 
     TODO:
     - [ ] Update the TODO UI/UX tool call, so that the initial one actually DOES show all the TODOs up front, so the user can track them as they change.

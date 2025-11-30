@@ -180,6 +180,25 @@ This executes Ruby/Capybara code in a headless Chrome browser session to debug f
 
 Execute Capybara Ruby code in a headless Chrome browser to debug frontend JavaScript, test user interactions, capture runtime errors, console output, **and see Rails server errors through the HTML response**.
 
+### Command Syntax (IMPORTANT)
+The script path and Ruby code **must be separate arguments**:
+
+```bash
+# ✅ Correct - script path and code are separate arguments
+bin/rails runner spec/run_capybara.rb 'session.visit("/dashboard")'
+
+# ❌ Wrong - don't wrap both in quotes together
+bin/rails runner "spec/run_capybara.rb 'session.visit(\"/dashboard\")'"
+```
+
+### Auto-Login
+The tool **automatically logs in** as `kody@llamapress.ai` before running your code. You don't need to handle authentication - just visit authenticated pages directly.
+
+To disable auto-login: set `CAPYBARA_AUTO_LOGIN=false`
+
+### URL Handling
+URLs using `localhost:3000` are automatically converted to the correct Docker network URL (`llamapress:3000`). You can use either format in your code - both will work.
+
 ### What browser_debug captures:
 - ✅ **JavaScript console output** (console.log, warn, error)
 - ✅ **Frontend JavaScript errors** (with stack traces)
