@@ -480,8 +480,6 @@ def check_timestamp():
         }
     )
 
-# Mount MCP Server
-from app.mcp_server import mcp
-
-# Mount the MCP server's SSE application
-app.mount("/mcp", mcp.sse_app(mount_path=""))
+# Mount MCP Server (stubbed out for now - MCP not yet fully implemented)
+# from app.mcp_server import mcp
+# app.mount("/mcp", mcp.sse_app(mount_path=""))
