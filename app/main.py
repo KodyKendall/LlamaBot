@@ -53,7 +53,7 @@ app = FastAPI()
 # Add CORS middleware for React frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:3001", "http://127.0.0.1:3000", "http://127.0.0.1:3001"],  # React dev server
+    allow_origins=["*"],  # Allow all origins for ngrok/external access
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -379,7 +379,7 @@ async def available_agents():
 
 @app.get("/rails-routes", response_class=JSONResponse)
 async def rails_routes():
-    """Parse routes.rb and return available GET routes for index actions and home page"""
+    """Parse routes.rb and return available GET routes for `index` actions and home page"""
     import re
     import os
 
@@ -479,3 +479,9 @@ def check_timestamp():
             "X-Accel-Buffering": "no"
         }
     )
+
+# Mount MCP Server
+from app.mcp_server import mcp
+
+# Mount the MCP server's SSE application
+app.mount("/mcp", mcp.sse_app(mount_path=""))

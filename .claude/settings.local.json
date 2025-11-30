@@ -36,7 +36,8 @@
       "Read(//Users/kodykendall/SoftEngineering/LLMPress/Leonardo/**)",
       "Read(//Users/kodykendall/SoftEngineering/LLMPress/**)",
       "Bash(./scripts/setup-s3-bucket.sh:*)",
-      "Bash(./scripts/deploy-frontend-to-s3.sh:*)"
+      "Bash(./scripts/deploy-frontend-to-s3.sh:*)",
+      "Bash(find:*)"
     ],
     "deny": [],
     "ask": []
