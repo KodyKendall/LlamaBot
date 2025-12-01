@@ -298,6 +298,12 @@ async def startup_log_streaming():
         except ImportError:
             logger.info("rails_frontend_starter_agent not found, skipping")
 
+        try:
+            from app.agents.leonardo.rails_user_feedback_agent.nodes import build_workflow as build_rails_user_feedback
+            app.state.compiled_graphs["rails_user_feedback_agent"] = build_rails_user_feedback(checkpointer=checkpointer)
+        except ImportError:
+            logger.info("rails_user_feedback_agent not found, skipping")
+
         logger.info(f"✅ Compiled {len(app.state.compiled_graphs)} LangGraph workflows: {list(app.state.compiled_graphs.keys())}")
     except Exception as e:
         logger.error(f"❌ Error compiling LangGraph workflows: {e}", exc_info=True)
