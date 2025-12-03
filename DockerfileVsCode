@@ -46,8 +46,11 @@ if [ -t 1 ]; then \
   fi; \
 fi' > /etc/profile.d/check_ssh.sh
 
+# 🧨 Silence all browser console logs
+RUN sed -i '1s|^|<script>for(const k of ["log","debug","info","warn","error"])console[k]=()=>{};</script>\n|' \
+    /app/code-server/lib/vscode/out/vs/code/browser/workbench/workbench.html
 
-# docker buildx build --file DockerfileVsCode --platform linux/amd64,linux/arm64 --tag kody06/llamabot-vscode:0.2.0 --push .
+# docker buildx build --file DockerfileVsCode --platform linux/amd64,linux/arm64 --tag kody06/llamabot-vscode:0.2.0a --push .
 # TODO: set up VS Code SSH:
     # Dockerfile for VSCode container with Leonardo SSH auto-setup
 # Base image: linuxserver/code-server or your preferred VSCode image

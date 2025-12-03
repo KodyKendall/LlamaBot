@@ -13,32 +13,90 @@
  *    - Requires Rails debug info to maintain state
  */
 
-import { getRailsUrl, getVSCodeUrl, CONFIG } from '../config.js';
+import { getRailsUrl, getVSCodeUrl, DEFAULT_CONFIG } from '../config.js';
 
 export class IframeManager {
-  constructor() {
+  constructor(container = null) {
+    this.container = container || document;
+
     // STREAMING PREVIEW iframe (for HTML generation preview)
-    this.contentFrame = document.getElementById('contentFrame');
+    this.contentFrame = this.querySelector('[data-llamabot="content-frame"]');
 
     // RAILS APP PREVIEW iframe (for live Rails app)
-    this.liveSiteFrame = document.getElementById('liveSiteFrame');
+    this.liveSiteFrame = this.querySelector('[data-llamabot="live-site-frame"]');
 
     // VS CODE iframe
-    this.vsCodeFrame = document.getElementById('vsCodeFrame');
+    this.vsCodeFrame = this.querySelector('[data-llamabot="vscode-frame"]');
 
     // URL input element
-    this.urlInput = document.getElementById('urlInput');
+    this.urlInput = this.querySelector('[data-llamabot="url-input"]');
 
     // URL dropdown element
-    this.urlDropdown = document.getElementById('urlDropdown');
+    this.urlDropdown = this.querySelector('[data-llamabot="url-dropdown"]');
 
     // Cached routes
     this.cachedRoutes = null;
 
     this.overlayElement = null;
 
+    // Navigation history stack for back button (since we can't access cross-origin iframe history)
+    this.navigationHistory = [];
+
     // Initialize iframe URLs
     this.initIframeSources();
+
+    // Listen for navigation messages from the Rails iframe
+    this.initNavigationListener();
+  }
+
+  /**
+   * Initialize listener for navigation messages from the Rails iframe
+   * This allows us to track navigation that happens inside the iframe (link clicks, etc.)
+   */
+  initNavigationListener() {
+    window.addEventListener('message', (event) => {
+      // Only handle navigation messages from our Rails app
+      if (event.data.source !== 'llamapress-navigation') return;
+
+      if (event.data.type === 'before-navigate') {
+        // The Rails app is about to navigate - save the current path to history
+        const fromPath = event.data.fromPath;
+        const toPath = event.data.toPath;
+
+        if (fromPath && toPath && fromPath !== toPath) {
+          // Avoid duplicates at the top of the stack
+          if (this.navigationHistory.length === 0 ||
+              this.navigationHistory[this.navigationHistory.length - 1] !== fromPath) {
+            this.navigationHistory.push(fromPath);
+            console.log('Navigation tracked:', fromPath, '->', toPath, 'History:', this.navigationHistory);
+          }
+        }
+
+        // Update URL bar immediately when navigation starts
+        if (this.urlInput && toPath) {
+          this.urlInput.value = toPath;
+        }
+      } else if (event.data.type === 'page-loaded') {
+        // Update URL display when Rails app loads a new page
+        if (this.urlInput && event.data.path) {
+          this.urlInput.value = event.data.path;
+        }
+      }
+    });
+  }
+
+  /**
+   * Helper method for scoped queries with fallback to global
+   */
+  querySelector(selector) {
+    return this.container.querySelector(selector);
+  }
+
+  /**
+   * Helper method for scoped querySelectorAll with fallback to global
+   */
+  querySelectorAll(selector) {
+    return this.container.querySelectorAll(selector);
   }
 
   /**
@@ -185,6 +243,7 @@ export class IframeManager {
 
   /**
    * Refresh the Rails app preview iframe
+   * Only refreshes the "Your App" iframe (liveSiteFrame), not other iframes like VSCode
    *
    * @param {Function} getRailsDebugInfoCallback - Function that accepts a callback parameter
    *                                                The callback will receive debugInfoJson
@@ -193,33 +252,27 @@ export class IframeManager {
    *   iframeManager.refreshRailsApp((callback) => this.getRailsDebugInfo(callback))
    */
   refreshRailsApp(getRailsDebugInfoCallback) {
-    const iframes = document.querySelectorAll('iframe');
+    // Only refresh the Rails app iframe (liveSiteFrame), not all iframes
+    if (!this.liveSiteFrame) return;
 
-    iframes.forEach(iframe => {
-      const isRailsIFrame = iframe.src.includes(':3000') || iframe.src.includes('https://rails-');
+    const isRailsIFrame = this.liveSiteFrame.src.includes(':3000') || this.liveSiteFrame.src.includes('https://rails-');
 
-      if (isRailsIFrame) {
-        getRailsDebugInfoCallback((debugInfoJson) => {
-          console.log('debugInfoJson', debugInfoJson);
+    if (isRailsIFrame) {
+      getRailsDebugInfoCallback((debugInfoJson) => {
+        console.log('debugInfoJson', debugInfoJson);
 
-          if (iframe.src) {
-            let additionalRequestPath = debugInfoJson.request_path;
+        if (this.liveSiteFrame.src) {
+          let additionalRequestPath = debugInfoJson.request_path;
 
-            if (!additionalRequestPath) {
-              console.warn('Warning: debugInfoJson.request_path is undefined! Rails error likely.', debugInfoJson);
-              additionalRequestPath = '/';
-            }
-
-            iframe.src = getRailsUrl() + additionalRequestPath;
+          if (!additionalRequestPath) {
+            console.warn('Warning: debugInfoJson.request_path is undefined! Rails error likely.', debugInfoJson);
+            additionalRequestPath = '/';
           }
-        });
-      } else {
-        // Refresh non-Rails iframes by reloading their current src
-        if (iframe.src) {
-          iframe.src = iframe.src;
+
+          this.liveSiteFrame.src = getRailsUrl() + additionalRequestPath;
         }
-      }
-    });
+      });
+    }
   }
 
   /**
@@ -237,13 +290,22 @@ export class IframeManager {
   /**
    * Navigate the Rails iframe to a specific path
    * @param {string} path - The path to navigate to (e.g., '/users', '/posts/123')
+   * @param {boolean} addToHistory - Whether to add this navigation to history (default: true)
    */
-  navigateToPath(path) {
+  navigateToPath(path, addToHistory = true) {
     if (!this.liveSiteFrame) return;
 
     // Ensure path starts with /
     if (!path.startsWith('/')) {
       path = '/' + path;
+    }
+
+    // Save current path to history before navigating (for back button)
+    if (addToHistory) {
+      const currentPath = this.extractRelativePath(this.liveSiteFrame.src);
+      if (currentPath && currentPath !== path) {
+        this.navigationHistory.push(currentPath);
+      }
     }
 
     // Update iframe src
@@ -252,6 +314,17 @@ export class IframeManager {
     // Update URL input
     if (this.urlInput) {
       this.urlInput.value = path;
+    }
+  }
+
+  /**
+   * Navigate back in the iframe history
+   * Uses our own history stack since cross-origin iframes don't allow history access
+   */
+  navigateBack() {
+    if (this.navigationHistory.length > 0) {
+      const previousPath = this.navigationHistory.pop();
+      this.navigateToPath(previousPath, false); // Don't add to history when going back
     }
   }
 
@@ -402,7 +475,7 @@ export class IframeManager {
    */
   initNavigationButtons() {
     // Refresh button
-    const refreshButton = document.getElementById('refreshButton');
+    const refreshButton = this.querySelector('[data-llamabot="refresh-button"]');
     if (refreshButton) {
       refreshButton.addEventListener('click', (e) => {
         const button = e.currentTarget;
@@ -420,22 +493,20 @@ export class IframeManager {
       });
     }
 
-    // Back button
-    const backButton = document.getElementById('backButton');
+    // Back button - uses our own history stack since cross-origin iframes don't allow history access
+    const backButton = this.querySelector('[data-llamabot="back-button"]');
     if (backButton && this.liveSiteFrame) {
       backButton.addEventListener('click', () => {
-        if (this.liveSiteFrame.contentWindow) {
-          try {
-            this.liveSiteFrame.contentWindow.history.back();
-          } catch (error) {
-            console.log('Cannot access iframe history due to cross-origin restrictions');
-
-            // Provide visual feedback
-            backButton.style.transform = 'scale(0.9)';
-            setTimeout(() => {
-              backButton.style.transform = '';
-            }, 150);
-          }
+        if (this.navigationHistory.length > 0) {
+          this.navigateBack();
+        } else {
+          // No history available - provide visual feedback
+          backButton.style.transform = 'scale(0.9)';
+          backButton.style.opacity = '0.5';
+          setTimeout(() => {
+            backButton.style.transform = '';
+            backButton.style.opacity = '';
+          }, 150);
         }
       });
     }
@@ -445,8 +516,18 @@ export class IframeManager {
    * Init tab switching
    */
   initTabSwitching() {
-    const tabs = document.querySelectorAll('.tab');
-    const iframes = document.querySelectorAll('.content-iframe');
+    const tabs = this.querySelectorAll('.tab');
+    const iframes = this.querySelectorAll('.content-iframe');
+
+    // Map old ID names to new data-llamabot attribute names
+    const idToDataAttrMap = {
+      'liveSiteFrame': 'live-site-frame',
+      'vsCodeFrame': 'vscode-frame',
+      'contentFrame': 'content-frame',
+      'gitFrame': 'git-frame',
+      'logsFrame': 'logs-frame',
+      'pgWebFrame': 'pgweb-frame'
+    };
 
     tabs.forEach(tab => {
       tab.addEventListener('click', (e) => {
@@ -460,7 +541,11 @@ export class IframeManager {
 
         tab.classList.add('active');
         const targetIframeId = tab.dataset.target;
-        const targetIframe = document.getElementById(targetIframeId);
+
+        // Map old ID to new data-llamabot attribute
+        const dataAttrName = idToDataAttrMap[targetIframeId] || targetIframeId;
+        const targetIframe = this.querySelector(`[data-llamabot="${dataAttrName}"]`);
+
         if (targetIframe) {
           targetIframe.classList.add('active');
         }
@@ -475,14 +560,27 @@ export class IframeManager {
    * Initialize external link buttons on tabs
    */
   initExternalLinkButtons() {
-    const externalLinkButtons = document.querySelectorAll('.tab-external-link');
+    const externalLinkButtons = this.querySelectorAll('.tab-external-link');
+
+    // Map old ID names to new data-llamabot attribute names
+    const idToDataAttrMap = {
+      'liveSiteFrame': 'live-site-frame',
+      'vsCodeFrame': 'vscode-frame',
+      'contentFrame': 'content-frame',
+      'gitFrame': 'git-frame',
+      'logsFrame': 'logs-frame',
+      'pgWebFrame': 'pgweb-frame'
+    };
 
     externalLinkButtons.forEach(button => {
       button.addEventListener('click', (e) => {
         e.stopPropagation(); // Prevent tab switching
 
         const iframeId = button.dataset.iframe;
-        const iframe = document.getElementById(iframeId);
+
+        // Map old ID to new data-llamabot attribute
+        const dataAttrName = idToDataAttrMap[iframeId] || iframeId;
+        const iframe = this.querySelector(`[data-llamabot="${dataAttrName}"]`);
 
         if (iframe && iframe.src) {
           // Open the iframe's current URL in a new tab
@@ -496,9 +594,9 @@ export class IframeManager {
    * Init view mode toggle
    */
   initViewModeToggle() {
-    const desktopModeBtn = document.getElementById('desktopModeBtn');
-    const mobileModeBtn = document.getElementById('mobileModeBtn');
-    const browserContent = document.querySelector('.browser-content');
+    const desktopModeBtn = this.querySelector('[data-llamabot="desktop-mode-btn"]');
+    const mobileModeBtn = this.querySelector('[data-llamabot="mobile-mode-btn"]');
+    const browserContent = this.querySelector('.browser-content');
 
     if (!desktopModeBtn || !mobileModeBtn || !browserContent) return;
 

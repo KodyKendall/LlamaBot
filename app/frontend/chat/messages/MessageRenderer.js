@@ -6,12 +6,15 @@ import { MarkdownParser } from './MarkdownParser.js';
 import { ToolMessageRenderer } from './ToolMessageRenderer.js';
 
 export class MessageRenderer {
-  constructor(messageHistoryElement, iframeManager = null, getRailsDebugInfoCallback = null, scrollManager = null, loadingVerbs = null) {
+  constructor(messageHistoryElement, iframeManager = null, getRailsDebugInfoCallback = null, scrollManager = null, loadingVerbs = null, config = {}, container = null, elements = {}) {
     this.messageHistory = messageHistoryElement;
     this.markdownParser = new MarkdownParser();
     this.toolRenderer = new ToolMessageRenderer(iframeManager, getRailsDebugInfoCallback);
     this.scrollManager = scrollManager;
     this.loadingVerbs = loadingVerbs;
+    this.config = config;
+    this.container = container;
+    this.elements = elements;
   }
 
   /**
@@ -54,8 +57,14 @@ export class MessageRenderer {
    */
   renderHumanMessage(content) {
     const messageDiv = document.createElement('div');
-    messageDiv.className = 'message user-message';
+    messageDiv.setAttribute('data-llamabot', 'human-message');
     messageDiv.textContent = content;
+
+    // Apply custom CSS classes if configured
+    if (this.config.cssClasses?.humanMessage) {
+      messageDiv.className = this.config.cssClasses.humanMessage;
+    }
+
     this.insertMessage(messageDiv);
     return messageDiv;
   }
@@ -65,7 +74,7 @@ export class MessageRenderer {
    */
   renderAiMessage(content, baseMessage) {
     const messageDiv = document.createElement('div');
-    messageDiv.className = 'message ai-message';
+    messageDiv.setAttribute('data-llamabot', 'ai-message');
 
     // Ensure content is a valid string (handle undefined, null, etc.)
     const safeContent = (content !== undefined && content !== null && content !== 'undefined')
@@ -76,7 +85,7 @@ export class MessageRenderer {
 
     // Check if this is a tool call message (OpenAI format)
     if ((content === '' || content === null) && baseMessage?.tool_calls?.length > 0) {
-      messageDiv.className = 'message tool-message';
+      messageDiv.setAttribute('data-llamabot', 'tool-message');
       const toolCall = baseMessage.tool_calls[0];
       let firstArgument = toolCall.args[Object.keys(toolCall.args)[0]] || '';
 
@@ -87,6 +96,11 @@ export class MessageRenderer {
         ''
       );
       messageDiv.id = baseMessage.tool_calls[0].id;
+    } else {
+      // Apply custom CSS classes if configured (only for regular AI messages, not tool messages)
+      if (this.config.cssClasses?.aiMessage) {
+        messageDiv.className = this.config.cssClasses.aiMessage;
+      }
     }
 
     this.insertMessage(messageDiv);
@@ -100,7 +114,7 @@ export class MessageRenderer {
     const messageDiv = document.getElementById(baseMessage.tool_call_id);
 
     if (messageDiv) {
-      messageDiv.className = 'message tool-message';
+      messageDiv.setAttribute('data-llamabot', 'tool-message');
       this.toolRenderer.updateCollapsibleToolMessage(messageDiv, content, baseMessage);
       return messageDiv;
     }
@@ -114,8 +128,14 @@ export class MessageRenderer {
    */
   renderErrorMessage(content) {
     const messageDiv = document.createElement('div');
-    messageDiv.className = 'message error-message';
+    messageDiv.setAttribute('data-llamabot', 'error-message');
     messageDiv.textContent = content;
+
+    // Apply custom CSS classes if configured
+    if (this.config.cssClasses?.errorMessage) {
+      messageDiv.className = this.config.cssClasses.errorMessage;
+    }
+
     this.insertMessage(messageDiv);
 
     // Stop the thinking indicator when an error occurs
@@ -133,15 +153,15 @@ export class MessageRenderer {
       this.loadingVerbs.stopCycling();
     }
 
-    // Hide thinking area in input area
-    const thinkingArea = document.getElementById('thinkingArea');
+    // Hide thinking area in input area - use scoped elements if available
+    const thinkingArea = this.elements?.thinkingArea || document.getElementById('thinkingArea');
     if (thinkingArea) {
       thinkingArea.classList.add('hidden');
       thinkingArea.innerHTML = '';
     }
 
-    // Restore original placeholder text
-    const messageInput = document.getElementById('messageInput');
+    // Restore original placeholder text - use scoped elements if available
+    const messageInput = this.elements?.messageInput || document.getElementById('messageInput');
     if (messageInput) {
       messageInput.placeholder = 'Ask Leonardo...';
     }
@@ -152,8 +172,14 @@ export class MessageRenderer {
    */
   renderQueuedMessage(content) {
     const messageDiv = document.createElement('div');
-    messageDiv.className = 'message queued-message';
+    messageDiv.setAttribute('data-llamabot', 'queued-message');
     messageDiv.textContent = content;
+
+    // Apply custom CSS classes if configured
+    if (this.config.cssClasses?.queuedMessage) {
+      messageDiv.className = this.config.cssClasses.queuedMessage;
+    }
+
     this.insertMessage(messageDiv);
     return messageDiv;
   }
@@ -212,7 +238,7 @@ export class MessageRenderer {
 
     // Find all tool messages
     const allMessages = Array.from(this.messageHistory.children);
-    const toolMessages = allMessages.filter(msg => msg.classList.contains('tool-message'));
+    const toolMessages = allMessages.filter(msg => msg.getAttribute('data-llamabot') === 'tool-message');
 
     // If no tool messages, the AI message should stay where it is
     if (toolMessages.length === 0) return;
@@ -227,7 +253,7 @@ export class MessageRenderer {
     // Only reposition if AI message is BEFORE the last tool message
     if (aiMessageIndex < lastToolIndex) {
       // Find thinking message (should stay at bottom)
-      const thinkingMessage = allMessages.find(msg => msg.classList.contains('thinking-message'));
+      const thinkingMessage = allMessages.find(msg => msg.getAttribute('data-llamabot') === 'thinking-message');
 
       // Insert after last tool message but before thinking message
       if (thinkingMessage) {

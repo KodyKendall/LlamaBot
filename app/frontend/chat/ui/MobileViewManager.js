@@ -3,10 +3,19 @@
  */
 
 export class MobileViewManager {
-  constructor(scrollManager) {
+  constructor(scrollManager, container = null, elements = {}) {
     this.scrollManager = scrollManager;
+    this.container = container || document;
+    this.elements = elements;
     this.currentMobileView = 'chat'; // Default view
     this.init();
+  }
+
+  /**
+   * Helper method for scoped queries
+   */
+  querySelector(selector) {
+    return this.container.querySelector(selector);
   }
 
   /**
@@ -16,6 +25,7 @@ export class MobileViewManager {
     this.initializeMobileView();
     this.initResizeListener();
     this.initTextareaAutoResize();
+    this.initMobileViewButtons();
   }
 
   /**
@@ -86,11 +96,32 @@ export class MobileViewManager {
    * Initialize textarea auto-resize
    */
   initTextareaAutoResize() {
-    const messageInput = document.getElementById('messageInput');
+    const messageInput = this.elements.messageInput || this.querySelector('[data-llamabot="message-input"]');
     if (messageInput) {
       messageInput.addEventListener('input', function() {
         this.style.height = 'auto';
         this.style.height = this.scrollHeight + 'px';
+      });
+    }
+  }
+
+  /**
+   * Initialize mobile view toggle buttons
+   */
+  initMobileViewButtons() {
+    // Button to show preview (switch to iframe view)
+    const showPreviewBtn = this.querySelector('[data-llamabot="show-preview-btn"]');
+    if (showPreviewBtn) {
+      showPreviewBtn.addEventListener('click', () => {
+        this.switchToMobileView('iframe');
+      });
+    }
+
+    // Button to show chat (switch back to chat view)
+    const showChatBtn = this.querySelector('[data-llamabot="show-chat-btn"]');
+    if (showChatBtn) {
+      showChatBtn.addEventListener('click', () => {
+        this.switchToMobileView('chat');
       });
     }
   }
@@ -102,10 +133,3 @@ export class MobileViewManager {
     return this.currentMobileView;
   }
 }
-
-// Make switchToMobileView available globally for onclick handlers
-window.switchToMobileView = function(view) {
-  if (window.mobileViewManager) {
-    window.mobileViewManager.switchToMobileView(view);
-  }
-};

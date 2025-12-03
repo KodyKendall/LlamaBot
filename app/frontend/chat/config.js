@@ -1,37 +1,51 @@
 /**
- * Application configuration constants
+ * Default configuration for LlamaBot Client
+ * These can be overridden when creating an instance
  */
 
-export const CONFIG = {
+export const DEFAULT_CONFIG = {
+  // WebSocket configuration
+  websocketUrl: null, // Auto-detect if null
+
+  // ActionCable configuration (alternative to websocketUrl)
+  // Use this when connecting through Rails ActionCable instead of direct WebSocket
+  // Example:
+  //   actionCable: {
+  //     consumer: LlamaBotRails.cable,
+  //     channel: 'LlamaBotRails::ChatChannel',
+  //     session_id: 'unique-session-id'
+  //   }
+  actionCable: null,
+
   // Agent configuration
-  AGENT: {
-    NAME: 'rails_frontend_starter_agent',
-    TYPE: 'default'
-    // TYPE: 'claude_llm_model'
+  agent: {
+    name: 'rails_frontend_starter_agent',
+    type: 'default'
   },
 
   // Agent mode mappings
-  AGENT_MODES: {
+  agentModes: {
     prototype: 'rails_frontend_starter_agent',
     engineer: 'rails_agent',
     ai_builder: 'rails_ai_builder_agent',
-    testing: 'rails_testing_agent'
+    testing: 'rails_testing_agent',
+    feedback: 'rails_user_feedback_agent'
   },
 
   // Streaming configuration
-  IFRAME_REFRESH_MS: 500,
+  iframeRefreshMs: 500,
 
   // Scroll configuration
-  SCROLL_THRESHOLD: 50, // pixels from bottom to consider "at bottom"
+  scrollThreshold: 50, // pixels from bottom to consider "at bottom"
 
   // Rails iframe timeout
-  RAILS_DEBUG_TIMEOUT: 250, // ms
+  railsDebugTimeout: 250, // ms
 
   // Cookie settings
-  COOKIE_EXPIRY_DAYS: 365,
+  cookieExpiryDays: 365,
 
   // Markdown configuration
-  MARKDOWN_OPTIONS: {
+  markdownOptions: {
     breaks: true,
     gfm: true,
     sanitize: false, // We'll handle XSS prevention differently
@@ -40,7 +54,26 @@ export const CONFIG = {
   },
 
   // WebSocket reconnection
-  RECONNECT_DELAY: 3000 // ms
+  reconnectDelay: 3000, // ms
+
+  // Custom renderers (can be overridden)
+  toolRenderers: {},
+  messageRenderers: {},
+
+  // Custom CSS classes for styling (optional - for Tailwind/Bootstrap integration)
+  cssClasses: {
+    humanMessage: '',  // e.g., 'bg-blue-100 p-3 rounded-lg'
+    aiMessage: '',     // e.g., 'bg-gray-100 p-3 rounded-lg'
+    errorMessage: '',  // e.g., 'bg-red-100 p-3 rounded-lg text-red-800'
+    queuedMessage: '', // e.g., 'bg-yellow-50 p-3 rounded-lg'
+    connectionStatusConnected: '',    // e.g., 'bg-green-400'
+    connectionStatusDisconnected: ''  // e.g., 'bg-red-400'
+  },
+
+  // Callbacks (can be overridden)
+  onMessageReceived: null,
+  onToolResult: null,
+  onError: null
 };
 
 /**

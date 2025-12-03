@@ -1,22 +1,41 @@
 /**
  * WebSocket connection management with auto-reconnection
+ * Supports both native WebSocket and ActionCable connections
  */
 
-import { getWebSocketUrl, getRailsUrl, CONFIG } from '../config.js';
+import { getWebSocketUrl, getRailsUrl } from '../config.js';
+import { ActionCableAdapter } from './ActionCableAdapter.js';
 
 export class WebSocketManager {
-  constructor(messageHandler) {
+  constructor(messageHandler, config = {}, elements = {}) {
     this.messageHandler = messageHandler;
+    this.config = config;
+    this.elements = elements;
     this.socket = null;
     this.reconnectTimer = null;
+    this.isActionCable = false;
   }
 
   /**
    * Initialize WebSocket connection
+   * Supports both native WebSocket and ActionCable
    */
   connect() {
-    const wsUrl = getWebSocketUrl();
+    // Check if ActionCable configuration is provided
+    if (this.config.actionCable) {
+      return this.connectActionCable();
+    } else {
+      return this.connectWebSocket();
+    }
+  }
+
+  /**
+   * Initialize native WebSocket connection
+   */
+  connectWebSocket() {
+    const wsUrl = this.config.websocketUrl || getWebSocketUrl();
     this.socket = new WebSocket(wsUrl);
+    this.isActionCable = false;
 
     this.socket.onopen = () => this.handleOpen();
     this.socket.onclose = () => this.handleClose();
@@ -24,12 +43,35 @@ export class WebSocketManager {
     this.socket.onmessage = (event) => this.handleMessage(event);
 
     // Set initial iframe src for HTTPS
-    if (window.location.protocol === 'https:') {
-      const liveSiteFrame = document.getElementById('liveSiteFrame');
-      if (liveSiteFrame) {
-        liveSiteFrame.src = getRailsUrl();
-      }
+    if (window.location.protocol === 'https:' && this.elements.liveSiteFrame) {
+      this.elements.liveSiteFrame.src = getRailsUrl();
     }
+
+    return this.socket;
+  }
+
+  /**
+   * Initialize ActionCable connection
+   */
+  connectActionCable() {
+    const { consumer, ...channelConfig } = this.config.actionCable;
+
+    // Create ActionCable adapter with WebSocket-like interface
+    this.socket = new ActionCableAdapter(
+      consumer,
+      channelConfig,
+      this.messageHandler
+    );
+    this.isActionCable = true;
+
+    // Set handlers
+    this.socket.onopen = () => this.handleOpen();
+    this.socket.onclose = () => this.handleClose();
+    this.socket.onerror = (error) => this.handleError(error);
+    this.socket.onmessage = (event) => this.handleMessage(event);
+
+    // Connect
+    this.socket.connect();
 
     return this.socket;
   }
@@ -41,9 +83,8 @@ export class WebSocketManager {
     console.log('WebSocket connected');
     this.updateConnectionStatus(true);
 
-    const sendButton = document.getElementById('sendButton');
-    if (sendButton) {
-      sendButton.disabled = false;
+    if (this.elements.sendButton) {
+      this.elements.sendButton.disabled = false;
     }
 
     // Emit custom event
@@ -57,9 +98,8 @@ export class WebSocketManager {
     console.log('WebSocket disconnected');
     this.updateConnectionStatus(false);
 
-    const sendButton = document.getElementById('sendButton');
-    if (sendButton) {
-      sendButton.disabled = true;
+    if (this.elements.sendButton) {
+      this.elements.sendButton.disabled = true;
     }
 
     // Emit custom event
@@ -77,6 +117,11 @@ export class WebSocketManager {
 
     // Emit custom event with error
     window.dispatchEvent(new CustomEvent('websocketError', { detail: error }));
+
+    // Call custom error callback if provided
+    if (this.config.onError) {
+      this.config.onError(error);
+    }
   }
 
   /**
@@ -84,8 +129,8 @@ export class WebSocketManager {
    */
   handleMessage(event) {
     const data = JSON.parse(event.data);
-    console.log('Received:', data.type);
-    console.log('Data:', data);
+    // console.log('Received:', data.type);
+    // console.log('Data:', data);
 
     // Delegate to message handler
     if (this.messageHandler) {
@@ -109,22 +154,38 @@ export class WebSocketManager {
    * Update connection status UI
    */
   updateConnectionStatus(connected) {
-    const status = document.getElementById('connectionStatus');
-    if (!status) return;
+    if (!this.elements.connectionStatus) return;
 
     if (connected) {
-      status.className = 'connection-status connected';
-      status.innerHTML = '<span class="status-dot"></span>';
+      // Apply custom CSS class if configured, otherwise use default
+      if (this.config.cssClasses?.connectionStatusConnected) {
+        this.elements.connectionStatus.className = this.config.cssClasses.connectionStatusConnected;
+      } else {
+        this.elements.connectionStatus.className = 'connection-status connected';
+        this.elements.connectionStatus.innerHTML = '<span class="status-dot"></span>';
+      }
     } else {
-      status.className = 'connection-status disconnected';
-      status.innerHTML = '<span class="status-dot"></span>';
+      // Apply custom CSS class if configured, otherwise use default
+      if (this.config.cssClasses?.connectionStatusDisconnected) {
+        this.elements.connectionStatus.className = this.config.cssClasses.connectionStatusDisconnected;
+      } else {
+        this.elements.connectionStatus.className = 'connection-status disconnected';
+        this.elements.connectionStatus.innerHTML = '<span class="status-dot"></span>';
+      }
     }
   }
 
   /**
    * Schedule reconnection attempt
+   * Note: ActionCable handles reconnection automatically
    */
   scheduleReconnect() {
+    // ActionCable handles reconnection automatically, skip for ActionCable
+    if (this.isActionCable) {
+      console.log('ActionCable will handle reconnection automatically');
+      return;
+    }
+
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
     }
@@ -132,7 +193,7 @@ export class WebSocketManager {
     this.reconnectTimer = setTimeout(() => {
       console.log('Attempting to reconnect...');
       this.connect();
-    }, CONFIG.RECONNECT_DELAY);
+    }, this.config.reconnectDelay || 3000);
   }
 
   /**

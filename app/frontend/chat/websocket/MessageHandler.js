@@ -2,7 +2,7 @@
  * WebSocket message routing and processing
  */
 
-import { CONFIG } from '../config.js';
+import { DEFAULT_CONFIG } from '../config.js';
 
 export class MessageHandler {
   constructor(appState, streamingState, messageRenderer, iframeManager, scrollManager) {

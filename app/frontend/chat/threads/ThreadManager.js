@@ -17,8 +17,24 @@ export class ThreadManager {
       this.showThreadsLoading();
 
       const response = await fetch('/threads');
+
+      // Check if response is OK
+      if (!response.ok) {
+        console.warn(`Thread fetch returned ${response.status}: ${response.statusText}`);
+        this.showThreadsError(`Server returned ${response.status}`);
+        return;
+      }
+
+      // Check if response is JSON
+      const contentType = response.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        console.warn('Thread fetch did not return JSON, got:', contentType);
+        this.showThreadsError('Invalid response format');
+        return;
+      }
+
       const threads = await response.json();
-      console.log(threads);
+      console.log('Fetched threads:', threads);
 
       // Sort by date, newest first
       threads.sort((a, b) => new Date(b.state[4]) - new Date(a.state[4]));
@@ -27,7 +43,7 @@ export class ThreadManager {
       this.populateMenuWithThreads(threads);
     } catch (error) {
       console.error('Error fetching threads:', error);
-      this.showThreadsError();
+      this.showThreadsError(error.message);
     }
   }
 
@@ -55,12 +71,16 @@ export class ThreadManager {
   /**
    * Show error state in threads menu
    */
-  showThreadsError() {
+  showThreadsError(errorMsg = 'Failed to load') {
     const menuItems = document.querySelector('.menu-items');
     if (!menuItems) return;
 
     menuItems.innerHTML = `
       <div class="menu-item" style="opacity: 0.6; cursor: default; color: #ff6b6b;">
+        <small>⚠️ ${errorMsg}</small>
+      </div>
+      <div class="menu-item" style="opacity: 0.8; cursor: default;">
+        <small style="color: #888;">Threads unavailable - chat still works!</small>
         Failed to load conversations
       </div>
       <div class="menu-item" onclick="window.threadManager.fetchThreads()" style="color: var(--accent-color); cursor: pointer;">

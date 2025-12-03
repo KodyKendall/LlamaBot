@@ -2,7 +2,7 @@
  * Centralized application state management
  */
 
-import { CONFIG } from '../config.js';
+import { DEFAULT_CONFIG } from '../config.js';
 
 export class AppState {
   constructor() {
@@ -18,8 +18,8 @@ export class AppState {
 
     // Agent configuration (mutable for dynamic selection)
     this.agentConfig = {
-      name: CONFIG.AGENT.NAME,
-      type: CONFIG.AGENT.TYPE
+      name: DEFAULT_CONFIG.agent.name,
+      type: DEFAULT_CONFIG.agent.type
     };
   }
 
@@ -101,7 +101,7 @@ export class AppState {
    * Update agent configuration based on mode
    */
   setAgentMode(mode) {
-    const agentName = CONFIG.AGENT_MODES[mode];
+    const agentName = DEFAULT_CONFIG.agentModes[mode];
     if (agentName) {
       this.agentConfig.name = agentName;
     }

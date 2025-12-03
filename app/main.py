@@ -53,7 +53,7 @@ app = FastAPI()
 # Add CORS middleware for React frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:3001", "http://127.0.0.1:3000", "http://127.0.0.1:3001"],  # React dev server
+    allow_origins=["*"],  # Allow all origins for ngrok/external access
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -298,6 +298,12 @@ async def startup_log_streaming():
         except ImportError:
             logger.info("rails_frontend_starter_agent not found, skipping")
 
+        try:
+            from app.agents.leonardo.rails_user_feedback_agent.nodes import build_workflow as build_rails_user_feedback
+            app.state.compiled_graphs["rails_user_feedback_agent"] = build_rails_user_feedback(checkpointer=checkpointer)
+        except ImportError:
+            logger.info("rails_user_feedback_agent not found, skipping")
+
         logger.info(f"✅ Compiled {len(app.state.compiled_graphs)} LangGraph workflows: {list(app.state.compiled_graphs.keys())}")
     except Exception as e:
         logger.error(f"❌ Error compiling LangGraph workflows: {e}", exc_info=True)
@@ -349,7 +355,7 @@ async def threads(username: str = Depends(auth)):
     # Get only the LATEST state for each thread (not full history)
     for thread_id in unique_thread_ids:
         config = {"configurable": {"thread_id": thread_id}}
-        state_history.append({"thread_id": thread_id, "state": graph.get_state(config=config)})
+        state_history.append({"thread_id": thread_id, "state": await graph.aget_state(config=config)})
 
     return state_history
 
@@ -366,7 +372,7 @@ async def chat_history(thread_id: str, username: str = Depends(auth)):
         logger.warning("⚠️ /chat-history endpoint using fallback graph compilation")
 
     config = {"configurable": {"thread_id": thread_id}}
-    state_history = graph.get_state(config=config) #graph.get_state returns a StateSnapshot object, which inherits from a Named Tuple. Serializes into an Array.
+    state_history = await graph.aget_state(config=config) #graph.aget_state returns a StateSnapshot object, which inherits from a Named Tuple. Serializes into an Array.
     print(state_history)
     return state_history
 
@@ -379,7 +385,7 @@ async def available_agents():
 
 @app.get("/rails-routes", response_class=JSONResponse)
 async def rails_routes():
-    """Parse routes.rb and return available GET routes for index actions and home page"""
+    """Parse routes.rb and return available GET routes for `index` actions and home page"""
     import re
     import os
 
@@ -479,3 +485,7 @@ def check_timestamp():
             "X-Accel-Buffering": "no"
         }
     )
+
+# Mount MCP Server (stubbed out for now - MCP not yet fully implemented)
+# from app.mcp_server import mcp
+# app.mount("/mcp", mcp.sse_app(mount_path=""))

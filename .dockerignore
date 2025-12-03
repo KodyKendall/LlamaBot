@@ -44,7 +44,7 @@ Dockerfile
 app/agents/private/*
 
 # ignore for now
-app/frontend/*
+# app/frontend/*  # Commented out - frontend files are needed in production
 
 rails/
 llamapress/
