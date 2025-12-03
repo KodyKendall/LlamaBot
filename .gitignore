@@ -4,7 +4,7 @@ experiments/
 chat_app.log
 .langgraph_api/*
 frontend/node_modules
-.claude
+.claude/*
 
 env/
 
