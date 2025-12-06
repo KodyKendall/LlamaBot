@@ -3,8 +3,10 @@ from datetime import datetime, timezone
 from typing import Optional
 from sqlmodel import SQLModel, Field
 
+from app.lib import ActiveRecordMixin, set_console_session  # noqa: F401
 
-class User(SQLModel, table=True):
+
+class User(ActiveRecordMixin, SQLModel, table=True):
     """User model for authentication."""
 
     id: Optional[int] = Field(default=None, primary_key=True)

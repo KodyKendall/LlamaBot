@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, HTTPException, Depends, Form
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
@@ -206,20 +206,48 @@ def admin_required(
         )
     return current_user
 
+
+def has_any_users() -> bool:
+    """Check if there are any users in the database."""
+    if engine is None:
+        return False
+    try:
+        with Session(engine) as session:
+            users = get_all_users(session)
+            return len(users) > 0
+    except Exception:
+        return False
+
+
 # At module level
 thread_locks = defaultdict(asyncio.Lock)
 thread_queues = defaultdict(asyncio.Queue)
 MAX_QUEUE_SIZE = 10
 
-@app.get("/", response_class=HTMLResponse)
-async def root(current_user: User = Depends(get_current_user)):
-    # Serve the chat.html file with user role injected
-    with open(frontend_dir / "chat.html") as f:
-        html = f.read()
-    # Inject user role as a global variable for the frontend
-    role_script = f'<script>window.LLAMABOT_USER_ROLE = "{getattr(current_user, "role", "engineer")}";</script>'
-    html = html.replace('</head>', f'{role_script}</head>')
-    return html
+@app.get("/")
+async def root(request: Request):
+    # If no users exist, redirect to registration
+    if not has_any_users():
+        return RedirectResponse(url="/register", status_code=302)
+
+    # Otherwise require authentication
+    credentials = await security(request)
+    with Session(engine) as session:
+        user = authenticate_user(session, credentials.username, credentials.password)
+        if not user:
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid credentials",
+                headers={"WWW-Authenticate": "Basic"},
+            )
+
+        # Serve the chat.html file with user role injected
+        with open(frontend_dir / "chat.html") as f:
+            html = f.read()
+        # Inject user role as a global variable for the frontend
+        role_script = f'<script>window.LLAMABOT_USER_ROLE = "{getattr(user, "role", "engineer")}";</script>'
+        html = html.replace('</head>', f'{role_script}</head>')
+        return HTMLResponse(content=html)
     
 @app.get("/hello", response_class=JSONResponse)
 async def hello():
@@ -227,7 +255,14 @@ async def hello():
 
 @app.get("/register", response_class=HTMLResponse)
 async def register_form():
-    """Serve the registration form"""
+    """Serve the registration form - only available when no users exist."""
+    # Security: Only allow registration if no users exist
+    if has_any_users():
+        raise HTTPException(
+            status_code=403,
+            detail="Registration is disabled. Please contact an administrator to create an account."
+        )
+
     with open("register.html") as f:
         html = f.read()
         return HTMLResponse(content=html)
@@ -239,7 +274,14 @@ async def register(
     confirm: str = Form(...),
     session: Session = Depends(get_db_session)
 ):
-    """Process registration form - creates new user in database."""
+    """Process registration form - only works when no users exist (creates first admin user)."""
+    # Security: Only allow registration if no users exist
+    if has_any_users():
+        raise HTTPException(
+            status_code=403,
+            detail="Registration is disabled. Please contact an administrator to create an account."
+        )
+
     # Validate passwords match
     if password != confirm:
         raise HTTPException(
@@ -247,7 +289,7 @@ async def register(
             detail="Passwords do not match"
         )
 
-    # Check if username already exists
+    # Check if username already exists (shouldn't happen if no users, but be safe)
     existing_user = get_user_by_username(session, username)
     if existing_user:
         raise HTTPException(
@@ -256,10 +298,12 @@ async def register(
         )
 
     try:
-        user = create_user(session, username, password)
-        logger.info(f"User '{username}' registered successfully")
+        # First user is always an admin
+        from app.services.user_service import create_admin_user
+        user = create_admin_user(session, username, password)
+        logger.info(f"Admin user '{username}' registered successfully (first user)")
         return JSONResponse({
-            "message": f"User '{username}' registered successfully! You can now use these credentials to access protected endpoints."
+            "message": f"Admin user '{username}' registered successfully! You can now use these credentials to access the app."
         })
     except Exception as e:
         logger.error(f"Error creating user: {e}")

@@ -42,6 +42,7 @@ httpx==0.28.1
 httpx-sse==0.4.0
 idna==3.10
 iniconfig==2.1.0
+ipython==8.32.0
 Jinja2==3.1.6
 jiter==0.9.0
 jsonpatch==1.33

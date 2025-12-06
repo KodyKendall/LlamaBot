@@ -1,0 +1,49 @@
+#!/bin/bash
+# LlamaBot Console - Rails-like interactive shell for database operations
+#
+# Usage:
+#   ./bin/console                    # Run locally (venv, etc.)
+#   ./bin/console --docker           # Run via docker compose exec
+#   ./bin/console -f compose.yml     # Run via specific compose file
+#
+# This opens an IPython shell with pre-loaded models, session, and helper functions.
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LLAMABOT_DIR="$(dirname "$SCRIPT_DIR")"
+
+# Parse arguments
+USE_DOCKER=false
+COMPOSE_FILE=""
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --docker|-d)
+            USE_DOCKER=true
+            shift
+            ;;
+        -f)
+            USE_DOCKER=true
+            COMPOSE_FILE="$2"
+            shift 2
+            ;;
+        *)
+            echo "Unknown option: $1"
+            echo "Usage: ./bin/console [--docker|-d] [-f docker-compose.yml]"
+            exit 1
+            ;;
+    esac
+done
+
+if [ "$USE_DOCKER" = true ]; then
+    if [ -n "$COMPOSE_FILE" ]; then
+        docker compose -f "$COMPOSE_FILE" exec llamabot python app/console.py
+    else
+        docker compose exec llamabot python app/console.py
+    fi
+else
+    # Run locally
+    cd "$LLAMABOT_DIR"
+    python app/console.py
+fi
