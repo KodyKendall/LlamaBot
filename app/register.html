@@ -65,9 +65,6 @@
 <body>
     <div class="container">
         <h2>🦙 LlamaBot Registration</h2>
-        <div class="message warning">
-            ⚠️ This is a one-time setup. After registration, this endpoint should be disabled.
-        </div>
         <form id="registerForm">
             <label for="username">Username:</label>
             <input type="text" id="username" name="username" required>
@@ -117,6 +114,9 @@
                     messageDiv.className = 'message success';
                     messageDiv.textContent = result.message;
                     document.getElementById('registerForm').reset();
+                } else if (response.status === 409) {
+                    messageDiv.className = 'message error';
+                    messageDiv.textContent = 'Username already exists. Please choose a different username.';
                 } else {
                     messageDiv.className = 'message error';
                     messageDiv.textContent = result.detail || 'Registration failed';

@@ -28,6 +28,9 @@
                 </div>
             </div>
             <h1>Leonardo</h1>
+            <a href="/settings" class="settings-btn" title="Settings">
+                <i class="fa-solid fa-gear"></i>
+            </a>
             <button class="mobile-view-toggle" data-llamabot="show-preview-btn">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
@@ -178,6 +181,26 @@
     <audio id="taskCompletedSound" preload="auto">
         <source src="/frontend/Leonardo-Task-Completed-Sound.wav" type="audio/wav">
     </audio>
+
+    <!-- Role-based mode restriction -->
+    <script>
+        // If user role is 'user', only show Feedback mode (engineers get all modes)
+        document.addEventListener('DOMContentLoaded', function() {
+            const userRole = window.LLAMABOT_USER_ROLE || 'engineer';
+            if (userRole === 'user') {
+                const modeSelect = document.querySelector('[data-llamabot="agent-mode-select"]');
+                if (modeSelect) {
+                    // Keep only feedback mode
+                    Array.from(modeSelect.options).forEach(option => {
+                        if (option.value !== 'feedback') {
+                            option.remove();
+                        }
+                    });
+                    modeSelect.value = 'feedback';
+                }
+            }
+        });
+    </script>
 
     <!-- Link to external JavaScript -->
     <script type="module" src="/frontend/chat/index.js?v=4"></script>
