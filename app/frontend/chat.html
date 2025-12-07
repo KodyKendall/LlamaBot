@@ -71,14 +71,6 @@
                     <button data-llamabot="element-selector-btn" class="element-selector-btn" title="Select element from page">
                         <i class="fa-solid fa-mouse-pointer"></i>
                     </button>
-                    <!-- <div class="custom-dropdown-container">
-                        <select data-llamabot="model-select" class="custom-dropdown">
-                            <option value="gpt-5-codex" data-short-label="GPT">GPT-5 Codex</option>
-                            <option value="claude-4.5-sonnet" selected data-short-label="Claude">Claude 4.5 Sonnet</option>
-                            <option value="claude-4.5-haiku" data-short-label="Haiku">Claude 4.5 Haiku</option>
-                            <option value="gemini-2.5-pro" data-short-label="Gemini">Gemini 2.5 Pro</option>
-                        </select>
-                    </div> -->
                     <div class="custom-dropdown-container">
                         <select data-llamabot="agent-mode-select" class="custom-dropdown">
                             <option value="prototype" data-short-label="Design">Design Mode</option>
@@ -185,7 +177,8 @@
     <!-- Role-based mode restriction -->
     <script>
         // If user role is 'user', only show Feedback mode (engineers get all modes)
-        document.addEventListener('DOMContentLoaded', function() {
+        // Wait for LlamaBot to initialize before modifying the dropdown
+        window.addEventListener('llamabot:ready', function() {
             const userRole = window.LLAMABOT_USER_ROLE || 'engineer';
             if (userRole === 'user') {
                 const modeSelect = document.querySelector('[data-llamabot="agent-mode-select"]');
@@ -197,6 +190,8 @@
                         }
                     });
                     modeSelect.value = 'feedback';
+                    // Dispatch change event so LlamaBot updates its internal state
+                    modeSelect.dispatchEvent(new Event('change', { bubbles: true }));
                 }
             }
         });
