@@ -18,3 +18,11 @@ auth.json
 venv
 .DS_Store
 new-a-record.json
+
+# SQLite database files
+app/sqlite_data/
+*.db
+*.db-journal
+
+# Migrated auth files
+*.json.migrated

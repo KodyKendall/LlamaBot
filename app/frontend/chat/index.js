@@ -174,6 +174,9 @@ class ChatApp {
     this.loadSettingsFromCookies();
 
     console.log(`LlamaBot instance ${this.instanceId} initialized`);
+
+    // Dispatch ready event for external scripts to hook into
+    window.dispatchEvent(new CustomEvent('llamabot:ready', { detail: { instance: this } }));
   }
 
   /**

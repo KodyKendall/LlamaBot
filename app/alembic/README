@@ -1,0 +1,21 @@
+Alembic migrations for LlamaBot auth database.
+
+This directory contains database migrations managed by Alembic.
+Migrations are run automatically on application startup.
+
+Commands (from the app/ directory):
+
+  # Generate a new migration after changing models.py
+  alembic revision --autogenerate -m "description of change"
+
+  # Run all pending migrations manually
+  alembic upgrade head
+
+  # Downgrade to previous version
+  alembic downgrade -1
+
+  # Show current revision
+  alembic current
+
+  # Show migration history
+  alembic history

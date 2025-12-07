@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LlamaBot v0.2.21 Release Notes</title>
+    <style>
+        :root {
+            --primary: #6366f1;
+            --primary-light: #818cf8;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --bg-dark: #0f172a;
+            --bg-card: #1e293b;
+            --bg-card-hover: #334155;
+            --text-primary: #f1f5f9;
+            --text-secondary: #94a3b8;
+            --border: #334155;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: var(--bg-dark);
+            color: var(--text-primary);
+            line-height: 1.6;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 50px;
+            padding-bottom: 30px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .logo {
+            font-size: 3rem;
+            margin-bottom: 10px;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 8px;
+            background: linear-gradient(135deg, var(--primary-light), var(--success));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .version-badge {
+            display: inline-block;
+            background: var(--primary);
+            color: white;
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            margin-bottom: 15px;
+        }
+
+        .release-date {
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+        }
+
+        .main-release {
+            background: linear-gradient(135deg, var(--bg-card), var(--bg-card-hover));
+            border-radius: 16px;
+            padding: 35px;
+            margin-bottom: 40px;
+            border: 1px solid var(--primary);
+            box-shadow: 0 0 30px rgba(99, 102, 241, 0.1);
+        }
+
+        .main-release h2 {
+            font-size: 1.8rem;
+            margin-bottom: 25px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .feature-grid {
+            display: grid;
+            gap: 20px;
+        }
+
+        .feature-card {
+            background: var(--bg-dark);
+            border-radius: 12px;
+            padding: 24px;
+            border: 1px solid var(--border);
+            transition: transform 0.2s, border-color 0.2s;
+        }
+
+        .feature-card:hover {
+            transform: translateY(-2px);
+            border-color: var(--primary-light);
+        }
+
+        .feature-card h3 {
+            font-size: 1.15rem;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: var(--primary-light);
+        }
+
+        .feature-card p {
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+        }
+
+        .feature-card ul {
+            margin-top: 12px;
+            margin-left: 20px;
+            color: var(--text-secondary);
+        }
+
+        .feature-card li {
+            margin-bottom: 6px;
+            font-size: 0.9rem;
+        }
+
+        .previous-releases {
+            margin-top: 50px;
+        }
+
+        .previous-releases h2 {
+            font-size: 1.5rem;
+            margin-bottom: 25px;
+            color: var(--text-secondary);
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 15px;
+        }
+
+        .version-section {
+            background: var(--bg-card);
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 16px;
+            border: 1px solid var(--border);
+        }
+
+        .version-section h3 {
+            font-size: 1.1rem;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .version-section h3 .version {
+            background: var(--bg-card-hover);
+            padding: 4px 12px;
+            border-radius: 6px;
+            font-family: monospace;
+            font-size: 0.9rem;
+        }
+
+        .version-section ul {
+            margin-left: 20px;
+            color: var(--text-secondary);
+        }
+
+        .version-section li {
+            margin-bottom: 6px;
+            font-size: 0.9rem;
+        }
+
+        .tag {
+            display: inline-block;
+            font-size: 0.7rem;
+            padding: 2px 8px;
+            border-radius: 4px;
+            margin-left: 8px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .tag-major {
+            background: var(--success);
+            color: white;
+        }
+
+        .tag-feature {
+            background: var(--primary);
+            color: white;
+        }
+
+        .tag-improvement {
+            background: var(--warning);
+            color: black;
+        }
+
+        footer {
+            text-align: center;
+            margin-top: 50px;
+            padding-top: 30px;
+            border-top: 1px solid var(--border);
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+
+        footer a {
+            color: var(--primary-light);
+            text-decoration: none;
+        }
+
+        footer a:hover {
+            text-decoration: underline;
+        }
+
+        .emoji {
+            font-size: 1.2em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">🦙</div>
+            <h1>LlamaBot Release Notes</h1>
+            <span class="version-badge">v0.2.21</span>
+            <p class="release-date">December 6, 2025</p>
+        </header>
+
+        <section class="main-release">
+            <h2><span class="emoji">🚀</span> Version 0.2.21 - Multi-User & Admin System</h2>
+
+            <div class="feature-grid">
+                <div class="feature-card">
+                    <h3><span class="emoji">👥</span> Multi-User Management</h3>
+                    <p>LlamaBot now supports multiple users with a complete authentication and user management system.</p>
+                    <ul>
+                        <li>Separate PostgreSQL database for user authentication</li>
+                        <li>User registration and login functionality</li>
+                        <li>Session management across conversations</li>
+                        <li>Isolated user data and conversation history</li>
+                    </ul>
+                </div>
+
+                <div class="feature-card">
+                    <h3><span class="emoji">🔐</span> Admin Permissions & Role System</h3>
+                    <p>Granular access control with a flexible role-based permission system.</p>
+                    <ul>
+                        <li>Admin role with elevated privileges</li>
+                        <li>Permission-based access to features and agents</li>
+                        <li>Role assignment and management</li>
+                        <li>Secure authorization checks throughout the application</li>
+                    </ul>
+                </div>
+
+                <div class="feature-card">
+                    <h3><span class="emoji">🛠️</span> ActiveRecord-like Console Utilities</h3>
+                    <p>New sysadmin helper utilities for easier management from the terminal console.</p>
+                    <ul>
+                        <li>Ergonomic console commands for user management</li>
+                        <li>Quick user creation, deletion, and role assignment</li>
+                        <li>Database query helpers for debugging</li>
+                        <li>Designed for development and admin use (not production)</li>
+                    </ul>
+                </div>
+            </div>
+        </section>
+
+        <section class="previous-releases">
+            <h2><span class="emoji">📋</span> Previous Releases (Quick Notes)</h2>
+
+            <div class="version-section">
+                <h3><span class="version">v0.2.20</span> User Feedback Agent <span class="tag tag-feature">Feature</span></h3>
+                <ul>
+                    <li>New user feedback agent mode for end-users to plan future development</li>
+                    <li>Improved feedback agent prompt for better scope and sprint planning</li>
+                    <li>Enables direct user input into product roadmap</li>
+                </ul>
+            </div>
+
+            <div class="version-section">
+                <h3><span class="version">v0.2.19</span> AI Builder & Testing Mode <span class="tag tag-major">Major</span></h3>
+                <ul>
+                    <li><strong>AI Builder Mode</strong> - Leonardo helps build user-facing agents within Rails apps</li>
+                    <li><strong>QA Test Builder Mode</strong> - Automated test generation with RSpec & Vite-JS</li>
+                    <li>New <code>user_agents</code> folder for custom agent definitions</li>
+                    <li>Prompt caching for all agents (significant cost reduction)</li>
+                    <li>Capybara/Cuprite browser tool for JavaScript debugging</li>
+                    <li>VSCode iframe improvements with clipboard support</li>
+                    <li>Navigation history with working back button</li>
+                    <li>New thread creation button in side menu</li>
+                    <li>Default model switched to Claude Haiku 4.5</li>
+                </ul>
+            </div>
+
+            <div class="version-section">
+                <h3><span class="version">v0.2.18</span> UI/UX Overhaul <span class="tag tag-major">Major</span></h3>
+                <ul>
+                    <li>Massive UI/UX overhaul for messages and iframe</li>
+                    <li>Refactored chat.html into modular JavaScript packages</li>
+                    <li>Support for any LLM model - Claude, Gemini, GPT Codex, GPT series</li>
+                    <li>New task/planning component for clearer agent status</li>
+                    <li>Fixed tool call slippage for better LLM consistency</li>
+                    <li>Auto-refreshing iframe shows changes in real-time</li>
+                    <li>Message queuing - double-message the agent without interruption</li>
+                </ul>
+            </div>
+
+            <div class="version-section">
+                <h3><span class="version">v0.2.17</span> Frontend Refactor <span class="tag tag-improvement">Improvement</span></h3>
+                <ul>
+                    <li>Refactored chat.html into separate JavaScript & CSS modules</li>
+                    <li>Modular architecture ready for React/TypeScript migration</li>
+                    <li>Frontend support for multiple LLM providers</li>
+                    <li>Path normalization for tool arguments (reduced errors)</li>
+                </ul>
+            </div>
+
+            <div class="version-section">
+                <h3><span class="version">v0.2.16</span> GPT-5 & VSCode <span class="tag tag-feature">Feature</span></h3>
+                <ul>
+                    <li>Upgraded to GPT-5 with minimal reasoning mode</li>
+                    <li>VSCode Container for better developer experience</li>
+                    <li>Audio notification when tasks complete</li>
+                    <li>Progress on React frontend view</li>
+                </ul>
+            </div>
+
+            <div class="version-section">
+                <h3><span class="version">v0.2.15</span> Design Mode <span class="tag tag-feature">Feature</span></h3>
+                <ul>
+                    <li><strong>Design Mode</strong> (formerly Prototyping Mode) - focus on UI building</li>
+                    <li>Formatted TODO list in chat window for better clarity</li>
+                    <li>Rails Starter Agent - new dedicated agent for prototyping</li>
+                    <li>Iframe remembers user's location on refresh</li>
+                    <li>Improved error handling for iframe refresh</li>
+                </ul>
+            </div>
+        </section>
+
+        <footer>
+            <p>
+                <span class="emoji">🦙</span> LlamaBot - AI Coding Agent Framework<br>
+                <a href="https://github.com/KodyKendall/LlamaBot">GitHub</a> ·
+                <a href="https://discord.gg/7DapkvmWKZ">Discord</a>
+            </p>
+        </footer>
+    </div>
+</body>
+</html>

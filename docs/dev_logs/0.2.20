@@ -2,4 +2,4 @@
     0.2.20:
         - [x] - Add a user feedback agent mode for end-users to plan future development and provide feedback to Leonardo
     0.2.20a: 
-        - [ ] - Improve the user feedback agent prompt to help plan & execute on scopes and sprints
+        - [x] - Improve the user feedback agent prompt to help plan & execute on scopes and sprints

@@ -1,0 +1,4 @@
+12/06/2025:
+    0.2.21:
+        - Add Multi-User Management, Admin Permissions, and Role Permissioning System
+        - Add ActiveRecord-like functionality for easier sysadmin management from a terminal console
