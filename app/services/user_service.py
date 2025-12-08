@@ -21,10 +21,24 @@ def get_user_by_username(session: Session, username: str) -> Optional[User]:
     return session.exec(statement).first()
 
 
+def sanitize_username(username: str) -> str:
+    """Sanitize username by stripping whitespace and validating format."""
+    cleaned = username.strip()
+    if not cleaned:
+        raise ValueError("Username cannot be empty")
+    if cleaned != username:
+        # Log that we cleaned up whitespace (useful for debugging)
+        import logging
+        logging.getLogger(__name__).warning(
+            f"Username had leading/trailing whitespace, cleaned: '{username}' -> '{cleaned}'"
+        )
+    return cleaned
+
+
 def create_user(session: Session, username: str, password: str) -> User:
     """Create a new user."""
     user = User(
-        username=username,
+        username=sanitize_username(username),
         password_hash=hash_password(password)
     )
     session.add(user)
@@ -35,7 +49,9 @@ def create_user(session: Session, username: str, password: str) -> User:
 
 def authenticate_user(session: Session, username: str, password: str) -> Optional[User]:
     """Authenticate a user and return the User object if valid."""
-    user = get_user_by_username(session, username)
+    # Strip whitespace from username during login (forgiving input)
+    clean_username = username.strip() if username else username
+    user = get_user_by_username(session, clean_username)
     if user and user.is_active and verify_password(password, user.password_hash):
         return user
     return None
@@ -97,7 +113,7 @@ def delete_user(session: Session, user_id: int) -> bool:
 def create_admin_user(session: Session, username: str, password: str) -> User:
     """Create a new admin user."""
     user = User(
-        username=username,
+        username=sanitize_username(username),
         password_hash=hash_password(password),
         is_admin=True
     )

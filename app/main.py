@@ -679,13 +679,20 @@ async def api_create_user(
     session: Session = Depends(get_db_session)
 ):
     """Create a new user (admin only)."""
+    from app.services.user_service import hash_password, sanitize_username
+
+    # Sanitize username (strip whitespace)
+    try:
+        clean_username = sanitize_username(request.username)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     # Check if username exists
-    if get_user_by_username(session, request.username):
+    if get_user_by_username(session, clean_username):
         raise HTTPException(status_code=409, detail="Username already exists")
 
-    from app.services.user_service import hash_password
     user = User(
-        username=request.username,
+        username=clean_username,
         password_hash=hash_password(request.password),
         is_admin=request.is_admin,
         role=request.role
@@ -694,7 +701,7 @@ async def api_create_user(
     session.commit()
     session.refresh(user)
 
-    logger.info(f"Admin '{admin.username}' created user '{request.username}' with role '{request.role}'")
+    logger.info(f"Admin '{admin.username}' created user '{clean_username}' with role '{request.role}'")
     return {"id": user.id, "username": user.username, "message": "User created successfully"}
 
 

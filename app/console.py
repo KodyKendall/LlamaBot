@@ -65,6 +65,71 @@ def rollback():
     print("Changes rolled back.")
 
 
+def reset_password(user_or_id, new_password: str):
+    """Reset a user's password.
+
+    Args:
+        user_or_id: User object or user ID (int)
+        new_password: The new plaintext password
+
+    Example:
+        >>> reset_password(1, 'newpass123')
+        >>> reset_password(User.find_by(username='bob'), 'newpass123')
+    """
+    if isinstance(user_or_id, int):
+        user = User.find(user_or_id)
+    else:
+        user = user_or_id
+    user.password_hash = hash_password(new_password)
+    user.save()
+    print(f"Password reset for user '{user.username}' (id={user.id})")
+    return user
+
+
+def fix_username(user_or_id):
+    """Fix a user's username by stripping whitespace.
+
+    Args:
+        user_or_id: User object or user ID (int)
+
+    Example:
+        >>> fix_username(1)
+        >>> fix_username(User.last())
+    """
+    if isinstance(user_or_id, int):
+        user = User.find(user_or_id)
+    else:
+        user = user_or_id
+    old_username = user.username
+    new_username = old_username.strip()
+    if old_username == new_username:
+        print(f"Username '{user.username}' has no whitespace issues.")
+        return user
+    user.username = new_username
+    user.save()
+    print(f"Fixed username: '{repr(old_username)}' -> '{new_username}' (id={user.id})")
+    return user
+
+
+def fix_all_usernames():
+    """Fix all usernames by stripping whitespace.
+
+    Example:
+        >>> fix_all_usernames()
+    """
+    users = User.all()
+    fixed_count = 0
+    for user in users:
+        old_username = user.username
+        new_username = old_username.strip()
+        if old_username != new_username:
+            user.username = new_username
+            user.save()
+            print(f"Fixed: '{repr(old_username)}' -> '{new_username}' (id={user.id})")
+            fixed_count += 1
+    print(f"\nFixed {fixed_count} username(s).")
+
+
 BANNER = """
 ================================================================================
   LlamaBot Console (Rails-style)
@@ -89,8 +154,11 @@ Session helpers:
   commit()                      - Commit session
   rollback()                    - Rollback session
   reload_session()              - Get fresh session
+  reset_password(user, 'pass')  - Reset user's password
+  fix_username(user)            - Strip whitespace from username
+  fix_all_usernames()           - Fix all usernames with whitespace
 
-Also available: session, select, create_user(), create_admin_user(), etc.
+Also available: session, select, hash_password(), create_user(), etc.
 
 Examples:
   >>> User.all()
