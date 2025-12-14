@@ -146,26 +146,31 @@ async def api_delete_user(
 
 @router.get("/threads", response_class=JSONResponse)
 async def threads(request: Request, username: str = Depends(auth)):
-    """Get all conversation threads."""
+    """Get recent conversation threads (limited to 3 most recent to prevent memory issues)."""
     app = request.app
     checkpointer = app.state.get_or_create_checkpointer()
     config = {}
     checkpoint_generator = checkpointer.list(config=config)
 
-    # Stream through generator to extract unique thread_ids without loading all data
-    unique_thread_ids = set()
+    # Collect thread IDs with their timestamps for sorting
+    thread_timestamps = {}
     for checkpoint in checkpoint_generator:
         thread_id = checkpoint[0]["configurable"]["thread_id"]
-        unique_thread_ids.add(thread_id)
+        # Get timestamp from checkpoint metadata (index 4 in tuple)
+        timestamp = checkpoint[4] if len(checkpoint) > 4 else None
+        # Keep the most recent timestamp for each thread
+        if thread_id not in thread_timestamps or (timestamp and timestamp > thread_timestamps[thread_id]):
+            thread_timestamps[thread_id] = timestamp
 
-    unique_thread_ids = list(unique_thread_ids)
-    logger.info(f"Found {len(unique_thread_ids)} unique threads (memory-efficient extraction)")
+    # Sort by timestamp (newest first) and limit to 3 threads
+    MAX_THREADS = 3
+    sorted_thread_ids = sorted(
+        thread_timestamps.keys(),
+        key=lambda tid: thread_timestamps[tid] or "",
+        reverse=True
+    )[:MAX_THREADS]
 
-    # Limit threads returned to prevent excessive memory usage
-    MAX_THREADS = 100
-    if len(unique_thread_ids) > MAX_THREADS:
-        logger.warning(f"Limiting threads response from {len(unique_thread_ids)} to {MAX_THREADS} threads")
-        unique_thread_ids = unique_thread_ids[:MAX_THREADS]
+    logger.info(f"Found {len(thread_timestamps)} total threads, returning {len(sorted_thread_ids)} most recent")
 
     state_history = []
 
@@ -177,7 +182,7 @@ async def threads(request: Request, username: str = Depends(auth)):
         logger.warning("/threads endpoint using fallback graph compilation")
 
     # Get only the LATEST state for each thread (not full history)
-    for thread_id in unique_thread_ids:
+    for thread_id in sorted_thread_ids:
         config = {"configurable": {"thread_id": thread_id}}
         state_history.append({"thread_id": thread_id, "state": await graph.aget_state(config=config)})
 

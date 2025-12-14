@@ -618,17 +618,24 @@ def git_status(
 ) -> Command:
     """Get the status of the git repository."""
     tool_call_id = runtime.tool_call_id
-    def run_git(cmd: str) -> str:
-        result = subprocess.run(
-            ["/bin/sh", "-lc", f"git -C /app/app/rails {cmd}"],
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
-        if result.returncode != 0:
-            raise RuntimeError(f"Git command failed: {cmd}\n{result.stderr}")
-        return result.stdout.strip()
-    
+
+    def run_git(cmd: str) -> tuple[str, str | None]:
+        """Run a git command. Returns (output, error) tuple. If error is not None, command failed."""
+        try:
+            result = subprocess.run(
+                ["/bin/sh", "-lc", f"git -C /app/app/rails {cmd}"],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            if result.returncode != 0:
+                return "", f"Git command failed: {cmd}\n{result.stderr}"
+            return result.stdout.strip(), None
+        except subprocess.TimeoutExpired:
+            return "", f"Git command timed out: {cmd}"
+        except Exception as e:
+            return "", f"Git command error: {cmd}\n{str(e)}"
+
     def parse_git_status(status_output: str) -> list:
         """Parse git status --porcelain=v2 output into structured file changes."""
         files = []
@@ -691,11 +698,26 @@ def git_status(
         return files
     
     # Collect data
-    status = run_git("status --porcelain=v2 --branch")
-    log = run_git(
+    status, status_err = run_git("status --porcelain=v2 --branch")
+    if status_err:
+        return Command(
+            update={
+                "messages": [
+                    ToolMessage(
+                        f"Error getting git status: {status_err}",
+                        tool_call_id=tool_call_id,
+                    )
+                ],
+            }
+        )
+
+    log, log_err = run_git(
         "log -n 10 --pretty=format:'{\"hash\":\"%H\",\"author\":\"%an\",\"date\":\"%ad\",\"subject\":\"%s\"},'"
     )
-    
+    if log_err:
+        # Log errors are non-fatal, just use empty log
+        log = ""
+
     # Parse changed files
     changed_files = parse_git_status(status)
     
@@ -712,26 +734,24 @@ def git_status(
         if '→' in file_path:
             # For renames, get diff of the new file name
             new_path = file_path.split(' → ')[1]
-            try:
-                diff_output = run_git(f"diff HEAD -- '{new_path}'")
-                if not diff_output:
-                    # If no diff with HEAD, try staged diff
-                    diff_output = run_git(f"diff --cached -- '{new_path}'")
-            except:
+            diff_output, diff_err = run_git(f"diff HEAD -- '{new_path}'")
+            if diff_err or not diff_output:
+                # If no diff with HEAD, try staged diff
+                diff_output, _ = run_git(f"diff --cached -- '{new_path}'")
+            if not diff_output:
                 diff_output = f"Could not get diff for renamed file: {file_path}"
         else:
-            try:
-                # Try to get diff for the file
-                diff_output = run_git(f"diff HEAD -- '{file_path}'")
-                if not diff_output:
-                    # If no diff with HEAD, try staged diff
-                    diff_output = run_git(f"diff --cached -- '{file_path}'")
-                if not diff_output and file_info['status_code'].endswith('M'):
-                    # For worktree modifications, try diff without HEAD
-                    diff_output = run_git(f"diff -- '{file_path}'")
-            except:
+            # Try to get diff for the file
+            diff_output, diff_err = run_git(f"diff HEAD -- '{file_path}'")
+            if diff_err or not diff_output:
+                # If no diff with HEAD, try staged diff
+                diff_output, _ = run_git(f"diff --cached -- '{file_path}'")
+            if (not diff_output) and file_info['status_code'].endswith('M'):
+                # For worktree modifications, try diff without HEAD
+                diff_output, _ = run_git(f"diff -- '{file_path}'")
+            if not diff_output:
                 diff_output = f"Could not get diff for file: {file_path}"
-        
+
         file_info['diff'] = diff_output if diff_output else f"No changes to display for {file_path}"
 
     # Parse log into JSON
@@ -742,9 +762,13 @@ def git_status(
     commit_diffs = {}
     for commit in commits:
         commit_hash = commit['hash']
+        # Get commit diff
+        diff_output, diff_err = run_git(f"show --no-merges {commit_hash}")
+        if diff_err:
+            # If we can't get the diff for a commit, skip it but don't fail
+            print(f"Warning: Could not get diff for commit {commit_hash}: {diff_err}")
+            continue
         try:
-            # Get commit diff
-            diff_output = run_git(f"show --no-merges {commit_hash}")
             
             # Parse the diff into structured data using the same function from get_commit_diff
             def parse_commit_diff(diff_output: str) -> list:

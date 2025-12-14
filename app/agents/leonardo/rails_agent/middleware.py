@@ -34,12 +34,13 @@ class ViewPathContextMiddleware(AgentMiddleware):
     def _inject_view_context(self, request):
         """Add view path context to messages if available."""
         view_path = (request.state.get('debug_info') or {}).get('view_path')
+        request_path = (request.state.get('debug_info') or {}).get('request_path')
         if not view_path:
             return request
 
         # Create context message
         context_msg = HumanMessage(
-            content=f"<NOTE_FROM_SYSTEM> The user is currently viewing their Ruby on Rails webpage route at: {view_path} </NOTE_FROM_SYSTEM>"
+            content=f"<NOTE_FROM_SYSTEM> The user is currently viewing their Ruby on Rails browser page at: {request_path} which resolves to the Rails file path at: {view_path} </NOTE_FROM_SYSTEM>"
         )
 
         # Append to messages for LLM only (not persisted)

@@ -1,38 +1,49 @@
+"""
+Rails Ticket Mode Agent using LangChain 1.1+ create_agent with ToolRuntime.
+
+This agent converts user observations into implementation-ready engineering tickets:
+- Stage 1: Story Collection - Enforces structured observation template
+- Stage 2: Technical Research - Generates TECHNICAL_RESEARCH.md with codebase analysis
+- Stage 3: Ticket Creation - Creates formatted ticket from research notes
+
+Features:
+- Dynamic LLM model selection (defaults to Claude Haiku for efficiency)
+- Automatic context summarization for long sessions
+- View path context injection
+- Ticket mode restrictions injection
+- Failure circuit breaker after 3 failed tool calls
+- ToolRuntime for state access in tools
+- Anthropic prompt caching for reduced latency and costs
+
+Note: We use langchain.agents.create_agent with ToolRuntime pattern instead of
+langgraph's InjectedState because create_agent provides middleware support.
+"""
+
 from langchain_anthropic import ChatAnthropic
-
-from langchain_core.tools import tool
-from dotenv import load_dotenv
-load_dotenv()
-
-from langgraph.graph import MessagesState
-from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
-
-from langgraph.graph import START, StateGraph, END
-from langgraph.types import Command
-from langgraph.prebuilt import tools_condition
-from langgraph.prebuilt import ToolNode
-
-from pathlib import Path
-from typing import Literal
+from langchain.agents import create_agent
+from langchain.agents.middleware import SummarizationMiddleware
+from langchain_core.messages import SystemMessage
 from datetime import date
 
 from app.agents.leonardo.rails_agent.state import RailsAgentState
 from app.agents.leonardo.rails_agent.tools import (
-    write_todos, write_file, read_file, ls, edit_file, search_file, bash_command
+    write_todos, ls, read_file, write_file, edit_file, search_file, bash_command
 )
 from app.agents.leonardo.rails_ticket_mode_agent.prompts import TICKET_MODE_AGENT_PROMPT
+from app.agents.leonardo.rails_ticket_mode_agent.middleware import (
+    inject_view_context,
+    inject_ticket_mode_context,
+    check_failure_limit,
+    DynamicModelMiddleware,
+)
+from app.agents.leonardo.rails_ticket_mode_agent.sub_agents import delegate_task
 
 import logging
 logger = logging.getLogger(__name__)
 
-# Define base paths relative to project root
-SCRIPT_DIR = Path(__file__).parent.resolve()
-PROJECT_ROOT = SCRIPT_DIR.parent.parent.parent  # Go up to LlamaBot root
-APP_DIR = PROJECT_ROOT / 'app'
 
-
-def get_system_message():
-    """Build system message with current date appended.
+def get_cached_system_prompt():
+    """Build system message with current date and prompt caching enabled.
 
     Date is appended at the end so the main prompt can be cached,
     and only the date portion changes daily.
@@ -40,98 +51,69 @@ def get_system_message():
     current_date = date.today().strftime("%Y-%m-%d")
     prompt_with_date = f"{TICKET_MODE_AGENT_PROMPT}\n\n---\n**Today's Date:** {current_date}\n(Use this date when creating ticket filenames: {current_date}_TYPE_description.md)"
 
-    return {
-        "role": "system",
-        "content": [
+    return SystemMessage(
+        content=[
             {
                 "type": "text",
                 "text": prompt_with_date,
-                "cache_control": {"type": "ephemeral"},  # only works for Anthropic models.
-            },
-        ],
-    }
+                "cache_control": {"type": "ephemeral"}
+            }
+        ]
+    )
 
-# Tools for Ticket Mode - NO internet_search (codebase research only)
+
+# Tool list - tools available to the Ticket Mode agent (NO internet_search)
 default_tools = [
     write_todos,
-    ls, read_file, write_file, edit_file, search_file, bash_command
+    ls, read_file, write_file, edit_file, search_file,
+    bash_command,
+    delegate_task,  # Sub-agent delegation for focused research tasks
 ]
 
 
-# Helper function to get LLM based on user selection
-def get_llm(model_name: str):
-    """Get LLM instance based on model name from frontend."""
-    # Default to Claude 4.5 Haiku for ticket mode
-    return ChatAnthropic(model="claude-haiku-4-5", max_tokens=16384)
+def build_workflow(checkpointer=None):
+    """Build the Ticket Mode agent workflow with create_agent and middleware.
 
+    Args:
+        checkpointer: Optional checkpointer for state persistence (e.g., PostgresSaver)
 
-# Node
-def leonardo_ticket_mode(state: RailsAgentState) -> Command[Literal["tools"]]:
-    # ==================== LLM Model Selection ====================
-    # Get model selection from state (passed from frontend)
-    llm_model = state.get('llm_model', 'claude-4.5-haiku')
-    logger.info(f"Ticket Mode - Using LLM model: {llm_model}")
-    llm = get_llm(llm_model)
-    # =============================================================
+    Returns:
+        A compiled LangGraph agent with middleware support and ToolRuntime
 
-    view_path = (state.get('debug_info') or {}).get('view_path')
+    Note: Uses SystemMessage with cache_control for Anthropic prompt caching.
+    This requires LangChain 1.1.0+ which added SystemMessage support to create_agent.
+    The system prompt is cached for 5 minutes, reducing input token costs by ~90%.
+    """
+    # Default model (will be overridden by DynamicModelMiddleware based on state.llm_model)
+    default_model = ChatAnthropic(model="claude-haiku-4-5", max_tokens=16384)
 
-    # Get system message with current date
-    sys_msg = get_system_message()
-    messages = [sys_msg] + state["messages"]
-
-    if view_path:
-        messages = messages + [HumanMessage(
-            content="<NOTE_FROM_SYSTEM> The user is currently viewing their Ruby on Rails webpage route at: " + view_path + " </NOTE_FROM_SYSTEM>"
-        )]
-
-    # Tools for ticket mode
-    tools = [
-        write_todos,
-        ls, read_file, write_file, edit_file, search_file, bash_command
+    # Configure middleware stack (order matters - executed top to bottom)
+    middleware = [
+        # 1. Summarization for long conversations - prevents token limit issues
+        SummarizationMiddleware(
+            model="claude-haiku-4-5",
+            max_tokens_before_summary=80000,  # Trigger summarization at 80k tokens
+            messages_to_keep=40,              # Keep last 40 messages after summary
+        ),
+        # 2. Dynamic model selection based on state.llm_model from frontend
+        DynamicModelMiddleware(),
+        # 3. Inject view path context when user is viewing a specific page
+        inject_view_context,
+        # 4. Inject ticket mode restrictions reminder
+        inject_ticket_mode_context,
+        # 5. Circuit breaker - stop tool calls after 3 failures
+        check_failure_limit,
     ]
 
-    # Handle failed tool calls
-    failed_tool_calls_count = state.get("failed_tool_calls_count", 0)
-    if failed_tool_calls_count >= 3:
-        messages = messages + [HumanMessage(
-            content="<NOTE_FROM_SYSTEM> The user has had too many failed tool calls. DO NOT DO ANY NEW TOOL CALLS. Tell the user it's failed, and you need to stop and ask the user to try again in a different way. </NOTE_FROM_SYSTEM>"
-        )]
-        # Don't bind tools when we've failed too many times - we want a text response only
-        response = llm.invoke(messages, cache_control={"type": "ephemeral"})
-        # Reset counter by subtracting current count (since reducer uses operator.add)
-        return {"messages": [response], "failed_tool_calls_count": -failed_tool_calls_count}
-
-    # Add mode-specific system note
-    messages = messages + [HumanMessage(
-        content="<NOTE_FROM_SYSTEM> The user is in Ticket Mode. You can READ any file but can ONLY WRITE/EDIT .md files in rails/requirements/. NO CODE CHANGES ALLOWED. Focus on: 1) Gathering complete observation template, 2) Technical research, 3) Creating implementation tickets. </NOTE_FROM_SYSTEM>"
-    )]
-
-    llm_with_tools = llm.bind_tools(tools, parallel_tool_calls=False)
-    response = llm_with_tools.invoke(messages)
-
-    return {"messages": [response]}
-
-
-# Graph
-def build_workflow(checkpointer=None):
-    builder = StateGraph(RailsAgentState)
-
-    # Define nodes: these do the work
-    builder.add_node("leonardo_ticket_mode", leonardo_ticket_mode)
-    builder.add_node("tools", ToolNode(default_tools))
-
-    # Define edges: these determine how the control flow moves
-    builder.add_edge(START, "leonardo_ticket_mode")
-
-    builder.add_conditional_edges(
-        "leonardo_ticket_mode",
-        tools_condition,
-        {"tools": "tools", END: END},
+    # Create agent with middleware - uses ToolRuntime for state access in tools
+    # get_cached_system_prompt() enables Anthropic prompt caching via cache_control
+    agent = create_agent(
+        model=default_model,
+        tools=default_tools,
+        system_prompt=get_cached_system_prompt(),  # SystemMessage with cache_control
+        state_schema=RailsAgentState,
+        middleware=middleware,
+        checkpointer=checkpointer,
     )
 
-    builder.add_edge("tools", "leonardo_ticket_mode")
-
-    react_graph = builder.compile(checkpointer=checkpointer)
-
-    return react_graph
+    return agent

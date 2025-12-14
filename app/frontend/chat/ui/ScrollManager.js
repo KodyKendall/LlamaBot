@@ -20,7 +20,7 @@ export class ScrollManager {
    * Initialize scroll manager
    */
   init() {
-    this.scrollButton = document.getElementById('scrollToBottomBtn');
+    this.scrollButton = document.querySelector('[data-llamabot="scroll-to-bottom"]');
     console.log('ScrollManager: Button found:', !!this.scrollButton);
 
     // Create unread badge element
