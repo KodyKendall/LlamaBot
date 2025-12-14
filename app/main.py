@@ -204,6 +204,12 @@ async def startup_event():
         except ImportError:
             logger.info("rails_user_feedback_agent not found, skipping")
 
+        try:
+            from app.agents.leonardo.rails_ticket_mode_agent.nodes import build_workflow as build_rails_ticket_mode
+            app.state.compiled_graphs["rails_ticket_mode_agent"] = build_rails_ticket_mode(checkpointer=checkpointer)
+        except ImportError:
+            logger.info("rails_ticket_mode_agent not found, skipping")
+
         logger.info(f"Compiled {len(app.state.compiled_graphs)} LangGraph workflows: {list(app.state.compiled_graphs.keys())}")
     except Exception as e:
         logger.error(f"Error compiling LangGraph workflows: {e}", exc_info=True)

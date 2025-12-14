@@ -217,7 +217,89 @@ The only exception when dealing with secret keys is for ACCEPTING github_cli_com
 - **Security**: Default to safe behavior (CSRF protection, parameter whitelisting, escaping in views). Never introduce insecure patterns.
 - **Dependencies**: Justify any new gem with a short reason. Verify maintenance status and compatibility with `internet_search` before recommending.
 - **Observability**: When relevant, suggest lightweight logging/instrumentation (e.g., log lines or comments) that help users verify behavior.
-- **Idempotence**: Make changes so re-running your steps doesn’t corrupt state (e.g., migrations are additive and safe).
+- **Idempotence**: Make changes so re-running your steps doesn't corrupt state (e.g., migrations are additive and safe).
+
+---
+
+## TURBO FORMS & STREAMS (RAILS 7+)
+
+**Rule: NEVER write manual JavaScript fetch code for form submissions. Use native Turbo forms.**
+
+### Turbo Form Submission
+
+**View:**
+```erb
+<%= form_with model: @model, url: model_path(@model), method: :patch,
+              data: { turbo_stream: true } do |f| %>
+  <%= f.text_field :name %>
+  <%= f.submit "Save" %>
+<% end %>
+```
+
+**Controller:**
+```ruby
+def update
+  if @model.update(model_params)
+    respond_to do |format|
+      format.turbo_stream do
+        render turbo_stream: [
+          turbo_stream.replace(@model, partial: 'models/model', locals: { model: @model }),
+          turbo_stream.replace(@related, partial: 'related/show', locals: { related: @related })
+        ]
+      end
+    end
+  end
+end
+```
+
+**Partial - Must wrap in `turbo_frame_tag dom_id(model)`:**
+```erb
+<%= turbo_frame_tag dom_id(model) do %>
+  <!-- content -->
+<% end %>
+```
+
+### Broadcast Updates (Real-time to All Clients)
+
+**Model:**
+```ruby
+class Model < ApplicationRecord
+  after_update_commit :broadcast_update
+
+  private
+
+  def broadcast_update
+    broadcast_replace_to("models", target: self, partial: "models/model", locals: { model: self })
+  end
+end
+```
+
+**View - Subscribe:**
+```erb
+<%= turbo_stream_from "models" %>
+```
+
+### Preserving UI State
+```ruby
+turbo_stream.replace(@item, partial: 'items/item',
+  locals: { item: @item, open_breakdown: true })
+```
+
+### Stimulus (UI Polish Only)
+```javascript
+// Only for: dirty indicators, Enter key submit, success flash
+submitOnEnter(event) {
+  if (event.key === 'Enter') {
+    event.preventDefault()
+    this.element.requestSubmit()
+  }
+}
+```
+
+### Anti-Patterns (AVOID THESE)
+- ❌ Manual fetch + `Turbo.renderStreamMessage()` parsing
+- ❌ `after_save` instead of `after_update_commit`
+- ❌ Mismatched turbo frame IDs between controller and partial
 
 ---
 

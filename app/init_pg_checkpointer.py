@@ -97,6 +97,10 @@ else:
     print("DB_URI is set, we'll use PostgresSaver instead!")
     print("DB_URI: ", db_uri)
 
+    # Ensure the database exists before connecting
+    if not ensure_database_exists(db_uri):
+        print("⚠️ Could not ensure DB_URI database exists, continuing anyway...")
+
     # Create connection pool
     # pool = ConnectionPool(db_uri)
     conn = Connection.connect(db_uri, autocommit=True)
