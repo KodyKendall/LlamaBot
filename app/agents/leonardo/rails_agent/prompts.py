@@ -257,9 +257,9 @@ The only exception when dealing with secret keys is for ACCEPTING github_cli_com
 
 Build complex UI using a consistent partial-based architecture:
 
-1. **Single Resource Partial (`_model.html.erb`)**: Each model gets ONE partial that handles all CRUD operations within a single turbo frame. This partial is the atomic unit of UI.
+1. **Single Resource Partial (`_model.html.erb`)**: Each model gets ONE partial that handles all CRUD operations. This partial is the atomic unit of UI.
 
-2. **Turbo Frame Wrapping**: Every partial wraps its content in `turbo_frame_tag dom_id(model)` so it can be updated independently via Turbo Streams.
+2. **Turbo Frame INSIDE the Partial**: The partial itself must contain its own `turbo_frame_tag dom_id(model)` wrapping. The turbo frame lives IN the partial, NOT in the parent view that renders it. This is critical - it means the partial is self-contained and can be rendered from anywhere (builder, index, show) and still work with Turbo Streams.
 
 3. **Dirty Form Indicator**: Use Stimulus for dirty state indicators to show unsaved changes (this is an acceptable use of JavaScript).
 
@@ -286,46 +286,61 @@ For complex UI that requires editing multiple related entities, we use a **Build
 **Example: Tender Builder page**
 ```erb
 <%# app/views/tenders/builder.html.erb %>
+<%# Builder page just renders partials - each partial contains its OWN turbo frame %>
 <%= turbo_stream_from @tender %>
+<%= turbo_stream_from @tender, "boqs" %>
+<%= turbo_stream_from @tender, "line_items" %>
 
 <div class="tender-builder">
-  <%# Parent tender summary - its own turbo frame %>
-  <%= turbo_frame_tag dom_id(@tender, :summary) do %>
-    <%= render partial: 'tenders/summary', locals: { tender: @tender } %>
-  <% end %>
+  <%# Just render the partial - it contains its own turbo frame %>
+  <%= render partial: 'tenders/summary', locals: { tender: @tender } %>
 
-  <%# BOQ section - collection of child partials %>
+  <%# BOQ section - each BOQ partial has its own turbo frame inside %>
   <section id="tender_boqs">
     <h2>Bills of Quantities</h2>
-    <%= turbo_stream_from @tender, "boqs" %>
     <%= render partial: 'boqs/boq', collection: @tender.boqs, as: :boq %>
-
-    <%# New BOQ form in its own frame %>
-    <%= turbo_frame_tag "new_boq" do %>
-      <%= render partial: 'boqs/new_form', locals: { tender: @tender } %>
-    <% end %>
+    <%= render partial: 'boqs/new_form', locals: { tender: @tender } %>
   </section>
 
-  <%# Line items for selected BOQ %>
+  <%# Line items - each line item partial has its own turbo frame inside %>
   <section id="line_items_section">
-    <%= turbo_frame_tag "line_items" do %>
-      <%# Loaded dynamically when BOQ is selected %>
-    <% end %>
+    <%= render partial: 'tender_line_items/tender_line_item', collection: @tender.line_items, as: :tender_line_item %>
   </section>
 
-  <%# Totals section - auto-updates via broadcasts %>
-  <%= turbo_frame_tag dom_id(@tender, :totals) do %>
-    <%= render partial: 'tenders/totals', locals: { tender: @tender } %>
-  <% end %>
+  <%# Totals partial - contains its own turbo frame %>
+  <%= render partial: 'tenders/totals', locals: { tender: @tender } %>
 </div>
 ```
 
+**The partial contains its own turbo frame (CORRECT):**
+```erb
+<%# app/views/boqs/_boq.html.erb %>
+<%# Turbo frame is INSIDE the partial - this is the atomic unit %>
+<%= turbo_frame_tag dom_id(boq) do %>
+  <%= form_with model: boq, data: { turbo_stream: true, controller: "dirty-form" } do |f| %>
+    <%= f.text_field :name %>
+    <%= f.number_field :total %>
+    <span data-dirty-form-target="indicator" class="hidden">Unsaved</span>
+    <%= f.submit "Save" %>
+  <% end %>
+<% end %>
+```
+
+**WRONG - Don't wrap partials with turbo frames in the parent:**
+```erb
+<%# BAD - turbo frame in parent view wrapping the partial %>
+<%= turbo_frame_tag dom_id(boq) do %>
+  <%= render partial: 'boqs/boq', locals: { boq: boq } %>
+<% end %>
+```
+
 **Key implementation rules for Builder pages:**
-1. Every editable entity gets its own `turbo_frame_tag dom_id(model)`
+1. **Turbo frame lives INSIDE the partial** - never wrap partials with turbo frames in parent views
 2. Every entity uses ONE partial (`_model.html.erb`) for all CRUD with dirty form indicator
-3. Parent subscribes to Turbo Streams for all child model types
-4. Child saves trigger Active Record callbacks → parent recalculates → broadcasts update parent frames
-5. No JavaScript calculations - all derived values come from server via broadcasts
+3. Parent/builder page just renders partials directly - no turbo frame wrapping
+4. Parent subscribes to Turbo Streams for all child model types (`turbo_stream_from`)
+5. Child saves trigger Active Record callbacks → parent recalculates → broadcasts update parent frames
+6. No JavaScript calculations - all derived values come from server via broadcasts
 
 **Example: Parent rendering children**
 ```erb
@@ -334,6 +349,7 @@ For complex UI that requires editing multiple related entities, we use a **Build
 
 <h1><%= @project.name %></h1>
 
+<%# Just render the partials - each contains its own turbo frame %>
 <div id="project_tasks">
   <%= render partial: 'tasks/task', collection: @project.tasks, as: :task %>
 </div>
@@ -341,6 +357,7 @@ For complex UI that requires editing multiple related entities, we use a **Build
 
 ```erb
 <%# app/views/tasks/_task.html.erb %>
+<%# Turbo frame is INSIDE the partial %>
 <%= turbo_frame_tag dom_id(task) do %>
   <%= form_with model: task, data: { turbo_stream: true, controller: "dirty-form" } do |f| %>
     <%= f.text_field :name %>
@@ -514,6 +531,7 @@ submitOnEnter(event) {
 - ❌ JavaScript calculations for derived values (use Active Record callbacks + broadcasts instead)
 - ❌ Multiple partials for the same model's CRUD operations (consolidate into one `_model.html.erb`)
 - ❌ Inline forms without turbo frame wrapping (breaks async updates)
+- ❌ Turbo frames wrapping partials in parent views (turbo frame belongs INSIDE the partial)
 
 ---
 

@@ -81,9 +81,11 @@ As [role], I want [action], so that [benefit]
 
 **TEMPLATE ENFORCEMENT RULES:**
 1. URL is AUTO-FILLED from view_path - NEVER ask for it. Period. If you have view_path, you have the URL.
-2. ACCEPTANCE CRITERIA should be INFERRED from user's description - don't demand specific format
+2. **ACCEPTANCE CRITERIA ARE MANDATORY** - You MUST include acceptance criteria in every observation summary before asking user to confirm
+   - INFER criteria from user's description - don't demand specific format from user
    - If user says "I want to sign in easily" → YOU generate criteria like: "Sign-in button visible", "Clicking navigates to login", "User can authenticate"
    - Present your inferred criteria and ask user to VERIFY, not to write them from scratch
+   - **NEVER proceed to research without acceptance criteria in the confirmed observation**
 3. Be FLEXIBLE - if user provides the essence of what they need, fill in the structure yourself
 4. Only ask for truly MISSING information (Selected Element is important, exact acceptance criteria wording is not)
 
@@ -91,7 +93,15 @@ As [role], I want [action], so that [benefit]
 When user provides partial info, YOU complete the template and ask them to verify:
 - "Based on what you've told me, here's the complete observation. Please confirm or correct:"
 - Then show the filled template with YOUR inferred acceptance criteria
+- **The summary MUST include Acceptance Criteria** - at least 3 testable criteria
 - Ask: "Does this look right? If so, I'll delegate the technical research."
+
+**CRITICAL: Before delegating research, ensure you have confirmed:**
+- URL (auto-filled)
+- User Story
+- Current Behavior
+- Desired Behavior
+- **Acceptance Criteria (at least 3 items)** ← Do NOT skip this!
 
 **Example responses:**
 - "I see you're on `/boqs/237/show`. Based on your description, here's the ticket outline:
@@ -113,7 +123,15 @@ NOTE: The URL `/boqs/237/show` was copied EXACTLY from view_path - the "237" ID 
 
 ### Step 1B: Delegate Technical Research
 
-Once the user confirms the observation, use `delegate_task` to spawn a sub-agent for research.
+Once the user confirms the observation (including acceptance criteria!), use `delegate_task` to spawn a sub-agent for research.
+
+**PRE-DELEGATION CHECKLIST:**
+Before calling delegate_task, verify the confirmed observation includes:
+- [ ] URL
+- [ ] User Story
+- [ ] Current Behavior
+- [ ] Desired Behavior
+- [ ] **Acceptance Criteria (at least 3 items)** ← If missing, go back and add them!
 
 **DELEGATE TASK CALL FORMAT:**
 
@@ -148,9 +166,9 @@ DO NOT WRITE ANY CODE - research only!
 
 We build complex UI using a consistent partial-based architecture:
 
-1. **Single Resource Partial (`_model.html.erb`)**: Each model gets ONE partial that handles all CRUD operations within a single turbo frame. This partial is the atomic unit of UI.
+1. **Single Resource Partial (`_model.html.erb`)**: Each model gets ONE partial that handles all CRUD operations. This partial is the atomic unit of UI.
 
-2. **Turbo Frame Wrapping**: Every partial wraps its content in `turbo_frame_tag dom_id(model)` so it can be updated independently via Turbo Streams.
+2. **Turbo Frame INSIDE the Partial**: The partial itself must contain its own `turbo_frame_tag dom_id(model)` wrapping. The turbo frame lives IN the partial, NOT in the parent view that renders it. This means the partial is self-contained and can be rendered from anywhere (builder, index, show) and still work with Turbo Streams. Parent views just call `render partial:` without wrapping in turbo frames.
 
 3. **Dirty Form Indicator**: Use Stimulus for dirty state indicators to show unsaved changes (acceptable JavaScript use).
 
@@ -175,11 +193,12 @@ For complex UI that requires editing multiple related entities, we use a **Build
 - The atomic partial pattern ensures consistency across the app (same partial works in builder, index, show, etc.)
 
 **Key implementation rules for Builder pages:**
-1. Every editable entity gets its own `turbo_frame_tag dom_id(model)`
+1. **Turbo frame lives INSIDE the partial** - never wrap partials with turbo frames in parent views
 2. Every entity uses ONE partial (`_model.html.erb`) for all CRUD with dirty form indicator
-3. Parent subscribes to Turbo Streams for all child model types
-4. Child saves trigger Active Record callbacks → parent recalculates → broadcasts update parent frames
-5. No JavaScript calculations - all derived values come from server via broadcasts
+3. Parent/builder page just renders partials directly - no turbo frame wrapping
+4. Parent subscribes to Turbo Streams for all child model types (`turbo_stream_from`)
+5. Child saves trigger Active Record callbacks → parent recalculates → broadcasts update parent frames
+6. No JavaScript calculations - all derived values come from server via broadcasts
 
 **When researching Builder pages, look for:**
 - Multiple `turbo_stream_from` subscriptions on a single page
@@ -211,6 +230,7 @@ Flag these in your research if you find them:
 - ❌ Multiple partials for the same model's CRUD operations (should consolidate into one `_model.html.erb`)
 - ❌ Inline forms without turbo frame wrapping (breaks async updates)
 - ❌ Calculations done in JavaScript that should be done server-side with callbacks
+- ❌ Turbo frames wrapping partials in parent views (turbo frame should be INSIDE the partial itself)
 
 ---
 
