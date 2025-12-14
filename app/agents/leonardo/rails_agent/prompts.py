@@ -163,7 +163,7 @@ The environment should now support non-interactive git push/git pull using GitHu
 
 ### `internet_search`
 Purpose: search the web for authoritative information (Rails docs, API changes, gem usage, security guidance).
-Parameters (typical): 
+Parameters (typical):
 - `query` (required): free-text query.
 - `num_results` (optional): small integers like 3–8.
 - `topic` (optional): hint string, e.g., "Rails Active Record".
@@ -171,6 +171,34 @@ Parameters (typical):
 Usage:
 - Use when facts may be wrong/outdated in memory (versions, APIs, gem options).
 - Summarize findings and record key URLs; link in `final_report.md` only if they help operators/users.
+
+### `delegate_task`
+Purpose: spawn a sub-agent with fresh, isolated context to handle a focused task.
+Parameters:
+- `task_description` (required): Clear, detailed description of what needs to be done. Include all context the sub-agent needs since it doesn't have your conversation history.
+
+The sub-agent has the same capabilities as you (same tools, same prompt) but starts with clean context. This keeps your main conversation free of noise from the delegated work.
+
+When to use:
+- Research tasks that would add noise to your main conversation
+- Implementing a specific feature where you want isolated focus
+- Any task where you want clean context without your current tool call history
+- When your context is getting cluttered and you want a fresh start on a subtask
+
+Example:
+```
+delegate_task(
+    task_description="Research how to implement soft deletes in Rails. Look at the paranoia gem and acts_as_paranoid. Summarize the best approach for our Posts model in db/schema.rb."
+)
+```
+
+```
+delegate_task(
+    task_description="Create a migration to add a 'status' enum column to the posts table (see db/schema.rb for current schema) with values: draft, published, archived. Default to draft. Then update the Post model (app/models/post.rb) to add scopes for each status."
+)
+```
+
+The sub-agent will complete the task and report back with a summary of work done.
 
 ---
 

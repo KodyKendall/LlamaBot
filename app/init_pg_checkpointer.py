@@ -54,32 +54,55 @@ def ensure_database_exists(uri: str) -> bool:
         return False
 
 
-def run_alembic_migrations():
+def run_alembic_migrations(max_retries: int = 3, retry_delay: float = 2.0):
     """Run Alembic migrations to upgrade the auth database schema."""
+    import time
     from pathlib import Path
     from alembic.config import Config
     from alembic import command
 
+    # Get the path to alembic.ini relative to this file
+    app_dir = Path(__file__).parent
+    alembic_ini = app_dir / "alembic.ini"
+
+    if not alembic_ini.exists():
+        print(f"⚠️ Alembic config not found at {alembic_ini}")
+        return
+
+    # Create Alembic config
+    alembic_cfg = Config(str(alembic_ini))
+
+    # Retry logic for database connection issues
+    for attempt in range(1, max_retries + 1):
+        try:
+            print(f"🔄 Running Alembic migrations (attempt {attempt}/{max_retries})...")
+            command.upgrade(alembic_cfg, "head")
+            print("✅ Alembic migrations completed")
+            return  # Success, exit the function
+        except Exception as e:
+            error_msg = str(e)
+            if attempt < max_retries and "password authentication failed" in error_msg:
+                print(f"⚠️ Migration attempt {attempt} failed, retrying in {retry_delay}s...")
+                time.sleep(retry_delay)
+            else:
+                print(f"⚠️ Alembic migration error: {e}")
+                # Don't raise - let the app continue even if migrations fail
+                return
+
+
+def test_sqlalchemy_connection(uri: str) -> bool:
+    """Test if SQLAlchemy/psycopg2 can connect to the database."""
     try:
-        # Get the path to alembic.ini relative to this file
-        app_dir = Path(__file__).parent
-        alembic_ini = app_dir / "alembic.ini"
-
-        if not alembic_ini.exists():
-            print(f"⚠️ Alembic config not found at {alembic_ini}")
-            return
-
-        # Create Alembic config
-        alembic_cfg = Config(str(alembic_ini))
-
-        # Run migrations
-        print("🔄 Running Alembic migrations...")
-        command.upgrade(alembic_cfg, "head")
-        print("✅ Alembic migrations completed")
-
+        from sqlalchemy import create_engine, text
+        engine = create_engine(uri)
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        engine.dispose()
+        print(f"✅ SQLAlchemy connection test passed")
+        return True
     except Exception as e:
-        print(f"⚠️ Alembic migration error: {e}")
-        # Don't raise - let the app continue even if migrations fail
+        print(f"⚠️ SQLAlchemy connection test failed: {e}")
+        return False
 
 
 # Initialize auth database if AUTH_DB_URI is set
@@ -88,7 +111,11 @@ if auth_db_uri is None:
 else:
     print(f"AUTH_DB_URI is set, initializing auth database...")
     if ensure_database_exists(auth_db_uri):
-        run_alembic_migrations()
+        # Test SQLAlchemy connection before running migrations
+        if test_sqlalchemy_connection(auth_db_uri):
+            run_alembic_migrations()
+        else:
+            print("⚠️ Skipping migrations - SQLAlchemy cannot connect")
 
 # Initialize LangGraph checkpointer if DB_URI is set
 if db_uri is None:

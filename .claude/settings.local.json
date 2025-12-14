@@ -39,7 +39,9 @@
       "Bash(./scripts/deploy-frontend-to-s3.sh:*)",
       "Bash(find:*)",
       "Bash(chmod:*)",
-      "Bash(docker compose:*)"
+      "Bash(docker compose:*)",
+      "Bash(docker volume:*)",
+      "Bash(wc:*)"
     ],
     "deny": [],
     "ask": []

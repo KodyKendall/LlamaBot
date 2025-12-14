@@ -1,3 +1,7 @@
+# Load environment variables FIRST before any other imports that need them
+from dotenv import load_dotenv
+load_dotenv()
+
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,7 +15,6 @@ from collections import defaultdict
 
 from sqlmodel import Session
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
-from dotenv import load_dotenv
 
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.checkpoint.postgres import PostgresSaver
@@ -35,9 +38,6 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
-
-# Load environment variables
-load_dotenv()
 
 app = FastAPI()
 
