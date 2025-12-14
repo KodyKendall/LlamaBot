@@ -7,16 +7,25 @@ export class ThreadManager {
     this.messageRenderer = messageRenderer;
     this.menuManager = menuManager;
     this.scrollManager = scrollManager;
+    // Pagination state
+    this.nextCursor = null;
+    this.hasMore = false;
   }
 
   /**
-   * Fetch all threads from server
+   * Fetch threads from server with cursor-based pagination
+   * @param {string|null} cursor - Optional cursor for pagination
    */
-  async fetchThreads() {
+  async fetchThreads(cursor = null) {
     try {
       this.showThreadsLoading();
 
-      const response = await fetch('/threads');
+      let url = '/threads?limit=3';
+      if (cursor) {
+        url += `&before=${encodeURIComponent(cursor)}`;
+      }
+
+      const response = await fetch(url);
 
       // Check if response is OK
       if (!response.ok) {
@@ -33,14 +42,16 @@ export class ThreadManager {
         return;
       }
 
-      const threads = await response.json();
+      const data = await response.json();
+      const { threads, next_cursor, has_more } = data;
       console.log('Fetched threads:', threads);
 
-      // Sort by date, newest first
-      threads.sort((a, b) => new Date(b.state[4]) - new Date(a.state[4]));
+      // Store pagination state
+      this.nextCursor = next_cursor;
+      this.hasMore = has_more;
 
-      // Populate menu
-      this.populateMenuWithThreads(threads);
+      // Populate menu (threads already sorted by backend)
+      this.populateMenuWithThreads(threads, has_more);
     } catch (error) {
       console.error('Error fetching threads:', error);
       this.showThreadsError(error.message);
@@ -91,8 +102,10 @@ export class ThreadManager {
 
   /**
    * Populate menu with thread items
+   * @param {Array} threads - Array of thread objects
+   * @param {boolean} hasMore - Whether there are more threads to load
    */
-  populateMenuWithThreads(threads) {
+  populateMenuWithThreads(threads, hasMore = false) {
     const menuItems = document.querySelector('.menu-items');
     if (!menuItems) return;
 
@@ -119,6 +132,89 @@ export class ThreadManager {
 
       menuItems.appendChild(menuItem);
     });
+
+    // Add "Load More" button if there are more threads
+    if (hasMore) {
+      const loadMoreItem = document.createElement('div');
+      loadMoreItem.className = 'menu-item load-more';
+      loadMoreItem.innerHTML = '<i class="fa-solid fa-ellipsis"></i> Load more...';
+      loadMoreItem.style.color = 'var(--accent-color)';
+      loadMoreItem.style.cursor = 'pointer';
+      loadMoreItem.onclick = () => this.loadMoreThreads();
+      menuItems.appendChild(loadMoreItem);
+    }
+  }
+
+  /**
+   * Load more threads using the stored cursor
+   */
+  async loadMoreThreads() {
+    if (!this.nextCursor || !this.hasMore) return;
+
+    // Show loading state on the Load More button
+    const loadMoreBtn = document.querySelector('.menu-item.load-more');
+    if (loadMoreBtn) {
+      loadMoreBtn.innerHTML = '<div class="typing-indicator">Loading...</div>';
+    }
+
+    try {
+      const url = `/threads?limit=3&before=${encodeURIComponent(this.nextCursor)}`;
+      const response = await fetch(url);
+      const data = await response.json();
+      const { threads, next_cursor, has_more } = data;
+
+      // Update pagination state
+      this.nextCursor = next_cursor;
+      this.hasMore = has_more;
+
+      // Append new threads to existing menu
+      this.appendThreadsToMenu(threads, has_more);
+    } catch (error) {
+      console.error('Error loading more threads:', error);
+      // Restore the Load More button on error
+      if (loadMoreBtn) {
+        loadMoreBtn.innerHTML = '<i class="fa-solid fa-ellipsis"></i> Load more...';
+      }
+    }
+  }
+
+  /**
+   * Append threads to the existing menu (for pagination)
+   * @param {Array} threads - Array of thread objects to append
+   * @param {boolean} hasMore - Whether there are more threads to load
+   */
+  appendThreadsToMenu(threads, hasMore) {
+    const menuItems = document.querySelector('.menu-items');
+    if (!menuItems) return;
+
+    // Remove existing "Load More" button
+    const existingLoadMore = menuItems.querySelector('.load-more');
+    if (existingLoadMore) {
+      existingLoadMore.remove();
+    }
+
+    // Append new thread items
+    threads.forEach(thread => {
+      const messages = thread.state[0]?.messages || [];
+      const { title } = this.generateConversationSummary(messages);
+
+      const menuItem = document.createElement('div');
+      menuItem.className = 'menu-item';
+      menuItem.textContent = title;
+      menuItem.onclick = () => this.handleThreadClick(thread.thread_id, title);
+      menuItems.appendChild(menuItem);
+    });
+
+    // Add new "Load More" button if there are more
+    if (hasMore) {
+      const loadMoreItem = document.createElement('div');
+      loadMoreItem.className = 'menu-item load-more';
+      loadMoreItem.innerHTML = '<i class="fa-solid fa-ellipsis"></i> Load more...';
+      loadMoreItem.style.color = 'var(--accent-color)';
+      loadMoreItem.style.cursor = 'pointer';
+      loadMoreItem.onclick = () => this.loadMoreThreads();
+      menuItems.appendChild(loadMoreItem);
+    }
   }
 
   /**

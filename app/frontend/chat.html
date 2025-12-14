@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LlamaBot Chat Interface</title>
+    <title>Leonardo</title>
     <!-- Favicon -->
     <link rel="icon" type="image/png" href="https://service-jobs-images.s3.us-east-2.amazonaws.com/7rl98t1weu387r43il97h6ipk1l7">
     <!-- Add marked.js for markdown parsing -->
@@ -73,12 +73,12 @@
                     </button>
                     <div class="custom-dropdown-container">
                         <select data-llamabot="agent-mode-select" class="custom-dropdown">
-                            <option value="prototype" data-short-label="Design">Design Mode</option>
                             <option value="engineer" data-short-label="Engineer">Engineer Mode</option>
+                            <option value="ticket" data-short-label="Ticket">Ticket Mode</option>
+                            <option value="feedback" data-short-label="Feedback">Feedback Mode</option>
+                            <option value="prototype" data-short-label="Design">Design Mode</option>
                             <option value="ai_builder" data-short-label="AI Builder">AI Builder Mode</option>
                             <option value="testing" data-short-label="Test Builder">Test Builder Mode</option>
-                            <option value="feedback" data-short-label="Feedback">Feedback Mode</option>
-                            <option value="ticket" data-short-label="Ticket">Ticket Mode</option>
                         </select>
                     </div>
                     <button data-llamabot="send-button" class="send-icon-button" disabled title="Send message">
@@ -174,6 +174,23 @@
     <audio id="taskCompletedSound" preload="auto">
         <source src="/frontend/Leonardo-Task-Completed-Sound.wav" type="audio/wav">
     </audio>
+
+    <!-- Set document title with instance name if available -->
+    <script>
+        (async function() {
+            try {
+                const response = await fetch('/api/instance-info');
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.instance_name) {
+                        document.title = `Leonardo - ${data.instance_name}`;
+                    }
+                }
+            } catch (e) {
+                // Silently fail - just use default "Leonardo" title
+            }
+        })();
+    </script>
 
     <!-- Role-based mode restriction -->
     <script>

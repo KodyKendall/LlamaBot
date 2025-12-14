@@ -253,6 +253,152 @@ The only exception when dealing with secret keys is for ACCEPTING github_cli_com
 
 **Rule: NEVER write manual JavaScript fetch code for form submissions. Use native Turbo forms.**
 
+### Preferred UI Architecture: Partials + Turbo Frames
+
+Build complex UI using a consistent partial-based architecture:
+
+1. **Single Resource Partial (`_model.html.erb`)**: Each model gets ONE partial that handles all CRUD operations within a single turbo frame. This partial is the atomic unit of UI.
+
+2. **Turbo Frame Wrapping**: Every partial wraps its content in `turbo_frame_tag dom_id(model)` so it can be updated independently via Turbo Streams.
+
+3. **Dirty Form Indicator**: Use Stimulus for dirty state indicators to show unsaved changes (this is an acceptable use of JavaScript).
+
+4. **Grouping Patterns**:
+   - **Master tables**: Render resource partials in the index view
+   - **Parent-child relationships**: Parent's show page renders child partials via `has_many` association, each child in its own turbo frame
+
+### The "Builder" Pattern for Complex UI
+
+For complex UI that requires editing multiple related entities, we use a **Builder page pattern**. This creates a SPA-like experience while staying fully server-rendered with Turbo.
+
+**Concept:**
+- A parent resource (e.g., `Project`, `Tender`, `BOQ`) has a dedicated "builder" page
+- The builder page aggregates multiple turbo frames for child/dependent entities (all with `belongs_to` foreign keys back to the parent)
+- Each child entity renders its own atomic partial (`_model.html.erb`) with full CRUD + dirty form indicator
+- The builder page acts as a **single-page aggregator** where users can edit everything without page reloads
+
+**Why this pattern matters:**
+- Feels like a SPA but is fully server-rendered (SEO, accessibility, no JS state bugs)
+- Each turbo frame updates independently via Turbo Streams
+- Active Record callbacks cascade updates to related frames (e.g., editing a line item updates the parent's totals)
+- The atomic partial pattern ensures consistency across the app (same partial works in builder, index, show, etc.)
+
+**Example: Tender Builder page**
+```erb
+<%# app/views/tenders/builder.html.erb %>
+<%= turbo_stream_from @tender %>
+
+<div class="tender-builder">
+  <%# Parent tender summary - its own turbo frame %>
+  <%= turbo_frame_tag dom_id(@tender, :summary) do %>
+    <%= render partial: 'tenders/summary', locals: { tender: @tender } %>
+  <% end %>
+
+  <%# BOQ section - collection of child partials %>
+  <section id="tender_boqs">
+    <h2>Bills of Quantities</h2>
+    <%= turbo_stream_from @tender, "boqs" %>
+    <%= render partial: 'boqs/boq', collection: @tender.boqs, as: :boq %>
+
+    <%# New BOQ form in its own frame %>
+    <%= turbo_frame_tag "new_boq" do %>
+      <%= render partial: 'boqs/new_form', locals: { tender: @tender } %>
+    <% end %>
+  </section>
+
+  <%# Line items for selected BOQ %>
+  <section id="line_items_section">
+    <%= turbo_frame_tag "line_items" do %>
+      <%# Loaded dynamically when BOQ is selected %>
+    <% end %>
+  </section>
+
+  <%# Totals section - auto-updates via broadcasts %>
+  <%= turbo_frame_tag dom_id(@tender, :totals) do %>
+    <%= render partial: 'tenders/totals', locals: { tender: @tender } %>
+  <% end %>
+</div>
+```
+
+**Key implementation rules for Builder pages:**
+1. Every editable entity gets its own `turbo_frame_tag dom_id(model)`
+2. Every entity uses ONE partial (`_model.html.erb`) for all CRUD with dirty form indicator
+3. Parent subscribes to Turbo Streams for all child model types
+4. Child saves trigger Active Record callbacks → parent recalculates → broadcasts update parent frames
+5. No JavaScript calculations - all derived values come from server via broadcasts
+
+**Example: Parent rendering children**
+```erb
+<%# app/views/projects/show.html.erb %>
+<%= turbo_stream_from @project, "tasks" %>
+
+<h1><%= @project.name %></h1>
+
+<div id="project_tasks">
+  <%= render partial: 'tasks/task', collection: @project.tasks, as: :task %>
+</div>
+```
+
+```erb
+<%# app/views/tasks/_task.html.erb %>
+<%= turbo_frame_tag dom_id(task) do %>
+  <%= form_with model: task, data: { turbo_stream: true, controller: "dirty-form" } do |f| %>
+    <%= f.text_field :name %>
+    <%= f.number_field :hours %>
+    <span data-dirty-form-target="indicator" class="hidden">Unsaved</span>
+    <%= f.submit "Save" %>
+  <% end %>
+<% end %>
+```
+
+### Calculations: Active Record Callbacks + Broadcasts (NOT JavaScript)
+
+**CRITICAL: Never use JavaScript to calculate derived values in the UI.** Instead:
+
+1. Child model saves → Active Record callback updates parent/dependent models in the database
+2. Callback triggers `broadcast_replace_to` for all affected turbo frames
+3. UI re-renders automatically with correct server-calculated values
+
+**Example: Task hours updating Project total**
+```ruby
+# app/models/task.rb
+class Task < ApplicationRecord
+  belongs_to :project
+
+  after_save :update_project_totals
+  after_destroy :update_project_totals
+
+  private
+
+  def update_project_totals
+    project.recalculate_total_hours!  # Updates DB column
+  end
+end
+
+# app/models/project.rb
+class Project < ApplicationRecord
+  has_many :tasks
+
+  after_update_commit :broadcast_update
+
+  def recalculate_total_hours!
+    update!(total_hours: tasks.sum(:hours))
+  end
+
+  private
+
+  def broadcast_update
+    broadcast_replace_to("projects", target: self, partial: "projects/project", locals: { project: self })
+  end
+end
+```
+
+This ensures:
+- Single source of truth (database)
+- All clients see consistent data
+- No JavaScript calculation bugs
+- Works across multiple browser tabs/users
+
 ### Turbo Form Submission
 
 **View:**
@@ -307,11 +453,48 @@ end
 <%= turbo_stream_from "models" %>
 ```
 
-### Preserving UI State
+### Preserving UI State During Broadcasts
+
+When a turbo frame re-renders via broadcast, any transient UI state (open accordions, expanded sections, active tabs) will be lost unless you explicitly pass it through locals.
+
+**Problem:** User has an accordion open, child saves, parent broadcasts a replace, accordion closes unexpectedly.
+
+**Solution:** Pass UI state flags through locals when building turbo stream updates.
+
+**Example: Keeping accordion open after line item update**
 ```ruby
-turbo_stream.replace(@item, partial: 'items/item',
-  locals: { item: @item, open_breakdown: true })
+# In controller or model callback
+turbo_updates << turbo_stream.replace(
+  tender_line_item,
+  partial: 'tender_line_items/tender_line_item',
+  locals: { tender_line_item: tender_line_item, open_breakdown: true }
+)
 ```
+
+**In the partial, use the local to set initial state:**
+```erb
+<%# app/views/tender_line_items/_tender_line_item.html.erb %>
+<%= turbo_frame_tag dom_id(tender_line_item) do %>
+  <div data-controller="accordion" data-accordion-open-value="<%= local_assigns[:open_breakdown] || false %>">
+    <button data-action="accordion#toggle">Toggle Breakdown</button>
+    <div data-accordion-target="content" class="<%= 'hidden' unless local_assigns[:open_breakdown] %>">
+      <%= render partial: 'breakdowns/breakdown', collection: tender_line_item.breakdowns %>
+    </div>
+  </div>
+<% end %>
+```
+
+**Common UI state to preserve:**
+- `open_breakdown: true` - Keep accordion/collapsible sections expanded
+- `editing: true` - Keep inline edit mode active
+- `active_tab: 'details'` - Preserve which tab is selected
+- `expanded: true` - Keep tree nodes or nested sections open
+
+**When to use:**
+- Controller responses where you know the user's current UI context
+- Cascade updates where a child triggers parent re-render but parent had UI state
+
+**Note:** For broadcasts to OTHER users (who may not have the same UI state), you typically use default collapsed state. UI state preservation is mainly for the user who triggered the action.
 
 ### Stimulus (UI Polish Only)
 ```javascript
@@ -328,6 +511,9 @@ submitOnEnter(event) {
 - ❌ Manual fetch + `Turbo.renderStreamMessage()` parsing
 - ❌ `after_save` instead of `after_update_commit`
 - ❌ Mismatched turbo frame IDs between controller and partial
+- ❌ JavaScript calculations for derived values (use Active Record callbacks + broadcasts instead)
+- ❌ Multiple partials for the same model's CRUD operations (consolidate into one `_model.html.erb`)
+- ❌ Inline forms without turbo frame wrapping (breaks async updates)
 
 ---
 
@@ -336,6 +522,51 @@ submitOnEnter(event) {
 - Be direct and concrete. Ask **one** blocking question at a time when necessary; otherwise proceed with reasonable defaults and record assumptions in the requirements.
 - Present the current TODO list (or deltas) when it helps the user understand progress.
 - When blocked externally (missing API key, unknown domain language, etc.), create a TODO, state the exact blocker, and propose unblocking options.
+
+---
+
+## DEBUGGING HARD PROBLEMS
+
+When debugging complex issues, you can add temporary logging statements and guide the user to view logs in real time.
+
+### Debugging Emoji Convention
+**IMPORTANT:** When adding temporary debugging logs (in both Rails and JavaScript), always prefix log messages with the 🪲 emoji. This makes it easy to find and remove debugging statements later so they don't get left in source control.
+
+**Rails example:**
+```ruby
+Rails.logger.info("🪲 DEBUG: user_id=#{user.id}, params=#{params.inspect}")
+```
+
+**JavaScript example:**
+```javascript
+console.log("🪲 DEBUG: response data:", data);
+```
+
+### Viewing Rails Logs in Real Time
+If the user is debugging a hard problem and needs to see backend Rails logs in real time, guide them through these steps:
+
+1. **Open VSCode Terminal** → Go to Terminal menu
+2. **SSH into Leonardo** → Make sure they're connected (the terminal prompt will show green/blue text if SSH'd correctly)
+3. **Navigate to the project** → `cd Leonardo`
+4. **Run the log tail command** → `./bin/rails_logs`
+5. **Clear logs if needed** → Use `Command + K` (Mac) or `Ctrl + K` (Windows/Linux) to clear the terminal, or clear the Rails log file directly
+6. **Test the app** → Reproduce the issue in the browser
+7. **View logs** → Watch the output in real time
+8. **Copy & paste logs** → User can copy relevant log output and paste it into the chat for you to analyze
+
+### Viewing JavaScript Logs (Browser Developer Console)
+For frontend JavaScript debugging:
+
+1. **Open the app in a separate browser tab** (recommended: use a separate tab from the Leonardo chat/VSCode iframe to avoid seeing unrelated JavaScript logs)
+2. **Open Developer Tools** → Right-click → "Inspect" → Console tab, or use keyboard shortcut:
+   - Mac: `Command + Option + J`
+   - Windows/Linux: `Ctrl + Shift + J`
+3. **Clear console if needed** → Click the clear button or use `Command + K` / `Ctrl + L`
+4. **Test the app** → Reproduce the issue
+5. **Copy & paste logs** → User can copy relevant console output and paste it into the chat
+
+### Cleanup Reminder
+After debugging is complete, remind the user (or proactively search for and remove) any 🪲 debug statements before committing code.
 
 ---
 

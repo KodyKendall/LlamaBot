@@ -119,7 +119,7 @@ Once the user confirms the observation, use `delegate_task` to spawn a sub-agent
 
 ```
 delegate_task(
-    task_description="""
+    task_description='''
 Research the following feature request in the Rails codebase:
 
 **URL:** [from observation]
@@ -139,6 +139,80 @@ Build a complete technical mental model by researching:
 6. Routes (rails/config/routes.rb)
 
 DO NOT WRITE ANY CODE - research only!
+
+---
+
+## OUR UI ARCHITECTURE PREFERENCES (USE THESE TO EVALUATE THE CODE)
+
+### Preferred UI Composition Pattern: Partials + Turbo Frames
+
+We build complex UI using a consistent partial-based architecture:
+
+1. **Single Resource Partial (`_model.html.erb`)**: Each model gets ONE partial that handles all CRUD operations within a single turbo frame. This partial is the atomic unit of UI.
+
+2. **Turbo Frame Wrapping**: Every partial wraps its content in `turbo_frame_tag dom_id(model)` so it can be updated independently via Turbo Streams.
+
+3. **Dirty Form Indicator**: Use Stimulus for dirty state indicators to show unsaved changes (acceptable JavaScript use).
+
+4. **Grouping Patterns**:
+   - **Master tables**: Render resource partials in the index view
+   - **Parent-child relationships**: Parent's show page renders child partials via `has_many` association, each child in its own turbo frame
+
+### The "Builder" Pattern for Complex UI
+
+For complex UI that requires editing multiple related entities, we use a **Builder page pattern**. This creates a SPA-like experience while staying fully server-rendered with Turbo.
+
+**Concept:**
+- A parent resource (e.g., `Project`, `Tender`, `BOQ`) has a dedicated "builder" page
+- The builder page aggregates multiple turbo frames for child/dependent entities (all with `belongs_to` foreign keys back to the parent)
+- Each child entity renders its own atomic partial (`_model.html.erb`) with full CRUD + dirty form indicator
+- The builder page acts as a **single-page aggregator** where users can edit everything without page reloads
+
+**Why this pattern matters:**
+- Feels like a SPA but is fully server-rendered (SEO, accessibility, no JS state bugs)
+- Each turbo frame updates independently via Turbo Streams
+- Active Record callbacks cascade updates to related frames (e.g., editing a line item updates the parent's totals)
+- The atomic partial pattern ensures consistency across the app (same partial works in builder, index, show, etc.)
+
+**Key implementation rules for Builder pages:**
+1. Every editable entity gets its own `turbo_frame_tag dom_id(model)`
+2. Every entity uses ONE partial (`_model.html.erb`) for all CRUD with dirty form indicator
+3. Parent subscribes to Turbo Streams for all child model types
+4. Child saves trigger Active Record callbacks → parent recalculates → broadcasts update parent frames
+5. No JavaScript calculations - all derived values come from server via broadcasts
+
+**When researching Builder pages, look for:**
+- Multiple `turbo_stream_from` subscriptions on a single page
+- Parent routes like `/tenders/:id/builder` or `/projects/:id/edit`
+- Nested partials being rendered for `has_many` associations
+- Callbacks that update parent totals/aggregates when children change
+
+### Calculations: Active Record Callbacks + Broadcasts (NOT JavaScript)
+
+**CRITICAL: We NEVER use JavaScript to calculate derived values in the UI.** Our pattern:
+
+1. Child model saves → Active Record callback updates parent/dependent models in the database
+2. Callback triggers `broadcast_replace_to` for all affected turbo frames
+3. UI re-renders automatically with correct server-calculated values
+
+This ensures:
+- Single source of truth (database)
+- All clients see consistent data
+- No JavaScript calculation bugs
+- Works across multiple browser tabs/users
+
+### Anti-Patterns to Identify
+
+Flag these in your research if you find them:
+- ❌ Manual JavaScript fetch + `Turbo.renderStreamMessage()` parsing (should use native Turbo forms)
+- ❌ `after_save` instead of `after_update_commit` for broadcasts
+- ❌ Mismatched turbo frame IDs between controller and partial
+- ❌ JavaScript calculations for derived values (should use Active Record callbacks + broadcasts)
+- ❌ Multiple partials for the same model's CRUD operations (should consolidate into one `_model.html.erb`)
+- ❌ Inline forms without turbo frame wrapping (breaks async updates)
+- ❌ Calculations done in JavaScript that should be done server-side with callbacks
+
+---
 
 Return your findings in this structured format:
 
@@ -165,9 +239,12 @@ Return your findings in this structured format:
 ### Business Logic Summary
 [How the pieces connect - what triggers what, data flow]
 
+### Anti-Patterns Found
+[List any violations of our preferred patterns - JavaScript calculations, missing turbo frames, multiple partials for same model CRUD, etc. If none found, state "None identified."]
+
 ### Implementation Considerations
-[Any gotchas, edge cases, or suggestions for the engineer]
-"""
+[Any gotchas, edge cases, or suggestions for the engineer. Include recommendations for fixing any anti-patterns found.]
+'''
 )
 ```
 

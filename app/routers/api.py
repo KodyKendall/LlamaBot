@@ -5,7 +5,8 @@ import logging
 import re
 import os
 
-from fastapi import APIRouter, Request, Depends, HTTPException
+from typing import Optional
+from fastapi import APIRouter, Request, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlmodel import Session
@@ -145,34 +146,40 @@ async def api_delete_user(
 # ============== Thread/Chat History API ==============
 
 @router.get("/threads", response_class=JSONResponse)
-async def threads(request: Request, username: str = Depends(auth)):
-    """Get recent conversation threads (limited to 3 most recent to prevent memory issues)."""
+async def threads(
+    request: Request,
+    username: str = Depends(auth),
+    before: Optional[str] = Query(None, description="Cursor for pagination - timestamp of oldest thread from previous batch"),
+    limit: int = Query(3, ge=1, le=20)
+):
+    """Get recent conversation threads with cursor-based pagination."""
     app = request.app
     checkpointer = app.state.get_or_create_checkpointer()
-    config = {}
-    checkpoint_generator = checkpointer.list(config=config)
 
-    # Collect thread IDs with their timestamps for sorting
-    thread_timestamps = {}
-    for checkpoint in checkpoint_generator:
-        thread_id = checkpoint[0]["configurable"]["thread_id"]
-        # Get timestamp from checkpoint metadata (index 4 in tuple)
-        timestamp = checkpoint[4] if len(checkpoint) > 4 else None
-        # Keep the most recent timestamp for each thread
-        if thread_id not in thread_timestamps or (timestamp and timestamp > thread_timestamps[thread_id]):
-            thread_timestamps[thread_id] = timestamp
+    seen_threads = set()
+    recent_threads = []  # List of (thread_id, timestamp) tuples
 
-    # Sort by timestamp (newest first) and limit to 3 threads
-    MAX_THREADS = 3
-    sorted_thread_ids = sorted(
-        thread_timestamps.keys(),
-        key=lambda tid: thread_timestamps[tid] or "",
-        reverse=True
-    )[:MAX_THREADS]
+    # Use async iteration with limit to avoid loading all checkpoints
+    # Fetch extra since we're deduplicating by thread_id
+    async for checkpoint in checkpointer.alist(config={}, limit=limit * 10):
+        thread_id = checkpoint.config["configurable"]["thread_id"]
+        # Get timestamp from checkpoint metadata
+        timestamp = checkpoint.metadata.get("created_at") or checkpoint.config.get("configurable", {}).get("checkpoint_id", "")
 
-    logger.info(f"Found {len(thread_timestamps)} total threads, returning {len(sorted_thread_ids)} most recent")
+        # Skip if we've seen this thread
+        if thread_id in seen_threads:
+            continue
+        # Skip if timestamp is >= cursor (we want older threads)
+        if before and timestamp >= before:
+            continue
 
-    state_history = []
+        seen_threads.add(thread_id)
+        recent_threads.append((thread_id, timestamp))
+
+        if len(recent_threads) >= limit:
+            break
+
+    logger.info(f"Returning {len(recent_threads)} threads (cursor-based pagination)")
 
     # Use cached graph from startup (singleton pattern)
     graph = app.state.compiled_graphs.get("llamabot")
@@ -181,12 +188,24 @@ async def threads(request: Request, username: str = Depends(auth)):
         graph = build_workflow(checkpointer=checkpointer)
         logger.warning("/threads endpoint using fallback graph compilation")
 
-    # Get only the LATEST state for each thread (not full history)
-    for thread_id in sorted_thread_ids:
+    # Fetch states (only for the limited threads)
+    state_history = []
+    for thread_id, timestamp in recent_threads:
         config = {"configurable": {"thread_id": thread_id}}
-        state_history.append({"thread_id": thread_id, "state": await graph.aget_state(config=config)})
+        state_history.append({
+            "thread_id": thread_id,
+            "timestamp": timestamp,
+            "state": await graph.aget_state(config=config)
+        })
 
-    return state_history
+    # Build response with next cursor
+    next_cursor = recent_threads[-1][1] if recent_threads else None
+
+    return {
+        "threads": state_history,
+        "next_cursor": next_cursor,
+        "has_more": len(recent_threads) == limit
+    }
 
 
 @router.get("/chat-history/{thread_id}")
@@ -279,3 +298,20 @@ async def rails_routes():
 def check_timestamp(request: Request):
     """Returns the timestamp of last message from user in UTC."""
     return {"timestamp": request.app.state.timestamp}
+
+
+@router.get("/api/instance-info", response_class=JSONResponse)
+async def get_instance_info():
+    """Get instance info from .leonardo/instance.json if it exists."""
+    instance_file = ".leonardo/instance.json"
+
+    if not os.path.exists(instance_file):
+        return {"instance_name": None}
+
+    try:
+        with open(instance_file, "r") as f:
+            data = json.load(f)
+        return {"instance_name": data.get("instance_name")}
+    except Exception as e:
+        logger.warning(f"Error reading instance.json: {e}")
+        return {"instance_name": None}
