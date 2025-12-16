@@ -192,6 +192,162 @@ See "4) Create AgentStateBuilder Phase" below for detailed documentation on cust
 - ✅ Agent name must match key in `langgraph.json`
 - ✅ ActionCable consumer comes from `llama_bot_rails` gem (already configured)
 - ✅ Suggested prompts auto-fill and send messages
+
+---
+
+## ERROR HANDLING IN CHAT FRONTEND
+
+Understanding how errors flow from the LangGraph backend to the chat UI is critical for proper error handling.
+
+**Error Flow Architecture:**
+
+```
+Backend Exception → WebSocket JSON → MessageHandler → MessageRenderer → DOM Element
+```
+
+**Step-by-Step Error Flow:**
+
+| Step | Location | What Happens |
+|------|----------|--------------|
+| 1 | `request_handler.py` | Exception caught, sends `{"type": "error", "content": "..."}` via WebSocket |
+| 2 | `MessageHandler.js` | Routes message to `handleGenericMessage()` |
+| 3 | `MessageHandler.js` | Calls `messageRenderer.addMessage(content, "error", null)` |
+| 4 | `MessageRenderer.js` | Routes to `renderErrorMessage(content)` |
+| 5 | `MessageRenderer.js` | Creates `<div data-llamabot="error-message">` in chat |
+
+**Backend Error JSON Structure:**
+When an exception occurs in the LangGraph agent, the backend sends:
+```json
+{
+  "type": "error",
+  "content": "Error processing request: <exception message>"
+}
+```
+
+**Frontend DOM Output:**
+The error message is rendered as:
+```html
+<div data-llamabot="error-message" class="your-error-classes">
+  Error processing request: <exception message>
+</div>
+```
+
+**Styling Error Messages:**
+Pass custom CSS classes via the `cssClasses.errorMessage` config:
+```javascript
+const chat = LlamaBot.create('[data-llamabot="chat-container"]', {
+  cssClasses: {
+    errorMessage: 'bg-red-100 text-red-800 p-3 rounded-lg mb-2 border border-red-300',
+  }
+});
+```
+
+**Handling Connection-Level Errors:**
+Use the `onError` callback for WebSocket connection errors:
+```javascript
+const chat = LlamaBot.create('[data-llamabot="chat-container"]', {
+  actionCable: { ... },
+
+  // Handle WebSocket connection errors
+  onError: (error) => {
+    console.error('Connection error:', error);
+    showToast('Connection problem - please refresh');
+  }
+});
+```
+
+**Listening for Connection Events:**
+The chat library emits custom DOM events you can listen to:
+```javascript
+// WebSocket connection established
+window.addEventListener('websocketConnected', () => {
+  console.log('Connected to chat server');
+  hideReconnectingBanner();
+});
+
+// WebSocket connection lost
+window.addEventListener('websocketDisconnected', () => {
+  console.log('Disconnected from chat server');
+  showReconnectingBanner();
+});
+
+// WebSocket error occurred
+window.addEventListener('websocketError', (event) => {
+  console.error('WebSocket error:', event.detail);
+  logErrorToService(event.detail);
+});
+```
+
+**Watching for Error Messages in DOM (Advanced):**
+Use MutationObserver to react to error messages programmatically:
+```javascript
+const messageHistory = document.querySelector('[data-llamabot="message-history"]');
+const observer = new MutationObserver((mutations) => {
+  mutations.forEach((mutation) => {
+    mutation.addedNodes.forEach((node) => {
+      if (node.nodeType === 1 && node.getAttribute('data-llamabot') === 'error-message') {
+        // Custom error handling
+        const errorText = node.textContent;
+        sendToErrorTracking(errorText);
+        showCustomErrorModal(errorText);
+      }
+    });
+  });
+});
+observer.observe(messageHistory, { childList: true });
+```
+
+**Complete Error Handling Example:**
+```erb
+<script type="module">
+  waitForCableConnection(async (consumer) => {
+    const { default: LlamaBot } = await import('https://llamapress-cdn.s3.amazonaws.com/llamabot-chat-js-v0.2.19a/index.js');
+
+    const chat = LlamaBot.create('[data-llamabot="chat-container"]', {
+      actionCable: {
+        consumer: consumer,
+        channel: 'LlamaBotRails::ChatChannel',
+        session_id: crypto.randomUUID(),
+      },
+      agent: { name: 'my_agent' },
+
+      // Style error messages
+      cssClasses: {
+        errorMessage: 'bg-red-50 text-red-700 p-4 rounded-lg mb-2 border-l-4 border-red-500',
+      },
+
+      // Handle connection errors
+      onError: (error) => {
+        console.error('Connection error:', error);
+      }
+    });
+
+    // Listen for connection state changes
+    window.addEventListener('websocketDisconnected', () => {
+      document.getElementById('connection-banner').classList.remove('hidden');
+    });
+
+    window.addEventListener('websocketConnected', () => {
+      document.getElementById('connection-banner').classList.add('hidden');
+    });
+  });
+</script>
+
+<!-- Optional: Connection status banner -->
+<div id="connection-banner" class="hidden bg-yellow-100 text-yellow-800 p-2 text-center">
+  Reconnecting to chat server...
+</div>
+```
+
+**Error Types Summary:**
+
+| Error Type | Source | How to Handle |
+|------------|--------|---------------|
+| Application errors | Agent exceptions | Styled via `cssClasses.errorMessage`, appears in chat |
+| Connection errors | WebSocket issues | `onError` callback |
+| Disconnection | Network/server | `websocketDisconnected` event |
+| Reconnection | Auto-reconnect success | `websocketConnected` event |
+
 ---
 
 ## AGENT FILE PATHS & REGISTRATION

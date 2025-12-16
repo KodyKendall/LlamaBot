@@ -1,8 +1,6 @@
-from langchain_core.tools import tool, InjectedToolCallId
+from langchain.tools import tool, ToolRuntime
 from langgraph.types import Command
 from langchain_core.messages import ToolMessage
-from typing import Annotated
-from langgraph.prebuilt import InjectedState
 from tavily import TavilyClient
 import os
 from bs4 import BeautifulSoup
@@ -22,7 +20,7 @@ from app.agents.leonardo.rails_agent.prompts import (
     GITHUB_CLI_DESCRIPTION,
 )
 
-from app.agents.leonardo.rails_agent.state import Todo, RailsAgentState
+from app.agents.leonardo.rails_agent.state import Todo
 
 from pathlib import Path
 import subprocess
@@ -40,14 +38,15 @@ APP_DIR = PROJECT_ROOT / 'app'
 
 @tool(description=WRITE_TODOS_DESCRIPTION)
 def write_todos(
-    todos: list[Todo], tool_call_id: Annotated[str, InjectedToolCallId]
+    todos: list[Todo],
+    runtime: ToolRuntime,
 ) -> Command:
-
+    """Update the todo list with new items."""
     return Command(
         update={
             "todos": todos,
             "messages": [
-                ToolMessage(f"Updated todo list to {todos}", tool_call_id=tool_call_id)
+                ToolMessage(f"Updated todo list to {todos}", tool_call_id=runtime.tool_call_id)
             ],
         }
     )
@@ -107,10 +106,11 @@ def ls(directory: str = "") -> list[str]:
 @tool(description=TOOL_DESCRIPTION)
 def read_file(
     file_path: str,
-    state: Annotated[RailsAgentState, InjectedState],
+    runtime: ToolRuntime,
     offset: int = 0,
     limit: int = 2000,
 ) -> str:
+    """Read a file within the Rails project and return its contents."""
     file_path = guard_against_beginning_slash_argument(file_path)
     
     # Construct the full path
@@ -164,22 +164,15 @@ def read_file(
 def write_file(
     file_path: str,
     content: str,
-    state: Annotated[RailsAgentState, InjectedState],
-    tool_call_id: Annotated[str, InjectedToolCallId],
+    runtime: ToolRuntime,
 ) -> Command:
-    """
-    This creates and writes to a file at the specicied path, creating the file and any necessary directories if they don't exist.
-    Usage:
-    - file_path: The path to the file to write to. This should be a relative path from the root of the Rails project. Never include a leading slash "/" at the beginning of the file_path.
-    - content: The content to write to the file. You must specify this argument or this tool call will fail.
-    """
+    """Create or overwrite a file at the specified path."""
     file_path = guard_against_beginning_slash_argument(file_path)
     full_path = APP_DIR / "rails" / file_path
-    
+
     try:
         full_path.parent.mkdir(parents=True, exist_ok=True)
         full_path.write_text(content)
-        # git_status(tool_call_id) # hacky - this will update the git status page so the user can see the changes.
     except Exception as e:
         error_message = f"Error writing file {file_path}: {e}"
         tool_output = {
@@ -192,7 +185,7 @@ def write_file(
                     ToolMessage(
                         error_message,
                         artifact=tool_output,
-                        tool_call_id=tool_call_id,
+                        tool_call_id=runtime.tool_call_id,
                     )
                 ]
             }
@@ -207,7 +200,7 @@ def write_file(
     return Command(
         update={
             "messages": [
-                ToolMessage(success_message, artifact=tool_output, tool_call_id=tool_call_id)
+                ToolMessage(success_message, artifact=tool_output, tool_call_id=runtime.tool_call_id)
             ],
         }
     )
@@ -218,10 +211,11 @@ def edit_file(
     file_path: str,
     old_string: str,
     new_string: str,
-    state: Annotated[RailsAgentState, InjectedState],
-    tool_call_id: Annotated[str, InjectedToolCallId],
+    runtime: ToolRuntime,
     replace_all: bool = False,
 ) -> Command:
+    """Edit a file by replacing old_string with new_string."""
+    tool_call_id = runtime.tool_call_id
     file_path = guard_against_beginning_slash_argument(file_path)
     full_path = APP_DIR / "rails" / file_path
 
@@ -391,12 +385,14 @@ def edit_file(
 
 @tool(description=SEARCH_FILE_DESCRIPTION)
 def search_file(
-    substring: str, tool_call_id: Annotated[str, InjectedToolCallId]
+    substring: str,
+    runtime: ToolRuntime,
 ) -> Command:
     """Search all files in the directory for a substring."""
+    tool_call_id = runtime.tool_call_id
     full_path = APP_DIR / "rails"
     matches = []
-    
+
     # Check if the rails directory exists
     if not full_path.exists():
         result_msg = f"Project directory not found"
@@ -571,11 +567,13 @@ def rails_api_sh(snippet: str, workdir: str = WORKDIR) -> str:
 
 @tool(description=BASH_COMMAND_FOR_RAILS_DESCRIPTION)
 def bash_command(
-    command: str, 
-    tool_call_id: Annotated[str, InjectedToolCallId],
-    workdir: str = WORKDIR
+    command: str,
+    runtime: ToolRuntime,
+    workdir: str = WORKDIR,
 ) -> Command:
-    # 🚨 Safeguard against secret exfiltration attempts
+    """Execute a bash command in the Rails container."""
+    tool_call_id = runtime.tool_call_id
+    # Safeguard against secret exfiltration attempts
     forbidden_patterns = [".env", "ENV["]
     for pattern in forbidden_patterns:
         if pattern.lower() in command.lower():
@@ -587,9 +585,9 @@ def bash_command(
                     ],
                 }
             )
-    
+
     result = rails_api_sh(command, workdir)
-    
+
     return Command(
         update={
             "messages": [
@@ -616,10 +614,10 @@ def internet_search(
 
 @tool(description=GIT_STATUS_DESCRIPTION)
 def git_status(
-    tool_call_id: Annotated[str, InjectedToolCallId],
+    runtime: ToolRuntime,
 ) -> Command:
-    
     """Get the status of the git repository."""
+    tool_call_id = runtime.tool_call_id
     def run_git(cmd: str) -> str:
         result = subprocess.run(
             ["/bin/sh", "-lc", f"git -C /app/app/rails {cmd}"],
@@ -854,34 +852,35 @@ def git_status(
 @tool(description=GIT_COMMIT_DESCRIPTION)
 def git_commit(
     message: str,
-    tool_call_id: Annotated[str, InjectedToolCallId],
+    runtime: ToolRuntime,
 ) -> Command:
     """Commit the changes to the git repository."""
+    tool_call_id = runtime.tool_call_id
     # First add all changes
     add_result = subprocess.run(["/bin/sh", "-lc", "git -C /app/app/rails add ."], capture_output=True, text=True, timeout=30)
-    
+
     # Then commit the changes - use subprocess list format to avoid shell escaping issues
     commit_result = subprocess.run(["git", "-C", "/app/app/rails", "commit", "-m", message], capture_output=True, text=True, timeout=30)
-    
+
     # Combine the output from both commands
     output = f"Git add:\n{add_result.stdout}"
     if add_result.stderr:
         output += f"\nGit add errors:\n{add_result.stderr}"
-    
+
     output += f"\n\nGit commit:\n{commit_result.stdout}"
     if commit_result.stderr:
         output += f"\nGit commit errors:\n{commit_result.stderr}"
-    
+
     # After committing, automatically run git status to show the current state
     try:
-        status_command = git_status(tool_call_id)
+        status_command = git_status(runtime)
         # Extract the git status message from the status command
         status_messages = status_command.update.get("messages", [])
         if status_messages:
             output += f"\n\n--- Post-commit Git Status ---\n{status_messages[0].content}"
     except Exception as e:
         output += f"\n\nError getting post-commit git status: {str(e)}"
-    
+
     return Command(
         update={
             "messages": [ToolMessage(output, tool_call_id=tool_call_id)],
@@ -891,9 +890,10 @@ def git_commit(
 @tool(description=GIT_COMMAND_DESCRIPTION)
 def git_command(
     command: str,
-    tool_call_id: Annotated[str, InjectedToolCallId],
+    runtime: ToolRuntime,
 ) -> Command:
-    """Configure the git repository."""
+    """Execute a git command in the Rails repository."""
+    tool_call_id = runtime.tool_call_id
     git_result = subprocess.run(["/bin/sh", "-lc", f"git -C /app/app/rails {command}"], capture_output=True, text=True, timeout=30)
 
     output = f"Git command:\n{command}\n\nGit result:\n{git_result.stdout}"
@@ -909,10 +909,10 @@ def git_command(
 @tool(description=GITHUB_CLI_DESCRIPTION)
 def github_cli_command(
     command: str,
-    tool_call_id: Annotated[str, InjectedToolCallId],
+    runtime: ToolRuntime,
 ) -> Command:
     """Use the github cli to do anything else related specifically to github."""
-
+    tool_call_id = runtime.tool_call_id
     github_result = subprocess.run(["/bin/sh", "-lc", f"gh {command}"], capture_output=True, text=True, timeout=30)
 
     output = f"Github result:\n{github_result.stdout}"
@@ -926,12 +926,13 @@ def github_cli_command(
     )
 
 @tool(description=VIEW_CURRENT_PAGE_HTML_DESCRIPTION)
-def view_page(state: Annotated[RailsAgentState, InjectedState], tool_call_id: Annotated[str, InjectedToolCallId]):
-    debug_info = state.get("debug_info")
+def view_page(runtime: ToolRuntime) -> Command:
+    """View the current page HTML that the user is looking at."""
+    debug_info = runtime.state.get("debug_info")
     return Command(
         update={
-            "messages": [ToolMessage(debug_info, tool_call_id=tool_call_id)],
-    }
+            "messages": [ToolMessage(debug_info, tool_call_id=runtime.tool_call_id)],
+        }
     )
 
 # ============================================================================
@@ -965,7 +966,7 @@ Usage:
 Returns the contents of /app/app/user_agents/{agent_name}/nodes.py with line numbers.""")
 def read_agent_file(
     agent_name: str,
-    state: Annotated[RailsAgentState, InjectedState],
+    runtime: ToolRuntime,
 ) -> str:
     """Read a custom agent's nodes.py file."""
     # Construct the full path
@@ -1009,10 +1010,10 @@ This tool will create the agent directory if it doesn't exist.""")
 def write_agent_file(
     agent_name: str,
     file_content: str,
-    state: Annotated[RailsAgentState, InjectedState],
-    tool_call_id: Annotated[str, InjectedToolCallId],
+    runtime: ToolRuntime,
 ) -> Command:
     """Create or overwrite a custom agent's nodes.py file."""
+    tool_call_id = runtime.tool_call_id
     # Construct the full path
     agent_dir = APP_DIR / "user_agents" / agent_name
     full_path = agent_dir / "nodes.py"
@@ -1088,11 +1089,11 @@ def edit_agent_file(
     agent_name: str,
     old_string: str,
     new_string: str,
-    state: Annotated[RailsAgentState, InjectedState],
-    tool_call_id: Annotated[str, InjectedToolCallId],
+    runtime: ToolRuntime,
     replace_all: bool = False,
 ) -> Command:
     """Edit a custom agent's nodes.py file by replacing text."""
+    tool_call_id = runtime.tool_call_id
     full_path = APP_DIR / "user_agents" / agent_name / "nodes.py"
 
     if not full_path.exists():
@@ -1222,7 +1223,7 @@ def edit_agent_file(
 Returns the contents of /app/app/langgraph.json which registers all agents (built-in and custom).
 This file maps agent names to their workflow build functions.""")
 def read_langgraph_json(
-    state: Annotated[RailsAgentState, InjectedState],
+    runtime: ToolRuntime,
 ) -> str:
     """Read the langgraph.json configuration file."""
     full_path = APP_DIR / "langgraph.json"
@@ -1245,10 +1246,10 @@ Example: To add a new agent, replace the graphs object with an updated version t
 def edit_langgraph_json(
     old_string: str,
     new_string: str,
-    state: Annotated[RailsAgentState, InjectedState],
-    tool_call_id: Annotated[str, InjectedToolCallId],
+    runtime: ToolRuntime,
 ) -> Command:
     """Edit the langgraph.json configuration file."""
+    tool_call_id = runtime.tool_call_id
     full_path = APP_DIR / "langgraph.json"
 
     if not full_path.exists():

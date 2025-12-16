@@ -54,24 +54,31 @@ class RequestHandler:
         
         async with lock:
             try:
-                app, state = self.get_langgraph_app_and_state(message)
+                app, state, agent_config = self.get_langgraph_app_and_state(message)
+
+                # Default limits (can be overridden per-agent in langgraph.json)
+                DEFAULT_RECURSION_LIMIT = 100
+                DEFAULT_MAX_MESSAGES = 30
+
+                # Get agent-specific limits or use defaults
+                recursion_limit = agent_config.get("recursion_limit", DEFAULT_RECURSION_LIMIT)
+                max_messages = agent_config.get("max_messages", DEFAULT_MAX_MESSAGES)
 
                 # Message history trimming to prevent unbounded memory growth
-                MAX_MESSAGES = 30  # Keep last 30 messages to prevent memory issues
-                if "messages" in state and len(state["messages"]) > MAX_MESSAGES:
+                if "messages" in state and len(state["messages"]) > max_messages:
                     # Preserve system messages + recent messages
                     system_msgs = [m for m in state["messages"] if hasattr(m, 'type') and m.type == "system"]
-                    recent_msgs = state["messages"][-MAX_MESSAGES:]
+                    recent_msgs = state["messages"][-max_messages:]
                     state["messages"] = system_msgs + recent_msgs
-                    logger.info(f"🔧 Trimmed message history from {len(state['messages'])} to {len(state['messages'])} messages (prevents memory growth)")
+                    logger.info(f"🔧 Trimmed message history to {len(state['messages'])} messages (max: {max_messages})")
 
                 config = {
                     "configurable": {
                         "thread_id": f"{message.get('thread_id')}",
                         "origin": message.get('origin', ''),
-                        "recursion_limit": 100
+                        "recursion_limit": recursion_limit
                     },
-                    "recursion_limit": 100
+                    "recursion_limit": recursion_limit
                 }
 
                 async for chunk in app.astream(state, config=config, stream_mode=["updates", "messages"], subgraphs=True):
@@ -203,7 +210,7 @@ class RequestHandler:
         # For chat history, we don't need a specific agent, just get any workflow to access the checkpointer
         # This is a bit of a hack - we should refactor this to not need the workflow for just getting history
         try:
-            app, _ = self.get_langgraph_app_and_state({"agent_name": "llamabot", "message": "", "api_token": "", "agent_prompt": ""})
+            app, _, _ = self.get_langgraph_app_and_state({"agent_name": "llamabot", "message": "", "api_token": "", "agent_prompt": ""})
             config = {"configurable": {"thread_id": thread_id}}
             state_history = await app.aget_state(config=config)
             return state_history[0] #gets the actual state.
@@ -241,11 +248,16 @@ class RequestHandler:
             del self.locks[ws_id]
 
 
-    def get_workflow_from_langgraph_json(self, message: dict) -> str | None:
+    def get_workflow_from_langgraph_json(self, message: dict) -> tuple[str, dict]:
         """
-        Return the workflow path (e.g. "./agents/llamapress/nodes.py:build_workflow")
-        for `message["agent_name"]`.  Raises FileNotFoundError if the JSON itself
-        can’t be located; raises KeyError if the agent isn’t present in the JSON.
+        Return (workflow_path, agent_config) for `message["agent_name"]`.
+
+        workflow_path: e.g. "./agents/llamapress/nodes.py:build_workflow"
+        agent_config: dict with optional keys like 'recursion_limit', 'max_messages'
+                      Empty dict if no custom config specified.
+
+        Raises FileNotFoundError if the JSON itself can't be located.
+        Raises KeyError if the agent isn't present in the JSON.
         """
 
         agent_name = message.get("agent_name")
@@ -277,51 +289,97 @@ class RequestHandler:
         raise FileNotFoundError("langgraph.json not found in any expected location")
 
 
-    def _load_workflow(self, cfg_path: Path, agent_name: str) -> str:
-        """Load JSON at cfg_path and return the graph definition for agent_name."""
+    def _load_workflow(self, cfg_path: Path, agent_name: str) -> tuple[str, dict]:
+        """
+        Load JSON at cfg_path and return (workflow_path, agent_config) for agent_name.
+
+        Supports two formats in langgraph.json:
+        1. Simple string (backwards compatible):
+           "llamabot": "./agents/llamabot/nodes.py:build_workflow"
+
+        2. Object with config (new format):
+           "leo": {
+               "workflow": "./user_agents/leo/nodes.py:build_workflow",
+               "recursion_limit": 200,
+               "max_messages": 50
+           }
+
+        Returns:
+            tuple: (workflow_path, agent_config) where agent_config contains any
+                   custom settings like recursion_limit, max_messages, etc.
+                   If using simple string format, agent_config will be empty dict.
+        """
         with cfg_path.open("r") as f:
             data = json.load(f)
 
         graphs = data.get("graphs", {})
         if agent_name not in graphs:
             raise KeyError(f"Agent '{agent_name}' not found in {cfg_path}")
-        return graphs[agent_name]
+
+        graph_entry = graphs[agent_name]
+
+        # Handle both formats: simple string or object with config
+        if isinstance(graph_entry, str):
+            # Simple string format (backwards compatible)
+            return graph_entry, {}
+        elif isinstance(graph_entry, dict):
+            # Object format with config
+            workflow_path = graph_entry.get("workflow")
+            if not workflow_path:
+                raise KeyError(f"Agent '{agent_name}' config missing 'workflow' key in {cfg_path}")
+
+            # Extract config (everything except 'workflow')
+            agent_config = {k: v for k, v in graph_entry.items() if k != "workflow"}
+            return workflow_path, agent_config
+        else:
+            raise ValueError(f"Invalid format for agent '{agent_name}' in {cfg_path}. Expected string or object.")
     
     def get_langgraph_app_and_state(self, message: dict):
+        """
+        Returns (app, state, agent_config) tuple.
+
+        agent_config contains optional per-agent settings like:
+        - recursion_limit: max graph execution cycles (default: 100)
+        - max_messages: message history limit (default: 30)
+        """
         app = None
         state = message
+        agent_config = {}  # Default empty config
+
         if message.get("agent_name") is not None:
-            langgraph_workflow = self.get_workflow_from_langgraph_json(message)
+            langgraph_workflow, agent_config = self.get_workflow_from_langgraph_json(message)
             if langgraph_workflow is not None:
                 app = self.get_app_from_workflow_string(langgraph_workflow)
-                
+
                 # Create messages from the message content
 
                 # We removed this timestamp because we don't want to mess with prompt caching. If this date is different every time, it could cause a cache miss for the LLM provider.
-                # messages = [HumanMessage(content=message.get("message"), response_metadata={'created_at': datetime.now()})] 
+                # messages = [HumanMessage(content=message.get("message"), response_metadata={'created_at': datetime.now()})]
                 messages = [HumanMessage(content=message.get("message"))]
-                
+
                 # Start with the transformed messages field
                 state = {"messages": messages}
-                
+
                 # Pass through ALL fields except the ones used for system routingError processing request: cannot access local variable 'state' where it is not associated with a value
                 system_routing_fields = {
                     "message",      # We transformed this into messages
                     "agent_name",   # Used for workflow routing only
                     "thread_id"     # Used for LangGraph config only
                 }
-                
+
                 # Pass everything else through naturally
                 for key, value in message.items():
                     if key not in system_routing_fields:
                         state[key] = value
 
                 logger.info(f"Created state with keys: {list(state.keys())}")
-                
+                if agent_config:
+                    logger.info(f"Agent config: {agent_config}")
+
             else:
                 raise ValueError(f"Unknown workflow: {message.get('agent_name')}")
-        
-        return app, state
+
+        return app, state, agent_config
     
     # This method resolves an agent name to a workflow with the checkpointer.
     # Super important for routing to the right agent workflow for websockets requests.

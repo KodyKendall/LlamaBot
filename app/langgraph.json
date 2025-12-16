@@ -7,6 +7,7 @@
       "rails_frontend_starter_agent": "./agents/leonardo/rails_frontend_starter_agent/nodes.py:build_workflow",
       "rails_ai_builder_agent": "./agents/leonardo/rails_ai_builder_agent/nodes.py:build_workflow",
       "rails_testing_agent": "./agents/leonardo/rails_testing_agent/nodes.py:build_workflow",
-      "rails_user_feedback_agent": "./agents/leonardo/rails_user_feedback_agent/nodes.py:build_workflow"
+      "rails_user_feedback_agent": "./agents/leonardo/rails_user_feedback_agent/nodes.py:build_workflow",
+      "rails_ticket_mode_agent": "./agents/leonardo/rails_ticket_mode_agent/nodes.py:build_workflow"
     }
   }

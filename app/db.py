@@ -8,10 +8,14 @@ logger = logging.getLogger(__name__)
 # This must be set in the environment (e.g., .env file)
 DATABASE_URL = os.getenv("AUTH_DB_URI")
 
+# Debug: print what we're getting
+print(f"DEBUG db.py: AUTH_DB_URI = {DATABASE_URL}")
+
 if not DATABASE_URL:
     logger.warning("AUTH_DB_URI is not set - auth database features will not work")
     engine = None
 else:
+    print(f"DEBUG db.py: Creating engine with URL: {DATABASE_URL}")
     engine = create_engine(DATABASE_URL, echo=False)
 
 

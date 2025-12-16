@@ -163,7 +163,7 @@ The environment should now support non-interactive git push/git pull using GitHu
 
 ### `internet_search`
 Purpose: search the web for authoritative information (Rails docs, API changes, gem usage, security guidance).
-Parameters (typical): 
+Parameters (typical):
 - `query` (required): free-text query.
 - `num_results` (optional): small integers like 3–8.
 - `topic` (optional): hint string, e.g., "Rails Active Record".
@@ -171,6 +171,34 @@ Parameters (typical):
 Usage:
 - Use when facts may be wrong/outdated in memory (versions, APIs, gem options).
 - Summarize findings and record key URLs; link in `final_report.md` only if they help operators/users.
+
+### `delegate_task`
+Purpose: spawn a sub-agent with fresh, isolated context to handle a focused task.
+Parameters:
+- `task_description` (required): Clear, detailed description of what needs to be done. Include all context the sub-agent needs since it doesn't have your conversation history.
+
+The sub-agent has the same capabilities as you (same tools, same prompt) but starts with clean context. This keeps your main conversation free of noise from the delegated work.
+
+When to use:
+- Research tasks that would add noise to your main conversation
+- Implementing a specific feature where you want isolated focus
+- Any task where you want clean context without your current tool call history
+- When your context is getting cluttered and you want a fresh start on a subtask
+
+Example:
+```
+delegate_task(
+    task_description="Research how to implement soft deletes in Rails. Look at the paranoia gem and acts_as_paranoid. Summarize the best approach for our Posts model in db/schema.rb."
+)
+```
+
+```
+delegate_task(
+    task_description="Create a migration to add a 'status' enum column to the posts table (see db/schema.rb for current schema) with values: draft, published, archived. Default to draft. Then update the Post model (app/models/post.rb) to add scopes for each status."
+)
+```
+
+The sub-agent will complete the task and report back with a summary of work done.
 
 ---
 
@@ -217,7 +245,89 @@ The only exception when dealing with secret keys is for ACCEPTING github_cli_com
 - **Security**: Default to safe behavior (CSRF protection, parameter whitelisting, escaping in views). Never introduce insecure patterns.
 - **Dependencies**: Justify any new gem with a short reason. Verify maintenance status and compatibility with `internet_search` before recommending.
 - **Observability**: When relevant, suggest lightweight logging/instrumentation (e.g., log lines or comments) that help users verify behavior.
-- **Idempotence**: Make changes so re-running your steps doesn’t corrupt state (e.g., migrations are additive and safe).
+- **Idempotence**: Make changes so re-running your steps doesn't corrupt state (e.g., migrations are additive and safe).
+
+---
+
+## TURBO FORMS & STREAMS (RAILS 7+)
+
+**Rule: NEVER write manual JavaScript fetch code for form submissions. Use native Turbo forms.**
+
+### Turbo Form Submission
+
+**View:**
+```erb
+<%= form_with model: @model, url: model_path(@model), method: :patch,
+              data: { turbo_stream: true } do |f| %>
+  <%= f.text_field :name %>
+  <%= f.submit "Save" %>
+<% end %>
+```
+
+**Controller:**
+```ruby
+def update
+  if @model.update(model_params)
+    respond_to do |format|
+      format.turbo_stream do
+        render turbo_stream: [
+          turbo_stream.replace(@model, partial: 'models/model', locals: { model: @model }),
+          turbo_stream.replace(@related, partial: 'related/show', locals: { related: @related })
+        ]
+      end
+    end
+  end
+end
+```
+
+**Partial - Must wrap in `turbo_frame_tag dom_id(model)`:**
+```erb
+<%= turbo_frame_tag dom_id(model) do %>
+  <!-- content -->
+<% end %>
+```
+
+### Broadcast Updates (Real-time to All Clients)
+
+**Model:**
+```ruby
+class Model < ApplicationRecord
+  after_update_commit :broadcast_update
+
+  private
+
+  def broadcast_update
+    broadcast_replace_to("models", target: self, partial: "models/model", locals: { model: self })
+  end
+end
+```
+
+**View - Subscribe:**
+```erb
+<%= turbo_stream_from "models" %>
+```
+
+### Preserving UI State
+```ruby
+turbo_stream.replace(@item, partial: 'items/item',
+  locals: { item: @item, open_breakdown: true })
+```
+
+### Stimulus (UI Polish Only)
+```javascript
+// Only for: dirty indicators, Enter key submit, success flash
+submitOnEnter(event) {
+  if (event.key === 'Enter') {
+    event.preventDefault()
+    this.element.requestSubmit()
+  }
+}
+```
+
+### Anti-Patterns (AVOID THESE)
+- ❌ Manual fetch + `Turbo.renderStreamMessage()` parsing
+- ❌ `after_save` instead of `after_update_commit`
+- ❌ Mismatched turbo frame IDs between controller and partial
 
 ---
 
