@@ -1,5 +1,5 @@
 12/12/2025:
     0.2.22:
         - [x] Refactor main.py into smaller modules for better maintainability 
-        - [?] Add config options for LangGraph.json files to increase recursion limit.
-        - [ ] Add new agent mode - Ticket Creation Mode for Leonardo
+        - [x] Add config options for LangGraph.json files to increase recursion limit.
+        - [x] Add new agent mode - Ticket Creation Mode for Leonardo
