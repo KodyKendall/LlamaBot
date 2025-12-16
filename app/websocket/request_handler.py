@@ -57,20 +57,14 @@ class RequestHandler:
                 app, state, agent_config = self.get_langgraph_app_and_state(message)
 
                 # Default limits (can be overridden per-agent in langgraph.json)
-                DEFAULT_RECURSION_LIMIT = 100
-                DEFAULT_MAX_MESSAGES = 30
+                DEFAULT_RECURSION_LIMIT = 200
 
                 # Get agent-specific limits or use defaults
                 recursion_limit = agent_config.get("recursion_limit", DEFAULT_RECURSION_LIMIT)
-                max_messages = agent_config.get("max_messages", DEFAULT_MAX_MESSAGES)
 
-                # Message history trimming to prevent unbounded memory growth
-                if "messages" in state and len(state["messages"]) > max_messages:
-                    # Preserve system messages + recent messages
-                    system_msgs = [m for m in state["messages"] if hasattr(m, 'type') and m.type == "system"]
-                    recent_msgs = state["messages"][-max_messages:]
-                    state["messages"] = system_msgs + recent_msgs
-                    logger.info(f"🔧 Trimmed message history to {len(state['messages'])} messages (max: {max_messages})")
+                # Note: Message history management is now handled by SummarizationMiddleware
+                # in each agent's middleware stack, which provides intelligent summarization
+                # instead of naive message trimming.
 
                 config = {
                     "configurable": {

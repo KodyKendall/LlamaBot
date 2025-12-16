@@ -112,8 +112,11 @@
                 
                 if (response.ok) {
                     messageDiv.className = 'message success';
-                    messageDiv.textContent = result.message;
+                    messageDiv.textContent = result.message + ' Redirecting...';
                     document.getElementById('registerForm').reset();
+                    setTimeout(() => {
+                        window.location.href = '/';
+                    }, 1500);
                 } else if (response.status === 409) {
                     messageDiv.className = 'message error';
                     messageDiv.textContent = 'Username already exists. Please choose a different username.';
