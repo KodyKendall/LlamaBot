@@ -1,0 +1,157 @@
+<h1>🦙 LlamaBot v0.2.22 - Middleware Architecture & Ticket Mode</h1>
+
+<p><strong>Release Date:</strong> December 16, 2025</p>
+
+<hr>
+
+<h2>🚀 What's New</h2>
+
+<h3>🏗️ Modern Middleware Architecture</h3>
+<p>Complete refactoring of the Rails Agent to use LangChain 1.1+ middleware pattern for better maintainability and extensibility.</p>
+<ul>
+  <li><strong>ViewPathContextMiddleware</strong> - Automatically injects current page context into agent conversations</li>
+  <li><strong>FailureCircuitBreakerMiddleware</strong> - Prevents infinite loops by stopping after 3 failed tool calls</li>
+  <li><strong>DynamicModelMiddleware</strong> - Runtime LLM model selection (Claude Haiku, Sonnet, GPT-5 Codex)</li>
+  <li><strong>SummarizationMiddleware</strong> - Auto-summarizes long conversations to prevent token limit issues</li>
+  <li>Uses LangChain's <code>create_agent</code> factory with <code>ToolRuntime</code> pattern</li>
+  <li>Cleaner separation of concerns - middleware handles cross-cutting features</li>
+</ul>
+
+<h3>🎫 Ticket Mode - Non-Technical User Workflow ⭐</h3>
+<p>New specialized agent mode that helps non-technical users convert observations into implementation-ready engineering tickets.</p>
+<ul>
+  <li><strong>3-Stage Workflow:</strong>
+    <ol>
+      <li><strong>Story Collection</strong> - Guides users through structured observation template</li>
+      <li><strong>Technical Research</strong> - Agent explores codebase and documents findings</li>
+      <li><strong>Ticket Creation</strong> - Produces formatted engineering ticket with implementation guidance</li>
+    </ol>
+  </li>
+  <li>Auto-detects current page URL from browser context</li>
+  <li>Smart template auto-fill - agent infers acceptance criteria from user descriptions</li>
+  <li>Read-only codebase research (no code changes in this mode)</li>
+  <li>Generates <code>TECHNICAL_RESEARCH.md</code> files with schema, models, controllers, views analysis</li>
+  <li>Creates dated, categorized tickets: <code>YYYY-MM-DD_TYPE_description.md</code></li>
+  <li>Bridges communication gap between domain experts and engineers</li>
+</ul>
+
+<h3>🤖 Sub-Agent Task Delegation</h3>
+<p>Main agent can now spawn isolated sub-agents for focused work without polluting the main conversation.</p>
+<ul>
+  <li>New <code>delegate_task</code> tool spawns fresh agent instance with clean context</li>
+  <li>Sub-agents have same capabilities but isolated conversation history</li>
+  <li>Perfect for research tasks, focused implementations, or context cleanup</li>
+  <li>Prevents context clutter in long-running conversations</li>
+</ul>
+
+<h3>⚙️ Enhanced Agent Configuration</h3>
+<p>More flexible agent configuration via <code>langgraph.json</code> with per-agent settings.</p>
+<ul>
+  <li>Configurable recursion limits per agent</li>
+  <li>Per-agent message history limits</li>
+  <li>Supports both simple string format (backwards compatible) and object format with config</li>
+</ul>
+
+<h3>🔧 Infrastructure Improvements</h3>
+<ul>
+  <li><strong>Modular FastAPI Routes</strong> - Refactored <code>main.py</code> into separate routers (UI, API, WebSocket)</li>
+  <li><strong>Shared Dependencies</strong> - Cleaner dependency injection with <code>app/dependencies.py</code></li>
+  <li><strong>Database Connection Resilience</strong> - Retry logic for Alembic migrations on startup</li>
+  <li><strong>Username Sanitization</strong> - Strips whitespace from usernames during creation/login</li>
+  <li>Console utilities for admin tasks (<code>reset_password</code>, <code>fix_username</code>)</li>
+  <li>Upgraded to LangChain 1.1.3+ and LangGraph 1.0.2+</li>
+</ul>
+
+<h3>📚 Documentation Additions</h3>
+<ul>
+  <li><strong>Rails Turbo Forms & Streams</strong> - Comprehensive guide added to prompts</li>
+  <li><strong>Error Handling Flow</strong> - Complete documentation for AI Builder Agent error handling</li>
+  <li>Research memo on InjectedState compatibility with LangChain 1.0</li>
+</ul>
+
+<hr>
+
+<h2>🔄 Migration Notes</h2>
+
+<p><strong>For Developers:</strong></p>
+<ul>
+  <li>Rails Agent now uses <code>ToolRuntime</code> instead of <code>InjectedState</code> for tool state access</li>
+  <li>Tools updated: <code>state: Annotated[RailsAgentState, InjectedState]</code> → <code>runtime: ToolRuntime</code></li>
+  <li>Access state via <code>runtime.state</code>, tool_call_id via <code>runtime.tool_call_id</code></li>
+  <li>Agent now built with <code>create_agent()</code> factory instead of manual <code>StateGraph</code></li>
+</ul>
+
+<p><strong>New Configuration Format Example:</strong></p>
+<pre><code>{
+  "graphs": {
+    "my_agent": {
+      "workflow": "./agents/my_agent/nodes.py:build_workflow",
+      "recursion_limit": 200,
+      "max_messages": 50
+    }
+  }
+}</code></pre>
+
+<hr>
+
+<h2>🐛 Bug Fixes</h2>
+<ul>
+  <li>Fixed username whitespace issues causing authentication failures</li>
+  <li>Improved database connection error handling during initialization</li>
+  <li>Fixed tool call slippage with new ToolRuntime pattern</li>
+  <li>Better error messages for failed database migrations</li>
+</ul>
+
+<hr>
+
+<h2>📋 Previous Releases</h2>
+
+<details>
+<summary><strong>v0.2.21</strong> - Multi-User & Admin System</summary>
+<ul>
+  <li>Multi-user management with PostgreSQL authentication</li>
+  <li>Admin permissions and role-based access control</li>
+  <li>ActiveRecord-like console utilities</li>
+  <li>User registration and session management</li>
+</ul>
+</details>
+
+<details>
+<summary><strong>v0.2.20</strong> - User Feedback Agent</summary>
+<ul>
+  <li>New user feedback agent mode for end-users to plan future development</li>
+  <li>Improved feedback agent prompt for better scope and sprint planning</li>
+  <li>Enables direct user input into product roadmap</li>
+</ul>
+</details>
+
+<details>
+<summary><strong>v0.2.19</strong> - AI Builder & Testing Mode ⭐</summary>
+<ul>
+  <li><strong>AI Builder Mode</strong> - Leonardo helps build user-facing agents within Rails apps</li>
+  <li><strong>QA Test Builder Mode</strong> - Automated test generation with RSpec & Vite-JS</li>
+  <li>New <code>user_agents</code> folder for custom agent definitions</li>
+  <li>Prompt caching for all agents (significant cost reduction)</li>
+  <li>Capybara/Cuprite browser tool for JavaScript debugging</li>
+  <li>VSCode iframe improvements with clipboard support</li>
+</ul>
+</details>
+
+<details>
+<summary><strong>v0.2.18</strong> - UI/UX Overhaul ⭐</summary>
+<ul>
+  <li>Massive UI/UX overhaul for messages and iframe</li>
+  <li>Refactored chat.html into modular JavaScript packages</li>
+  <li>Support for any LLM model - Claude, Gemini, GPT Codex, GPT series</li>
+  <li>New task/planning component for clearer agent status</li>
+  <li>Auto-refreshing iframe shows changes in real-time</li>
+</ul>
+</details>
+
+<hr>
+
+<p>🦙 <strong>LlamaBot</strong> - AI Coding Agent Framework</p>
+<p>
+  <a href="https://github.com/KodyKendall/LlamaBot">GitHub</a> ·
+  <a href="https://discord.gg/7DapkvmWKZ">Discord</a>
+</p>
