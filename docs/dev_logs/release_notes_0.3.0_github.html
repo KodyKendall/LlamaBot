@@ -1,0 +1,188 @@
+<h1>🦙 LlamaBot v0.3.0 - Ticket Mode 2.0 & Enhanced Builder Pattern</h1>
+
+<p><strong>Release Date:</strong> December 16, 2025</p>
+
+<hr>
+
+<h2>🚀 What's New</h2>
+
+<h3>🎫 Ticket Mode 2.0 - Streamlined Workflow ⭐</h3>
+<p>Complete redesign of Ticket Mode with a simplified, single-conversation workflow powered by sub-agent delegation.</p>
+<ul>
+  <li><strong>Two-Task Workflow:</strong>
+    <ol>
+      <li><strong>Story Collection + Delegated Research</strong> - Gather user observation, then spawn a sub-agent for technical research</li>
+      <li><strong>Ticket Creation</strong> - Create implementation-ready ticket using sub-agent findings in the same conversation</li>
+    </ol>
+  </li>
+  <li>No more "start a new conversation" - everything happens in one thread</li>
+  <li><strong>Mandatory Acceptance Criteria</strong> - Agent now enforces at least 3 testable acceptance criteria before research begins</li>
+  <li><strong>Context-Aware Research</strong> - Sub-agent references existing requirements in <code>rails/requirements/</code> for consistency</li>
+  <li>Enhanced research focus on Builder pattern detection and anti-pattern identification</li>
+  <li>Improved URL context injection - now shows both browser path and Rails file path</li>
+</ul>
+
+<h3>🏗️ Builder Pattern Documentation</h3>
+<p>Comprehensive documentation of our preferred UI architecture pattern for complex, SPA-like interfaces.</p>
+<ul>
+  <li><strong>Single Resource Partial Pattern</strong> - One partial per model handles all CRUD operations</li>
+  <li><strong>Turbo Frame Inside Partial</strong> - Self-contained partials with embedded turbo frames (not wrapped by parent)</li>
+  <li><strong>Builder Page Aggregation</strong> - Parent pages aggregate child partials for multi-entity editing</li>
+  <li><strong>Server-Side Calculations</strong> - Active Record callbacks + broadcasts (no JavaScript calculations)</li>
+  <li><strong>UI State Preservation</strong> - Guide for preserving accordion/tab state during turbo stream updates</li>
+  <li>Anti-pattern detection guide for common Turbo Frame mistakes</li>
+</ul>
+
+<h3>🪲 Debugging Workflow Enhancements</h3>
+<p>New debugging conventions and user guidance for troubleshooting complex issues.</p>
+<ul>
+  <li><strong>🪲 Emoji Convention</strong> - All debug logs prefixed with 🪲 for easy identification and cleanup</li>
+  <li><strong>Rails Logs Guide</strong> - Step-by-step instructions for viewing real-time Rails logs via <code>./bin/rails_logs</code></li>
+  <li><strong>JavaScript Console Guide</strong> - Instructions for browser developer console debugging</li>
+  <li>Encourages users to copy/paste logs into chat for AI analysis</li>
+  <li>Reminder system for cleaning up debug statements before commits</li>
+</ul>
+
+<h3>🛡️ Enhanced Git Error Handling</h3>
+<p>Robust error handling for Git operations prevents agent crashes during status checks.</p>
+<ul>
+  <li><code>git_status</code> tool now handles timeouts and errors gracefully</li>
+  <li>Returns error tuples instead of raising exceptions</li>
+  <li>Non-fatal errors (like log failures) no longer block workflow</li>
+  <li>Improved diff handling for staged, unstaged, and commit changes</li>
+  <li>Better error messages for debugging Git issues</li>
+</ul>
+
+<h3>🤖 Ticket Mode Middleware Stack</h3>
+<p>Ticket Mode agent now uses dedicated middleware for mode-specific behavior.</p>
+<ul>
+  <li><strong>TicketModeContextMiddleware</strong> - Injects ticket mode restrictions reminder</li>
+  <li>Reuses proven middleware from Rails Agent (view context, circuit breaker, dynamic model)</li>
+  <li>Modular middleware architecture in <code>app/agents/leonardo/rails_ticket_mode_agent/middleware.py</code></li>
+  <li>Consistent behavior across all agent modes</li>
+</ul>
+
+<h3>🎯 Sub-Agent Delegation Improvements</h3>
+<p>Enhanced <code>delegate_task</code> tool with clearer usage guidelines and examples.</p>
+<ul>
+  <li>Detailed pre-delegation checklist (URL, story, behaviors, acceptance criteria)</li>
+  <li>Structured task description format for consistency</li>
+  <li>Research mission template for technical investigations</li>
+  <li>Sub-agents return findings directly to parent agent (no manual copy/paste needed)</li>
+</ul>
+
+<hr>
+
+<h2>📚 Documentation Improvements</h2>
+
+<h3>Rails UI Architecture Guide</h3>
+<ul>
+  <li><strong>Partial + Turbo Frame Pattern</strong> - Comprehensive guide to our atomic partial architecture</li>
+  <li><strong>Builder Page Pattern</strong> - How to create SPA-like experiences with server rendering</li>
+  <li><strong>Calculations Pattern</strong> - Active Record callbacks + broadcasts (NOT JavaScript)</li>
+  <li><strong>UI State Preservation</strong> - Passing <code>open_breakdown</code>, <code>editing</code>, <code>active_tab</code> flags</li>
+  <li>Examples with <code>Tender</code>, <code>BOQ</code>, <code>LineItem</code> relationships</li>
+  <li>Anti-patterns list with explanations</li>
+</ul>
+
+<h3>Ticket Mode Workflow</h3>
+<ul>
+  <li>Simplified from 3-stage to 2-task workflow documentation</li>
+  <li>Clear delegation instructions with code examples</li>
+  <li>Research output format with anti-pattern section</li>
+  <li>Context reference guidelines for existing requirements</li>
+</ul>
+
+<hr>
+
+<h2>🔄 Migration Notes</h2>
+
+<p><strong>For Users:</strong></p>
+<ul>
+  <li><strong>Ticket Mode workflow changed</strong> - No longer need to start new conversations between research and ticket creation</li>
+  <li><strong>Acceptance criteria now mandatory</strong> - Agent will prompt for at least 3 criteria before proceeding</li>
+  <li>Debug logs now use 🪲 emoji - search for this when cleaning up temporary debugging code</li>
+</ul>
+
+<p><strong>For Developers:</strong></p>
+<ul>
+  <li>Ticket Mode agent now uses <code>create_agent</code> factory (same as Rails Agent)</li>
+  <li>Ticket Mode has dedicated middleware module at <code>app/agents/leonardo/rails_ticket_mode_agent/middleware.py</code></li>
+  <li><code>git_status</code> tool signature changed: returns <code>(output, error)</code> tuple instead of raising exceptions</li>
+  <li>View context now includes both <code>request_path</code> (browser) and <code>view_path</code> (Rails file)</li>
+</ul>
+
+<hr>
+
+<h2>🐛 Bug Fixes</h2>
+<ul>
+  <li>Fixed <code>git_status</code> tool crashes on timeout or missing commits</li>
+  <li>Fixed diff retrieval for renamed files in Git</li>
+  <li>Improved error handling for staged vs unstaged diffs</li>
+  <li>Fixed sub-agent context initialization in Ticket Mode</li>
+  <li>Better handling of missing log data in Git status output</li>
+</ul>
+
+<hr>
+
+<h2>📋 Previous Releases</h2>
+
+<details>
+<summary><strong>v0.2.22</strong> - Middleware Architecture & Ticket Mode</summary>
+<ul>
+  <li>Modern middleware architecture with LangChain 1.1+</li>
+  <li>Initial Ticket Mode with 3-stage workflow</li>
+  <li>Sub-agent task delegation</li>
+  <li>Enhanced agent configuration via langgraph.json</li>
+  <li>Modular FastAPI routes</li>
+</ul>
+</details>
+
+<details>
+<summary><strong>v0.2.21</strong> - Multi-User & Admin System</summary>
+<ul>
+  <li>Multi-user management with PostgreSQL authentication</li>
+  <li>Admin permissions and role-based access control</li>
+  <li>ActiveRecord-like console utilities</li>
+  <li>User registration and session management</li>
+</ul>
+</details>
+
+<details>
+<summary><strong>v0.2.20</strong> - User Feedback Agent</summary>
+<ul>
+  <li>New user feedback agent mode for end-users to plan future development</li>
+  <li>Improved feedback agent prompt for better scope and sprint planning</li>
+  <li>Enables direct user input into product roadmap</li>
+</ul>
+</details>
+
+<details>
+<summary><strong>v0.2.19</strong> - AI Builder & Testing Mode ⭐</summary>
+<ul>
+  <li><strong>AI Builder Mode</strong> - Leonardo helps build user-facing agents within Rails apps</li>
+  <li><strong>QA Test Builder Mode</strong> - Automated test generation with RSpec & Vite-JS</li>
+  <li>New <code>user_agents</code> folder for custom agent definitions</li>
+  <li>Prompt caching for all agents (significant cost reduction)</li>
+  <li>Capybara/Cuprite browser tool for JavaScript debugging</li>
+</ul>
+</details>
+
+<details>
+<summary><strong>v0.2.18</strong> - UI/UX Overhaul ⭐</summary>
+<ul>
+  <li>Massive UI/UX overhaul for messages and iframe</li>
+  <li>Refactored chat.html into modular JavaScript packages</li>
+  <li>Support for any LLM model - Claude, Gemini, GPT Codex, GPT series</li>
+  <li>New task/planning component for clearer agent status</li>
+  <li>Auto-refreshing iframe shows changes in real-time</li>
+</ul>
+</details>
+
+<hr>
+
+<p>🦙 <strong>LlamaBot</strong> - AI Coding Agent Framework</p>
+<p>
+  <a href="https://github.com/KodyKendall/LlamaBot">GitHub</a> ·
+  <a href="https://discord.gg/7DapkvmWKZ">Discord</a>
+</p>
