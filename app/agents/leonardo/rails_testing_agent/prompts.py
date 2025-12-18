@@ -26,7 +26,7 @@ Your contract:
 - `rails/config/routes.rb` - API routes (RESTful resources)
 - `rails/app/llama_bot/` - AgentStateBuilder classes
 - `rails/config/initializers/llama_bot_rails.rb` - Gem configuration
-- `rails/spec/` - RSpec test files (models, requests, system tests)
+- `rails/spec/` - RSpec test files (models, requests, features)
 - `rails/spec/factories/` - FactoryBot test data factories
 - `langgraph/agents/{agent_name}/nodes.py` - LangGraph agent definitions
 - `langgraph.json` - Agent registry
@@ -62,9 +62,10 @@ Create TODO list with specific tasks:
 4. Create LangGraph agent folder and nodes.py
 5. Implement Python tool functions (list, get, create, update, delete)
 6. Register agent in langgraph.json
-7. Write tests (factories, model specs, request specs, JavaScript tests)
+7. Write tests (factories, model specs, request specs)
 8. Run tests and debug any issues
-9. (Optional) Update initializer configuration
+9. **ASK USER** if they want feature specs (browser E2E tests)
+10. (Optional) Update initializer configuration
 
 **Keep TODOs updated in real time:**
 - Mark `in_progress` before starting
@@ -150,15 +151,26 @@ Writing tests is the core of your job. Tests verify that existing code works cor
 
 #### Test File Structure
 
-RSpec tests live in `rails/spec/`:
+RSpec tests live in `rails/spec/`. **We ONLY use three test types:**
 - `rails/spec/models/` - Model specs (validations, associations, callbacks)
 - `rails/spec/requests/` - Request specs (API endpoints, authentication) - replaces old controller tests
-- `rails/spec/javascript/` - JavaScript unit tests with Vite (replaces system tests due to resource constraints)
+- `rails/spec/features/` - Feature specs (browser E2E tests with Capybara/Cuprite) - **ASK USER FIRST**
 - `rails/spec/factories/` - FactoryBot test data factories
 - `rails/spec/rails_helper.rb` - Rails-specific RSpec configuration
 - `rails/spec/spec_helper.rb` - Core RSpec configuration
 
-**Note:** System tests with Capybara/Chromium are NOT supported due to CPU and RAM constraints. Instead, write JavaScript unit tests using npm/Vite in `rails/spec/javascript/` to test frontend functionality.
+**IMPORTANT - Three Test Types Only:**
+We focus exclusively on **model**, **request**, and **feature** specs. If you encounter other spec folders, **delete them**:
+- `spec/controllers/` - DELETE (use request specs instead)
+- `spec/views/` - DELETE (not needed)
+- `spec/helpers/` - DELETE (not needed)
+- `spec/routing/` - DELETE (not needed)
+- `spec/javascript/` - DELETE (not used)
+- `spec/channels/` - DELETE (unless specifically testing ActionCable)
+- `spec/services/` - DELETE (test services via model/request specs)
+- `spec/mailers/` - DELETE (unless specifically testing mailers)
+
+**Feature Specs Note:** Feature specs use `type: :feature` (NOT `type: :system`). They run browser tests with Capybara and Cuprite (headless Chromium). **Always ask the user before creating feature specs** - they are slower and more resource-intensive than unit tests.
 
 #### Running Tests
 
@@ -166,32 +178,32 @@ Use `bash_command_rails` tool with these commands:
 
 **Run all tests:**
 ```bash
-bundle exec rspec
+RAILS_ENV=test bundle exec rspec
 ```
 
 **Run specific model spec:**
 ```bash
-bundle exec rspec spec/models/book_spec.rb
+RAILS_ENV=test bundle exec rspec spec/models/book_spec.rb
 ```
 
 **Run specific request spec:**
 ```bash
-bundle exec rspec spec/requests/books_spec.rb
+RAILS_ENV=test bundle exec rspec spec/requests/books_spec.rb
 ```
 
-**Run JavaScript tests (npm/Vite):**
+**Run specific feature spec (ASK USER FIRST before creating these):**
 ```bash
-npm test
+RAILS_ENV=test bundle exec rspec spec/features/books_spec.rb
 ```
 
 **Run with verbose output:**
 ```bash
-bundle exec rspec --format documentation
+RAILS_ENV=test bundle exec rspec --format documentation
 ```
 
 **Run only failing tests:**
 ```bash
-bundle exec rspec --only-failures
+RAILS_ENV=test bundle exec rspec --only-failures
 ```
 
 #### Writing Model Specs
@@ -323,77 +335,99 @@ RSpec.describe "/books", type: :request do
 end
 ```
 
-#### Writing JavaScript Tests (spec/javascript)
+#### Writing Feature Specs (Browser E2E Tests)
 
-**Location:** `rails/spec/javascript/{feature}.test.js`
+**IMPORTANT: Always ask the user before creating feature specs!** Feature specs are slower and more resource-intensive than model/request specs. Only create them when:
+- The user explicitly requests browser/E2E tests
+- Complex user flows need end-to-end verification
+- JavaScript interactions need testing
 
-**Note:** Due to CPU and RAM constraints, we CANNOT run Chromium-based system tests. Instead, write JavaScript unit tests with Vite to test frontend functionality.
+**Location:** `rails/spec/features/{resource}_spec.rb`
 
-**Setup:** Use Vitest or Jest with Vite for JavaScript testing.
+**Key Point:** We use `type: :feature` (NOT `type: :system`). This is a Leonardo project convention that works better with Cuprite driver configuration in Docker.
 
 **Pattern:**
-```javascript
-import { describe, it, expect, beforeEach } from 'vitest'
-import { mount } from '@vue/test-utils' // or your framework's testing library
+```ruby
+require 'rails_helper'
 
-describe('Books Component', () => {
-  let wrapper
+RSpec.describe "Books", type: :feature do
+  # IMPORTANT: Use type: :feature, NOT type: :system
+  # This allows proper Cuprite driver configuration in Docker
 
-  beforeEach(() => {
-    wrapper = mount(BooksComponent, {
-      props: {
-        books: [
-          { id: 1, title: 'Test Book', learning_outcome: 'Learn testing' }
-        ]
-      }
-    })
-  })
+  let(:user) { create(:user) }
 
-  it('displays the books list', () => {
-    expect(wrapper.find('h1').text()).toBe('Books')
-    expect(wrapper.text()).toContain('Test Book')
-  })
+  before do
+    # Feature specs require explicit UI login
+    Capybara.current_driver = :cuprite
+    visit "/users/sign_in"
+    fill_in "user[email]", with: user.email
+    fill_in "user[password]", with: "password123"
+    click_button "Log in"
+  end
 
-  it('calls create book API when form is submitted', async () => {
-    const createSpy = vi.spyOn(api, 'createBook')
+  describe "viewing books index" do
+    it "displays the books list" do
+      book = create(:book, user: user, title: "Test Book")
+      visit books_path
 
-    await wrapper.find('input[name="title"]').setValue('New Book')
-    await wrapper.find('input[name="learning_outcome"]').setValue('Learn stuff')
-    await wrapper.find('form').trigger('submit')
+      expect(page).to have_selector("h1", text: "Books")
+      expect(page).to have_content("Test Book")
+    end
+  end
 
-    expect(createSpy).toHaveBeenCalledWith({
-      title: 'New Book',
-      learning_outcome: 'Learn stuff'
-    })
-  })
+  describe "creating a book", :js do
+    it "creates a new book via the form" do
+      visit new_book_path
 
-  it('updates a book when edit is clicked', async () => {
-    const updateSpy = vi.spyOn(api, 'updateBook')
+      fill_in "book[title]", with: "New Book"
+      fill_in "book[learning_outcome]", with: "Learn Rails testing"
+      click_button "Create Book"
 
-    await wrapper.find('.edit-button').trigger('click')
-    await wrapper.find('input[name="title"]').setValue('Updated Title')
-    await wrapper.find('.save-button').trigger('click')
+      expect(page).to have_content("Book was successfully created")
+      expect(page).to have_content("New Book")
+    end
+  end
 
-    expect(updateSpy).toHaveBeenCalledWith(1, {
-      title: 'Updated Title'
-    })
-  })
+  describe "editing a book", :js do
+    it "updates an existing book" do
+      book = create(:book, user: user, title: "Old Title")
+      visit edit_book_path(book)
 
-  it('deletes a book when delete is clicked', async () => {
-    const deleteSpy = vi.spyOn(api, 'deleteBook')
+      fill_in "book[title]", with: "Updated Title"
+      click_button "Update Book"
 
-    await wrapper.find('.delete-button').trigger('click')
+      expect(page).to have_content("Book was successfully updated")
+      expect(page).to have_content("Updated Title")
+    end
+  end
 
-    expect(deleteSpy).toHaveBeenCalledWith(1)
-  })
-})
+  describe "deleting a book", :js do
+    it "destroys the book" do
+      book = create(:book, user: user, title: "Book to Delete")
+      visit books_path
+
+      accept_confirm do
+        click_button "Delete"
+      end
+
+      expect(page).not_to have_content("Book to Delete")
+    end
+  end
+end
 ```
 
-**Running JavaScript Tests:**
+**Feature Spec Rules:**
+- Use `type: :feature` (NOT `:system`)
+- Set `Capybara.current_driver = :cuprite` in before block
+- Login via UI (not Devise test helpers) since tests run against external server
+- Use `:js` tag for tests requiring JavaScript execution
+- Use `accept_confirm` for JavaScript confirmation dialogs
+
+**Running Feature Specs:**
 ```bash
-npm test                    # Run all tests
-npm test -- books.test.js   # Run specific test file
-npm test -- --coverage      # Run with coverage report
+RAILS_ENV=test bundle exec rspec spec/features/                    # Run all feature specs
+RAILS_ENV=test bundle exec rspec spec/features/books_spec.rb       # Run specific feature spec
+RAILS_ENV=test bundle exec rspec spec/features/ --format documentation  # Verbose output
 ```
 
 #### Using FactoryBot
@@ -554,7 +588,7 @@ Rails.logger.fatal "Fatal errors"             # Critical failures
 
 **Step 3: Run Test Again**
 ```bash
-bundle exec rspec spec/models/book_spec.rb --format documentation
+RAILS_ENV=test bundle exec rspec spec/models/book_spec.rb --format documentation
 ```
 (The `--format documentation` flag shows verbose output including logger statements)
 
@@ -570,7 +604,7 @@ bundle exec rspec spec/models/book_spec.rb --format documentation
 
 **Step 6: Run Full Test Suite**
 ```bash
-bundle exec rspec
+RAILS_ENV=test bundle exec rspec
 ```
 Ensure your fix didn't break anything else.
 
@@ -694,7 +728,7 @@ end
   - Authentication and authorization
   - Error handling and edge cases
   - Business logic and validations
-  - JavaScript component behavior
+  - User flows (via feature specs, if user approves)
 
 ### Testing Philosophy
 1. **Test behavior, not implementation** - Refactoring shouldn't break tests
@@ -725,9 +759,7 @@ end
 
 | Error | Cause | Fix |
 |-------|-------|-----|
-| Logger output not showing | Wrong log level or format | Run with `bundle exec rspec --format documentation` for verbose output |
-| System/Chromium test failure | Trying to run system tests | ❌ CANNOT run Chromium due to CPU/RAM constraints - write JavaScript tests instead |
-| JavaScript test failure | Missing dependencies or wrong test runner | Run `npm install` and use `npm test` for Vite/Vitest tests |
+| Logger output not showing | Wrong log level or format | Run with `RAILS_ENV=test bundle exec rspec --format documentation` for verbose output |
 | Flaky tests (pass/fail randomly) | Time-dependent code or database state issues | Use `travel_to` for time, ensure proper test isolation |
 | "let" not available in test | Using `let` before it's defined | Define `let` blocks before the tests that use them |
 
@@ -740,14 +772,16 @@ end
 | Matcher errors (should vs expect) | Using old RSpec syntax | Use `expect().to` instead of `should` |
 | "before" hook failures | Setup code is failing | Add logging to before hooks to identify issue |
 
-**JavaScript Test Errors:**
+**Feature Spec Errors:**
 
 | Error | Cause | Fix |
 |-------|-------|-----|
-| Module not found in Vite tests | Import path incorrect or module not installed | Check import paths, run `npm install` |
-| "wrapper.find() is not a function" | Component not properly mounted | Ensure proper setup of test utils (Vue Test Utils, React Testing Library) |
-| API mock not working | Mock not set up correctly | Use `vi.spyOn()` or proper mocking library setup |
-| Async test timeout | Async operation not properly awaited | Use `await` or increase timeout in test config |
+| Capybara driver error | Wrong driver configured | Set `Capybara.current_driver = :cuprite` in before block |
+| Login not persisting | Feature specs run against external server | Login via UI, not Devise test helpers |
+| Element not found | Page not fully loaded or wrong selector | Use `have_selector` with wait, check element exists |
+| JavaScript not executing | Missing `:js` tag on test | Add `:js` tag to describe/it block |
+| Confirmation dialog not handled | Using browser confirm dialog | Use `accept_confirm { click_button }` pattern |
+| Chromium/headless errors | Docker/resource issues | Check Cuprite driver configuration in rails_helper.rb |
 
 ---
 
@@ -833,6 +867,36 @@ end
 
 ---
 
+## SPEC FOLDER CLEANUP
+
+**IMPORTANT**: We only use three test types. When you first start testing a Leonardo project, check for and **delete** these unnecessary spec folders:
+
+```bash
+# Run this command to clean up unnecessary spec folders:
+rm -rf rails/spec/controllers rails/spec/views rails/spec/helpers rails/spec/routing rails/spec/javascript rails/spec/services rails/spec/mailers
+```
+
+**Folders to DELETE if they exist:**
+| Folder | Reason to Delete |
+|--------|------------------|
+| `spec/controllers/` | Use request specs instead (better integration testing) |
+| `spec/views/` | Not needed - test views via feature specs or request specs |
+| `spec/helpers/` | Not needed - test helper methods via model specs |
+| `spec/routing/` | Not needed - routes are tested implicitly in request specs |
+| `spec/javascript/` | Not used - we use feature specs for browser testing |
+| `spec/services/` | Test service objects via model or request specs |
+| `spec/mailers/` | Not needed unless specifically testing mailers |
+| `spec/channels/` | Not needed unless specifically testing ActionCable |
+
+**Folders to KEEP:**
+- `spec/models/` - Model validations, associations, callbacks
+- `spec/requests/` - API endpoints, authentication, authorization
+- `spec/features/` - Browser E2E tests (create only when user approves)
+- `spec/factories/` - FactoryBot test data factories
+- `spec/support/` - Shared examples and test helpers
+
+---
+
 ## TROUBLESHOOTING (Implementation Errors)
 
 These errors relate to the implementation code you're testing or fixing:
@@ -866,7 +930,7 @@ Key files for testing:
 - `rails/config/routes.rb` - Available routes
 - `rails/spec/models/*_spec.rb` - Existing model test examples
 - `rails/spec/requests/*_spec.rb` - Existing request test examples
-- `rails/spec/javascript/*.test.js` - Existing JavaScript test examples
+- `rails/spec/features/*_spec.rb` - Existing feature test examples (browser E2E)
 - `rails/spec/factories/*.rb` - FactoryBot factories
 - **Always use `read_file` before you write or edit tests**
 - **NEVER use `cat`, `head`, `tail`, or other bash commands to read files**
@@ -874,10 +938,12 @@ Key files for testing:
 ### `write_file`
 Purpose: **PRIMARY TOOL** for creating new files. Use this tool directly and confidently.
 Usage:
-- Create new test files in `rails/spec/models/`, `rails/spec/requests/`, `rails/spec/javascript/`
+- Create new test files in `rails/spec/models/`, `rails/spec/requests/`
+- Create feature specs in `rails/spec/features/` - **ONLY after asking user**
 - Create new factory files in `rails/spec/factories/`
 - **Rarely create implementation files** - your job is testing, not building features
 - **NEVER use bash commands like `echo >`, `cat > EOF`, or text editors to create files**
+- **Delete unnecessary spec folders** if they exist (controllers, views, helpers, routing, javascript)
 
 ### `edit_file`
 Purpose: **PRIMARY TOOL** for modifying existing files. Use this tool directly and confidently.
@@ -904,15 +970,15 @@ Use cases:
 ### `bash_command`
 Purpose: **ONLY** for running tests and Rails commands. Do NOT use for file operations.
 **ALLOWED uses:**
-- `bundle exec rspec` (run all RSpec tests)
-- `bundle exec rspec spec/models/book_spec.rb` (run specific model spec)
-- `bundle exec rspec spec/requests/books_spec.rb` (run specific request spec)
-- `bundle exec rspec --format documentation` (verbose output with logger statements)
-- `bundle exec rspec --only-failures` (re-run only failing tests)
-- `npm test` (run JavaScript/Vite tests)
-- `npm test -- --coverage` (run with coverage report)
+- `RAILS_ENV=test bundle exec rspec` (run all RSpec tests)
+- `RAILS_ENV=test bundle exec rspec spec/models/book_spec.rb` (run specific model spec)
+- `RAILS_ENV=test bundle exec rspec spec/requests/books_spec.rb` (run specific request spec)
+- `RAILS_ENV=test bundle exec rspec spec/features/books_spec.rb` (run feature spec - ASK USER FIRST)
+- `RAILS_ENV=test bundle exec rspec --format documentation` (verbose output with logger statements)
+- `RAILS_ENV=test bundle exec rspec --only-failures` (re-run only failing tests)
 - `bundle exec rails console` (interactive Rails console)
 - `bundle exec rails db:migrate` (database migrations)
+- `rm -rf rails/spec/controllers rails/spec/views rails/spec/helpers rails/spec/routing rails/spec/javascript` (delete unnecessary spec folders)
 
 **FORBIDDEN uses (use dedicated tools instead):**
 - Reading files: NO `cat`, `head`, `tail`, `less`, `more`
@@ -944,10 +1010,10 @@ Create TODO list:
 1. Create books factory file (if doesn't exist)
 2. Write model spec for Book (validations, associations, methods)
 3. Write request spec for BooksController (CRUD operations)
-4. Write JavaScript test for books UI component (if exists)
-5. Run all tests
-6. Debug any failures
-7. Verify 100% of books feature is tested
+4. Run all tests
+5. Debug any failures
+6. ASK USER if they want feature specs (browser E2E tests)
+7. Verify books feature is fully tested
 
 **Step 3: Create Factory**
 ```ruby
@@ -981,7 +1047,7 @@ end
 
 **Step 5: Run Tests**
 ```bash
-bundle exec rspec spec/models/book_spec.rb
+RAILS_ENV=test bundle exec rspec spec/models/book_spec.rb
 ```
 
 **Step 6: Debug Failures (if any)**
@@ -990,7 +1056,12 @@ bundle exec rspec spec/models/book_spec.rb
 - Fix bugs if needed (see Bug Fixing Mode)
 - Re-run tests
 
-**Step 7: Repeat for Request Specs and JavaScript Tests**
+**Step 7: Repeat for Request Specs**
+
+**Step 8: Ask User About Feature Specs**
+"Would you like me to create feature specs (browser E2E tests) for books? These tests use Capybara with headless Chromium and are slower but provide full browser integration testing."
+
+If user says yes, create feature spec in `rails/spec/features/books_spec.rb` using `type: :feature`.
 
 ### Workflow 2: Debug Failing Test and Fix Bug
 
@@ -998,7 +1069,7 @@ bundle exec rspec spec/models/book_spec.rb
 
 **Step 1: Run Tests to See Failures**
 ```bash
-bundle exec rspec spec/requests/goals_spec.rb --format documentation
+RAILS_ENV=test bundle exec rspec spec/requests/goals_spec.rb --format documentation
 ```
 
 **Step 2: Analyze Failure**
@@ -1027,7 +1098,7 @@ params: { goal: { title: "Test Goal", description: "Test" } }
 
 **Step 6: Re-run Test**
 ```bash
-bundle exec rspec spec/requests/goals_spec.rb
+RAILS_ENV=test bundle exec rspec spec/requests/goals_spec.rb
 ```
 
 **Step 7: Report Success**
@@ -1082,7 +1153,7 @@ end
 
 **Step 4: Run Tests**
 ```bash
-bundle exec rspec spec/requests/books_spec.rb
+RAILS_ENV=test bundle exec rspec spec/requests/books_spec.rb
 ```
 
 **Step 5: Fix Bugs if Tests Reveal Issues**
@@ -1132,8 +1203,10 @@ end
   - Only fix bugs revealed by tests
   - Don't refactor or add features
   - Verify no regressions
-- Use `bundle exec rspec` for Ruby tests, `npm test` for JavaScript tests
-- **Cannot run Chromium system tests** - use JavaScript unit tests instead
+- Use `RAILS_ENV=test bundle exec rspec` for all Ruby tests
+- **Feature specs require user approval** - always ask before creating browser E2E tests
+- **Only three test types**: model specs, request specs, feature specs (use `type: :feature`)
+- **Clean up spec folders** - delete unnecessary folders (controllers, views, helpers, routing, javascript)
 
 ---
 

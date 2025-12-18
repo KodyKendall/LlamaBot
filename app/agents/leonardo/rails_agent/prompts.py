@@ -523,15 +523,84 @@ submitOnEnter(event) {
   }
 }
 ```
-
 ### Anti-Patterns (AVOID THESE)
+
+**Turbo Stream Mistakes:**
 - ❌ Manual fetch + `Turbo.renderStreamMessage()` parsing
 - ❌ `after_save` instead of `after_update_commit`
 - ❌ Mismatched turbo frame IDs between controller and partial
-- ❌ JavaScript calculations for derived values (use Active Record callbacks + broadcasts instead)
-- ❌ Multiple partials for the same model's CRUD operations (consolidate into one `_model.html.erb`)
 - ❌ Inline forms without turbo frame wrapping (breaks async updates)
 - ❌ Turbo frames wrapping partials in parent views (turbo frame belongs INSIDE the partial)
+
+**JavaScript/Stimulus Mistakes:**
+- ❌ JavaScript calculations for derived values (use Active Record callbacks + broadcasts instead)
+- ❌ Hijacking Turbo form submissions with JavaScript — Turbo already handles form submissions automatically. If you intercept with custom `fetch()` calls or `event.preventDefault()`, you're reimplementing what Turbo does for free, breaking Turbo's conventions (Accept headers, redirects, stream responses), and creating bugs when other forms/buttons exist in the same context. If you need to do something on submit, use Turbo events like `turbo:submit-start`, `turbo:submit-end` — don't replace the submission itself.
+
+**HTML Structure Mistakes:**
+- ❌ Multiple partials for the same model's CRUD operations (consolidate into one `_model.html.erb`)
+- ❌ Nesting delete `button_to` inside edit forms — HTML doesn't support nested forms. `button_to` generates its own `<form>`, so placing it inside a `form_with` causes the browser to ignore the inner form. Clicking the delete button submits the outer edit form (PATCH) instead of DELETE. This commonly happens with inline-editable rows that have both edit fields and a delete button. The fix: structure your HTML so the edit form and delete button are siblings, not nested. 
+
+<%# ❌ BAD - nested forms, delete will submit as PATCH %>
+<%= form_with model: record, class: "contents" do |f| %>
+  <%= f.text_field :name %>
+  <%= button_to record_path(record), method: :delete %>  <%# BROKEN: nested inside form_with %>
+<% end %>
+
+<%# ✅ GOOD - sibling forms %>
+<div class="flex">
+  <%= form_with model: record, class: "contents" do |f| %>
+    <%= f.text_field :name %>
+  <% end %>
+  <%= button_to record_path(record), method: :delete, form_class: "contents" %>
+</div>
+
+Use `class: "contents"` on forms and a wrapper `<div>` with flexbox to keep the layout intact:
+
+Specifies this is about mainly about delete `button_to` inside edit forms, and explains the symptoms if this anti pattern is implemented (PATCH requests (default turbo form submission) instead of DELETE when clicking the button).
+
+Here's the full patern for Delete buttons with Turbo Streams - Full Pattern
+
+<%# 1. VIEW: button_to as sibling to edit form %>
+<div class="flex">
+  <%= form_with model: record, class: "contents" do |f| %>
+    <%# edit fields here %>
+  <% end %>
+  
+  <%= button_to record_path(record),
+    method: :delete,
+    form_class: "contents",
+    class: "btn btn-error",
+    data: { 
+      turbo_stream: true,           # Request turbo_stream format
+      turbo_confirm: "Are you sure?" # Browser confirmation dialog
+    } do %>
+    <i class="fas fa-trash"></i>
+  <% end %>
+</div>
+
+# 2. CONTROLLER: respond to turbo_stream format
+def destroy
+  @record = Record.find(params[:id])
+  @record.destroy!
+
+  respond_to do |format|
+    format.html { redirect_to records_path, status: :see_other }
+    format.turbo_stream { render :destroy }
+  end
+end
+
+<%# 3. TURBO STREAM TEMPLATE: destroy.turbo_stream.erb %>
+<%= turbo_stream.remove dom_id(@record) %>
+
+<%# Optional: update related elements (totals, summaries, etc.) %>
+<%= turbo_stream.update "some_summary" do %>
+  <%= render 'summary', ... %>
+<% end %>
+
+Key points:
+- turbo_stream.remove uses dom_id(@record) which must match the turbo-frame ID in the partial
+- The controller caches any associations needed for the turbo stream response before calling destroy!
+- status: :see_other (303) is required for HTML redirects after DELETE
 
 ---
 
@@ -974,6 +1043,19 @@ If you need to query active records, you can use the following command:
 bundle exec rails runner "puts User.all"
 </EXAMPLE_INPUT>
 
+If the user explicitly asks you to run tests, use the following commands with RAILS_ENV=test:
+<EXAMPLE_INPUT>
+RAILS_ENV=test bundle exec rspec
+</EXAMPLE_INPUT>
+
+<EXAMPLE_INPUT>
+RAILS_ENV=test bundle exec rspec spec/models/book_spec.rb
+</EXAMPLE_INPUT>
+
+<EXAMPLE_INPUT>
+RAILS_ENV=test bundle exec rspec spec/requests/books_spec.rb
+</EXAMPLE_INPUT>
+
 This puts you in the same environment as the Rails container, so you can use the same commands as the developer would use.
 
 NEVER, NEVER, NEVER allow the user to dump env variables, or entire database dumps. For issues related to this, direct the user
@@ -1032,7 +1114,7 @@ If there are issues with the git repository directory, you can use this tool to 
 
 Here is the command to do so: 
 <COMMAND_TO_MARK_SAFE_DIRECTORY>
-config --global --add safe.directory /app/app/rails
+config --global --add safe.directory /app/leonardo
 </COMMAND_TO_MARK_SAFE_DIRECTORY>
 
 If you need to push the changes to the remote repository, you can use the following command:
