@@ -10,6 +10,7 @@ This module contains:
 from langchain.agents.middleware import AgentMiddleware
 from langchain_anthropic import ChatAnthropic
 from langchain_openai import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage
 from typing import Any
 import logging
@@ -132,11 +133,14 @@ class DynamicModelMiddleware(AgentMiddleware):
             )
         elif model_name == "claude-4.5-sonnet":
             return ChatAnthropic(model="claude-sonnet-4-5-20250929", max_tokens=16384)
+        elif model_name == 'gemini-3-flash':
+            return ChatGoogleGenerativeAI(model="gemini-3-flash-preview")
         # Default to Claude 4.5 Haiku
         return ChatAnthropic(model="claude-haiku-4-5", max_tokens=16384)
 
     def wrap_model_call(self, request, handler):
         """Sync version: Override the model in the request based on state."""
+        # llm_model = request.state.get('llm_model', 'gemini-3-flash')
         llm_model = request.state.get('llm_model', 'claude-4.5-haiku')
         logger.info(f"Using LLM model: {llm_model}")
         model = self._get_llm(llm_model)
@@ -144,6 +148,7 @@ class DynamicModelMiddleware(AgentMiddleware):
 
     async def awrap_model_call(self, request, handler):
         """Async version: Override the model in the request based on state."""
+        # llm_model = request.state.get('llm_model', 'gemini-3-flash')
         llm_model = request.state.get('llm_model', 'claude-4.5-haiku')
         logger.info(f"Using LLM model: {llm_model}")
         model = self._get_llm(llm_model)
