@@ -188,16 +188,14 @@ export class MessageRenderer {
    * Handle end of stream
    */
   handleEndMessage() {
-    console.log('end of stream');
-
     // Stop the thinking indicator
     this.stopThinking();
 
     // Play task completed sound
     const taskCompletedSound = document.getElementById('taskCompletedSound');
     if (taskCompletedSound) {
-      taskCompletedSound.play().catch(error => {
-        console.log('Could not play sound:', error);
+      taskCompletedSound.play().catch(() => {
+        // Sound playback failed (likely due to autoplay restrictions)
       });
     }
 
