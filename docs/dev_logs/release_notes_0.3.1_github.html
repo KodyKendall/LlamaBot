@@ -1,0 +1,158 @@
+<h1>🦙 LlamaBot v0.3.1 - Gemini 3 Flash, Git Fixes & Cleaner Frontend</h1>
+
+<p><strong>Release Date:</strong> December 16, 2025</p>
+
+<hr>
+
+<h2>🚀 What's New</h2>
+
+<h3>🤖 Gemini 3 Flash Support</h3>
+<p>Added support for Google's latest Gemini 3 Flash model.</p>
+<ul>
+  <li>New model option <code>gemini-3-flash</code> available in dynamic model middleware</li>
+  <li>Uses <code>gemini-3-flash-preview</code> via LangChain Google GenAI integration</li>
+  <li>Updated <code>langchain-google-genai</code> to v3.1.0</li>
+</ul>
+
+<h3>🎫 Improved Ticket Generation</h3>
+<p>Enhanced ticket mode prompts to reduce hallucinations and improve ticket quality.</p>
+<ul>
+  <li><strong>Verification Criteria vs Business Rules</strong> - Clear separation between UI/UX criteria and domain logic</li>
+  <li><strong>Source Citations Required</strong> - All business rules must have explicit sources (user quote, screenshot, requirement doc, or code observation)</li>
+  <li><strong>Ground-Truth Contract</strong> - Observation block becomes the authoritative scope; never add requirements beyond it</li>
+  <li><strong>Demo Path</strong> - Mandatory step-by-step verification path using Given/When/Then format</li>
+  <li><strong>Scope Section</strong> - Explicit In Scope / Out of Scope boundaries prevent scope creep</li>
+  <li><strong>Split Check</strong> - Complex tickets (3+ models or 2+ screens) must propose splits</li>
+  <li><strong>Conservative Business Rules</strong> - Creation rules, filtering rules, time windows, calculations must be sourced or marked UNKNOWN</li>
+</ul>
+
+<h3>🧪 Testing Agent Overhaul</h3>
+<p>Simplified testing strategy focused on three spec types only.</p>
+<ul>
+  <li><strong>Three Test Types</strong> - Model specs, Request specs, and Feature specs (with user approval)</li>
+  <li><strong>RAILS_ENV=test Required</strong> - All rspec commands now explicitly set test environment to prevent data loss</li>
+  <li><strong>Feature Specs</strong> - Use <code>type: :feature</code> (not <code>:system</code>) with Cuprite driver</li>
+  <li><strong>Spec Folder Cleanup</strong> - Clear guidance to delete unnecessary folders (controllers, views, helpers, routing, javascript)</li>
+  <li><strong>User Consent for E2E</strong> - Agent asks before creating browser-based feature specs</li>
+</ul>
+
+<hr>
+
+<h2>🐛 Bug Fixes</h2>
+
+<h3>🔧 Git Operations Fixed</h3>
+<p>Fixed Leonardo's ability to commit, branch, and push to GitHub repositories.</p>
+<ul>
+  <li>Corrected git path from <code>/app/app/rails</code> to <code>/app/leonardo</code> across all agents</li>
+  <li>Fixed in: rails_agent, rails_ai_builder_agent, rails_testing_agent, html_agent</li>
+  <li>Both prompts and tools updated for consistent git operations</li>
+</ul>
+
+<h3>🧹 JavaScript Console Cleanup</h3>
+<p>Removed console.log statements from frontend JavaScript for cleaner production output.</p>
+<ul>
+  <li>Cleaned up: ChatApp, MessageRenderer, ThreadManager, IframeManager, ScrollManager</li>
+  <li>Cleaned up: ActionCableAdapter, WebSocketManager</li>
+  <li>Error handling preserved with silent catch blocks where appropriate</li>
+</ul>
+
+<hr>
+
+<h2>📦 Dependencies</h2>
+<ul>
+  <li><code>langchain-google-genai</code> upgraded to 3.1.0</li>
+  <li><code>google-ai-generativelanguage</code> upgraded to >=0.9.0</li>
+</ul>
+
+<hr>
+
+<h2>🔄 Migration Notes</h2>
+
+<p><strong>For Users:</strong></p>
+<ul>
+  <li><strong>Test commands changed</strong> - Always use <code>RAILS_ENV=test bundle exec rspec</code> (prevents accidental data loss)</li>
+  <li><strong>Gemini 3 Flash available</strong> - New model option for faster responses</li>
+  <li><strong>Ticket quality improved</strong> - Tickets now require explicit source citations for business rules</li>
+</ul>
+
+<p><strong>For Developers:</strong></p>
+<ul>
+  <li>Git operations now target <code>/app/leonardo</code> directory</li>
+  <li>Console.log statements removed - use browser dev tools for debugging</li>
+  <li><code>LLAMABOT_DB_URI</code> now preferred over <code>AUTH_DB_URI</code> (backwards compatible)</li>
+</ul>
+
+<hr>
+
+<h2>📋 Previous Releases</h2>
+
+<details>
+<summary><strong>v0.3.0</strong> - Ticket Mode 2.0 & Enhanced Builder Pattern</summary>
+<ul>
+  <li>Complete Ticket Mode redesign with single-conversation workflow</li>
+  <li>Sub-agent delegation for technical research</li>
+  <li>Comprehensive Builder pattern documentation</li>
+  <li>🪲 Debugging workflow with emoji convention</li>
+  <li>Enhanced git error handling</li>
+</ul>
+</details>
+
+<details>
+<summary><strong>v0.2.22</strong> - Middleware Architecture & Ticket Mode</summary>
+<ul>
+  <li>Modern middleware architecture with LangChain 1.1+</li>
+  <li>Initial Ticket Mode with 3-stage workflow</li>
+  <li>Sub-agent task delegation</li>
+  <li>Enhanced agent configuration via langgraph.json</li>
+  <li>Modular FastAPI routes</li>
+</ul>
+</details>
+
+<details>
+<summary><strong>v0.2.21</strong> - Multi-User & Admin System</summary>
+<ul>
+  <li>Multi-user management with PostgreSQL authentication</li>
+  <li>Admin permissions and role-based access control</li>
+  <li>ActiveRecord-like console utilities</li>
+  <li>User registration and session management</li>
+</ul>
+</details>
+
+<details>
+<summary><strong>v0.2.20</strong> - User Feedback Agent</summary>
+<ul>
+  <li>New user feedback agent mode for end-users to plan future development</li>
+  <li>Improved feedback agent prompt for better scope and sprint planning</li>
+  <li>Enables direct user input into product roadmap</li>
+</ul>
+</details>
+
+<details>
+<summary><strong>v0.2.19</strong> - AI Builder & Testing Mode ⭐</summary>
+<ul>
+  <li><strong>AI Builder Mode</strong> - Leonardo helps build user-facing agents within Rails apps</li>
+  <li><strong>QA Test Builder Mode</strong> - Automated test generation with RSpec & Vite-JS</li>
+  <li>New <code>user_agents</code> folder for custom agent definitions</li>
+  <li>Prompt caching for all agents (significant cost reduction)</li>
+  <li>Capybara/Cuprite browser tool for JavaScript debugging</li>
+</ul>
+</details>
+
+<details>
+<summary><strong>v0.2.18</strong> - UI/UX Overhaul ⭐</summary>
+<ul>
+  <li>Massive UI/UX overhaul for messages and iframe</li>
+  <li>Refactored chat.html into modular JavaScript packages</li>
+  <li>Support for any LLM model - Claude, Gemini, GPT Codex, GPT series</li>
+  <li>New task/planning component for clearer agent status</li>
+  <li>Auto-refreshing iframe shows changes in real-time</li>
+</ul>
+</details>
+
+<hr>
+
+<p>🦙 <strong>LlamaBot</strong> - AI Coding Agent Framework</p>
+<p>
+  <a href="https://github.com/KodyKendall/LlamaBot">GitHub</a> ·
+  <a href="https://discord.gg/7DapkvmWKZ">Discord</a>
+</p>

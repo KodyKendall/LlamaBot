@@ -68,7 +68,6 @@ export class IframeManager {
           if (this.navigationHistory.length === 0 ||
               this.navigationHistory[this.navigationHistory.length - 1] !== fromPath) {
             this.navigationHistory.push(fromPath);
-            console.log('Navigation tracked:', fromPath, '->', toPath, 'History:', this.navigationHistory);
           }
         }
 
@@ -144,7 +143,7 @@ export class IframeManager {
         }, 100);
       }
     } catch (e) {
-      console.log('Error updating streaming preview iframe (normal during streaming):', e);
+      // Error during streaming preview update (expected during streaming)
     }
   }
 
@@ -259,8 +258,6 @@ export class IframeManager {
 
     if (isRailsIFrame) {
       getRailsDebugInfoCallback((debugInfoJson) => {
-        console.log('debugInfoJson', debugInfoJson);
-
         if (this.liveSiteFrame.src) {
           let additionalRequestPath = debugInfoJson.request_path;
 
@@ -353,7 +350,7 @@ export class IframeManager {
       const relativePath = this.extractRelativePath(iframeSrc);
       this.urlInput.value = relativePath;
     } catch (e) {
-      console.log('Could not update URL display:', e);
+      // Could not update URL display
     }
   }
 

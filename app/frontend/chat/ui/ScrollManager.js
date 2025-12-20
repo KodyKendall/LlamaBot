@@ -21,7 +21,6 @@ export class ScrollManager {
    */
   init() {
     this.scrollButton = document.querySelector('[data-llamabot="scroll-to-bottom"]');
-    console.log('ScrollManager: Button found:', !!this.scrollButton);
 
     // Create unread badge element
     if (this.scrollButton) {
@@ -29,7 +28,6 @@ export class ScrollManager {
       this.unreadBadge.className = 'unread-badge';
       this.unreadBadge.style.display = 'none';
       this.scrollButton.appendChild(this.unreadBadge);
-      console.log('ScrollManager: Unread badge created and attached');
     }
 
     // Add scroll event listener
@@ -107,10 +105,8 @@ export class ScrollManager {
 
     if (!this.isUserAtBottom) {
       this.scrollButton.classList.add('visible');
-      console.log('ScrollManager: Button made visible');
     } else {
       this.scrollButton.classList.remove('visible');
-      console.log('ScrollManager: Button hidden');
     }
   }
 
@@ -127,7 +123,6 @@ export class ScrollManager {
   incrementUnreadCount() {
     if (!this.isUserAtBottom) {
       this.unreadCount++;
-      console.log('ScrollManager: Unread count incremented to', this.unreadCount);
       this.updateUnreadBadge();
     }
   }
@@ -144,18 +139,13 @@ export class ScrollManager {
    * Update unread badge display
    */
   updateUnreadBadge() {
-    if (!this.unreadBadge) {
-      console.log('ScrollManager: No unread badge element!');
-      return;
-    }
+    if (!this.unreadBadge) return;
 
     if (this.unreadCount > 0) {
       this.unreadBadge.textContent = this.unreadCount > 99 ? '99+' : this.unreadCount.toString();
       this.unreadBadge.style.display = 'flex';
-      console.log('ScrollManager: Badge showing count:', this.unreadBadge.textContent);
     } else {
       this.unreadBadge.style.display = 'none';
-      console.log('ScrollManager: Badge hidden');
     }
   }
 }

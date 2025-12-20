@@ -10,7 +10,41 @@ from psycopg import Connection
 load_dotenv()
 
 db_uri = os.getenv("DB_URI")
-auth_db_uri = os.getenv("AUTH_DB_URI")
+llamabot_db_uri = os.getenv("LLAMABOT_DB_URI") or os.getenv("AUTH_DB_URI")  # Backwards compat
+
+
+def ensure_env_variable(key: str, default_value: str, env_file: str = ".env") -> str:
+    """Ensure an environment variable exists in .env file, create if missing."""
+    from pathlib import Path
+
+    env_path = Path(env_file)
+
+    # Check if variable exists in environment
+    current_value = os.getenv(key)
+    if current_value:
+        return current_value
+
+    # Variable doesn't exist, add it to .env
+    print(f"🔧 {key} not found, adding to {env_file}...")
+
+    # Read existing .env content
+    env_content = ""
+    if env_path.exists():
+        env_content = env_path.read_text()
+
+    # Add the new variable
+    if env_content and not env_content.endswith('\n'):
+        env_content += '\n'
+    env_content += f'{key}="{default_value}"\n'
+
+    # Write back to .env
+    env_path.write_text(env_content)
+
+    # Set in current environment
+    os.environ[key] = default_value
+
+    print(f"✅ Added {key} to {env_file}")
+    return default_value
 
 
 def get_db_name_from_uri(uri: str) -> str:
@@ -105,14 +139,14 @@ def test_sqlalchemy_connection(uri: str) -> bool:
         return False
 
 
-# Initialize auth database if AUTH_DB_URI is set
-if auth_db_uri is None:
-    print("AUTH_DB_URI is not set, skipping auth database initialization")
+# Initialize LlamaBot database if LLAMABOT_DB_URI is set
+if llamabot_db_uri is None:
+    print("LLAMABOT_DB_URI is not set, skipping LlamaBot database initialization")
 else:
-    print(f"AUTH_DB_URI is set, initializing auth database...")
-    if ensure_database_exists(auth_db_uri):
+    print(f"LLAMABOT_DB_URI is set, initializing LlamaBot database...")
+    if ensure_database_exists(llamabot_db_uri):
         # Test SQLAlchemy connection before running migrations
-        if test_sqlalchemy_connection(auth_db_uri):
+        if test_sqlalchemy_connection(llamabot_db_uri):
             run_alembic_migrations()
         else:
             print("⚠️ Skipping migrations - SQLAlchemy cannot connect")

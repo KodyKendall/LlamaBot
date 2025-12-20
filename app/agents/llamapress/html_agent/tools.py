@@ -626,7 +626,7 @@ def git_status(
     """Get the status of the git repository."""
     def run_git(cmd: str) -> str:
         result = subprocess.run(
-            ["/bin/sh", "-lc", f"git -C /app/app/rails {cmd}"],
+            ["/bin/sh", "-lc", f"git -C /app/leonardo {cmd}"],
             capture_output=True,
             text=True,
             timeout=30
@@ -879,10 +879,10 @@ def git_commit(
 ) -> Command:
     """Commit the changes to the git repository."""
     # First add all changes
-    add_result = subprocess.run(["/bin/sh", "-lc", "git -C /app/app/rails add ."], capture_output=True, text=True, timeout=30)
-    
+    add_result = subprocess.run(["/bin/sh", "-lc", "git -C /app/leonardo add ."], capture_output=True, text=True, timeout=30)
+
     # Then commit the changes - use subprocess list format to avoid shell escaping issues
-    commit_result = subprocess.run(["git", "-C", "/app/app/rails", "commit", "-m", message], capture_output=True, text=True, timeout=30)
+    commit_result = subprocess.run(["git", "-C", "/app/leonardo", "commit", "-m", message], capture_output=True, text=True, timeout=30)
     
     # Combine the output from both commands
     output = f"Git add:\n{add_result.stdout}"
@@ -915,7 +915,7 @@ def git_command(
     tool_call_id: Annotated[str, InjectedToolCallId],
 ) -> Command:
     """Configure the git repository."""
-    git_result = subprocess.run(["/bin/sh", "-lc", f"git -C /app/app/rails {command}"], capture_output=True, text=True, timeout=30)
+    git_result = subprocess.run(["/bin/sh", "-lc", f"git -C /app/leonardo {command}"], capture_output=True, text=True, timeout=30)
 
     output = f"Git command:\n{command}\n\nGit result:\n{git_result.stdout}"
     if git_result.stderr:

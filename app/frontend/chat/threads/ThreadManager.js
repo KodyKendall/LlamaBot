@@ -44,7 +44,6 @@ export class ThreadManager {
 
       const data = await response.json();
       const { threads, next_cursor, has_more } = data;
-      console.log('Fetched threads:', threads);
 
       // Store pagination state
       this.nextCursor = next_cursor;
@@ -244,8 +243,6 @@ export class ThreadManager {
    * Handle thread click - load thread messages
    */
   async handleThreadClick(threadId, title) {
-    console.log(`Loading thread: ${threadId} - ${title}`);
-
     try {
       // Emit event for app state to update thread ID
       window.dispatchEvent(new CustomEvent('threadChanged', {
@@ -396,8 +393,6 @@ export class ThreadManager {
     if (this.scrollManager) {
       this.scrollManager.scrollToBottom(true);
     }
-
-    console.log('Created new thread:', newThreadId);
   }
 
   /**

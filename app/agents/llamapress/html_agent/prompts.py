@@ -875,7 +875,7 @@ If there are issues with the git repository directory, you can use this tool to 
 
 Here is the command to do so: 
 <COMMAND_TO_MARK_SAFE_DIRECTORY>
-config --global --add safe.directory /app/app/rails
+config --global --add safe.directory /app/leonardo
 </COMMAND_TO_MARK_SAFE_DIRECTORY>
 
 If you need to push the changes to the remote repository, you can use the following command:

@@ -39,7 +39,6 @@ export class ActionCableAdapter {
    * Handle ActionCable connected event
    */
   handleConnected() {
-    console.log('ActionCable connected');
     this.isConnected = true;
 
     if (this.onopen) {
@@ -51,7 +50,6 @@ export class ActionCableAdapter {
    * Handle ActionCable disconnected event
    */
   handleDisconnected() {
-    console.log('ActionCable disconnected');
     this.isConnected = false;
 
     if (this.onclose) {

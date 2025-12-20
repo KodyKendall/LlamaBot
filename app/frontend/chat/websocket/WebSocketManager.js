@@ -80,7 +80,6 @@ export class WebSocketManager {
    * Handle WebSocket open event
    */
   handleOpen() {
-    console.log('WebSocket connected');
     this.updateConnectionStatus(true);
 
     if (this.elements.sendButton) {
@@ -95,7 +94,6 @@ export class WebSocketManager {
    * Handle WebSocket close event
    */
   handleClose() {
-    console.log('WebSocket disconnected');
     this.updateConnectionStatus(false);
 
     if (this.elements.sendButton) {
@@ -182,7 +180,6 @@ export class WebSocketManager {
   scheduleReconnect() {
     // ActionCable handles reconnection automatically, skip for ActionCable
     if (this.isActionCable) {
-      console.log('ActionCable will handle reconnection automatically');
       return;
     }
 
@@ -191,7 +188,6 @@ export class WebSocketManager {
     }
 
     this.reconnectTimer = setTimeout(() => {
-      console.log('Attempting to reconnect...');
       this.connect();
     }, this.config.reconnectDelay || 3000);
   }
