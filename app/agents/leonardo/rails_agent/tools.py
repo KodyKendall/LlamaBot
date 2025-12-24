@@ -916,7 +916,7 @@ def git_command(
     command: str,
     runtime: ToolRuntime,
 ) -> Command:
-    """Execute a git command in the Rails repository."""
+    """Execute a git command in the app repository."""
     tool_call_id = runtime.tool_call_id
     git_result = subprocess.run(["/bin/sh", "-lc", f"git -C /app/leonardo {command}"], capture_output=True, text=True, timeout=30)
 

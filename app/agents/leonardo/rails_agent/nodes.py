@@ -52,7 +52,9 @@ default_tools = [
     write_todos,
     ls, read_file, write_file, edit_file, search_file,
     bash_command,
-    git_status, git_commit, git_command, github_cli_command,
+    # git_status, git_commit, 
+    # git_command, 
+    # github_cli_command,
     internet_search,
     delegate_task,  # Sub-agent delegation for specialized tasks
 ]
