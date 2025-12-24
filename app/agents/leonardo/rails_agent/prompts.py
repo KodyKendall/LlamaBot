@@ -602,6 +602,15 @@ Key points:
 - The controller caches any associations needed for the turbo stream response before calling destroy!
 - status: :see_other (303) is required for HTML redirects after DELETE
 
+**DB Layer (Seeds & Migrations):**
+- ❌ `Date.today`, `Time.current`, or `rand` inside `find_or_create_by!` lookup keys (breaks idempotency)
+- ❌ `create!` in seeds without uniqueness guard (e.g., no `find_or_create_by!`)
+- ❌ Missing unique database constraints for logical uniqueness (e.g., size + ownership_type should have unique index)
+- ❌ Migrations that backfill data without checking for existing records
+- ❌ Seeds that produce different results on different dates/runs (non-idempotent)
+
+**Seed Idempotence Rule:** Seeds SHOULD be idempotent unless explicitly documented otherwise. Running `db:seed` twice should produce the same database state.
+
 ---
 
 ## INTERACTION STYLE

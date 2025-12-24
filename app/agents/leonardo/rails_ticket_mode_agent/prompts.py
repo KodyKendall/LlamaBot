@@ -197,6 +197,41 @@ Research the following feature request in the Rails codebase:
 **Business Rules:** [from observation - only those explicitly stated with sources]
 
 YOUR RESEARCH MISSION:
+
+## STEP 0: Root Cause Layer Classification (REQUIRED)
+
+Before diving into implementation details, classify where the problem originates:
+
+| Layer | What to Check | Example Issues |
+|-------|---------------|----------------|
+| **DB (Seeds/Migrations)** | `db/seeds.rb`, `db/migrate/*.rb` | Non-idempotent seeds, bad backfills |
+| **Model (Callbacks)** | `after_create`, `after_save`, `after_commit` | Auto-creating related records |
+| **Controller (Query)** | Scopes, `.where()`, `.find_by()` | Wrong records fetched, non-deterministic selection |
+| **View (Display)** | Partials, templates, Turbo frames | Rendering issues, wrong data shown |
+
+**Classification Question:** Is this a problem with how data EXISTS, or how data is DISPLAYED?
+
+---
+
+## STEP 1: Five Whys - Hypothesis Pass (before deep research)
+
+Write a quick 5-step "Why?" chain with layer-tagged hypotheses:
+
+- Why #1 (symptom): Why [observed problem]? → Hypothesis: [guess] (Layer: X)
+- Why #2: Why would that happen? → Hypothesis: [guess] (Layer: X)
+- Why #3: Why would that happen? → Hypothesis: [guess] (Layer: X)
+- Why #4: Why would that happen? → Hypothesis: [guess] (Layer: X)
+- Why #5: Why wasn't this prevented? → Hypothesis: [guess] (Layer: X)
+
+Then state:
+- **Top 2 hypotheses** (ranked by probability)
+- **Evidence to check first** (specific files/queries)
+- **Initial layer classification** (DB/Model/Controller/Views/Mixed)
+
+---
+
+## STEP 2: Technical Research
+
 Build a complete technical mental model by researching:
 1. Relevant database tables and columns (start with rails/db/schema.rb)
 2. ActiveRecord associations and callbacks (rails/app/models/)
@@ -205,7 +240,36 @@ Build a complete technical mental model by researching:
 5. Stimulus controllers (rails/app/javascript/controllers/)
 6. Routes (rails/config/routes.rb)
 
+**IF THE ISSUE INVOLVES DUPLICATES / UNEXPECTED COUNTS / NON-DETERMINISTIC SELECTION:**
+You MUST also:
+- Query the database to prove the duplication pattern (group by logical key, show counts)
+- Trace provenance: WHERE are duplicates created? (seeds, migration, callback, job, controller)
+- Classify: INTENTIONAL (versioning/history) or ACCIDENTAL (bug)?
+- Check db/seeds.rb for time-dependent lookup keys or non-idempotent patterns
+
 DO NOT WRITE ANY CODE - research only!
+
+---
+
+## STEP 3: Five Whys - Evidence Pass (after research)
+
+Rewrite your Why chain with concrete evidence:
+
+- Why #1: [symptom] → Evidence: [file:line or query output]
+- Why #2: [cause] → Evidence: [file:line or query output]
+- Why #3: [deeper cause] → Evidence: [file:line or query output]
+- Why #4: [mechanism] → Evidence: [file:line or query output]
+- Why #5: [prevention gap] → Evidence: [missing constraint/test/guard]
+
+Then conclude with:
+- **Primary fix (stop the bleeding):** Fix at the SOURCE layer
+- **Secondary fix (consumption hardening):** Make reads deterministic as safety net
+- **What breaks if you only do secondary fix:** [explicit statement]
+
+**Guardrails:**
+- No "people/process" whys — focus on code/data causes only
+- Every why must be falsifiable with code/DB evidence
+- Stop at the first controllable cause (the thing you can change to stop recurrence)
 
 ---
 
@@ -271,9 +335,8 @@ This ensures:
 
 ### Anti-Patterns to Identify
 
-Flag these in your research if you find them:
+**View/Controller Layer:**
 - ❌ Manual JavaScript fetch + `Turbo.renderStreamMessage()` parsing (should use native Turbo forms)
-- ❌ `after_save` instead of `after_update_commit` for broadcasts
 - ❌ Mismatched turbo frame IDs between controller and partial
 - ❌ JavaScript calculations for derived values (should use Active Record callbacks + broadcasts)
 - ❌ Multiple partials for the same model's CRUD operations (should consolidate into one `_model.html.erb`)
@@ -281,9 +344,60 @@ Flag these in your research if you find them:
 - ❌ Calculations done in JavaScript that should be done server-side with callbacks
 - ❌ Turbo frames wrapping partials in parent views (turbo frame should be INSIDE the partial itself)
 
+**Model Layer (Callbacks/Associations):**
+- ❌ `after_save` instead of `after_update_commit` for broadcasts
+- ❌ Callbacks that silently create related records without idempotency checks (e.g., `after_create` that spawns child records)
+- ❌ Non-deterministic `find_by` without ordering (returns arbitrary record when multiple exist)
+
+**DB Layer (Seeds & Migrations):**
+- ❌ `Date.today`, `Time.current`, or `rand` inside `find_or_create_by!` lookup keys (breaks idempotency)
+- ❌ `create!` in seeds without uniqueness guard (e.g., no `find_or_create_by!`)
+- ❌ Missing unique database constraints for logical uniqueness (e.g., size + ownership_type should have unique index)
+- ❌ Migrations that backfill data without checking for existing records
+- ❌ Seeds that produce different results on different dates/runs (non-idempotent)
+
+**Seed Idempotence Rule:** Seeds SHOULD be idempotent unless explicitly documented otherwise. Running `db:seed` twice should produce the same database state.
+
 ---
 
 Return your findings in this structured format:
+
+### Root Cause Classification
+- **Primary layer:** [DB | Model | Controller | Views]
+- **Secondary layers (if any):** [list]
+- **Is this a DATA problem or DISPLAY problem?** [answer]
+- **Evidence:** [file paths + brief explanation]
+
+### Five Whys Analysis
+
+**Hypothesis Pass (pre-research):**
+- Why #1: [symptom] → Hypothesis: [guess] (Layer: X)
+- Why #2: → Hypothesis: [guess] (Layer: X)
+- Why #3: → Hypothesis: [guess] (Layer: X)
+- Why #4: → Hypothesis: [guess] (Layer: X)
+- Why #5: → Hypothesis: [guess] (Layer: X)
+- **Top 2 hypotheses:** ...
+- **Initial layer guess:** ...
+
+**Evidence Pass (post-research):**
+- Why #1: [symptom] → Evidence: [file:line]
+- Why #2: [cause] → Evidence: [file:line]
+- Why #3: [deeper cause] → Evidence: [file:line]
+- Why #4: [mechanism] → Evidence: [file:line]
+- Why #5: [prevention gap] → Evidence: [file:line]
+
+**Fix Strategy:**
+- Primary fix (source): [what to change at the SOURCE layer]
+- Secondary fix (consumption): [what to change to make reads deterministic]
+- Risk if only secondary ships: [explicit statement of what continues to break]
+
+### Data Anomaly Analysis (if duplicates/unexpected counts involved)
+- **Logical key(s) that should be unique:** [e.g., size + ownership_type]
+- **Observed duplication pattern:** [e.g., 27 records for 9 logical entities, grouped by effective_from]
+- **Provenance (where created):** [seeds | migration | callback | controller | job]
+- **Intentional or Accidental?** [answer + evidence]
+- **Stop-the-bleeding fix:** [what to change at source]
+- **Cleanup needed?** [delete N duplicate records? migration?]
 
 ### Database Schema
 **Relevant Tables:**
@@ -309,13 +423,15 @@ Return your findings in this structured format:
 [How the pieces connect - what triggers what, data flow]
 
 ### Anti-Patterns Found
-[List any violations of our preferred patterns - JavaScript calculations, missing turbo frames, multiple partials for same model CRUD, etc. If none found, state "None identified."]
+[List any violations of our preferred patterns - JavaScript calculations, missing turbo frames, multiple partials for same model CRUD, non-idempotent seeds, etc. If none found, state "None identified."]
 
 ### Implementation Considerations
 [Any gotchas, edge cases, or suggestions for the engineer. Include recommendations for fixing any anti-patterns found.]
 '''
 )
 ```
+
+---
 
 **AFTER DELEGATION:**
 The sub-agent will return its research findings directly to you. Once you receive the findings, proceed immediately to Task 2 (Ticket Creation).
@@ -493,6 +609,36 @@ Example: ## 2025-01-15 - BUG: Line Item Rate Shows 0 Instead of Final Buildup Ra
 
 ---
 
+### Data Integrity Assessment (for duplicate/data anomaly issues only)
+
+**Include this section if the issue involves duplicates, unexpected counts, or data anomalies.**
+
+**Root Cause Classification:**
+- Primary layer: [DB | Model | Controller | Views]
+- Is this a DATA problem or DISPLAY problem? [answer]
+
+**Five Whys Summary:**
+- Why #1: [symptom] → [evidence]
+- Why #2: [cause] → [evidence]
+- Why #3: [deeper cause] → [evidence]
+- Why #4: [mechanism] → [evidence]
+- Why #5: [root cause / prevention gap] → [evidence]
+
+**Data Anomaly Details:**
+- Logical key(s) that should be unique: [e.g., size + ownership_type]
+- Observed pattern: [e.g., 27 records for 9 logical entities]
+- Provenance: [seeds | migration | callback | controller | job]
+- Intentional or Accidental? [answer]
+
+**Two-Part Fix (REQUIRED):**
+1. **Stop the bleeding (source fix):** [what to change to stop new duplicates]
+2. **Query hardening (consumption fix):** [what to change to make reads deterministic]
+3. **Regression guard:** [unique constraint, test, or lint rule to prevent recurrence]
+
+**Risk if only #2 ships:** [explicit statement — e.g., "Database will accumulate 9 new duplicates per seed run"]
+
+---
+
 ### Constraints / Guardrails
 
 [Explicit constraints:]
@@ -559,6 +705,7 @@ Each smaller ticket should be independently demoable and testable.
 8. **No commentary outside the ticket** - Output ONLY the ticket markdown
 9. **MVP-first thinking** - The smallest demoable slice wins. Propose splits for complex tickets.
 10. **Demo Path is mandatory** - If you can't write a click-by-click demo path (Given/When/Then), the ticket scope is unclear
+11. **Data anomaly tickets require two fixes** - If the issue involves duplicates/orphans/unexpected data patterns, the ticket MUST include: (A) stop-the-bleeding fix at the source layer, and (B) consumption hardening. Explicitly state what breaks if only (B) ships.
 
 ---
 
@@ -676,6 +823,10 @@ The sub-agent will complete the task and report back with a summary of findings.
 13. **MVP-first thinking** - Smallest demoable slice wins
 14. **Contract is ground-truth** - Observation block copied verbatim; final VC is verbatim copy, Demo Path is where you expand steps
 15. **ALWAYS be concise** - No long explanations, just action
+16. **ROOT CAUSE BEFORE FIX** - For duplicates/data anomalies, research must classify layer (DB/Model/Controller/Views) and trace provenance BEFORE proposing any query/view fix. Never ship a "dedupe in query" ticket without first determining if the source is still creating duplicates.
+17. **Data Anomaly = Five Whys** - If user reports duplicates/unexpected counts, run the Five Whys (hypothesis + evidence pass) to trace backwards to the root controllable cause
+18. **Seeds Must Be Idempotent** - Flag any `Date.today`, `Time.current`, or random values inside `find_or_create_by!` lookup keys as anti-patterns
+19. **Two-Part Fixes for Data Issues** - Always propose both "stop the bleeding" (fix source) AND "query hardening" (deterministic reads). Explicitly state what breaks if only the secondary fix ships.
 
 **DECISIVENESS POLICY (repeated for emphasis):**
 - **Be decisive about:** MVP scope, timeboxing, non-goals, minor UI defaults when unspecified by contract/artifacts
