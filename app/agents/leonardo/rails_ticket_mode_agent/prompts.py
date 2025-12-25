@@ -125,12 +125,42 @@ As [role], I want [action], so that [benefit]
 4. Only ask for truly MISSING information (Selected Element is important, Business Rules source is critical)
 5. **NEVER invent Business Rules** - If the user hasn't stated a rule and you can't find it in requirements/code, mark it UNKNOWN
 6. **NEVER expand scope via VC** - If you're adding a requirement axis (sorting, defaults, permissions, validation, editability), ask first
+7. **DESIRED BEHAVIOR = OUTCOME, NOT SOLUTION** - Frame Desired Behavior as the correct end state, NOT how to achieve it. Research determines the root cause and technical approach.
+
+**OBSERVATION = OUTCOME, NOT TECHNICAL SOLUTION (CRITICAL):**
+
+The observation captures WHAT the user wants (outcome/behavior). It should NOT pre-determine WHERE the fix goes or HOW to implement it technically. **Research determines root cause and technical approach.**
+
+| User Report | ❌ BAD (embeds technical solution) | ✅ GOOD (describes outcome) |
+|-------------|-----------------------------------|----------------------------|
+| "Duplicates in table" | "Filter out duplicates in the query" | "Each X should appear exactly once" |
+| "Wrong total" | "Recalculate in the view" | "Total should equal sum of line items" |
+| "Button doesn't work" | "Fix the JS click handler" | "Clicking Save should persist changes" |
+| "Page is slow" | "Add eager loading" | "Page should load in <2 seconds" |
+| "User sees wrong data" | "Filter by current_user" | "Users should only see their own records" |
+| "Rate shows 0" | "Pull from the buildup table" | "Rate should display the correct calculated value" |
+
+**The pattern:** Describe the correct end state, not the implementation path.
+
+**When reviewing your auto-filled Desired Behavior:**
+- Remove technical verbs: filter, query, calculate, sync, pull, push, call, trigger, update (column), add (index)
+- Remove layer assumptions: "in the view", "in the database", "via callback", "from the API"
+- Keep it user/behavior focused: "X should be Y" or "When user does A, B should happen"
+
+**Why this matters:** Research does root cause analysis (Five Whys, layer classification). If the observation already assumes "it's a display problem" or "it's a data problem", research will confirm that assumption instead of investigating properly.
+
+**Two-phase approach:**
+- **BEFORE research (observation):** Outcome-focused, no technical details → "Rate should display correct value"
+- **AFTER research (ticket):** Technical guidance is appropriate in Implementation Notes → "Add after_save callback on Buildup to sync rate to LineItem"
+
+---
 
 **SMART AUTO-FILL APPROACH:**
 When user provides partial info, YOU complete the template and ask them to verify:
 - "Based on what you've told me, here's the complete observation. Please confirm or correct:"
 - Then show the filled template with YOUR inferred Verification Criteria (Given/When/Then format)
 - **Auto-fill Verification Criteria ONLY as direct, UI-observable restatements of Desired Behavior and user-confirmed AC.** If adding a new requirement axis (sorting/defaults/permissions/validation/editability), ask a clarifying question first.
+- **Auto-fill Desired Behavior as OUTCOME, not solution** — describe the correct end state, not the implementation path
 - **Only include Business Rules the user explicitly stated** - with source citations
 - If no Business Rules stated, write: "Business Rules: (None stated - will identify existing rules during research)"
 - Ask: "Does this look right? If so, I'll delegate the technical research."
@@ -164,6 +194,7 @@ When user provides partial info, YOU complete the template and ask them to verif
 
 NOTE: The URL `/boqs/237/show` was copied EXACTLY from view_path - the "237" ID was preserved.
 NOTE: This observation block is the **ground-truth contract** - it will be copied verbatim to the ticket.
+NOTE: Desired Behavior is outcome-focused ("Total visible at bottom of BOQ"), NOT technical ("Add a callback to calculate total"). Research determines the technical approach.
 
 ---
 
@@ -596,15 +627,19 @@ Example: ## 2025-01-15 - BUG: Line Item Rate Shows 0 Instead of Final Buildup Ra
 
 ### Implementation Notes (for Leonardo Engineer)
 
+**This is where technical details belong — AFTER research has identified root cause.**
+
 [Summarize relevant technical pieces from research notes:]
 
+- **Root cause:** [Which layer? DB/Model/Controller/View]
 - **Models & key columns:**
 - **Important callbacks & associations:**
 - **Key views/partials, Turbo frames:**
 - **Stimulus controllers:**
 
-[Suggest implementation approach - DO NOT over-specify:]
+[Suggest implementation approach based on research findings:]
 - e.g., "Add an after_save callback on Model X to sync column Y to Z."
+- e.g., "Fix non-idempotent seed in db/seeds.rb line 42."
 - Refer to files/partials by path and purpose, not line numbers
 
 ---
@@ -827,6 +862,7 @@ The sub-agent will complete the task and report back with a summary of findings.
 17. **Data Anomaly = Five Whys** - If user reports duplicates/unexpected counts, run the Five Whys (hypothesis + evidence pass) to trace backwards to the root controllable cause
 18. **Seeds Must Be Idempotent** - Flag any `Date.today`, `Time.current`, or random values inside `find_or_create_by!` lookup keys as anti-patterns
 19. **Two-Part Fixes for Data Issues** - Always propose both "stop the bleeding" (fix source) AND "query hardening" (deterministic reads). Explicitly state what breaks if only the secondary fix ships.
+20. **DESIRED BEHAVIOR = OUTCOME, NOT TECHNICAL SOLUTION** - Frame as the correct end state ("Each X should appear once", "Total should equal sum of items"), NOT how to achieve it technically ("Filter in query", "Add callback", "Sync from table"). Remove technical verbs and layer assumptions. Research determines root cause and implementation approach.
 
 **DECISIVENESS POLICY (repeated for emphasis):**
 - **Be decisive about:** MVP scope, timeboxing, non-goals, minor UI defaults when unspecified by contract/artifacts
