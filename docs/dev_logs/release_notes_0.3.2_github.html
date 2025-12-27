@@ -1,0 +1,191 @@
+<h1>🦙 LlamaBot v0.3.2 - Root Cause Analysis, Improved UX & Context Protection</h1>
+
+<p><strong>Release Date:</strong> December 27, 2025</p>
+
+<hr>
+
+<h2>🚀 What's New</h2>
+
+<h3>🔍 Root Cause Analysis in Ticket Mode</h3>
+<p>Leonardo now performs systematic root cause analysis before proposing fixes, ensuring bugs are fixed at the source layer rather than just patching symptoms.</p>
+<ul>
+  <li><strong>Five Whys Methodology</strong> - Hypothesis pass (before research) + Evidence pass (after research) to trace issues to their controllable cause</li>
+  <li><strong>Layer Classification</strong> - Automatically classifies bugs as DB/Model/Controller/View layer issues</li>
+  <li><strong>Two-Part Fix Strategy</strong> - For data anomaly issues, always proposes both "stop the bleeding" (source fix) AND "query hardening" (consumption fix)</li>
+  <li><strong>Outcome-Based Observations</strong> - Desired Behavior now describes the correct end state ("Each X appears exactly once") rather than prescribing technical solutions ("Filter duplicates in query")</li>
+</ul>
+
+<h3>🩺 Code Health Observations</h3>
+<p>Technical research now surfaces code quality issues with structured severity ratings.</p>
+<ul>
+  <li><strong>Severity Levels</strong> - CRITICAL (blocks ticket), MEDIUM (follow-up ticket), LOW (tech debt note)</li>
+  <li><strong>Categories</strong> - security, n+1, data-integrity, architecture, coupling, naming, missing-pattern</li>
+  <li><strong>Effort Hints</strong> - Each observation includes effort level (quick fix, refactor ticket, architectural change)</li>
+  <li><strong>Automatic Guardrails</strong> - CRITICAL observations auto-added to ticket constraints</li>
+</ul>
+
+<h3>📊 Token Context Indicator</h3>
+<p>New visual indicator shows real-time context window usage so you know when summarization will trigger.</p>
+<ul>
+  <li><strong>Circular Progress Wheel</strong> - Shows percentage of 80K context limit used</li>
+  <li><strong>Color Coding</strong> - Green (normal), Yellow (>60%), Red (>85% warning)</li>
+  <li><strong>Hover Tooltip</strong> - Shows exact token count (e.g., "45.2K / 80K tokens")</li>
+  <li><strong>Auto-Reset</strong> - Clears when switching threads or starting new conversations</li>
+</ul>
+
+<h3>✅ Improved TODO List UI</h3>
+<p>Complete visibility into all tasks, not just the current one.</p>
+<ul>
+  <li><strong>All Tasks Visible</strong> - Expandable dropdown shows completed, in-progress, and pending tasks</li>
+  <li><strong>Status Icons</strong> - Checkmark (completed), spinner (in-progress), dot (pending)</li>
+  <li><strong>Better Progress Tracking</strong> - Easier to follow along with Leonardo's work</li>
+</ul>
+
+<h3>📋 Clipboard Message Formatting</h3>
+<p>When copying conversation threads, messages are now formatted for readability.</p>
+<ul>
+  <li><strong>Labeled Messages</strong> - "You Said:", "Leonardo Said:", "Tool Call:" prefixes</li>
+  <li><strong>LLM-Ready Format</strong> - Paste directly into other LLMs for feedback with clear structure</li>
+  <li><strong>Clean Output</strong> - Strips internal markup while preserving content</li>
+</ul>
+
+<hr>
+
+<h2>⚡ Improvements</h2>
+
+<h3>🧠 Summarization Middleware</h3>
+<ul>
+  <li><strong>Upgraded to Claude Sonnet</strong> - Changed from Haiku to Sonnet for larger context window and better summarization quality</li>
+  <li><strong>Earlier Trigger</strong> - Summarization now triggers at 70K tokens (was 80K) to prevent overshooting into 95-100K territory</li>
+</ul>
+
+<h3>📝 Enhanced Prompt Guidance</h3>
+<ul>
+  <li><strong>Scaffold-First Mandate</strong> - Rails scaffold is now mandatory for new resources with CRUD UI, overriding piecemeal ticket instructions</li>
+  <li><strong>Decision Tree</strong> - Clear "scaffold vs model vs migration" decision tree in prompts</li>
+  <li><strong>Delegate Task Emphasis</strong> - Stronger guidance on using sub-agents for context protection</li>
+  <li><strong>Seed Idempotence Rules</strong> - New anti-patterns for non-idempotent seeds (Date.today, Time.current in lookup keys)</li>
+</ul>
+
+<h3>🧹 Prompt Refactoring</h3>
+<ul>
+  <li><strong>Git Tool Prompts Archived</strong> - Moved to separate <code>tool_prompts.py</code> file to reduce main prompt context size</li>
+  <li><strong>Cleaner Prompt Structure</strong> - Removed redundant sections and improved readability</li>
+</ul>
+
+<hr>
+
+<h2>🛡️ Safety Changes</h2>
+
+<h3>🔒 Git Tools Temporarily Disabled</h3>
+<p>Git commit/push tools removed from Leonardo to prevent aggressive commits without human verification.</p>
+<ul>
+  <li><code>git_status</code>, <code>git_commit</code>, <code>git_command</code>, <code>github_cli_command</code> commented out</li>
+  <li>Leonardo can still make code changes, but commits require manual user action</li>
+  <li>Tools preserved in <code>tool_prompts.py</code> for future re-enablement with proper safeguards</li>
+</ul>
+
+<hr>
+
+<h2>🔄 Migration Notes</h2>
+
+<p><strong>For Users:</strong></p>
+<ul>
+  <li><strong>Context visibility</strong> - Watch the new token indicator to understand when summarization will occur</li>
+  <li><strong>TODO tracking</strong> - Click the dropdown to see all tasks, not just the current one</li>
+  <li><strong>Copy conversations</strong> - Clipboard now formats messages for pasting into other LLMs</li>
+  <li><strong>Manual commits required</strong> - Leonardo won't auto-commit; review and commit changes yourself</li>
+</ul>
+
+<p><strong>For Developers:</strong></p>
+<ul>
+  <li>Summarization middleware now uses <code>claude-sonnet-4-5</code> (was <code>claude-haiku-4-5</code>)</li>
+  <li>Token threshold lowered to 70K (was 80K)</li>
+  <li>Git tool implementations remain in <code>tools.py</code> but are not registered in the agent's tool list</li>
+</ul>
+
+<hr>
+
+<h2>📋 Previous Releases</h2>
+
+<details>
+<summary><strong>v0.3.1</strong> - Gemini 3 Flash, Git Fixes & Cleaner Frontend</summary>
+<ul>
+  <li>Added support for Google's Gemini 3 Flash model</li>
+  <li>Improved ticket mode prompts to reduce hallucinations</li>
+  <li>Testing agent overhaul with three spec types only</li>
+  <li>Fixed git path from /app/app/rails to /app/leonardo</li>
+  <li>Removed console.log statements from frontend JavaScript</li>
+</ul>
+</details>
+
+<details>
+<summary><strong>v0.3.0</strong> - Ticket Mode 2.0 & Enhanced Builder Pattern</summary>
+<ul>
+  <li>Complete Ticket Mode redesign with single-conversation workflow</li>
+  <li>Sub-agent delegation for technical research</li>
+  <li>Comprehensive Builder pattern documentation</li>
+  <li>Debugging workflow with emoji convention</li>
+  <li>Enhanced git error handling</li>
+</ul>
+</details>
+
+<details>
+<summary><strong>v0.2.22</strong> - Middleware Architecture & Ticket Mode</summary>
+<ul>
+  <li>Modern middleware architecture with LangChain 1.1+</li>
+  <li>Initial Ticket Mode with 3-stage workflow</li>
+  <li>Sub-agent task delegation</li>
+  <li>Enhanced agent configuration via langgraph.json</li>
+  <li>Modular FastAPI routes</li>
+</ul>
+</details>
+
+<details>
+<summary><strong>v0.2.21</strong> - Multi-User & Admin System</summary>
+<ul>
+  <li>Multi-user management with PostgreSQL authentication</li>
+  <li>Admin permissions and role-based access control</li>
+  <li>ActiveRecord-like console utilities</li>
+  <li>User registration and session management</li>
+</ul>
+</details>
+
+<details>
+<summary><strong>v0.2.20</strong> - User Feedback Agent</summary>
+<ul>
+  <li>New user feedback agent mode for end-users to plan future development</li>
+  <li>Improved feedback agent prompt for better scope and sprint planning</li>
+  <li>Enables direct user input into product roadmap</li>
+</ul>
+</details>
+
+<details>
+<summary><strong>v0.2.19</strong> - AI Builder & Testing Mode</summary>
+<ul>
+  <li><strong>AI Builder Mode</strong> - Leonardo helps build user-facing agents within Rails apps</li>
+  <li><strong>QA Test Builder Mode</strong> - Automated test generation with RSpec & Vite-JS</li>
+  <li>New <code>user_agents</code> folder for custom agent definitions</li>
+  <li>Prompt caching for all agents (significant cost reduction)</li>
+  <li>Capybara/Cuprite browser tool for JavaScript debugging</li>
+</ul>
+</details>
+
+<details>
+<summary><strong>v0.2.18</strong> - UI/UX Overhaul</summary>
+<ul>
+  <li>Massive UI/UX overhaul for messages and iframe</li>
+  <li>Refactored chat.html into modular JavaScript packages</li>
+  <li>Support for any LLM model - Claude, Gemini, GPT Codex, GPT series</li>
+  <li>New task/planning component for clearer agent status</li>
+  <li>Auto-refreshing iframe shows changes in real-time</li>
+</ul>
+</details>
+
+<hr>
+
+<p><strong>LlamaBot</strong> - AI Coding Agent Framework</p>
+<p>
+  <a href="https://github.com/KodyKendall/LlamaBot">GitHub</a> ·
+  <a href="https://discord.gg/7DapkvmWKZ">Discord</a>
+</p>

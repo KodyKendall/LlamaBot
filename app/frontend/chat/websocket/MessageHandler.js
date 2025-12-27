@@ -2,15 +2,15 @@
  * WebSocket message routing and processing
  */
 
-import { DEFAULT_CONFIG } from '../config.js';
-
 export class MessageHandler {
-  constructor(appState, streamingState, messageRenderer, iframeManager, scrollManager) {
+  constructor(appState, streamingState, messageRenderer, iframeManager, scrollManager, tokenIndicator, config) {
     this.appState = appState;
     this.streamingState = streamingState;
     this.messageRenderer = messageRenderer;
     this.iframeManager = iframeManager;
     this.scrollManager = scrollManager;
+    this.tokenIndicator = tokenIndicator;
+    this.config = config;
 
     // Track active plan for real-time updates
     this.activePlanId = null;
@@ -64,6 +64,11 @@ export class MessageHandler {
    * Handle incoming WebSocket message
    */
   handleMessage(data) {
+    // Update token indicator if token usage data is present
+    if (data.token_usage && this.tokenIndicator) {
+      this.tokenIndicator.update(data.token_usage);
+    }
+
     if (data.type === 'AIMessageChunk') {
       this.handleAIMessageChunk(data);
     } else if (data.type === 'ai') {

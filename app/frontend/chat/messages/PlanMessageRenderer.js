@@ -1,7 +1,7 @@
 /**
  * Modern minimalist plan rendering for 2025 AI UX
  * - Only shows active task with shimmer
- * - Hides completed tasks in subtle collapsed view
+ * - All tasks viewable in expandable dropdown (completed, in_progress, pending)
  * - Clean, unobtrusive design
  */
 
@@ -32,16 +32,16 @@ export class PlanMessageRenderer {
     // Subtle progress indicator
     const progressHTML = this._renderProgressIndicator(completedTasks.length, steps.length, uniqueId);
 
-    // Hidden completed tasks (expandable)
-    const completedHTML = completedTasks.length > 0
-      ? this._renderCompletedTasks(completedTasks, uniqueId)
+    // All tasks list (expandable dropdown)
+    const allTasksHTML = steps.length > 0
+      ? this._renderAllTasks(steps, uniqueId)
       : '';
 
     return `
       <div class="plan-modern" data-plan-id="${uniqueId}">
         ${activeTaskHTML}
         ${progressHTML}
-        ${completedHTML}
+        ${allTasksHTML}
       </div>
     `;
   }
@@ -92,19 +92,32 @@ export class PlanMessageRenderer {
   }
 
   /**
-   * Render collapsed completed tasks list
+   * Render all tasks list with status indicators
    */
-  _renderCompletedTasks(tasks, planId) {
-    const tasksHTML = tasks.map(task => `
-      <div class="plan-completed-item">
-        <div class="plan-check-tiny">✓</div>
-        <span>${this._escapeHtml(task.content)}</span>
-      </div>
-    `).join('');
+  _renderAllTasks(tasks, planId) {
+    const tasksHTML = tasks.map(task => {
+      const statusClass = `plan-task-${task.status}`;
+      let statusIcon = '';
+
+      if (task.status === 'completed') {
+        statusIcon = '<div class="plan-check-tiny">✓</div>';
+      } else if (task.status === 'in_progress') {
+        statusIcon = '<div class="plan-active-icon">✦</div>';
+      } else {
+        statusIcon = '<div class="plan-pending-dot"></div>';
+      }
+
+      return `
+        <div class="plan-task-item ${statusClass}">
+          ${statusIcon}
+          <span>${this._escapeHtml(task.content)}</span>
+        </div>
+      `;
+    }).join('');
 
     return `
-      <div class="plan-completed-list" id="plan-details-${planId}" style="display: none;">
-        <div class="plan-completed-header">Completed</div>
+      <div class="plan-tasks-list" id="plan-details-${planId}" style="display: none;">
+        <div class="plan-tasks-header">All Tasks</div>
         ${tasksHTML}
       </div>
     `;
@@ -158,29 +171,42 @@ export class PlanMessageRenderer {
         : `<span class="plan-count">${completedTasks.length}/${newSteps.length} tasks</span>${arrowIcon}`;
     }
 
-    // Update completed list
-    const completedList = planElement.querySelector('.plan-completed-list');
-    if (completedTasks.length > 0) {
-      const completedHTML = completedTasks.map(task => `
-        <div class="plan-completed-item">
-          <div class="plan-check-tiny">✓</div>
-          <span>${this._escapeHtml(task.content)}</span>
-        </div>
-      `).join('');
+    // Update all tasks list
+    const tasksList = planElement.querySelector('.plan-tasks-list');
+    if (newSteps.length > 0) {
+      const tasksHTML = newSteps.map(task => {
+        const statusClass = `plan-task-${task.status}`;
+        let statusIcon = '';
 
-      if (completedList) {
-        completedList.innerHTML = `
-          <div class="plan-completed-header">Completed</div>
-          ${completedHTML}
-        `;
-      } else {
-        const newCompletedHTML = `
-          <div class="plan-completed-list" id="plan-details-${planId}" style="display: none;">
-            <div class="plan-completed-header">Completed</div>
-            ${completedHTML}
+        if (task.status === 'completed') {
+          statusIcon = '<div class="plan-check-tiny">✓</div>';
+        } else if (task.status === 'in_progress') {
+          statusIcon = '<div class="plan-spinner-tiny"></div>';
+        } else {
+          statusIcon = '<div class="plan-pending-dot"></div>';
+        }
+
+        return `
+          <div class="plan-task-item ${statusClass}">
+            ${statusIcon}
+            <span>${this._escapeHtml(task.content)}</span>
           </div>
         `;
-        planElement.insertAdjacentHTML('beforeend', newCompletedHTML);
+      }).join('');
+
+      if (tasksList) {
+        tasksList.innerHTML = `
+          <div class="plan-tasks-header">All Tasks</div>
+          ${tasksHTML}
+        `;
+      } else {
+        const newTasksHTML = `
+          <div class="plan-tasks-list" id="plan-details-${planId}" style="display: none;">
+            <div class="plan-tasks-header">All Tasks</div>
+            ${tasksHTML}
+          </div>
+        `;
+        planElement.insertAdjacentHTML('beforeend', newTasksHTML);
       }
     }
   }

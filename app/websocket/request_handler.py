@@ -98,14 +98,21 @@ class RequestHandler:
                         content = base_message_as_dict["content"]
                         logger.info(f"🍅 Content type: {type(content)}, Content: {content}")
 
+                        # Token usage is typically only available on the final chunk or update message
+                        # For streaming chunks, we skip token extraction (Anthropic doesn't send it mid-stream)
+                        token_usage = None
+
                         # # Only send if WebSocket is still open
                         if self._is_websocket_open(websocket):
-                            await websocket.send_json({
+                            ws_message = {
                                 "type": base_message_as_dict["type"],
                                 "content": base_message_as_dict["content"],  # Keep original format, frontend handles both
                                 "tool_calls": [],
                                 "base_message": base_message_as_dict
-                            })
+                            }
+                            if token_usage:
+                                ws_message["token_usage"] = token_usage
+                            await websocket.send_json(ws_message)
 
                     elif is_this_chunk_an_update_stream_type: # This means that LangGraph has given us a state update. This will often include a new message from the AI.
                         state_object = chunk[2]
@@ -153,10 +160,23 @@ class RequestHandler:
                                         logger.warning(f"Failed to serialize message: {e}")
                                         base_message_as_dict = {"content": str(message), "type": "ai"}
 
+                                    # Extract token usage metadata if available (for context window tracking)
+                                    # Anthropic sends usage_metadata on the final AIMessage (not during streaming)
+                                    token_usage = None
+                                    usage_metadata = getattr(message, 'usage_metadata', None)
+
+                                    if usage_metadata:
+                                        token_usage = {
+                                            "input_tokens": usage_metadata.get("input_tokens", 0) if isinstance(usage_metadata, dict) else getattr(usage_metadata, 'input_tokens', 0),
+                                            "output_tokens": usage_metadata.get("output_tokens", 0) if isinstance(usage_metadata, dict) else getattr(usage_metadata, 'output_tokens', 0),
+                                            "total_tokens": usage_metadata.get("total_tokens", 0) if isinstance(usage_metadata, dict) else getattr(usage_metadata, 'total_tokens', 0)
+                                        }
+                                        logger.info(f"📊 Token usage: {token_usage}")
+
                                     # Only send if WebSocket is still open
                                     if self._is_websocket_open(websocket):
 
-                                        # NOTE: This JSON object is a standardized format that we've been using for all our front-ends.  
+                                        # NOTE: This JSON object is a standardized format that we've been using for all our front-ends.
                                         # Eventually, we might want to just rely on the base_message data shape as the source of truth for all front-ends.
                                         llamapress_user_interface_json = { # we're forcing this shape to match a BaseMessage type.
                                             "type": message.type if hasattr(message, 'type') else "ai",
@@ -164,7 +184,9 @@ class RequestHandler:
                                             "tool_calls": tool_calls,
                                             "base_message": base_message_as_dict
                                         }
-                                        
+                                        if token_usage:
+                                            llamapress_user_interface_json["token_usage"] = token_usage
+
                                         await websocket.send_json(llamapress_user_interface_json)
                         logger.info(f"LangGraph Output (State Update): {chunk}")
 

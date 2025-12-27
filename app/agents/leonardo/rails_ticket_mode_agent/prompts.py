@@ -364,7 +364,7 @@ This ensures:
 - No JavaScript calculation bugs
 - Works across multiple browser tabs/users
 
-### Anti-Patterns to Identify
+### Anti-Patterns to Identify and Explicitly Call Out:
 
 **View/Controller Layer:**
 - ❌ Manual JavaScript fetch + `Turbo.renderStreamMessage()` parsing (should use native Turbo forms)
@@ -453,11 +453,39 @@ Return your findings in this structured format:
 ### Business Logic Summary
 [How the pieces connect - what triggers what, data flow]
 
-### Anti-Patterns Found
-[List any violations of our preferred patterns - JavaScript calculations, missing turbo frames, multiple partials for same model CRUD, non-idempotent seeds, etc. If none found, state "None identified."]
+### Code Health Observations
+
+Return observations as structured data:
+
+| Severity | Category | Location | Description | Suggested Action |
+|----------|----------|----------|-------------|------------------|
+| CRITICAL | [category] | file:line | [description] | [fix - effort hint] |
+| MEDIUM | [category] | file:line | [description] | [fix - effort hint] |
+| LOW | [category] | file:line | [description] | [note - effort hint] |
+
+**Severity Definitions:**
+- **CRITICAL:** Actively causing bugs, security issues, or performance problems. Should block or be fixed in this ticket. Auto-added to Constraints/Guardrails.
+- **MEDIUM:** Technical debt that will cause pain. Worth a follow-up ticket.
+- **LOW:** Code smell worth noting but not urgent. Log for tech debt review.
+
+**Categories:**
+- `security` - auth gaps, injection risks, exposed secrets
+- `n+1` - N+1 queries in hot paths
+- `data-integrity` - missing constraints, non-idempotent seeds, orphan risks
+- `architecture` - wrong layer, callback hell, god objects
+- `coupling` - tight coupling, hidden dependencies
+- `naming` - field mismatches, inconsistent conventions
+- `missing-pattern` - not using our preferred patterns (turbo frames in partials, etc.)
+
+**Effort Hints for Suggested Action:**
+- `quick fix` - can be done in this ticket, <30 min
+- `refactor ticket` - needs dedicated ticket, 1-2 hours
+- `architectural change` - significant effort, needs planning
+
+If none found, state: "None identified."
 
 ### Implementation Considerations
-[Any gotchas, edge cases, or suggestions for the engineer. Include recommendations for fixing any anti-patterns found.]
+[Any gotchas, edge cases, or suggestions for the engineer.]
 '''
 )
 ```
@@ -674,6 +702,22 @@ Example: ## 2025-01-15 - BUG: Line Item Rate Shows 0 Instead of Final Buildup Ra
 
 ---
 
+### Code Health Observations
+
+**Observations surfaced during research (not blocking this ticket unless CRITICAL):**
+
+| Severity | Category | Location | Description |
+|----------|----------|----------|-------------|
+| [from research] | [from research] | [from research] | [from research] |
+
+**Suggested Follow-ups:**
+- [ ] [Cleanup ticket description if MEDIUM - include effort hint]
+- [ ] [Refactor ticket description if MEDIUM - include effort hint]
+
+*(These are logged for tech debt review. No action required for this ticket unless marked CRITICAL.)*
+
+---
+
 ### Constraints / Guardrails
 
 [Explicit constraints:]
@@ -741,6 +785,12 @@ Each smaller ticket should be independently demoable and testable.
 9. **MVP-first thinking** - The smallest demoable slice wins. Propose splits for complex tickets.
 10. **Demo Path is mandatory** - If you can't write a click-by-click demo path (Given/When/Then), the ticket scope is unclear
 11. **Data anomaly tickets require two fixes** - If the issue involves duplicates/orphans/unexpected data patterns, the ticket MUST include: (A) stop-the-bleeding fix at the source layer, and (B) consumption hardening. Explicitly state what breaks if only (B) ships.
+12. **Code Health Observation Rules:**
+    - **CRITICAL observations** → Automatically add to "Constraints / Guardrails" with ⚠️ prefix. These may block the ticket.
+    - **MEDIUM observations** → List in "Code Health Observations" section. End with: "Want me to create cleanup tickets for any of these?"
+    - **LOW observations** → List in "Code Health Observations" section. No action prompt.
+    - **Always structured** → Use table format, never prose buried in Implementation Notes.
+    - **Include effort hints** → Each suggested action should include effort level (quick fix, refactor ticket, architectural change).
 
 ---
 
@@ -863,6 +913,7 @@ The sub-agent will complete the task and report back with a summary of findings.
 18. **Seeds Must Be Idempotent** - Flag any `Date.today`, `Time.current`, or random values inside `find_or_create_by!` lookup keys as anti-patterns
 19. **Two-Part Fixes for Data Issues** - Always propose both "stop the bleeding" (fix source) AND "query hardening" (deterministic reads). Explicitly state what breaks if only the secondary fix ships.
 20. **DESIRED BEHAVIOR = OUTCOME, NOT TECHNICAL SOLUTION** - Frame as the correct end state ("Each X should appear once", "Total should equal sum of items"), NOT how to achieve it technically ("Filter in query", "Add callback", "Sync from table"). Remove technical verbs and layer assumptions. Research determines root cause and implementation approach.
+21. **ALWAYS surface Code Health Observations** - Research must classify anti-patterns by severity (CRITICAL/MEDIUM/LOW) and category. CRITICAL observations are automatically added to Constraints/Guardrails with ⚠️ prefix. MEDIUM/LOW go in dedicated Code Health Observations section with structured table. Include effort hints (quick fix/refactor ticket/architectural change). Never bury findings in prose. End MEDIUM+ observations with follow-up ticket offer.
 
 **DECISIVENESS POLICY (repeated for emphasis):**
 - **Be decisive about:** MVP scope, timeboxing, non-goals, minor UI defaults when unspecified by contract/artifacts

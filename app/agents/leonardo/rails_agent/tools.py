@@ -9,14 +9,16 @@ from app.agents.leonardo.rails_agent.prompts import (
     WRITE_TODOS_DESCRIPTION,
     EDIT_DESCRIPTION,
     TOOL_DESCRIPTION,
-    INTERNET_SEARCH_DESCRIPTION,
     LIST_DIRECTORY_DESCRIPTION,
     BASH_COMMAND_FOR_RAILS_DESCRIPTION,
+    SEARCH_FILE_DESCRIPTION,
+)
+
+from app.agents.leonardo.rails_agent.tool_prompts import (
+    INTERNET_SEARCH_DESCRIPTION,
     GIT_STATUS_DESCRIPTION,
     GIT_COMMIT_DESCRIPTION,
     GIT_COMMAND_DESCRIPTION,
-    SEARCH_FILE_DESCRIPTION,
-    VIEW_CURRENT_PAGE_HTML_DESCRIPTION,
     GITHUB_CLI_DESCRIPTION,
 )
 
@@ -946,16 +948,6 @@ def github_cli_command(
     return Command(
         update={
             "messages": [ToolMessage(output, tool_call_id=tool_call_id)],
-        }
-    )
-
-@tool(description=VIEW_CURRENT_PAGE_HTML_DESCRIPTION)
-def view_page(runtime: ToolRuntime) -> Command:
-    """View the current page HTML that the user is looking at."""
-    debug_info = runtime.state.get("debug_info")
-    return Command(
-        update={
-            "messages": [ToolMessage(debug_info, tool_call_id=runtime.tool_call_id)],
         }
     )
 

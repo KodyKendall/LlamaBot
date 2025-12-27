@@ -15,8 +15,10 @@ import { IframeManager } from './ui/IframeManager.js';
 import { ElementSelector } from './ui/ElementSelector.js';
 import { MenuManager } from './ui/MenuManager.js';
 import { MobileViewManager } from './ui/MobileViewManager.js';
+import { TokenIndicator } from './ui/TokenIndicator.js';
 import { ThreadManager } from './threads/ThreadManager.js';
 import { LoadingVerbs } from './utils/LoadingVerbs.js';
+import { ClipboardFormatter } from './utils/ClipboardFormatter.js';
 
 /**
  * Main application class - LlamaBot Client
@@ -47,6 +49,7 @@ class ChatApp {
     this.menuManager = null;
     this.mobileViewManager = null;
     this.threadManager = null;
+    this.tokenIndicator = null;
     this.loadingVerbs = new LoadingVerbs();
 
     // Initialize WebSocket components
@@ -119,6 +122,9 @@ class ChatApp {
     this.iframeManager = new IframeManager(this.container);
     this.menuManager = new MenuManager(this.container);
     this.mobileViewManager = new MobileViewManager(this.scrollManager, this.container, this.elements);
+    this.tokenIndicator = new TokenIndicator();
+    this.clipboardFormatter = new ClipboardFormatter(this.elements.messageHistory);
+    this.clipboardFormatter.init();
 
     // Initialize message renderer with iframe manager, debug info callback, scroll manager, and loading verbs
     this.messageRenderer = new MessageRenderer(
@@ -146,6 +152,7 @@ class ChatApp {
       this.messageRenderer,
       this.iframeManager,
       this.scrollManager,
+      this.tokenIndicator,
       this.config
     );
 
@@ -270,11 +277,19 @@ class ChatApp {
     // Listen for thread change
     window.addEventListener('threadChanged', (e) => {
       this.appState.setThreadId(e.detail.threadId);
+      // Reset token indicator when switching threads (we don't have historical token counts)
+      if (this.tokenIndicator) {
+        this.tokenIndicator.reset();
+      }
     });
 
     // Listen for new thread creation
     window.addEventListener('createNewThread', () => {
       this.threadManager.createNewThread();
+      // Reset token indicator for new conversation
+      if (this.tokenIndicator) {
+        this.tokenIndicator.reset();
+      }
     });
   }
 

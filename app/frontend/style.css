@@ -1343,6 +1343,94 @@ body {
     filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3));
 }
 
+/* Token Context Indicator - Shows context window usage */
+.token-indicator {
+    position: absolute;
+    top: -45px;
+    left: 10px;
+    width: 36px;
+    height: 36px;
+    cursor: pointer;
+    z-index: 1000;
+    opacity: 0.7;
+    transition: opacity 0.2s ease;
+}
+
+.token-indicator:hover {
+    opacity: 1;
+}
+
+.token-wheel {
+    width: 100%;
+    height: 100%;
+    transform: rotate(-90deg);
+}
+
+.token-wheel-bg {
+    fill: none;
+    stroke: rgba(255, 255, 255, 0.15);
+    stroke-width: 3;
+}
+
+.token-wheel-progress {
+    fill: none;
+    stroke: #8b5cf6;
+    stroke-width: 3;
+    stroke-linecap: round;
+    transition: stroke-dasharray 0.3s ease, stroke 0.3s ease;
+}
+
+/* Color changes based on usage level */
+.token-indicator.warning .token-wheel-progress {
+    stroke: #f59e0b;
+}
+
+.token-indicator.critical .token-wheel-progress {
+    stroke: #ef4444;
+}
+
+.token-percentage {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 9px;
+    font-weight: 600;
+    color: #e0e0e0;
+    pointer-events: none;
+}
+
+.token-tooltip {
+    position: absolute;
+    bottom: 44px;
+    left: 0;
+    background: rgba(30, 30, 30, 0.95);
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    color: #e0e0e0;
+    white-space: nowrap;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.2s ease, visibility 0.2s ease;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.token-tooltip::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 14px;
+    border: 5px solid transparent;
+    border-top-color: rgba(30, 30, 30, 0.95);
+}
+
+.token-indicator:hover .token-tooltip {
+    opacity: 1;
+    visibility: visible;
+}
+
 /* Unread badge */
 .unread-badge {
     position: absolute;
@@ -1963,12 +2051,86 @@ body {
 }
 
 /* Rotate arrow when expanded */
-.plan-completed-list[style*="display: block"] ~ .plan-progress-text .plan-expand-arrow,
+.plan-tasks-list[style*="display: block"] ~ .plan-progress-text .plan-expand-arrow,
 .plan-progress-text.expanded .plan-expand-arrow {
     transform: rotate(180deg);
 }
 
-/* Collapsed completed tasks list */
+/* All tasks list (expandable dropdown) */
+.plan-tasks-list {
+    margin-top: 8px;
+    padding: 12px;
+    background: rgba(255, 255, 255, 0.02);
+    border-radius: 8px;
+    transition: opacity 0.3s ease;
+}
+
+.plan-tasks-header {
+    font-size: 0.75em;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: rgba(255, 255, 255, 0.4);
+    margin-bottom: 8px;
+    font-weight: 600;
+}
+
+.plan-task-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 0;
+    font-size: 0.85em;
+    line-height: 1.4;
+}
+
+/* Task status styles */
+.plan-task-completed {
+    color: rgba(255, 255, 255, 0.4);
+}
+
+.plan-task-in_progress {
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.plan-task-pending {
+    color: rgba(255, 255, 255, 0.35);
+}
+
+/* Active icon for in-progress tasks in list */
+.plan-active-icon {
+    width: 14px;
+    height: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #8b5cf6;
+    font-size: 1.1em;
+    flex-shrink: 0;
+    animation: star-shimmer 2s ease-in-out infinite;
+}
+
+@keyframes star-shimmer {
+    0%, 100% {
+        opacity: 0.7;
+        transform: rotate(-15deg);
+    }
+    50% {
+        opacity: 1;
+        transform: rotate(15deg);
+    }
+}
+
+/* Pending square */
+.plan-pending-dot {
+    width: 14px;
+    height: 14px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    flex-shrink: 0;
+}
+
+/* Legacy: Collapsed completed tasks list (kept for backwards compatibility) */
 .plan-completed-list {
     margin-top: 8px;
     padding: 12px;
