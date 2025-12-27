@@ -17,6 +17,7 @@ import { MenuManager } from './ui/MenuManager.js';
 import { MobileViewManager } from './ui/MobileViewManager.js';
 import { ThreadManager } from './threads/ThreadManager.js';
 import { LoadingVerbs } from './utils/LoadingVerbs.js';
+import { ClipboardFormatter } from './utils/ClipboardFormatter.js';
 
 /**
  * Main application class - LlamaBot Client
@@ -119,6 +120,8 @@ class ChatApp {
     this.iframeManager = new IframeManager(this.container);
     this.menuManager = new MenuManager(this.container);
     this.mobileViewManager = new MobileViewManager(this.scrollManager, this.container, this.elements);
+    this.clipboardFormatter = new ClipboardFormatter(this.elements.messageHistory);
+    this.clipboardFormatter.init();
 
     // Initialize message renderer with iframe manager, debug info callback, scroll manager, and loading verbs
     this.messageRenderer = new MessageRenderer(

@@ -79,7 +79,7 @@ def build_workflow(checkpointer=None):
     middleware = [
         # 1. Summarization for long conversations - prevents token limit issues
         SummarizationMiddleware(
-            model="claude-haiku-4-5",
+            model="claude-sonnet-4-5",
             max_tokens_before_summary=80000,  # Trigger summarization at 80k tokens
             messages_to_keep=40,              # Keep last 40 messages after summary
         ),
