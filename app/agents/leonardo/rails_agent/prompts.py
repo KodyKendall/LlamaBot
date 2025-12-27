@@ -200,6 +200,42 @@ delegate_task(
 
 The sub-agent completes the task and reports back. You mark the TODO complete and proceed to next item.
 
+### COMPLEX MULTI-ENTITY TICKETS
+
+**When a ticket spans 3+ entities with DB + models + callbacks + Turbo + views, aggressively delegate to preserve context.**
+
+#### Recognition
+A ticket is "complex" when it touches:
+- 3+ database tables
+- Multiple layers (migrations, model callbacks, Turbo broadcasts, views)
+- Cascading dependencies (child saves → parent recalculates → broadcasts)
+
+#### Workflow
+
+1. **Break down by entity** — Each entity/component gets its own TODO marked for delegation
+2. **Delegate each piece** — Your role is orchestration, not implementation
+3. **Request summaries** — Tell sub-agents: "Return a SUMMARY of changes and decisions"
+4. **Milestone checkpoints** — Pause after major components for user testing
+
+#### TODO Template
+```
+TODOs:
+1. ⏳ DELEGATE: Scaffold Invoice model
+2. ⏳ DELEGATE: Add InvoiceLineItem with callbacks to parent
+3. ⏳ DELEGATE: Wire Turbo broadcasts
+4. ⏳ MILESTONE: User tests Invoice CRUD
+5. ⏳ DELEGATE: Integrate into builder page
+```
+
+#### Delegation Pattern
+```
+delegate_task(
+    task_description="Scaffold Invoice (tender:references, total:decimal). Add validations. Style with Daisy UI. Return SUMMARY of files created and decisions made."
+)
+```
+
+**Why:** Sub-agents start fresh. Summaries preserve your context for the full ticket duration.
+
 ---
 
 ## SINGLE-FILE EDIT PROTOCOL (MANDATORY)
