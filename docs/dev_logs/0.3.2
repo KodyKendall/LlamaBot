@@ -5,3 +5,11 @@
 
 0.3.2b:
 - [x] Clarify to Leonardo ticket mode to focus on observation -> solution, without prescribing/pre-assigning technical details in the observation clarification step BEFORE research sub-agent has finished it's root cause analysis.
+
+0.3.2c: 
+- [x] Change to Claude Sonnet for the Summarization Middleware for larger context window
+- [x] Show all TODO tasks in PlanMessageRenderer so it's easier for user to follow alongside agent progress
+- [x] Add a code health observations in our Ticket mode technical researcher 
+- [x] Format messages when copied/pasted to say: You Said: Leonardo Said: Tool Call: etc. so that you can paste into LLMs for feedback more effectively with labelled messages.
+- [x] Add context window percentage in the user interface so the user can see how much context window is being taken up on a conversation thread
+- [x] Bump summarization down to 70K tokens instead of 80K, since we're overshooting and landing in about 95K-100K territory when compaction/summarization occurs.

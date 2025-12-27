@@ -63,6 +63,17 @@
                 <i class="fa-solid fa-arrow-down"></i>
                 <!-- Badge will be added dynamically by ScrollManager -->
             </button>
+            <!-- Token context usage indicator -->
+            <div class="token-indicator" data-llamabot="token-indicator" title="Context usage">
+                <svg class="token-wheel" viewBox="0 0 36 36">
+                    <circle class="token-wheel-bg" cx="18" cy="18" r="15.9"/>
+                    <circle class="token-wheel-progress" cx="18" cy="18" r="15.9" stroke-dasharray="0 100"/>
+                </svg>
+                <span class="token-percentage">0%</span>
+                <div class="token-tooltip">
+                    <span class="token-count">0</span> / 80K tokens
+                </div>
+            </div>
             <!-- Thinking indicator area - displays above input -->
             <div data-llamabot="thinking-area" class="thinking-area hidden"></div>
             <textarea placeholder="Ask Leonardo..." data-llamabot="message-input"></textarea>
