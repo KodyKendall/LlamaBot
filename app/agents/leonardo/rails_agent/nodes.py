@@ -81,7 +81,7 @@ def build_workflow(checkpointer=None):
         SummarizationMiddleware(
             model="claude-sonnet-4-5",
             max_tokens_before_summary=70000,  # Trigger summarization at 80k tokens
-            messages_to_keep=40,              # Keep last 40 messages after summary
+            messages_to_keep=8,               #
         ),
         # 2. Dynamic model selection based on state.llm_model from frontend
         DynamicModelMiddleware(),
