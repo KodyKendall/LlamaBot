@@ -21,7 +21,9 @@ from langchain_core.messages import SystemMessage
 from app.agents.leonardo.rails_agent.state import RailsAgentState
 from app.agents.leonardo.rails_agent.tools import (
     write_todos, ls, read_file, write_file, edit_file,
-    search_file, bash_command, git_status, git_commit,
+    search_file, 
+    glob_files, grep_files,
+    bash_command, git_status, git_commit,
     git_command, github_cli_command, internet_search
 )
 from app.agents.leonardo.rails_agent.prompts import RAILS_AGENT_PROMPT
@@ -50,7 +52,9 @@ CACHED_SYSTEM_PROMPT = SystemMessage(
 # Tool list - all tools available to the Rails agent
 default_tools = [
     write_todos,
-    ls, read_file, write_file, edit_file, search_file,
+    ls, read_file, write_file, edit_file, 
+    # search_file,
+    glob_files, grep_files,
     bash_command,
     # git_status, git_commit, 
     # git_command, 

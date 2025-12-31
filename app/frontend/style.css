@@ -117,6 +117,59 @@ body {
     font-size: 18px;
 }
 
+/* Model toggle button - subtle, hidden by default */
+.model-toggle-btn {
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: none;
+    color: var(--text-color);
+    opacity: 0.25;
+    cursor: pointer;
+    transition: opacity 0.2s ease, background-color 0.2s ease;
+    border-radius: 4px;
+    padding: 0;
+}
+
+.model-toggle-btn:hover {
+    opacity: 0.6;
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+.model-toggle-btn.active {
+    opacity: 0.8;
+    background-color: rgba(139, 92, 246, 0.1);
+}
+
+.model-toggle-btn i {
+    font-size: 12px;
+}
+
+/* Model selector container - slides in when visible */
+.model-selector-container {
+    display: flex;
+    align-items: center;
+    transition: opacity 0.2s ease, transform 0.2s ease;
+    margin-right: auto;
+}
+
+.model-selector-container.hidden {
+    display: none;
+}
+
+.model-selector-container .custom-dropdown {
+    font-size: 0.7rem;
+    padding: 0.35rem 1.5rem 0.35rem 0.5rem;
+}
+
+/* When model selector is hidden, toggle button pushes itself to left */
+.send-controls .model-toggle-btn:not(.active) {
+    margin-right: auto;
+}
+
 /* Hamburger menu styles */
 .hamburger-menu {
     width: 32px;

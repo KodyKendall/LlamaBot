@@ -135,8 +135,11 @@ class DynamicModelMiddleware(AgentMiddleware):
             return ChatAnthropic(model="claude-sonnet-4-5-20250929", max_tokens=16384)
         elif model_name == 'gemini-3-flash':
             return ChatGoogleGenerativeAI(model="gemini-3-flash-preview")
-        # Default to Claude 4.5 Haiku
-        return ChatAnthropic(model="claude-haiku-4-5", max_tokens=16384)
+        elif model_name == 'claude-4.5-haiku':
+            return ChatAnthropic(model="claude-haiku-4-5", max_tokens=16384)
+        
+        # Default to Gemini 3 Flash - fallback (can be changed independently from explicit model selections)
+        return ChatGoogleGenerativeAI(model="gemini-3-flash-preview")
 
     def wrap_model_call(self, request, handler):
         """Sync version: Override the model in the request based on state."""
@@ -144,6 +147,12 @@ class DynamicModelMiddleware(AgentMiddleware):
         llm_model = request.state.get('llm_model', 'claude-4.5-haiku')
         logger.info(f"Using LLM model: {llm_model}")
         model = self._get_llm(llm_model)
+        # This is all you need for automatic retries on rate limits from Google
+        model = model.with_retry(
+            retry_if_exception_type=(ResourceExhausted,),
+            stop_after_attempt=5,
+            wait_exponential_jitter=True,
+        )
         return handler(request.override(model=model))
 
     async def awrap_model_call(self, request, handler):

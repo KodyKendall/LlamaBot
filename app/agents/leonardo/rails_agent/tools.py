@@ -12,6 +12,8 @@ from app.agents.leonardo.rails_agent.prompts import (
     LIST_DIRECTORY_DESCRIPTION,
     BASH_COMMAND_FOR_RAILS_DESCRIPTION,
     SEARCH_FILE_DESCRIPTION,
+    GLOB_FILES_DESCRIPTION,
+    GREP_FILES_DESCRIPTION,
 )
 
 from app.agents.leonardo.rails_agent.tool_prompts import (
@@ -430,6 +432,151 @@ def search_file(
             "messages": [ToolMessage(result_msg, tool_call_id=tool_call_id)],
         }
     )
+
+
+@tool(description=GLOB_FILES_DESCRIPTION)
+def glob_files(
+    pattern: str,
+    runtime: ToolRuntime,
+    path: str = "",
+    max_results: int = 100,
+) -> Command:
+    """Find files matching a glob pattern using ripgrep."""
+    tool_call_id = runtime.tool_call_id
+
+    # Normalize path
+    if path:
+        path = guard_against_beginning_slash_argument(path)
+        search_dir = APP_DIR / "rails" / path
+    else:
+        search_dir = APP_DIR / "rails"
+
+    if not search_dir.exists():
+        return Command(update={
+            "messages": [ToolMessage(f"Directory not found: {path or 'rails root'}", tool_call_id=tool_call_id)]
+        })
+
+    # Use rg --files with glob pattern
+    cmd = [
+        "rg", "--files",
+        "--glob", pattern,
+        "--glob", "!.git",
+        "--glob", "!node_modules",
+        "--glob", "!tmp",
+        "--glob", "!log",
+        str(search_dir)
+    ]
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+
+        if result.returncode == 0 and result.stdout:
+            files = result.stdout.strip().split('\n')
+            # Convert to relative paths
+            rails_root = APP_DIR / "rails"
+            files = [str(Path(f).relative_to(rails_root)) for f in files if f]
+            total = len(files)
+            files = files[:max_results]
+
+            file_list = "\n".join(f"  {f}" for f in files)
+            msg = f"Found {total} file(s) matching '{pattern}'"
+            if total > max_results:
+                msg += f" (showing first {max_results})"
+            msg += f":\n{file_list}"
+        else:
+            msg = f"No files found matching pattern '{pattern}'"
+
+    except subprocess.TimeoutExpired:
+        msg = "Search timed out after 30 seconds"
+    except FileNotFoundError:
+        msg = "ripgrep (rg) not found. Please ensure it's installed in the container."
+    except Exception as e:
+        msg = f"Error during search: {e}"
+
+    return Command(update={"messages": [ToolMessage(msg, tool_call_id=tool_call_id)]})
+
+
+@tool(description=GREP_FILES_DESCRIPTION)
+def grep_files(
+    pattern: str,
+    runtime: ToolRuntime,
+    glob: str = "",
+    path: str = "",
+    case_insensitive: bool = False,
+    context_lines: int = 0,
+    max_results: int = 50,
+) -> Command:
+    """Search file contents for a regex pattern using ripgrep."""
+    tool_call_id = runtime.tool_call_id
+
+    # Normalize path
+    if path:
+        path = guard_against_beginning_slash_argument(path)
+        search_dir = APP_DIR / "rails" / path
+    else:
+        search_dir = APP_DIR / "rails"
+
+    if not search_dir.exists():
+        return Command(update={
+            "messages": [ToolMessage(f"Directory not found: {path or 'rails root'}", tool_call_id=tool_call_id)]
+        })
+
+    # Build ripgrep command
+    cmd = ["rg", "--line-number", "--no-heading", "--color", "never"]
+
+    # Add options
+    if case_insensitive:
+        cmd.append("-i")
+    if context_lines > 0:
+        cmd.extend(["-C", str(context_lines)])
+    if glob:
+        cmd.extend(["--glob", glob])
+
+    # Always ignore common directories
+    cmd.extend(["--glob", "!.git", "--glob", "!node_modules", "--glob", "!tmp", "--glob", "!log"])
+
+    # Add pattern and path
+    cmd.append(pattern)
+    cmd.append(str(search_dir))
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+
+        if result.returncode == 0 and result.stdout:
+            lines = result.stdout.strip().split('\n')
+            total = len([l for l in lines if l and not l.startswith('--')])  # Exclude context separators
+
+            # Limit results
+            if len(lines) > max_results * (1 + context_lines * 2):
+                lines = lines[:max_results * (1 + context_lines * 2)]
+                truncated = True
+            else:
+                truncated = False
+
+            # Convert absolute paths to relative
+            output_lines = []
+            rails_root = str(APP_DIR / "rails") + "/"
+            for line in lines:
+                if line.startswith(rails_root):
+                    line = line[len(rails_root):]
+                output_lines.append(line)
+
+            msg = f"Found matches for pattern '{pattern}':\n\n" + "\n".join(output_lines)
+            if truncated:
+                msg += f"\n\n(Results truncated. Use max_results parameter for more.)"
+        elif result.returncode == 1:
+            msg = f"No matches found for pattern '{pattern}'"
+        else:
+            msg = f"Search error: {result.stderr or 'Unknown error'}"
+
+    except subprocess.TimeoutExpired:
+        msg = "Search timed out after 30 seconds"
+    except FileNotFoundError:
+        msg = "ripgrep (rg) not found. Please ensure it's installed in the container."
+    except Exception as e:
+        msg = f"Error during search: {e}"
+
+    return Command(update={"messages": [ToolMessage(msg, tool_call_id=tool_call_id)]})
 
 
 def list_all_files_recursive(directory: Path):

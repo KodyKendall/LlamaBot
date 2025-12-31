@@ -27,6 +27,7 @@ from app.agents.leonardo.rails_agent.prompts import RAILS_AGENT_PROMPT
 from app.agents.leonardo.rails_agent.tools import (
     write_todos, ls, read_file, write_file, edit_file,
     search_file, bash_command, git_status, git_commit,
+    grep_files, glob_files,
     git_command, github_cli_command, internet_search
 )
 
@@ -66,7 +67,9 @@ def create_sub_agent():
     # Same tools as the main agent (minus delegate_task to prevent recursion)
     sub_agent_tools = [
         write_todos,
-        ls, read_file, write_file, edit_file, search_file,
+        ls, read_file, write_file, edit_file, 
+        #search_file,
+        grep_files, glob_files,
         bash_command,
         git_status, git_commit, git_command, github_cli_command,
         internet_search,

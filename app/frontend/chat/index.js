@@ -194,6 +194,8 @@ class ChatApp {
       sendButton: this.container.querySelector('[data-llamabot="send-button"]'),
       agentModeSelect: this.container.querySelector('[data-llamabot="agent-mode-select"]'),
       modelSelect: this.container.querySelector('[data-llamabot="model-select"]'),
+      modelToggleBtn: this.container.querySelector('[data-llamabot="model-toggle-btn"]'),
+      modelSelectorContainer: this.container.querySelector('[data-llamabot="model-selector-container"]'),
       thinkingArea: this.container.querySelector('[data-llamabot="thinking-area"]'),
       elementSelectorBtn: this.container.querySelector('[data-llamabot="element-selector-btn"]'),
       connectionStatus: this.container.querySelector('[data-llamabot="connection-status"]'),
@@ -243,6 +245,30 @@ class ChatApp {
       });
       // Initialize with short label
       this.updateDropdownLabel(this.elements.modelSelect);
+    }
+
+    // Model toggle button - show/hide model selector
+    if (this.elements.modelToggleBtn && this.elements.modelSelectorContainer) {
+      this.elements.modelToggleBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isHidden = this.elements.modelSelectorContainer.classList.contains('hidden');
+        if (isHidden) {
+          this.elements.modelSelectorContainer.classList.remove('hidden');
+          this.elements.modelToggleBtn.classList.add('active');
+        } else {
+          this.elements.modelSelectorContainer.classList.add('hidden');
+          this.elements.modelToggleBtn.classList.remove('active');
+        }
+      });
+
+      // Close model selector when clicking outside
+      document.addEventListener('click', (e) => {
+        if (!this.elements.modelToggleBtn.contains(e.target) &&
+            !this.elements.modelSelectorContainer.contains(e.target)) {
+          this.elements.modelSelectorContainer.classList.add('hidden');
+          this.elements.modelToggleBtn.classList.remove('active');
+        }
+      });
     }
 
     // Suggested prompts - handle clicks on all buttons with data-llamabot="suggested-prompt"

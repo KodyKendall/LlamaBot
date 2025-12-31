@@ -27,10 +27,10 @@ target_metadata = SQLModel.metadata
 
 # Get database URL from environment
 def get_url():
-    """Get database URL from AUTH_DB_URI environment variable."""
-    url = os.getenv("AUTH_DB_URI")
+    """Get database URL from LEONARDO_DB_URI (or AUTH_DB_URI for backwards compat)."""
+    url = os.getenv("LEONARDO_DB_URI") or os.getenv("AUTH_DB_URI")
     if not url:
-        raise RuntimeError("AUTH_DB_URI environment variable is not set")
+        raise RuntimeError("LEONARDO_DB_URI or AUTH_DB_URI environment variable must be set")
     return url
 
 

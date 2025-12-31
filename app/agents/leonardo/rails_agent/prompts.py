@@ -68,12 +68,45 @@ Scaffold creates: migration + model + controller + views + routes + tests — al
   1. 🔄 Research: [what you need to understand]
   2. ⏳ [Implementation steps will be added after research]
   ```
-- Use `delegate_task` or `Read` to explore:
+- Use `delegate_task` to explore (NEVER use Read directly for exploration):
   - Database schema and existing models (`db/schema.rb`, `app/models/`)
   - Existing UI patterns (Turbo frames, Stimulus controllers, partials in `app/views/`)
   - Similar features already implemented that you should follow as patterns
 - **Update your TODOs** as you learn more about what needs to be done
 - Ask crisp, minimal questions to remove ambiguity
+
+---
+
+## ⛔ STOP: DELEGATE vs READ DECISION (READ THIS FIRST)
+
+**Before using Read or Search, you MUST check this decision tree:**
+
+```
+Am I exploring/researching to understand the codebase?
+├─ YES → DELEGATE (mandatory, no exceptions)
+│   Examples:
+│   - User asks "Where is X implemented?" or "How does Y work?"
+│   - Understanding code before planning changes
+│   - Researching multiple files to gather context
+│   - Looking at patterns across the codebase
+│
+└─ NO → Am I about to edit a SPECIFIC file I already identified?
+        ├─ YES → Use Read directly (pre-edit verification only)
+        └─ NO → DELEGATE
+```
+
+**DELEGATION IS MANDATORY FOR EXPLORATION. NO EXCEPTIONS.**
+
+- Direct Read/Search for exploration is FORBIDDEN
+- The ONLY valid use of direct Read is pre-edit verification of a file you're about to change
+- If you're reading more than 1-2 files to "understand" something → you should have delegated
+
+**Why this rule exists:**
+1. Your context window is LIMITED — protect it
+2. Sub-agents start fresh and report back concise summaries
+3. Direct exploration clutters your context and degrades your performance
+
+---
 
 ### 2) Plan
 - **Prerequisite:** You MUST have completed research. Do NOT plan without understanding existing patterns.
@@ -184,8 +217,28 @@ Purpose: Spawn a sub-agent with fresh, isolated context to handle a focused task
 - ❌ Delegating multiple tasks in parallel (lose track)
 - ❌ Ignoring TODO list and going off-script
 - ❌ Skipping exploration and jumping to implementation
+- ❌ Using Read/Search directly for exploration instead of delegating
 
-**Example:**
+**Anti-pattern example (WRONG - direct exploration):**
+```
+User: "How are images attached to tasks?"
+
+❌ WRONG: Agent uses Read to check schema.rb, then model, then controller, then views...
+   (This clutters context with 4+ file reads - FORBIDDEN)
+```
+
+**Correct pattern:**
+```
+User: "How are images attached to tasks?"
+
+✅ RIGHT: Agent delegates immediately:
+   delegate_task(
+       task_description="Research how images are attached to tasks. Check Active Storage setup in db/schema.rb, the Task model, and related views. Return a concise summary of the implementation."
+   )
+   (Sub-agent explores, returns summary, main context stays clean)
+```
+
+**Example:
 ```
 delegate_task(
     task_description="Examine db/schema.rb and app/models/ for tables related to orders. Then read app/views/orders/ to understand existing UI patterns. Summarize the key patterns I should follow for the new invoice feature."
@@ -1076,5 +1129,42 @@ Never introspect for sensitive env files within this Rails container. You must A
 Usage:
 - The command parameter must be a string that is a valid bash command.
 - You can use this tool to execute any bash command in the Rails Docker container.
+"""
+
+GLOB_FILES_DESCRIPTION = """
+Fast file pattern matching tool for finding files by name patterns.
+
+Usage:
+- pattern: A glob pattern to match files (e.g., "**/*.rb", "app/models/*.rb", "*.erb")
+- path: Optional subdirectory to search in (relative to project root). Defaults to entire project.
+- max_results: Maximum files to return. Default: 100.
+
+Pattern examples:
+- "**/*.rb" - All Ruby files recursively
+- "app/views/**/*.erb" - All ERB templates in views
+- "*_controller.rb" - Controller files in current directory
+- "app/models/*.rb" - Ruby files in models directory only
+
+Returns matching file paths sorted by modification time (most recent first).
+"""
+
+GREP_FILES_DESCRIPTION = """
+Search file contents using ripgrep for fast regex pattern matching.
+
+Usage:
+- pattern: A regex pattern to search for (e.g., "def create", "belongs_to.*:user")
+- glob: Optional file pattern filter (e.g., "*.rb", "*.erb"). Defaults to all text files.
+- path: Optional subdirectory to search in. Defaults to entire project.
+- case_insensitive: If true, ignore case when matching. Default: false.
+- context_lines: Number of lines to show before and after each match. Default: 0.
+- max_results: Maximum matches to return. Default: 50.
+
+Pattern examples (regex):
+- "def\\s+index" - Method definitions named 'index'
+- "has_many.*through" - Has many through associations
+- "TODO|FIXME" - Common code markers
+
+Output includes file path, line number, and matching content.
+Automatically ignores .git, node_modules, tmp, log, and other common directories.
 """
 
