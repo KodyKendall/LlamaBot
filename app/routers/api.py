@@ -315,3 +315,15 @@ async def get_instance_info():
     except Exception as e:
         logger.warning(f"Error reading instance.json: {e}")
         return {"instance_name": None}
+
+
+@router.post("/api/capture-rails-logs", response_class=JSONResponse)
+async def capture_rails_logs_endpoint(request: Request, username: str = Depends(auth)):
+    """Capture Rails logs for 10 seconds and return the content."""
+    from pathlib import Path
+    from app.agents.leonardo.rails_agent.tools import capture_rails_logs
+
+    file_path = capture_rails_logs(duration=10)
+    logs = Path(file_path).read_text()
+
+    return {"logs": logs, "file_path": file_path}

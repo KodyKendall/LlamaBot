@@ -198,6 +198,7 @@ class ChatApp {
       modelSelectorContainer: this.container.querySelector('[data-llamabot="model-selector-container"]'),
       thinkingArea: this.container.querySelector('[data-llamabot="thinking-area"]'),
       elementSelectorBtn: this.container.querySelector('[data-llamabot="element-selector-btn"]'),
+      captureLogsBtn: this.container.querySelector('[data-llamabot="capture-logs-btn"]'),
       connectionStatus: this.container.querySelector('[data-llamabot="connection-status"]'),
       hamburgerMenu: this.container.querySelector('[data-llamabot="hamburger-menu"]'),
       menuDrawer: this.container.querySelector('[data-llamabot="menu-drawer"]'),
@@ -317,6 +318,25 @@ class ChatApp {
         this.tokenIndicator.reset();
       }
     });
+
+    // Capture Rails logs button
+    if (this.elements.captureLogsBtn) {
+      this.elements.captureLogsBtn.addEventListener('click', async () => {
+        this.elements.captureLogsBtn.classList.add('recording');
+        try {
+          const res = await fetch('/api/capture-rails-logs', { method: 'POST' });
+          const { logs } = await res.json();
+          if (this.elements.messageInput) {
+            this.elements.messageInput.value = `Here are the Rails logs:\n\`\`\`\n${logs}\n\`\`\``;
+            this.elements.messageInput.dispatchEvent(new Event('input', { bubbles: true }));
+          }
+        } catch (err) {
+          console.error('Failed to capture logs:', err);
+        } finally {
+          this.elements.captureLogsBtn.classList.remove('recording');
+        }
+      });
+    }
   }
 
   /**

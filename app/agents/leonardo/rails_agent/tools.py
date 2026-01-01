@@ -715,31 +715,67 @@ def rails_api_sh(snippet: str, workdir: str = WORKDIR) -> str:
     except Exception as e:
         return f"Unexpected error: {str(e)}"
 
-def capture_rails_logs(duration: int = 5, output_file: str = "tmp/captured_logs.txt") -> str:
+def capture_rails_logs(duration: int = 10, output_file: str = None) -> str:
     """
     Capture Rails container logs for a duration and write to the rails folder.
 
     Args:
-        duration: Seconds to capture logs (default 5)
-        output_file: Path relative to rails folder (default tmp/captured_logs.txt)
+        duration: Seconds to capture logs (default 10)
+        output_file: Path relative to rails folder (auto-generated if None)
 
     Returns:
         Path to the captured log file or error message
     """
+    import random
+    import string
+
+    # Generate random 3-character suffix if no output file specified
+    if output_file is None:
+        suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=3))
+        output_file = f"tmp/debug_rails_log_{suffix}.txt"
+
+    time.sleep(duration)
+
     # Use docker logs API to capture stdout/stderr
+    # Note: Docker logs API returns multiplexed stream with 8-byte headers per frame
     cmd = [
         "curl", "--silent", "--unix-socket", "/var/run/docker.sock",
         f"http://localhost/containers/{RAILS_CONT}/logs?stdout=true&stderr=true&tail=50"
     ]
 
-    time.sleep(duration)
+    result = subprocess.run(cmd, capture_output=True, timeout=10)
 
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-    logs = result.stdout if result.returncode == 0 else f"Error: {result.stderr}"
+    if result.returncode != 0:
+        logs = f"Error: {result.stderr.decode('utf-8', errors='replace')}"
+    else:
+        # Docker multiplexed stream: each frame has 8-byte header + payload
+        # Header: [stream_type(1), 0, 0, 0, size(4 big-endian)]
+        # We strip headers and extract just the text content
+        raw = result.stdout
+        lines = []
+        i = 0
+        while i < len(raw):
+            if i + 8 > len(raw):
+                break
+            # Read 4-byte size from header (bytes 4-7, big-endian)
+            size = int.from_bytes(raw[i+4:i+8], 'big')
+            if i + 8 + size > len(raw):
+                break
+            payload = raw[i+8:i+8+size]
+            try:
+                lines.append(payload.decode('utf-8', errors='replace').rstrip())
+            except Exception:
+                pass
+            i += 8 + size
+        logs = '\n'.join(lines) if lines else raw.decode('utf-8', errors='replace')
 
     full_path = APP_DIR / "rails" / output_file
     full_path.parent.mkdir(parents=True, exist_ok=True)
     full_path.write_text(logs)
+
+    # Also write to the Rails container filesystem
+    rails_path = f"/rails/{output_file}"
+    rails_api_sh(f"mkdir -p $(dirname {rails_path}) && cat > {rails_path} << 'EOFLOG'\n{logs}\nEOFLOG")
 
     return str(full_path)
 

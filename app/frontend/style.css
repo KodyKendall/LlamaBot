@@ -682,6 +682,43 @@ body {
     }
 }
 
+/* Capture logs button - subtle debug button */
+.capture-logs-btn {
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: none;
+    color: var(--text-color);
+    opacity: 0.25;
+    cursor: pointer;
+    transition: opacity 0.2s ease, background-color 0.2s ease;
+    border-radius: 4px;
+    padding: 0;
+}
+
+.capture-logs-btn:hover {
+    opacity: 0.6;
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+.capture-logs-btn.recording {
+    opacity: 1;
+    color: #ff4444;
+    animation: pulse-recording 1s ease-in-out infinite;
+}
+
+.capture-logs-btn i {
+    font-size: 12px;
+}
+
+@keyframes pulse-recording {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
 /* Selected element badge */
 .selected-element-badge {
     display: flex;
