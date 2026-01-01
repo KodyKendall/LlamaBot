@@ -3,6 +3,7 @@ from langgraph.types import Command
 from langchain_core.messages import ToolMessage
 from tavily import TavilyClient
 import os
+import time
 from bs4 import BeautifulSoup
 
 from app.agents.leonardo.rails_agent.prompts import (
@@ -713,6 +714,35 @@ def rails_api_sh(snippet: str, workdir: str = WORKDIR) -> str:
         return "Command timed out"
     except Exception as e:
         return f"Unexpected error: {str(e)}"
+
+def capture_rails_logs(duration: int = 5, output_file: str = "tmp/captured_logs.txt") -> str:
+    """
+    Capture Rails container logs for a duration and write to the rails folder.
+
+    Args:
+        duration: Seconds to capture logs (default 5)
+        output_file: Path relative to rails folder (default tmp/captured_logs.txt)
+
+    Returns:
+        Path to the captured log file or error message
+    """
+    # Use docker logs API to capture stdout/stderr
+    cmd = [
+        "curl", "--silent", "--unix-socket", "/var/run/docker.sock",
+        f"http://localhost/containers/{RAILS_CONT}/logs?stdout=true&stderr=true&tail=50"
+    ]
+
+    time.sleep(duration)
+
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+    logs = result.stdout if result.returncode == 0 else f"Error: {result.stderr}"
+
+    full_path = APP_DIR / "rails" / output_file
+    full_path.parent.mkdir(parents=True, exist_ok=True)
+    full_path.write_text(logs)
+
+    return str(full_path)
+
 
 @tool(description=BASH_COMMAND_FOR_RAILS_DESCRIPTION)
 def bash_command(
