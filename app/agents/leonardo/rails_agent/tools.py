@@ -773,10 +773,6 @@ def capture_rails_logs(duration: int = 10, output_file: str = None) -> str:
     full_path.parent.mkdir(parents=True, exist_ok=True)
     full_path.write_text(logs)
 
-    # Also write to the Rails container filesystem
-    rails_path = f"/rails/{output_file}"
-    rails_api_sh(f"mkdir -p $(dirname {rails_path}) && cat > {rails_path} << 'EOFLOG'\n{logs}\nEOFLOG")
-
     return str(full_path)
 
 

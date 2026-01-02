@@ -327,7 +327,9 @@ class ChatApp {
           const res = await fetch('/api/capture-rails-logs', { method: 'POST' });
           const { logs } = await res.json();
           if (this.elements.messageInput) {
-            this.elements.messageInput.value = `Here are the Rails logs:\n\`\`\`\n${logs}\n\`\`\``;
+            const existing = this.elements.messageInput.value;
+            const separator = existing ? '\n\n' : '';
+            this.elements.messageInput.value = `${existing}${separator}Here are the Rails logs:\n\`\`\`\n${logs}\n\`\`\``;
             this.elements.messageInput.dispatchEvent(new Event('input', { bubbles: true }));
           }
         } catch (err) {

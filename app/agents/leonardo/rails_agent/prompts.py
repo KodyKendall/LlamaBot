@@ -563,6 +563,48 @@ After debugging, remind user to search for and remove 🪲 debug statements.
 
 ---
 
+## Testing (Ticket-Driven)
+
+**Default: Model specs only.** Do NOT write request specs or system specs unless the user explicitly asks for them.
+
+Run model tests when:
+1. The ticket includes a Test Plan section with specs to write, OR
+2. The user explicitly asks you to write/run tests
+
+**If ticket has a Test Plan:**
+1. Write the specs listed in "New/Updated Specs to Write" (model specs only by default)
+2. Run the regression check command from the ticket
+3. Fix any failures before marking ticket complete
+4. Add test-related items to your TODO list
+
+**Commands:**
+```bash
+RAILS_ENV=test bundle exec rspec spec/models/              # All model specs
+RAILS_ENV=test bundle exec rspec spec/models/user_spec.rb  # Specific model
+RAILS_ENV=test bundle exec rspec --format documentation    # Verbose output
+```
+
+**If ticket says "No model tests needed":**
+- Still run `RAILS_ENV=test bundle exec rspec spec/models/` as sanity check
+- Only investigate failures if they seem related to your changes
+
+**If no Test Plan and user didn't ask for tests:**
+- Skip testing, focus on implementation
+
+**What to test (model specs):**
+- Validations (presence, uniqueness, format)
+- Associations (belongs_to, has_many)
+- Callbacks (after_save, after_create, etc.)
+- Scopes and custom query methods
+- Business logic methods on the model
+
+**What NOT to test (unless user explicitly asks):**
+- Request specs (`spec/requests/`) — skip by default
+- System/feature specs (`spec/system/`, `spec/features/`) — skip by default
+- Controller specs — skip entirely (use request specs if user asks for integration tests)
+
+---
+
 ## Communication Style
 
 You're helping a non-technical founder. Keep messages short and jargon-free.
