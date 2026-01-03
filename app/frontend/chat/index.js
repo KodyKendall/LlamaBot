@@ -324,12 +324,24 @@ class ChatApp {
       this.elements.captureLogsBtn.addEventListener('click', async () => {
         this.elements.captureLogsBtn.classList.add('recording');
         try {
-          const res = await fetch('/api/capture-rails-logs', { method: 'POST' });
-          const { logs } = await res.json();
+          // Fetch both Rails server logs AND JS console logs in parallel
+          const [railsLogsRes, jsLogs] = await Promise.all([
+            fetch('/api/capture-rails-logs', { method: 'POST' }).then(r => r.json()),
+            this.getJsConsoleLogs()
+          ]);
+
+          // Format combined output
+          let output = '';
+          if (jsLogs && jsLogs.length > 0) {
+            const formattedJsLogs = jsLogs.map(l => `[${l.type}] ${l.args.join(' ')}`).join('\n');
+            output += `JavaScript Console Logs:\n\`\`\`\n${formattedJsLogs}\n\`\`\`\n\n`;
+          }
+          output += `Rails Server Logs:\n\`\`\`\n${railsLogsRes.logs}\n\`\`\``;
+
           if (this.elements.messageInput) {
             const existing = this.elements.messageInput.value;
             const separator = existing ? '\n\n' : '';
-            this.elements.messageInput.value = `${existing}${separator}Here are the Rails logs:\n\`\`\`\n${logs}\n\`\`\``;
+            this.elements.messageInput.value = existing + separator + output;
             this.elements.messageInput.dispatchEvent(new Event('input', { bubbles: true }));
           }
         } catch (err) {
@@ -465,6 +477,35 @@ class ChatApp {
       window.removeEventListener("message", handleMessage);
       callback(new Error("No response from Rails iframe"));
     }, timeoutMs);
+  }
+
+  /**
+   * Get JavaScript console logs from the Rails iframe via postMessage
+   */
+  getJsConsoleLogs() {
+    return new Promise((resolve) => {
+      const iframe = this.elements.liveSiteFrame;
+      if (!iframe || !iframe.contentWindow) {
+        resolve([]);
+        return;
+      }
+
+      const handleMessage = (event) => {
+        if (event.data && event.data.source === 'llamapress' && event.data.type === 'console-logs') {
+          window.removeEventListener('message', handleMessage);
+          clearTimeout(timer);
+          resolve(event.data.logs || []);
+        }
+      };
+
+      window.addEventListener('message', handleMessage);
+      iframe.contentWindow.postMessage({ source: 'leonardo', type: 'get-console-logs' }, '*');
+
+      const timer = setTimeout(() => {
+        window.removeEventListener('message', handleMessage);
+        resolve([]); // Return empty if no response
+      }, 2000);
+    });
   }
 
   /**

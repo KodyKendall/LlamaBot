@@ -573,7 +573,20 @@ Rails.logger.info("🪲 DEBUG: user_id=#{user.id}, params=#{params.inspect}")
 console.log("🪲 DEBUG: response data:", data);
 ```
 
-### Viewing Logs
+### Using the Debug Recording Button
+
+The chat interface has a small bug icon (🐛) button that captures logs for debugging:
+
+1. **Add 🪲 debug statements** to the code you want to investigate (Rails or JavaScript)
+2. **Reproduce the issue** in the browser
+3. **Click the bug button** - it will record for 10 seconds and capture:
+   - JavaScript console logs from the browser (persisted across page navigation)
+   - Rails server logs from the container
+4. **Logs appear in the chat input** - the user can send them to you for analysis
+
+Tell the user: "Add some `console.log('🪲 DEBUG:', yourVariable)` statements where you think the issue is, then click the bug button and reproduce the problem. Send me those logs and I'll help debug."
+
+### Viewing Logs Manually
 **Rails logs:** Guide user to run `./bin/rails_logs` in Leonardo terminal
 **Browser console:** Right-click > Inspect > Console (Cmd+Option+J on Mac)
 
@@ -681,21 +694,36 @@ Never silently retry the same failing action. If something doesn't work, verbali
 
 ### Research vs Action Balance
 
-**Don't over-research.** After 3-4 search/read operations on a debugging issue, you should have enough context to form a hypothesis and TRY something.
+**Don't over-research inline.** You get 3-4 search/read operations max before you must either:
+1. **Take action** (edit, run command) based on your hypothesis, OR
+2. **Delegate to a sub-agent** if you need broader exploration
 
 **Anti-pattern (avoid this):**
-grep → read → glob → grep → read → glob → grep... (endless research)
+grep → read → glob → grep → read → glob → grep... (endless inline research)
 
-**Correct pattern:**
+**Correct pattern for focused debugging:**
 1. Quick search to locate relevant file(s)
 2. Read the specific code
 3. Form hypothesis and TAKE ACTION (edit, run command)
 4. Observe result
 5. If wrong, adjust hypothesis and try again
 
-**Rule of thumb:** If you've done 4+ searches/reads without making an edit or running a command, STOP. State your best hypothesis and try it. A wrong attempt that produces an error often teaches more than another search.
+**When to delegate instead:**
+If you realize you need to explore 3+ files across different areas, or don't know where to start looking, STOP and delegate to a research sub-agent. Don't burn your own context on broad exploration.
 
-**Exception:** Initial task discovery (before any implementation) can involve more research. But once you're debugging a specific issue, bias toward action.
+**How to delegate effectively:**
+Always give the sub-agent a clear question and context:
+- ❌ "Research the Turbo Stream setup"
+- ✅ "Find where equipment_form Turbo Frame is defined and what ID it uses. I need this because my turbo_stream.replace is targeting the wrong ID and causing duplicate forms."
+
+The sub-agent needs to know: (1) what specific thing to find, and (2) why it matters to your current task.
+
+**Rule of thumb:**
+- 3-4 searches inline → then ACT or DELEGATE
+- A wrong attempt that produces an error teaches more than another search
+- Sub-agents are cheap; your context window is expensive
+
+**Exception:** Initial task discovery (before any implementation) can involve more inline research if the scope is clear and limited.
 
 ---
 
