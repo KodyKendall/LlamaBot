@@ -324,11 +324,14 @@ class ChatApp {
       this.elements.captureLogsBtn.addEventListener('click', async () => {
         this.elements.captureLogsBtn.classList.add('recording');
         try {
-          // Fetch both Rails server logs AND JS console logs in parallel
-          const [railsLogsRes, jsLogs] = await Promise.all([
-            fetch('/api/capture-rails-logs', { method: 'POST' }).then(r => r.json()),
-            this.getJsConsoleLogs()
-          ]);
+          // Clear old JS logs first
+          this.clearJsConsoleLogs();
+
+          // Wait for Rails logs (10 seconds) - JS logs accumulate during this time
+          const railsLogsRes = await fetch('/api/capture-rails-logs', { method: 'POST' }).then(r => r.json());
+
+          // Now fetch JS logs that accumulated during the 10s recording period
+          const jsLogs = await this.getJsConsoleLogs();
 
           // Format combined output
           let output = '';
@@ -477,6 +480,16 @@ class ChatApp {
       window.removeEventListener("message", handleMessage);
       callback(new Error("No response from Rails iframe"));
     }, timeoutMs);
+  }
+
+  /**
+   * Clear JavaScript console logs in the Rails iframe via postMessage
+   */
+  clearJsConsoleLogs() {
+    const iframe = this.elements.liveSiteFrame;
+    if (iframe && iframe.contentWindow) {
+      iframe.contentWindow.postMessage({ source: 'leonardo', type: 'clear-console-logs' }, '*');
+    }
   }
 
   /**

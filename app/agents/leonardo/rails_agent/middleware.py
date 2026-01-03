@@ -124,22 +124,47 @@ class DynamicModelMiddleware(AgentMiddleware):
     """
 
     def _get_llm(self, model_name: str):
-        """Get LLM instance based on model name from frontend."""
+        """Get LLM instance based on model name from frontend.
+
+        All models are configured with thinking/reasoning enabled:
+        - Gemini: include_thoughts=True, thinking_level="low"
+        - Claude: thinking with budget_tokens (5000 for sonnet, 3000 for haiku)
+        - OpenAI: reasoning with effort="low" and output_version for content blocks
+        """
         if model_name == "gpt-5-codex":
             return ChatOpenAI(
                 model="gpt-5-codex",
                 use_responses_api=True,
-                reasoning={"effort": "low"}
+                reasoning={"effort": "low"},
+                output_version="responses/v1"  # Format reasoning into content blocks
             )
         elif model_name == "claude-4.5-sonnet":
-            return ChatAnthropic(model="claude-sonnet-4-5-20250929", max_tokens=16384)
+            return ChatAnthropic(
+                model="claude-sonnet-4-5-20250929",
+                max_tokens=16384,
+                thinking={"type": "enabled", "budget_tokens": 5000}
+            )
         elif model_name == 'gemini-3-flash':
-            return ChatGoogleGenerativeAI(model="gemini-3-flash-preview")
+            # Note: thinking_level requires langchain-google-genai >= 4.0.0
+            # If you get "Unknown field for ThinkingConfig: thinking_level", upgrade the package
+            return ChatGoogleGenerativeAI(
+                model="gemini-3-flash-preview",
+                include_thoughts=True
+                # thinking_level="low"
+            )
         elif model_name == 'claude-4.5-haiku':
-            return ChatAnthropic(model="claude-haiku-4-5", max_tokens=16384)
-        
-        # Default to Gemini 3 Flash - fallback (can be changed independently from explicit model selections)
-        return ChatGoogleGenerativeAI(model="gemini-3-flash-preview")
+            return ChatAnthropic(
+                model="claude-haiku-4-5",
+                max_tokens=16384,
+                thinking={"type": "enabled", "budget_tokens": 3000}
+            )
+
+        # Default to Gemini 3 Flash with thinking enabled
+        return ChatGoogleGenerativeAI(
+            model="gemini-3-flash-preview",
+            include_thoughts=True
+            # thinking_level="low"
+        )
 
     def wrap_model_call(self, request, handler):
         """Sync version: Override the model in the request based on state."""

@@ -94,9 +94,43 @@ class RequestHandler:
                         # - OpenAI: content is a string ("Hello world")
                         # - Anthropic/Claude: content is a list of content blocks [{type: "text", text: "..."}]
                         # - Gemini: content is a list of content blocks [{type: "text", text: "..."}, {type: "image_url", ...}]
-                        # The frontend extractTextContent() method handles all formats automatically!
+                        # - Thinking/Reasoning blocks: [{type: "thinking"/"reasoning", text/thinking: "..."}]
                         content = base_message_as_dict["content"]
                         logger.info(f"🍅 Content type: {type(content)}, Content: {content}")
+
+                        # Separate thinking/reasoning content from regular text content
+                        # This allows the frontend to display thinking in a dedicated area
+                        thinking_content = None
+                        text_content = content
+
+                        if isinstance(content, list):
+                            # Extract thinking/reasoning blocks (varies by provider)
+                            # - Claude: {type: "thinking", thinking: "..."}
+                            # - OpenAI: {type: "reasoning", text: "..."}
+                            # - Gemini (langchain-google-genai): {type: "thinking", thinking: "...", signature: "..."}
+                            thinking_blocks = [
+                                b for b in content
+                                if isinstance(b, dict) and (
+                                    b.get("type") == "reasoning" or
+                                    b.get("type") == "thinking" or
+                                    b.get("thought") == True
+                                )
+                            ]
+
+                            # Extract regular text blocks
+                            text_blocks = [
+                                b for b in content
+                                if isinstance(b, dict) and (
+                                    b.get("type") in ("text", "text_delta") and
+                                    not b.get("thought")
+                                )
+                            ]
+
+                            if thinking_blocks:
+                                thinking_content = thinking_blocks
+                            # Always use text_blocks if we found any, otherwise use empty list
+                            # This prevents thinking content from appearing in text_content
+                            text_content = text_blocks if text_blocks else []
 
                         # Token usage is typically only available on the final chunk or update message
                         # For streaming chunks, we skip token extraction (Anthropic doesn't send it mid-stream)
@@ -106,7 +140,8 @@ class RequestHandler:
                         if self._is_websocket_open(websocket):
                             ws_message = {
                                 "type": base_message_as_dict["type"],
-                                "content": base_message_as_dict["content"],  # Keep original format, frontend handles both
+                                "content": text_content,  # Text content only (thinking separated)
+                                "thinking": thinking_content,  # Thinking/reasoning content (may be None)
                                 "tool_calls": [],
                                 "base_message": base_message_as_dict
                             }

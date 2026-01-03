@@ -15,6 +15,13 @@ export class MessageHandler {
     // Track active plan for real-time updates
     this.activePlanId = null;
     this.planStepMapping = new Map(); // Maps step content to step DOM IDs
+
+    // Track current thinking message for inline display
+    this.currentThinkingId = null;
+    this.currentThinkingBuffer = '';
+    // Track if a non-thinking message was added since last thinking
+    // Used to determine if we need a new thinking bubble or can append to existing
+    this.hasNonThinkingMessageSinceLastThinking = false;
   }
 
   /**
@@ -61,6 +68,31 @@ export class MessageHandler {
   }
 
   /**
+   * Extract thinking/reasoning content from LLM response
+   * Handles different provider formats:
+   * - Claude: {type: "thinking", thinking: "..."}
+   * - OpenAI: {type: "reasoning", text: "..."}
+   * - Gemini: {thought: true, text: "..."}
+   * @param {Array|null} thinkingBlocks - The thinking content blocks from the backend
+   * @returns {string|null} - Extracted thinking text or null
+   */
+  extractThinkingContent(thinkingBlocks) {
+    if (!thinkingBlocks || !Array.isArray(thinkingBlocks) || thinkingBlocks.length === 0) {
+      return null;
+    }
+
+    return thinkingBlocks
+      .map(block => {
+        // Handle different provider formats
+        if (block.thinking) return block.thinking;  // Claude format
+        if (block.text) return block.text;          // OpenAI/Gemini format
+        return '';
+      })
+      .filter(text => text.length > 0)
+      .join('');
+  }
+
+  /**
    * Handle incoming WebSocket message
    */
   handleMessage(data) {
@@ -82,14 +114,66 @@ export class MessageHandler {
    * Handle AI message chunks (streaming)
    */
   handleAIMessageChunk(data) {
-    // debugger;
-    if (data.content) {
+    // Handle thinking/reasoning content if present - render inline in message history
+    if (data.thinking) {
+      const thinkingText = this.extractThinkingContent(data.thinking);
+      if (thinkingText) {
+        this.handleThinkingContent(thinkingText);
+      }
+    }
+
+    // Handle regular text content
+    // Check if content has actual text (not just empty array or empty string)
+    const hasActualContent = data.content && (
+      (typeof data.content === 'string' && data.content.length > 0) ||
+      (Array.isArray(data.content) && data.content.length > 0)
+    );
+
+    if (hasActualContent) {
+      // Finalize current thinking block before starting text content
+      this.finalizeCurrentThinking();
       // Regular text content streaming
       this.handleTextContent(data);
-    } else if (data.content === '' || data.content === null) {
-      // Tool call arguments streaming
+    } else if (data.base_message?.tool_call_chunks?.length > 0) {
+      // Tool call arguments streaming - only finalize if there are actual tool calls
+      this.finalizeCurrentThinking();
       this.handleToolCallChunk(data);
     }
+  }
+
+  /**
+   * Finalize and collapse the current thinking block
+   * Called when transitioning from thinking to text/tool content
+   */
+  finalizeCurrentThinking() {
+    if (this.currentThinkingId) {
+      this.messageRenderer.collapseThinkingMessage(this.currentThinkingId);
+      // Mark that a non-thinking message occurred - next thinking will need new bubble
+      this.hasNonThinkingMessageSinceLastThinking = true;
+      // Note: We do NOT reset currentThinkingId here anymore
+      // We only create a new bubble if hasNonThinkingMessageSinceLastThinking is true
+    }
+  }
+
+  /**
+   * Handle thinking content - render as inline message in history
+   * @param {string} thinkingText - The thinking text to append
+   */
+  handleThinkingContent(thinkingText) {
+    // Create new thinking bubble only if:
+    // 1. We don't have one yet, OR
+    // 2. A non-thinking message was added since the last thinking content
+    if (!this.currentThinkingId || this.hasNonThinkingMessageSinceLastThinking) {
+      this.currentThinkingId = `thinking-${Date.now()}`;
+      this.currentThinkingBuffer = '';
+      this.hasNonThinkingMessageSinceLastThinking = false;
+    }
+
+    // Append to buffer
+    this.currentThinkingBuffer += thinkingText;
+
+    // Render/update the inline thinking message
+    this.messageRenderer.renderThinkingMessage(this.currentThinkingBuffer, this.currentThinkingId);
   }
 
   /**
@@ -203,6 +287,9 @@ export class MessageHandler {
   handleAIMessage(data) {
     // Only process tool calls if present
     if (data.base_message?.tool_calls?.length > 0) {
+      // Finalize any current thinking block before tool calls
+      this.finalizeCurrentThinking();
+
       // "Close" the current content message by resetting the buffer and clearing current message
       // This ensures that when streaming resumes, a NEW message bubble is created
       this.appState.setCurrentAiMessage(null);
@@ -298,7 +385,16 @@ export class MessageHandler {
       // Clear plan tracking when conversation ends
       this.activePlanId = null;
       this.planStepMapping.clear();
+      // Finalize any remaining thinking message and reset all tracking
+      this.finalizeCurrentThinking();
+      this.currentThinkingId = null;
+      this.currentThinkingBuffer = '';
+      this.hasNonThinkingMessageSinceLastThinking = false;
     } else {
+      // Finalize thinking before tool messages so they appear interspersed
+      if (data.type === 'tool') {
+        this.finalizeCurrentThinking();
+      }
       this.messageRenderer.addMessage(data.content, data.type, data.base_message);
 
       // Check if this is an updated todo list and update plan steps in real-time

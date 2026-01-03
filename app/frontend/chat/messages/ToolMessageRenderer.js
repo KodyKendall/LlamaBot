@@ -6,11 +6,19 @@ import { generateUniqueId } from '../utils/domHelpers.js';
 import { PlanMessageRenderer } from './PlanMessageRenderer.js';
 import { ToolIcons } from '../utils/icons.js';
 
+// Tools that should be expandable to show args and output
+const EXPANDABLE_TOOLS = ['grep_files', 'glob_files', 'bash_command', 'delegate_task'];
+
+// Tools that should be expandable but only show input args (no output)
+const INPUT_ONLY_EXPANDABLE_TOOLS = ['read_file', 'edit_file'];
+
 export class ToolMessageRenderer {
   constructor(iframeManager = null, getRailsDebugInfoCallback = null) {
     this.iframeManager = iframeManager;
     this.getRailsDebugInfoCallback = getRailsDebugInfoCallback;
     this.planRenderer = new PlanMessageRenderer(iframeManager, getRailsDebugInfoCallback);
+    // Store tool data for expandable tools
+    this.toolDataStore = new Map();
   }
 
   /**
@@ -24,8 +32,8 @@ export class ToolMessageRenderer {
       return this.renderTodoList(uniqueId, toolArgs);
     }
 
-    if (toolName === 'edit_file') {
-      return this.renderEditFile(uniqueId, firstArgument, toolArgs, toolResult);
+    if (INPUT_ONLY_EXPANDABLE_TOOLS.includes(toolName)) {
+      return this.renderInputOnlyExpandable(uniqueId, toolName, firstArgument, toolArgs);
     }
 
     // Default tool rendering
@@ -49,28 +57,86 @@ export class ToolMessageRenderer {
   }
 
   /**
-   * Render edit file tool - minimal compact version
+   * Render tools that only show file path when expanded (no output)
+   * Used for read_file, edit_file, etc.
    */
-  renderEditFile(uniqueId, firstArgument, toolArgs, toolResult) {
-    const icon = ToolIcons.getIcon('edit_file');
-    const filename = this._extractFilename(firstArgument);
+  renderInputOnlyExpandable(uniqueId, toolName, _firstArgument, toolArgs) {
+    const icon = ToolIcons.getIcon(toolName);
+    const displayName = this._formatToolName(toolName);
+
+    // Extract the file_path from args (more reliable than firstArgument for edit_file)
+    const filePath = this._extractFilePath(toolArgs);
+    const displayTarget = filePath ? this._extractFilename(filePath) : '';
 
     return `
-      <div data-llamabot="tool-compact">
-        ${icon}
-        <span data-llamabot="tool-compact-name">Edit</span>
-        <span data-llamabot="tool-compact-target">${this._escapeHtml(filename)}</span>
+      <div data-llamabot="tool-expandable" data-tool-id="${uniqueId}" data-input-only="true" onclick="toggleToolExpand('${uniqueId}')">
+        <div data-llamabot="tool-compact" data-expandable="true">
+          ${icon}
+          <span data-llamabot="tool-compact-name">${displayName}</span>
+          ${displayTarget ? `<span data-llamabot="tool-compact-target">${this._escapeHtml(displayTarget)}</span>` : ''}
+          <span data-llamabot="tool-expand-arrow">▶</span>
+        </div>
+        <div data-llamabot="tool-expand-content" id="tool-content-${uniqueId}">
+          <div data-llamabot="tool-expand-section">
+            <div data-llamabot="tool-expand-label">Path:</div>
+            <pre data-llamabot="tool-expand-code">${this._escapeHtml(filePath)}</pre>
+          </div>
+        </div>
       </div>
     `;
   }
 
   /**
+   * Extract file_path from tool args
+   */
+  _extractFilePath(toolArgs) {
+    try {
+      const args = typeof toolArgs === 'string' ? JSON.parse(toolArgs) : toolArgs;
+      return args.file_path || args.path || '';
+    } catch (e) {
+      return '';
+    }
+  }
+
+  /**
    * Render default tool - minimal compact version
+   * For expandable tools (Grep, Glob, Bash), make them clickable to show args/output
    */
   renderDefaultTool(uniqueId, toolName, firstArgument, toolArgs, toolResult) {
     const icon = ToolIcons.getIcon(toolName);
     const displayName = this._formatToolName(toolName);
     const displayTarget = firstArgument ? this._extractFilename(firstArgument) : '';
+    const isExpandable = EXPANDABLE_TOOLS.includes(toolName);
+
+    if (isExpandable) {
+      // Store the tool data for later retrieval
+      this.toolDataStore.set(uniqueId, {
+        toolName,
+        toolArgs,
+        toolResult: toolResult || ''
+      });
+
+      return `
+        <div data-llamabot="tool-expandable" data-tool-id="${uniqueId}" onclick="toggleToolExpand('${uniqueId}')">
+          <div data-llamabot="tool-compact" data-expandable="true">
+            ${icon}
+            <span data-llamabot="tool-compact-name">${displayName}</span>
+            ${displayTarget ? `<span data-llamabot="tool-compact-target">${this._escapeHtml(displayTarget)}</span>` : ''}
+            <span data-llamabot="tool-expand-arrow">▶</span>
+          </div>
+          <div data-llamabot="tool-expand-content" id="tool-content-${uniqueId}">
+            <div data-llamabot="tool-expand-section">
+              <div data-llamabot="tool-expand-label">Input:</div>
+              <pre data-llamabot="tool-expand-code">${this._escapeHtml(this._formatToolArgs(toolArgs))}</pre>
+            </div>
+            <div data-llamabot="tool-expand-section" data-llamabot-output="true">
+              <div data-llamabot="tool-expand-label">Output:</div>
+              <pre data-llamabot="tool-expand-code" data-llamabot="tool-output-content">Loading...</pre>
+            </div>
+          </div>
+        </div>
+      `;
+    }
 
     return `
       <div data-llamabot="tool-compact">
@@ -123,11 +189,99 @@ export class ToolMessageRenderer {
   }
 
   /**
+   * Format tool args for display
+   */
+  _formatToolArgs(toolArgs) {
+    try {
+      const args = typeof toolArgs === 'string' ? JSON.parse(toolArgs) : toolArgs;
+      // Format nicely with indentation
+      return JSON.stringify(args, null, 2);
+    } catch (e) {
+      return String(toolArgs);
+    }
+  }
+
+  /**
+   * Truncate output if too long
+   */
+  _truncateOutput(output, maxLength = 2000) {
+    if (!output) return '(no output)';
+    const str = String(output);
+    if (str.length > maxLength) {
+      return str.substring(0, maxLength) + '\n\n... (truncated)';
+    }
+    return str;
+  }
+
+  /**
    * Update existing tool message with result (for compact format)
    */
   updateCollapsibleToolMessage(messageDiv, toolResult, baseMessage) {
-    // Special handling for edit_file and write_file
-    if (baseMessage.name === 'edit_file' || baseMessage.name === 'write_file') {
+    // Handle expandable tools (Grep, Glob, Bash) - update their output
+    if (EXPANDABLE_TOOLS.includes(baseMessage.name)) {
+      const expandableDiv = messageDiv.querySelector('[data-llamabot="tool-expandable"]');
+      if (expandableDiv) {
+        const toolId = expandableDiv.getAttribute('data-tool-id');
+        const outputSection = expandableDiv.querySelector('[data-llamabot-output="true"]');
+
+        if (outputSection) {
+          const outputContent = outputSection.querySelector('pre');
+          if (outputContent) {
+            outputContent.textContent = this._truncateOutput(toolResult);
+          }
+        }
+
+        // Update stored data
+        if (toolId && this.toolDataStore.has(toolId)) {
+          const data = this.toolDataStore.get(toolId);
+          data.toolResult = toolResult;
+        }
+
+        // Update status styling
+        const toolCompact = expandableDiv.querySelector('[data-llamabot="tool-compact"]');
+        if (toolCompact) {
+          if (baseMessage.artifact?.status === 'success') {
+            toolCompact.setAttribute('data-status', 'success');
+          } else if (baseMessage.artifact?.status === 'error') {
+            toolCompact.setAttribute('data-status', 'error');
+          }
+        }
+      }
+      return;
+    }
+
+    // Handle input-only expandable tools (read_file, edit_file) - just update status
+    if (INPUT_ONLY_EXPANDABLE_TOOLS.includes(baseMessage.name)) {
+      const expandableDiv = messageDiv.querySelector('[data-llamabot="tool-expandable"]');
+      if (expandableDiv) {
+        const toolCompact = expandableDiv.querySelector('[data-llamabot="tool-compact"]');
+        if (toolCompact) {
+          if (baseMessage.artifact?.status === 'success') {
+            toolCompact.setAttribute('data-status', 'success');
+            const icon = toolCompact.querySelector('[data-llamabot="tool-icon"]');
+            if (icon) {
+              icon.outerHTML = ToolIcons.successIcon();
+            }
+
+            // Refresh the main iframe when edit_file or write_file succeeds
+            if ((baseMessage.name === 'edit_file' || baseMessage.name === 'write_file') &&
+                this.iframeManager && this.getRailsDebugInfoCallback) {
+              this.iframeManager.refreshRailsApp(this.getRailsDebugInfoCallback);
+            }
+          } else if (baseMessage.artifact?.status === 'error') {
+            toolCompact.setAttribute('data-status', 'error');
+            const icon = toolCompact.querySelector('[data-llamabot="tool-icon"]');
+            if (icon) {
+              icon.outerHTML = ToolIcons.errorIcon();
+            }
+          }
+        }
+      }
+      return;
+    }
+
+    // Special handling for write_file (not in INPUT_ONLY_EXPANDABLE_TOOLS)
+    if (baseMessage.name === 'write_file') {
       const toolCompact = messageDiv.querySelector('[data-llamabot="tool-compact"]');
       if (toolCompact) {
         if (baseMessage.artifact?.status === 'success') {
@@ -137,7 +291,7 @@ export class ToolMessageRenderer {
             icon.outerHTML = ToolIcons.successIcon();
           }
 
-          // Refresh the main iframe when edit_file or write_file succeeds
+          // Refresh the main iframe when write_file succeeds
           if (this.iframeManager && this.getRailsDebugInfoCallback) {
             this.iframeManager.refreshRailsApp(this.getRailsDebugInfoCallback);
           }
@@ -171,5 +325,15 @@ window.toggleTodo = function(todoId) {
   const todoText = document.getElementById(todoId);
   if (todoText) {
     todoText.classList.toggle('expanded');
+  }
+};
+
+/**
+ * Toggle expandable tool (Grep, Glob, Bash) to show/hide args and output
+ */
+window.toggleToolExpand = function(toolId) {
+  const expandableDiv = document.querySelector(`[data-tool-id="${toolId}"]`);
+  if (expandableDiv) {
+    expandableDiv.classList.toggle('expanded');
   }
 };

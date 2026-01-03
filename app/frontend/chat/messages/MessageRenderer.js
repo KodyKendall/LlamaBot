@@ -124,6 +124,84 @@ export class MessageRenderer {
   }
 
   /**
+   * Render or update inline thinking message
+   * Creates a collapsible thinking block that persists in the message history
+   * @param {string} thinkingText - The thinking content to display
+   * @param {string} thinkingId - Unique ID for this thinking block (to allow updates)
+   * @returns {HTMLElement} The thinking message div
+   */
+  renderThinkingMessage(thinkingText, thinkingId = null) {
+    const id = thinkingId || `thinking-${Date.now()}`;
+    let messageDiv = document.getElementById(id);
+
+    if (!messageDiv) {
+      // Create new thinking message - starts collapsed
+      messageDiv = document.createElement('div');
+      messageDiv.id = id;
+      messageDiv.setAttribute('data-llamabot', 'thinking-message');
+      messageDiv.className = 'thinking-message';
+      messageDiv.innerHTML = this.createThinkingMessageHTML(thinkingText, true);
+      this.insertMessage(messageDiv);
+    } else {
+      // Update existing thinking message
+      const textEl = messageDiv.querySelector('.thinking-message-text');
+      if (textEl) {
+        textEl.textContent = thinkingText;
+        // Auto-scroll the thinking text
+        textEl.scrollTop = textEl.scrollHeight;
+      }
+    }
+
+    return messageDiv;
+  }
+
+  /**
+   * Create HTML for thinking message
+   * @param {string} text - The thinking text
+   * @param {boolean} collapsed - Whether to start collapsed
+   * @returns {string} HTML string
+   */
+  createThinkingMessageHTML(text, collapsed = false, isStreaming = true) {
+    const escapedText = this.escapeHtml(text);
+    const expandedClass = collapsed ? '' : 'expanded';
+    const streamingClass = isStreaming ? 'streaming' : '';
+
+    return `
+      <div class="thinking-message-content ${expandedClass} ${streamingClass}">
+        <div class="thinking-message-header" onclick="this.parentElement.classList.toggle('expanded');">
+          <span class="thinking-label">thinking...</span>
+        </div>
+        <div class="thinking-message-text">${escapedText}</div>
+      </div>
+    `;
+  }
+
+  /**
+   * Collapse a thinking message (called when streaming ends)
+   * Removes expanded class and stops shimmer animation
+   * @param {string} thinkingId - The ID of the thinking message to collapse
+   */
+  collapseThinkingMessage(thinkingId) {
+    const messageDiv = document.getElementById(thinkingId);
+    if (messageDiv) {
+      const content = messageDiv.querySelector('.thinking-message-content');
+      if (content) {
+        content.classList.remove('expanded');
+        content.classList.remove('streaming');
+      }
+    }
+  }
+
+  /**
+   * Escape HTML to prevent XSS
+   */
+  escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  /**
    * Render error message
    */
   renderErrorMessage(content) {
