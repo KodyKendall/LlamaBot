@@ -411,7 +411,7 @@ class RequestHandler:
                 # Start with the transformed messages field
                 state = {"messages": messages}
 
-                # Pass through ALL fields except the ones used for system routingError processing request: cannot access local variable 'state' where it is not associated with a value
+                # Pass through ALL fields except the ones used for system routing
                 system_routing_fields = {
                     "message",      # We transformed this into messages
                     "agent_name",   # Used for workflow routing only

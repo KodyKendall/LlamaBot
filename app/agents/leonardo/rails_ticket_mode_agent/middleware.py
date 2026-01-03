@@ -29,13 +29,21 @@ class TicketModeContextMiddleware(AgentMiddleware):
     """
 
     def _inject_ticket_mode_context(self, request):
-        """Add ticket mode context to messages."""
-        context_msg = HumanMessage(
-            content="<NOTE_FROM_SYSTEM> The user is in Ticket Mode. You can READ any file but can ONLY WRITE/EDIT .md files in rails/requirements/. NO CODE CHANGES ALLOWED. Focus on: 1) Gathering complete observation template, 2) Technical research, 3) Creating implementation tickets. </NOTE_FROM_SYSTEM>"
-        )
+        """Add ticket mode context to the last user message."""
+        context = '<CONTEXT type="mode">TICKET MODE: READ any file, WRITE only .md files in rails/requirements/. No code changes. Focus on: observation template, research, implementation tickets.</CONTEXT>'
 
-        new_messages = list(request.messages) + [context_msg]
-        return request.override(messages=new_messages)
+        messages = list(request.messages)
+        for i in range(len(messages) - 1, -1, -1):
+            if isinstance(messages[i], HumanMessage):
+                content = messages[i].content
+                # Skip if already has ticket mode context
+                if isinstance(content, str) and '<CONTEXT type="mode">' in content:
+                    return request
+                # Prepend context
+                if isinstance(content, str):
+                    messages[i] = HumanMessage(content=context + '\n\n' + content)
+                    return request.override(messages=messages)
+        return request
 
     def wrap_model_call(self, request, handler):
         """Sync version: Inject ticket mode context into LLM request."""

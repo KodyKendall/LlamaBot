@@ -2,7 +2,7 @@
 Middleware for Rails Agent using LangChain 1.0 middleware architecture.
 
 This module contains:
-- ViewPathContextMiddleware: Adds current page context to LLM messages (not persisted)
+- ViewPathContextMiddleware: Prepends page context to user messages
 - FailureCircuitBreakerMiddleware: Circuit breaker for failed tool calls
 - DynamicModelMiddleware: Runtime LLM model selection based on state
 """
@@ -11,6 +11,7 @@ from langchain.agents.middleware import AgentMiddleware
 from langchain_anthropic import ChatAnthropic
 from langchain_openai import ChatOpenAI
 from langchain_google_genai import ChatGoogleGenerativeAI
+from google.api_core.exceptions import ResourceExhausted
 from langchain_core.messages import HumanMessage
 from typing import Any
 import logging
@@ -21,46 +22,52 @@ logger = logging.getLogger(__name__)
 
 
 # =============================================================================
-# View Path Context Injection (via wrap_model_call - NOT persisted to state)
+# View Path Context Injection
 # =============================================================================
 
 class ViewPathContextMiddleware(AgentMiddleware):
-    """Inject current page view path into LLM context without persisting to state.
-
-    This middleware adds context about which page the user is viewing, but only
-    to the messages sent to the LLM - it does NOT persist to the conversation
-    history that's shown in the UI.
-    """
-
-    def _inject_view_context(self, request):
-        """Add view path context to messages if available."""
-        view_path = (request.state.get('debug_info') or {}).get('view_path')
-        request_path = (request.state.get('debug_info') or {}).get('request_path')
-        if not view_path:
-            return request
-
-        # Create context message
-        context_msg = HumanMessage(
-            content=f"<NOTE_FROM_SYSTEM> The user is currently viewing their Ruby on Rails browser page at: {request_path} which resolves to the Rails file path at: {view_path} </NOTE_FROM_SYSTEM>"
-        )
-
-        # Append to messages for LLM only (not persisted)
-        new_messages = list(request.messages) + [context_msg]
-        return request.override(messages=new_messages)
+    """Prepend page context to the last user message."""
 
     def wrap_model_call(self, request, handler):
-        """Sync version: Inject view context into LLM request."""
-        modified_request = self._inject_view_context(request)
-        return handler(modified_request)
+        view_path = (request.state.get('debug_info') or {}).get('view_path')
+        request_path = (request.state.get('debug_info') or {}).get('request_path')
+
+        if view_path and request_path:
+            messages = list(request.messages)
+            # Find last HumanMessage
+            for i in range(len(messages) - 1, -1, -1):
+                if isinstance(messages[i], HumanMessage):
+                    content = messages[i].content
+                    # Skip if already has context
+                    if isinstance(content, str) and content.startswith('<CONTEXT'):
+                        break
+                    # Prepend context
+                    context = f'<CONTEXT page="{request_path}" file="{view_path}"/>\n\n'
+                    messages[i] = HumanMessage(content=context + content)
+                    return handler(request.override(messages=messages))
+
+        return handler(request)
 
     async def awrap_model_call(self, request, handler):
-        """Async version: Inject view context into LLM request."""
-        modified_request = self._inject_view_context(request)
-        return await handler(modified_request)
+        view_path = (request.state.get('debug_info') or {}).get('view_path')
+        request_path = (request.state.get('debug_info') or {}).get('request_path')
+
+        if view_path and request_path:
+            messages = list(request.messages)
+            for i in range(len(messages) - 1, -1, -1):
+                if isinstance(messages[i], HumanMessage):
+                    content = messages[i].content
+                    if isinstance(content, str) and content.startswith('<CONTEXT'):
+                        break
+                    context = f'<CONTEXT page="{request_path}" file="{view_path}"/>\n\n'
+                    messages[i] = HumanMessage(content=context + content)
+                    return await handler(request.override(messages=messages))
+
+        return await handler(request)
 
 
 # =============================================================================
-# Failure Circuit Breaker (via wrap_model_call for message injection)
+# Failure Circuit Breaker
 # =============================================================================
 
 class FailureCircuitBreakerMiddleware(AgentMiddleware):
@@ -79,16 +86,23 @@ class FailureCircuitBreakerMiddleware(AgentMiddleware):
         return failed_count >= 3
 
     def _inject_failure_warning(self, request):
-        """Add failure warning to messages if limit reached."""
+        """Add failure warning to the last user message if limit reached."""
         if not self._should_break(request.state):
             return request
 
-        warning_msg = HumanMessage(
-            content="<NOTE_FROM_SYSTEM> The user has had too many failed tool calls. DO NOT DO ANY NEW TOOL CALLS. Tell the user it's failed, and you need to stop and ask the user to try again in a different way. </NOTE_FROM_SYSTEM>"
-        )
+        messages = list(request.messages)
+        for i in range(len(messages) - 1, -1, -1):
+            if isinstance(messages[i], HumanMessage):
+                content = messages[i].content
+                # Skip if warning already injected
+                if isinstance(content, str) and '<CONTEXT type="warning">' in content:
+                    return request
+                # Prepend warning
+                warning = '<CONTEXT type="warning">Too many failed tool calls. DO NOT make any new tool calls. Tell the user it failed and ask them to try a different approach.</CONTEXT>\n\n'
+                messages[i] = HumanMessage(content=warning + content)
+                return request.override(messages=messages)
 
-        new_messages = list(request.messages) + [warning_msg]
-        return request.override(messages=new_messages)
+        return request
 
     def before_model(self, state: RailsAgentState, runtime) -> dict[str, Any] | None:
         """Reset failure counter when limit is reached (this DOES persist to state)."""
@@ -193,6 +207,6 @@ class DynamicModelMiddleware(AgentMiddleware):
 # Convenience exports (instantiated middleware)
 # =============================================================================
 
-# These are the middleware instances to use in nodes.py
+# Middleware instances to use in nodes.py
 inject_view_context = ViewPathContextMiddleware()
 check_failure_limit = FailureCircuitBreakerMiddleware()

@@ -9,8 +9,7 @@ This agent converts user observations into implementation-ready engineering tick
 Features:
 - Dynamic LLM model selection (defaults to Claude Haiku for efficiency)
 - Automatic context summarization for long sessions
-- View path context injection
-- Ticket mode restrictions injection
+- View path context injection (via middleware)
 - Failure circuit breaker after 3 failed tool calls
 - ToolRuntime for state access in tools
 - Anthropic prompt caching for reduced latency and costs
@@ -72,13 +71,13 @@ default_tools = [
 
 
 def build_workflow(checkpointer=None):
-    """Build the Ticket Mode agent workflow with create_agent and middleware.
+    """Build the Ticket Mode agent workflow with create_agent.
 
     Args:
         checkpointer: Optional checkpointer for state persistence (e.g., PostgresSaver)
 
     Returns:
-        A compiled LangGraph agent with middleware support and ToolRuntime
+        A compiled LangGraph agent
 
     Note: Uses SystemMessage with cache_control for Anthropic prompt caching.
     This requires LangChain 1.1.0+ which added SystemMessage support to create_agent.
@@ -92,28 +91,25 @@ def build_workflow(checkpointer=None):
         # 1. Summarization for long conversations - prevents token limit issues
         SummarizationMiddleware(
             model="claude-haiku-4-5",
-            max_tokens_before_summary=80000,  # Trigger summarization at 80k tokens
-            messages_to_keep=40,              # Keep last 40 messages after summary
+            max_tokens_before_summary=80000,
+            messages_to_keep=40,
         ),
         # 2. Dynamic model selection based on state.llm_model from frontend
         DynamicModelMiddleware(),
-        # 3. Inject view path context when user is viewing a specific page
+        # 3. View path context injection - prepends page context to user messages
         inject_view_context,
-        # 4. Inject ticket mode restrictions reminder
+        # 4. Ticket mode context - reminds agent of write restrictions
         inject_ticket_mode_context,
         # 5. Circuit breaker - stop tool calls after 3 failures
         check_failure_limit,
     ]
 
-    # Create agent with middleware - uses ToolRuntime for state access in tools
-    # get_cached_system_prompt() enables Anthropic prompt caching via cache_control
-    agent = create_agent(
+    # Create and return the agent
+    return create_agent(
         model=default_model,
         tools=default_tools,
-        system_prompt=get_cached_system_prompt(),  # SystemMessage with cache_control
+        system_prompt=get_cached_system_prompt(),
         state_schema=RailsAgentState,
         middleware=middleware,
         checkpointer=checkpointer,
     )
-
-    return agent

@@ -4,7 +4,7 @@ Rails Agent using LangChain 1.1+ create_agent with ToolRuntime.
 This agent helps non-technical users build Ruby on Rails applications with:
 - Dynamic LLM model selection (Claude Haiku, Sonnet, GPT-5 Codex)
 - Automatic context summarization for long sessions
-- View path context injection
+- View path context injection (via middleware)
 - Failure circuit breaker after 3 failed tool calls
 - ToolRuntime for state access in tools
 - Anthropic prompt caching for reduced latency and costs (via SystemMessage with cache_control)
@@ -21,7 +21,7 @@ from langchain_core.messages import SystemMessage
 from app.agents.leonardo.rails_agent.state import RailsAgentState
 from app.agents.leonardo.rails_agent.tools import (
     write_todos, ls, read_file, write_file, edit_file,
-    search_file, 
+    search_file,
     glob_files, grep_files,
     bash_command, git_status, git_commit,
     git_command, github_cli_command, internet_search
@@ -64,13 +64,13 @@ default_tools = [
 ]
 
 def build_workflow(checkpointer=None):
-    """Build the Rails agent workflow with create_agent and middleware.
+    """Build the Rails agent workflow with create_agent.
 
     Args:
         checkpointer: Optional checkpointer for state persistence (e.g., PostgresSaver)
 
     Returns:
-        A compiled LangGraph agent with middleware support and ToolRuntime
+        A compiled LangGraph agent
 
     Note: Uses SystemMessage with cache_control for Anthropic prompt caching.
     This requires LangChain 1.1.0+ which added SystemMessage support to create_agent.
@@ -84,26 +84,23 @@ def build_workflow(checkpointer=None):
         # 1. Summarization for long conversations - prevents token limit issues
         SummarizationMiddleware(
             model="claude-sonnet-4-5",
-            max_tokens_before_summary=70000,  # Trigger summarization at 80k tokens
-            messages_to_keep=8,               #
+            max_tokens_before_summary=70000,
+            messages_to_keep=8,
         ),
         # 2. Dynamic model selection based on state.llm_model from frontend
         DynamicModelMiddleware(),
-        # 3. Inject view path context when user is viewing a specific page
+        # 3. View path context injection - prepends page context to user messages
         inject_view_context,
         # 4. Circuit breaker - stop tool calls after 3 failures
         check_failure_limit,
     ]
 
-    # Create agent with middleware - uses ToolRuntime for state access in tools
-    # CACHED_SYSTEM_PROMPT enables Anthropic prompt caching via cache_control
-    agent = create_agent(
+    # Create and return the agent
+    return create_agent(
         model=default_model,
         tools=default_tools,
-        system_prompt=CACHED_SYSTEM_PROMPT,  # SystemMessage with cache_control
+        system_prompt=CACHED_SYSTEM_PROMPT,
         state_schema=RailsAgentState,
         middleware=middleware,
         checkpointer=checkpointer,
     )
-
-    return agent
