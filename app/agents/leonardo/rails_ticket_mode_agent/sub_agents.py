@@ -15,7 +15,7 @@ Use cases:
 """
 
 from langchain.agents import create_agent
-from langchain_anthropic import ChatAnthropic
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.tools import tool, ToolRuntime
 from langchain_core.messages import ToolMessage, SystemMessage
 from langgraph.types import Command
@@ -41,15 +41,7 @@ def get_cached_system_prompt():
     current_date = date.today().strftime("%Y-%m-%d")
     prompt_with_date = f"{TICKET_MODE_AGENT_PROMPT}\n\n---\n**Today's Date:** {current_date}\n(Use this date when creating ticket filenames: {current_date}_TYPE_description.md)"
 
-    return SystemMessage(
-        content=[
-            {
-                "type": "text",
-                "text": prompt_with_date,
-                "cache_control": {"type": "ephemeral"}
-            }
-        ]
-    )
+    return SystemMessage(content=prompt_with_date)
 
 
 # =============================================================================
@@ -80,7 +72,7 @@ def create_sub_agent():
     ]
 
     # Use the same model as the main agent's default
-    model = ChatAnthropic(model="claude-haiku-4-5", max_tokens=16384)
+    model = ChatGoogleGenerativeAI(model="gemini-3-flash-preview", max_output_tokens=16384)
 
     return create_agent(
         model=model,

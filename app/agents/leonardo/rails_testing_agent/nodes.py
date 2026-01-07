@@ -22,6 +22,7 @@ langgraph's InjectedState because create_agent provides middleware support.
 """
 
 from langchain_anthropic import ChatAnthropic
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.agents import create_agent
 from langchain.agents.middleware import SummarizationMiddleware
 from langchain_core.messages import SystemMessage
@@ -94,12 +95,19 @@ def build_workflow(checkpointer=None):
     default_model = ChatAnthropic(model="claude-haiku-4-5", max_tokens=16384)
 
     # Configure middleware stack (order matters - executed top to bottom)
+    # Use Gemini 3 Flash for summarization (Google AI Studio, not Vertex)
+    summarization_model = ChatGoogleGenerativeAI(
+        model="gemini-3-flash-preview",
+        vertexai=False,  # Explicitly use Google AI Studio, not Vertex AI
+        temperature=1.0,
+    )
     middleware = [
         # 1. Summarization for long conversations - prevents token limit issues
         SummarizationMiddleware(
-            model="claude-haiku-4-5",
-            max_tokens_before_summary=80000,
-            messages_to_keep=40,
+            model=summarization_model,
+            trigger=("tokens", 80000),
+            keep=("messages", 8),
+            trim_tokens_to_summarize=None,  # KEY FIX: Disable trimming, let Gemini see everything
         ),
         # 2. Dynamic model selection based on state.llm_model from frontend
         DynamicModelMiddleware(),
