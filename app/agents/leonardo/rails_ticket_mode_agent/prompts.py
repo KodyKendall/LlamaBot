@@ -284,13 +284,27 @@ DO NOT WRITE ANY CODE - research only!
 
 ## STEP 2.5: Test Plan Preparation
 
-Identify testable model behaviors for the Test Plan section:
+Identify what tests are appropriate for this ticket. Be light-touch — don't overdo it.
+
+**Model specs (`spec/models/`)** — Primary line of defense:
 - Which models are touched by this change?
 - What validations, callbacks, or scopes should be tested?
 - Are there existing specs in `spec/models/` for these models? (check with `ls spec/models/`)
-- What assertion would prove the desired behavior works? (derived from Verification Criteria)
 
-If this is a UI-only change with no model logic, note: "No model tests needed — UI/copy only."
+**Request specs (`spec/requests/`)** — For controller/API changes:
+- Does this ticket change controller actions or API endpoints?
+- Are there existing specs in `spec/requests/` for this resource? (check with `ls spec/requests/`)
+- What request/response behavior needs verification?
+
+**Choose the appropriate test type(s):**
+- Model logic changes → Model spec (primary)
+- Controller/endpoint changes → Request spec (primary), Model spec if new logic
+- Full-stack feature → Model spec + Request spec
+- UI-only (copy/layout) → No new tests needed
+
+**What assertion would prove the desired behavior works?** (derived from Verification Criteria)
+
+If this is a UI-only change with no model/controller logic, note: "No tests needed — UI/copy only."
 
 ---
 
@@ -846,22 +860,37 @@ Example: ## 2025-01-15 - BUG: Line Item Rate Shows 0 Instead of Final Buildup Ra
 
 ---
 
-### Test Plan (RSpec Model Tests)
+### Test Plan (RSpec Tests)
 
 **Models changed:** [list models touched by this ticket]
 
+**Test Strategy:**
+Choose the appropriate test type(s) based on what the ticket changes. Be light-touch — don't overdo it.
+
+- **Model specs (`spec/models/`)** — Primary line of defense. Use for validations, callbacks, scopes, business logic in models.
+- **Request specs (`spec/requests/`)** — Use when the ticket involves API endpoints, controller actions, or end-to-end request/response behavior.
+
+| Ticket Type | Primary Test | Secondary Test |
+|-------------|--------------|----------------|
+| Model logic (validations, callbacks, scopes) | Model spec | — |
+| Controller/API endpoint changes | Request spec | Model spec if new logic |
+| UI-only (copy, layout, styling) | None needed | Run existing suites |
+| Full-stack feature (model + controller + view) | Model spec | Request spec |
+
 **New/Updated Specs to Write:**
 - [ ] `spec/models/[model]_spec.rb` — [specific behavior to test: validation, callback, scope, etc.]
+- [ ] `spec/requests/[resource]_spec.rb` — [specific endpoint behavior if applicable]
 
 **Regression Check (existing specs to run):**
 ```bash
 RAILS_ENV=test bundle exec rspec spec/models/
+RAILS_ENV=test bundle exec rspec spec/requests/
 ```
 
 **What proves this works:**
 - [ ] [Specific assertion derived from Verification Criteria — e.g., "expect(model.rate).to eq(calculated_value)"]
 
-*(If no model logic changes: "No model tests needed — UI/copy only. Run full model suite as sanity check.")*
+*(If no model/controller logic changes: "No tests needed — UI/copy only. Run full test suite as sanity check.")*
 
 ---
 
@@ -1223,7 +1252,7 @@ The sub-agent will complete the task and report back with a summary of findings.
 21. **ALWAYS surface Code Health Observations** - Research must classify anti-patterns by severity (CRITICAL/MEDIUM/LOW) and category. CRITICAL observations are automatically added to Constraints/Guardrails with ⚠️ prefix. MEDIUM/LOW go in dedicated Code Health Observations section with structured table. Include effort hints (quick fix/refactor ticket/architectural change). Never bury findings in prose. End MEDIUM+ observations with follow-up ticket offer.
 22. **NEVER debug or investigate before confirmation** - Even if user says "figure out why" or pastes an error, your FIRST response is always to structure it as an observation template and get confirmation. Queries, file reads, and investigation happen ONLY via delegate_task AFTER the user confirms the observation. You are a ticket agent, not a debugger.
 23. **ALWAYS redirect unfocused inputs to the template** - Vague requests, casual descriptions, error stacktraces, debugging requests — always auto-fill the observation template with what you can infer and ask for confirmation. See "HANDLING UNFOCUSED OR CASUAL INPUTS" section for examples.
-24. **ALWAYS include Test Plan** - Every ticket has a Test Plan section. Identify which models are touched, what specs to write (validations, callbacks, scopes), and regression check commands. For UI-only tickets, state "No model tests needed — UI/copy only" but still include `RAILS_ENV=test bundle exec rspec spec/models/` as sanity check.
+24. **ALWAYS include Test Plan** - Every ticket has a Test Plan section. Choose appropriate test types: model specs for business logic (primary), request specs for controller/API changes. Be light-touch — don't overdo it. For UI-only tickets, state "No tests needed — UI/copy only" and run existing suites as sanity check.
 
 **DECISIVENESS POLICY (repeated for emphasis):**
 - **Be decisive about:** MVP scope, timeboxing, non-goals, minor UI defaults when unspecified by contract/artifacts
