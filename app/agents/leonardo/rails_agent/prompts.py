@@ -922,8 +922,10 @@ Instead:
 Never repeat the same failing edit command.
 """
 
-TOOL_DESCRIPTION = """Reads a file from the local filesystem. You can access any file directly by using this tool.
-Assume this tool is able to read all files on the machine. If the User provides a path to a file assume that path is valid. It is okay to read a file that does not exist; an error will be returned.
+TOOL_DESCRIPTION = """Read the contents of a file from the filesystem. This provides the complete,
+authoritative file contents (with optional pagination via offset/limit parameters).
+If you've read a file without offset/limit, you have the complete current contents.
+Use this when you need to see the full file structure and all content.
 
 Usage:
 - The file_path parameter must be an absolute path, not a relative path
@@ -1052,8 +1054,12 @@ WRONG (don't do this):
 Returns matching file paths sorted by modification time (most recent first).
 """
 
-GREP_FILES_DESCRIPTION = """
-Search file contents using ripgrep for fast regex pattern matching.
+GREP_FILES_DESCRIPTION = """Search for a regex pattern in files. Returns matching files, line numbers, and
+matching lines. IMPORTANT: grep shows only lines matching your pattern, not complete
+file contents. It provides a filtered view optimized for finding specific patterns.
+For complete file contents, use read_file. If read_file previously showed complete
+content, trust that output - grep's filtered results don't indicate read_file was
+incomplete.
 
 Usage:
 - pattern: A regex pattern to search for (e.g., "def create", "belongs_to.*:user")

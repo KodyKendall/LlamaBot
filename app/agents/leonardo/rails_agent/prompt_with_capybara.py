@@ -712,8 +712,10 @@ Instead:
 Never repeat the same failing edit command.
 """
 
-TOOL_DESCRIPTION = """Reads a file from the local filesystem. You can access any file directly by using this tool.
-Assume this tool is able to read all files on the machine. If the User provides a path to a file assume that path is valid. It is okay to read a file that does not exist; an error will be returned.
+TOOL_DESCRIPTION = """Read the contents of a file from the filesystem. This provides the complete,
+authoritative file contents (with optional pagination via offset/limit parameters).
+If you've read a file without offset/limit, you have the complete current contents.
+Use this when you need to see the full file structure and all content.
 
 Usage:
 - The file_path parameter must be an absolute path, not a relative path
@@ -721,7 +723,7 @@ Usage:
 - You can optionally specify a line offset and limit (especially handy for long files), but it's recommended to read the whole file by not providing these parameters
 - Any lines longer than 2000 characters will be truncated
 - Results are returned using cat -n format, with line numbers starting at 1
-- You have the capability to call multiple tools in a single response. It is always better to speculatively read multiple files as a batch that are potentially useful. 
+- You have the capability to call multiple tools in a single response. It is always better to speculatively read multiple files as a batch that are potentially useful.
 - If you read a file that exists but has empty contents you will receive a system reminder warning in place of file contents."""
 
 INTERNET_SEARCH_DESCRIPTION="""

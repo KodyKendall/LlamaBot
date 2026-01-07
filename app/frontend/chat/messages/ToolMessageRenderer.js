@@ -10,7 +10,7 @@ import { ToolIcons } from '../utils/icons.js';
 const EXPANDABLE_TOOLS = ['grep_files', 'glob_files', 'bash_command', 'delegate_task'];
 
 // Tools that should be expandable but only show input args (no output)
-const INPUT_ONLY_EXPANDABLE_TOOLS = ['read_file', 'edit_file'];
+const INPUT_ONLY_EXPANDABLE_TOOLS = ['read_file', 'edit_file', 'write_file'];
 
 export class ToolMessageRenderer {
   constructor(iframeManager = null, getRailsDebugInfoCallback = null) {
@@ -278,31 +278,6 @@ export class ToolMessageRenderer {
         }
       }
       return;
-    }
-
-    // Special handling for write_file (not in INPUT_ONLY_EXPANDABLE_TOOLS)
-    if (baseMessage.name === 'write_file') {
-      const toolCompact = messageDiv.querySelector('[data-llamabot="tool-compact"]');
-      if (toolCompact) {
-        if (baseMessage.artifact?.status === 'success') {
-          toolCompact.setAttribute('data-status', 'success');
-          const icon = toolCompact.querySelector('[data-llamabot="tool-icon"]');
-          if (icon) {
-            icon.outerHTML = ToolIcons.successIcon();
-          }
-
-          // Refresh the main iframe when write_file succeeds
-          if (this.iframeManager && this.getRailsDebugInfoCallback) {
-            this.iframeManager.refreshRailsApp(this.getRailsDebugInfoCallback);
-          }
-        } else if (baseMessage.artifact?.status === 'error') {
-          toolCompact.setAttribute('data-status', 'error');
-          const icon = toolCompact.querySelector('[data-llamabot="tool-icon"]');
-          if (icon) {
-            icon.outerHTML = ToolIcons.errorIcon();
-          }
-        }
-      }
     }
   }
 }

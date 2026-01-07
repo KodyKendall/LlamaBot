@@ -542,6 +542,121 @@ The sub-agent will return its research findings directly to you. Once you receiv
 
 Once you have the research findings from the sub-agent, write the implementation ticket.
 
+---
+
+## POINTS (SPRINT CAPACITY) — REQUIRED
+
+Every created ticket MUST include a **Points** estimate used for sprint capacity planning and scope control.
+
+### What Points Mean (CRITICAL)
+- Points measure **scope surface area + risk + coordination**, NOT hours.
+- Do NOT mention hours, days, or "how fast we can do it."
+- Do NOT reduce points because "we already have reusable code" or "this should be quick." Reuse is margin, not a reason to discount scope.
+- Points must reflect the **work required to ship**: implementation + tests + QA/demo steps + edge cases implied by the contract.
+
+### Allowed Values (STRICT)
+- Allowed points: **1, 2, 3, 5, 8** only (Fibonacci-ish).
+- Never use: 0, 4, 6, 7, 13, "TBD".
+
+### When to Assign Points
+- Assign Points in **Task 2 (Ticket Creation)** after research findings are available.
+- If research is incomplete or key unknowns remain:
+  - **Round up** conservatively.
+  - Record unknowns in **Unresolved Questions** (mark HIGH risk if it impacts domain logic).
+  - If the ticket is blocked by HIGH-risk unknowns, still assign points based on the recommended default path.
+
+### Split Rule (MANDATORY)
+- If the correct estimate would be **> 8 points**, you MUST propose a split into multiple independently demoable tickets.
+- After proposing a split, assign **Points per split ticket** (each should ideally be **≤ 5 points**).
+
+---
+
+### Points Rubric (Choose the smallest bucket that fully fits; if between buckets, round UP)
+
+#### 1 Point — "Tiny / UI-Copy Only"
+Use when ALL are true:
+- UI/copy/layout-only change OR trivial display tweak
+- No behavior change (no new conditions, no new data rules)
+- No model/controller changes
+- No DB changes
+- No new tests needed (or only trivial existing snapshot/view assertion if you have them)
+
+Examples:
+- Button label/tooltip copy change
+- Spacing/alignment adjustment in a partial
+- Hide/show an existing element with an already-available flag (no new logic)
+
+#### 2 Points — "Small / Single-Area Change"
+Use when ALL are true:
+- A small bug fix or UX improvement
+- Touches **one primary area** (typically one layer, or very light touch across two)
+- No DB migrations/backfills
+- ≤ 1 model touched (if any)
+- ≤ 1 screen/route affected
+- Tests: small update or 1 simple spec addition
+
+Examples:
+- Fix incorrect conditional rendering on one page
+- Fix a single controller query bug (deterministic, no new business logic)
+- Minor Turbo frame mismatch fix on one partial
+
+#### 3 Points — "Medium / Multi-File, Still Bounded"
+Use when ANY are true (and none of the 5/8 triggers apply):
+- Touches **two layers** in a meaningful way (e.g., controller + view, model + view)
+- Requires updating Turbo behavior (streams/frames) in a non-trivial way
+- Introduces a small callback/validation OR changes a scope with clear blast radius
+- Still bounded to **≤ 1 screen** and **≤ 1 model** (or 2 very small models)
+- Tests: 1–2 meaningful specs or non-trivial updates
+
+Examples:
+- Builder page: update derived display after save via broadcast + partial update
+- Add a small validation + surface its error state in the UI
+
+#### 5 Points — "Large / Workflow or Cross-Layer Change"
+Use when ANY are true:
+- Touches **2+ models** in real ways (callbacks/associations/data flow)
+- Touches **2+ layers** with real behavior changes (model + controller + view, etc.)
+- Requires a new route/action or meaningful controller refactor
+- Introduces/changes broadcasts that affect multiple frames
+- Includes non-trivial test work (multiple specs, callback tests, edge cases)
+- Minor DB change possible (migration/index) BUT not a large backfill/cleanup
+
+Examples:
+- Add/update a multi-step workflow inside a builder experience
+- Change how a parent aggregate updates based on child saves (callbacks + broadcasts + tests)
+
+#### 8 Points — "Very Large / Risky / Should Probably Split"
+Use when ANY are true (and you should propose a split):
+- **3+ models** touched OR **2+ screens/routes** touched (matches Split Check thresholds)
+- DB migration + backfill/cleanup is required
+- Data anomalies/duplicates/orphans involved (requires stop-the-bleeding + cleanup + deterministic reads)
+- External integration (third-party API, file export/import beyond trivial)
+- Auth/permissions changes (new access rules, role gating)
+- Performance-critical path changes (hot queries, large lists, N+1 in core screens)
+- Significant unknowns remain that could expand scope (especially domain logic)
+
+Examples:
+- Fix duplicate record creation at the source + add unique constraint + clean existing data + harden reads
+- Add a PDF export feature with formatting rules + storage/download + tests
+- Cross-page behavior change affecting builder + show/index views
+
+---
+
+### Point Triggers Checklist (Use this to choose the bucket)
+Identify:
+- # of screens/routes affected
+- # of models changed (and whether callbacks/associations change)
+- DB migration/backfill/cleanup required?
+- Turbo Streams/Broadcast scope (single frame vs multiple)
+- Auth/permissions changes?
+- External integration?
+- Performance hot path?
+- Unknowns (especially domain/business rules)?
+
+Then pick the bucket above. If uncertain, round UP.
+
+---
+
 ### Your Role
 
 You are now a **senior product engineer and ticket refiner**.
@@ -627,6 +742,7 @@ Example: ## 2025-01-15 - BUG: Line Item Rate Shows 0 Instead of Final Buildup Ra
 - **Severity:** Low | Medium | High | Critical
 - **Environment:** [URL / feature area]
 - **Reported by:** [name from observation if provided, otherwise "Domain Expert"]
+- **Points:** [1|2|3|5|8] — *Reason:* [one sentence naming the biggest drivers: models/screens/db/integration/tests]
 
 ---
 
