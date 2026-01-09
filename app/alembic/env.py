@@ -11,7 +11,7 @@ from alembic import context
 from sqlmodel import SQLModel
 
 # Import all models so they're registered with SQLModel.metadata
-from app.models import User  # noqa: F401
+from app.models import User, ThreadMetadata  # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

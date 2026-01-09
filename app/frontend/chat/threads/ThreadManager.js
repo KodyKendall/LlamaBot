@@ -10,6 +10,9 @@ export class ThreadManager {
     // Pagination state
     this.nextCursor = null;
     this.hasMore = false;
+
+    // Expose on window for inline onclick handlers
+    window.threadManager = this;
   }
 
   /**
@@ -101,7 +104,7 @@ export class ThreadManager {
 
   /**
    * Populate menu with thread items
-   * @param {Array} threads - Array of thread objects
+   * @param {Array} threads - Array of thread metadata objects (lightweight format from /threads API)
    * @param {boolean} hasMore - Whether there are more threads to load
    */
   populateMenuWithThreads(threads, hasMore = false) {
@@ -120,8 +123,16 @@ export class ThreadManager {
     }
 
     threads.forEach(thread => {
-      const messages = thread.state[0]?.messages || [];
-      const { title } = this.generateConversationSummary(messages);
+      // Use pre-computed title from metadata (fast - no state extraction needed)
+      // Falls back to extracting from state for backwards compatibility
+      let title = thread.title;
+      if (!title && thread.state) {
+        // Backwards compatibility: extract from state if metadata title not available
+        const messages = thread.state[0]?.messages || [];
+        const summary = this.generateConversationSummary(messages);
+        title = summary.title;
+      }
+      title = title || 'New Conversation';
 
       const menuItem = document.createElement('div');
       menuItem.className = 'menu-item';
@@ -179,7 +190,7 @@ export class ThreadManager {
 
   /**
    * Append threads to the existing menu (for pagination)
-   * @param {Array} threads - Array of thread objects to append
+   * @param {Array} threads - Array of thread metadata objects to append
    * @param {boolean} hasMore - Whether there are more threads to load
    */
   appendThreadsToMenu(threads, hasMore) {
@@ -192,10 +203,17 @@ export class ThreadManager {
       existingLoadMore.remove();
     }
 
-    // Append new thread items
+    // Append new thread items using lightweight metadata
     threads.forEach(thread => {
-      const messages = thread.state[0]?.messages || [];
-      const { title } = this.generateConversationSummary(messages);
+      // Use pre-computed title from metadata (fast - no state extraction needed)
+      let title = thread.title;
+      if (!title && thread.state) {
+        // Backwards compatibility: extract from state if metadata title not available
+        const messages = thread.state[0]?.messages || [];
+        const summary = this.generateConversationSummary(messages);
+        title = summary.title;
+      }
+      title = title || 'New Conversation';
 
       const menuItem = document.createElement('div');
       menuItem.className = 'menu-item';

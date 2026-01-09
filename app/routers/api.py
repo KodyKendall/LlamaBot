@@ -11,8 +11,9 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlmodel import Session
 
-from app.models import User
+from app.models import User, ThreadMetadata
 from app.dependencies import get_db_session, auth, admin_required
+from app.services.thread_service import get_thread_list
 from app.services.user_service import (
     get_all_users, get_user_by_username, update_user, delete_user
 )
@@ -149,63 +150,57 @@ async def api_delete_user(
 async def threads(
     request: Request,
     username: str = Depends(auth),
-    before: Optional[str] = Query(None, description="Cursor for pagination - timestamp of oldest thread from previous batch"),
-    limit: int = Query(3, ge=1, le=20)
+    before: Optional[str] = Query(None, description="Cursor for pagination - ISO timestamp"),
+    limit: int = Query(10, ge=1, le=50)
 ):
-    """Get recent conversation threads with cursor-based pagination."""
-    app = request.app
-    checkpointer = app.state.get_or_create_checkpointer()
+    """Get recent conversation threads with cursor-based pagination (fast - metadata only).
 
-    seen_threads = set()
-    recent_threads = []  # List of (thread_id, timestamp) tuples
+    This endpoint queries the lightweight ThreadMetadata table instead of loading
+    full LangGraph checkpoint states, providing a massive performance improvement.
+    """
+    from datetime import datetime
+    from app.db import engine
 
-    # Use async iteration with limit to avoid loading all checkpoints
-    # Fetch extra since we're deduplicating by thread_id
-    async for checkpoint in checkpointer.alist(config={}, limit=limit * 10):
-        thread_id = checkpoint.config["configurable"]["thread_id"]
-        # Get timestamp from checkpoint metadata
-        timestamp = checkpoint.metadata.get("created_at") or checkpoint.config.get("configurable", {}).get("checkpoint_id", "")
+    if engine is None:
+        logger.error("Database engine not available")
+        return {"threads": [], "next_cursor": None, "has_more": False}
 
-        # Skip if we've seen this thread
-        if thread_id in seen_threads:
-            continue
-        # Skip if timestamp is >= cursor (we want older threads)
-        if before and timestamp >= before:
-            continue
+    with Session(engine) as session:
+        # Parse cursor timestamp
+        before_dt = None
+        if before:
+            try:
+                before_dt = datetime.fromisoformat(before.replace('Z', '+00:00'))
+            except ValueError:
+                logger.warning(f"Invalid cursor timestamp: {before}")
 
-        seen_threads.add(thread_id)
-        recent_threads.append((thread_id, timestamp))
+        # Query lightweight metadata (no checkpoint loading!)
+        threads = get_thread_list(session, before=before_dt, limit=limit + 1)
 
-        if len(recent_threads) >= limit:
-            break
+        # Check if there are more results
+        has_more = len(threads) > limit
+        threads = threads[:limit]
 
-    logger.info(f"Returning {len(recent_threads)} threads (cursor-based pagination)")
+        # Build response
+        next_cursor = threads[-1].updated_at.isoformat() if threads else None
 
-    # Use cached graph from startup (singleton pattern)
-    graph = app.state.compiled_graphs.get("llamabot")
-    if not graph:
-        from app.agents.llamabot.nodes import build_workflow
-        graph = build_workflow(checkpointer=checkpointer)
-        logger.warning("/threads endpoint using fallback graph compilation")
+        logger.info(f"Returning {len(threads)} threads from metadata table (fast query)")
 
-    # Fetch states (only for the limited threads)
-    state_history = []
-    for thread_id, timestamp in recent_threads:
-        config = {"configurable": {"thread_id": thread_id}}
-        state_history.append({
-            "thread_id": thread_id,
-            "timestamp": timestamp,
-            "state": await graph.aget_state(config=config)
-        })
-
-    # Build response with next cursor
-    next_cursor = recent_threads[-1][1] if recent_threads else None
-
-    return {
-        "threads": state_history,
-        "next_cursor": next_cursor,
-        "has_more": len(recent_threads) == limit
-    }
+        return {
+            "threads": [
+                {
+                    "thread_id": t.thread_id,
+                    "title": t.title,
+                    "created_at": t.created_at.isoformat(),
+                    "updated_at": t.updated_at.isoformat(),
+                    "message_count": t.message_count,
+                    "agent_name": t.agent_name
+                }
+                for t in threads
+            ],
+            "next_cursor": next_cursor,
+            "has_more": has_more
+        }
 
 
 @router.get("/chat-history/{thread_id}")

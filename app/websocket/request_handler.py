@@ -45,16 +45,16 @@ class RequestHandler:
         return websocket.client_state == WebSocketState.CONNECTED
 
     # This is a the main function that handles incoming WebSocket requests. This will build the LangGraph workflow, and invoke it from a checkpointed state.
-    async def handle_request(self, message: dict, websocket: WebSocket):
+    async def handle_request(self, incoming_message: dict, websocket: WebSocket):
         """Handle incoming WebSocket requests with proper locking and cancellation"""
         ws_id = id(websocket)
         lock = self._get_lock(websocket)
 
         self.app.state.timestamp = datetime.now(timezone.utc) # keep timestamp updated
-        
+
         async with lock:
             try:
-                app, state, agent_config = self.get_langgraph_app_and_state(message)
+                app, state, agent_config = self.get_langgraph_app_and_state(incoming_message)
 
                 # Default limits (can be overridden per-agent in langgraph.json)
                 DEFAULT_RECURSION_LIMIT = 200
@@ -68,8 +68,8 @@ class RequestHandler:
 
                 config = {
                     "configurable": {
-                        "thread_id": f"{message.get('thread_id')}",
-                        "origin": message.get('origin', ''),
+                        "thread_id": f"{incoming_message.get('thread_id')}",
+                        "origin": incoming_message.get('origin', ''),
                         "recursion_limit": recursion_limit
                     },
                     "recursion_limit": recursion_limit
@@ -232,6 +232,10 @@ class RequestHandler:
                         logger.info(f"Workflow output: {chunk}")
 
                 print("🎏🎏🎏 LangGraph astream is finished!")
+
+                # Update thread metadata after successful message processing
+                await self._update_thread_metadata(incoming_message)
+
                 if self._is_websocket_open(websocket):
                     await websocket.send_json({
                         "type": "end"
@@ -298,6 +302,66 @@ class RequestHandler:
         if ws_id in self.locks:
             del self.locks[ws_id]
 
+    async def _update_thread_metadata(self, message: dict):
+        """Create or update thread metadata after a successful message exchange.
+
+        This tracks thread metadata for fast sidebar loading without loading
+        full LangGraph checkpoint states.
+        """
+        try:
+            from app.db import engine
+            from sqlmodel import Session
+            from app.models import ThreadMetadata
+            from app.services.thread_service import (
+                get_or_create_thread_metadata,
+                update_thread_metadata,
+                schedule_title_generation
+            )
+
+            if engine is None:
+                logger.debug("Database engine not available, skipping thread metadata update")
+                return
+
+            thread_id = message.get('thread_id')
+            if not thread_id:
+                return
+
+            first_message = message.get('message', '')
+            agent_name = message.get('agent_name')
+
+            with Session(engine) as db_session:
+                existing = db_session.get(ThreadMetadata, thread_id)
+                if existing:
+                    # Existing thread: increment message count by 2 (user + AI message)
+                    update_thread_metadata(db_session, thread_id, increment_messages=2)
+                    logger.debug(f"Updated thread metadata for {thread_id}")
+                else:
+                    # New thread: create metadata entry with truncated title as placeholder
+                    get_or_create_thread_metadata(
+                        db_session,
+                        thread_id=thread_id,
+                        first_message_content=first_message,
+                        agent_name=agent_name
+                    )
+                    logger.info(f"Created thread metadata for {thread_id}")
+
+                    # Schedule async LLM title generation in background (fire-and-forget)
+                    # This is completely optional - if it fails, truncated title is already saved
+                    if first_message:
+                        try:
+                            import asyncio
+                            task = asyncio.create_task(schedule_title_generation(thread_id, first_message))
+                            # Add a callback to log any unexpected errors (should never happen)
+                            task.add_done_callback(
+                                lambda t: logger.debug(f"Title generation task completed: {t.exception() if t.exception() else 'success'}")
+                                if t.done() else None
+                            )
+                        except Exception as task_error:
+                            # Even task creation failure should not affect the main flow
+                            logger.debug(f"Failed to schedule title generation (non-critical): {task_error}")
+        except Exception as e:
+            # Don't fail the request if metadata update fails
+            logger.warning(f"Failed to update thread metadata: {e}")
 
     def get_workflow_from_langgraph_json(self, message: dict) -> tuple[str, dict]:
         """
