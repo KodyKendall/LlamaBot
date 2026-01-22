@@ -71,7 +71,7 @@ export class MessageHandler {
    * Extract thinking/reasoning content from LLM response
    * Handles different provider formats:
    * - Claude: {type: "thinking", thinking: "..."}
-   * - OpenAI: {type: "reasoning", text: "..."}
+   * - OpenAI: {type: "reasoning", summary: [...]} or {type: "reasoning_summary", text: "..."}
    * - Gemini: {thought: true, text: "..."}
    * @param {Array|null} thinkingBlocks - The thinking content blocks from the backend
    * @returns {string|null} - Extracted thinking text or null
@@ -86,6 +86,13 @@ export class MessageHandler {
         // Handle different provider formats
         if (block.thinking) return block.thinking;  // Claude format
         if (block.text) return block.text;          // OpenAI/Gemini format
+        // OpenAI reasoning format: summary is an array of {type: "summary_text", text: "..."} objects
+        if (block.summary && Array.isArray(block.summary)) {
+          return block.summary
+            .map(s => s.text || s.content || (typeof s === 'string' ? s : ''))
+            .filter(t => t)
+            .join('\n');
+        }
         return '';
       })
       .filter(text => text.length > 0)

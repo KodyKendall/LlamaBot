@@ -1,5 +1,6 @@
 from langchain_openai import ChatOpenAI
 from langchain_anthropic import ChatAnthropic
+from langchain_google_genai import ChatGoogleGenerativeAI
 
 from langchain_core.tools import tool, InjectedToolCallId
 from dotenv import load_dotenv
@@ -421,9 +422,9 @@ def write_html_page_agent(state: LlamaPressState):
             "You can also just respond and answer questions, or even ask clarifying questions, etc. Parse the user's intent and make a decision."
         )
 
-    model = ChatAnthropic(
-            model="claude-haiku-4-5",
-            max_tokens=16384
+    model = ChatGoogleGenerativeAI(
+            model="gemini-3-flash-preview",
+            include_thoughts=True
     )
 
     llm_with_tools = model.bind_tools(tools)

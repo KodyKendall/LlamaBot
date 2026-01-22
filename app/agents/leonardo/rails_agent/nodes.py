@@ -32,6 +32,7 @@ from app.agents.leonardo.rails_agent.middleware import (
     inject_view_context,
     check_failure_limit,
     DynamicModelMiddleware,
+    deepseek_reasoning_fix,
 )
 from app.agents.leonardo.rails_agent.sub_agents import delegate_task
 
@@ -97,9 +98,11 @@ def build_workflow(checkpointer=None):
         ),
         # 2. Dynamic model selection based on state.llm_model from frontend
         DynamicModelMiddleware(),
-        # 3. View path context injection - prepends page context to user messages
+        # 3. DeepSeek reasoning fix - injects reasoning_content for multi-turn tool calls
+        deepseek_reasoning_fix,
+        # 4. View path context injection - prepends page context to user messages
         inject_view_context,
-        # 4. Circuit breaker - stop tool calls after 3 failures
+        # 5. Circuit breaker - stop tool calls after 3 failures
         check_failure_limit,
     ]
 

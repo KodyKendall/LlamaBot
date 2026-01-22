@@ -15,7 +15,6 @@ Use cases:
 """
 
 from langchain.agents import create_agent
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.tools import tool, ToolRuntime
 from langchain_core.messages import ToolMessage, SystemMessage
 from langgraph.types import Command
@@ -28,6 +27,8 @@ from app.agents.leonardo.rails_ticket_mode_agent.prompts import TICKET_MODE_AGEN
 from app.agents.leonardo.rails_agent.tools import (
     write_todos, ls, read_file, write_file, edit_file, search_file, bash_command
 )
+# Import the model factory from middleware to use the same model as the main agent
+from app.agents.leonardo.rails_agent.middleware import DynamicModelMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -48,16 +49,21 @@ def get_cached_system_prompt():
 # Sub-Agent Factory
 # =============================================================================
 
-def create_sub_agent():
+def create_sub_agent(llm_model: str = None):
     """Create a sub-agent instance with the same config as the main Ticket Mode agent.
 
     The sub-agent uses:
     - Same system prompt (TICKET_MODE_AGENT_PROMPT) with prompt caching
     - Same tools (ticket mode tools - no internet_search)
     - Same state schema (RailsAgentState)
+    - Same LLM model as the main agent (passed from state.llm_model)
 
     The only difference is it runs in isolated context without the main
     conversation's message history.
+
+    Args:
+        llm_model: The model name from state.llm_model (e.g., 'claude-4.5-haiku', 'gemini-3-flash').
+                   If None, defaults to 'gemini-3-flash'.
 
     Returns:
         A compiled LangGraph agent identical to the main Ticket Mode agent
@@ -71,8 +77,9 @@ def create_sub_agent():
         # Note: delegate_task is NOT included to prevent infinite recursion
     ]
 
-    # Use the same model as the main agent's default
-    model = ChatGoogleGenerativeAI(model="gemini-3-flash-preview", max_output_tokens=16384)
+    # Use the same model as the main agent by reusing DynamicModelMiddleware's _get_llm
+    model_middleware = DynamicModelMiddleware()
+    model = model_middleware._get_llm(llm_model or 'gemini-3-flash')
 
     return create_agent(
         model=model,
@@ -122,10 +129,12 @@ def delegate_task(
         )
     """
     tool_call_id = runtime.tool_call_id
-    logger.info(f"Ticket Mode delegating task to sub-agent: {task_description[:100]}...")
+    # Get the llm_model from the main agent's state so sub-agent uses the same model
+    llm_model = runtime.state.get('llm_model')
+    logger.info(f"Ticket Mode delegating task to sub-agent (model: {llm_model}): {task_description[:100]}...")
 
     try:
-        sub_agent = create_sub_agent()
+        sub_agent = create_sub_agent(llm_model=llm_model)
 
         # Invoke with the task - sub-agent starts with fresh context
         result = sub_agent.invoke({

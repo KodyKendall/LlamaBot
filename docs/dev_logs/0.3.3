@@ -8,59 +8,65 @@
  - [x] Add sections urging Ticket mode and Engineering mode to follow best rails conventions.
  - [x] Add more aggressive subtask delegation for large, complex tasks that span more entities and touch more parts of the codebase
 
-0.3.3c: 
- - [] Add instruction to use delegate task more agressively for searching/exploring code base.
+0.3.3c:
+ - [x] Add instruction to use delegate task more agressively for searching/exploring code base.
 
- 0.3.3d: 
- - [] Add more aggressive delegation for search/read/explore tasks when Leonardo is reading the codebase
+ 0.3.3d:
+ - [x] Add more aggressive delegation for search/read/explore tasks when Leonardo is reading the codebase
 
  0.3.3e:
- - [] Add glob and grep tools for much better search, and add ripgrep to dockerfile
+ - [x] Add glob and grep tools for much better search, and add ripgrep to dockerfile
 
  0.3.3f:
- - [] Add LLAMABOT_AUTH_URI as the default .env settings for LlamaBot's psql database, with the DB_AUTH_URI as the fallback.
+ - [x] Add LLAMABOT_AUTH_URI as the default .env settings for LlamaBot's psql database, with the DB_AUTH_URI as the fallback.
 
  0.3.3g:
- - [] Add ability to switch models in the settings
+ - [x] Add ability to switch models in the settings
 
  0.3.3h:
- - [] Tone down prompt instructions for Gemini 3.0 flash who follows instructions more literally than Claude 4.5 Haiku.
+ - [x] Tone down prompt instructions for Gemini 3.0 flash who follows instructions more literally than Claude 4.5 Haiku.
 
  0.3.3i:
- - [] Improve the glob & grep tool prompts. Iterate on engineering mode prompt some more.
+ - [x] Improve the glob & grep tool prompts. Iterate on engineering mode prompt some more.
 
- 0.3.3j: 
- - [] Add a debug/record button so the user can record the Rails logs for 5 seconds, and get the rails logs into the chat input window.
+ 0.3.3j:
+ - [x] Add a debug/record button so the user can record the Rails logs for 5 seconds, and get the rails logs into the chat input window.
 
  0.3.3k:
- - [] Adding instructions to Leonardo in ticket mode to make a test plan for rspec model tests for self verification
- - [] Change file permissions for rails log tracking tool
+ - [x] Adding instructions to Leonardo in ticket mode to make a test plan for rspec model tests for self verification
+ - [x] Change file permissions for rails log tracking tool
 
- 0.3.3l: 
- - [] Add stricter instructions in ticket mode so that Leonardo writes the ticket to the file system.
+ 0.3.3l:
+ - [x] Add stricter instructions in ticket mode so that Leonardo writes the ticket to the file system.
 
- 0.3.3m: 
- - [] Prompt Improvements tuned for Gemini 3.0 Flash
- - [] Add JavaScript logs into bug button for advanced debugging + add debugging prompt
+ 0.3.3m:
+ - [x] Prompt Improvements tuned for Gemini 3.0 Flash
+ - [x] Add JavaScript logs into bug button for advanced debugging + add debugging prompt
 
  0.3.3n:
- - [] Add thinking prompts into Haiku 4.5, and add new UI for thinking messages to see internal thoughts.
- - [] Add instructions for stopping, managing TODO list, and generally attempting to improve the prompt to work for both Gemini 3.0 Flash and Claude Haiku 4.5.
+ - [x] Add thinking prompts into Haiku 4.5, and add new UI for thinking messages to see internal thoughts.
+ - [x] Add instructions for stopping, managing TODO list, and generally attempting to improve the prompt to work for both Gemini 3.0 Flash and Claude Haiku 4.5.
 
  0.3.3o:
- - [] Change how we inject the view path into the HumanMessage, preventing the red herring where models get confused/disoriented when it gets injected as separate human message.
+ - [x] Change how we inject the view path into the HumanMessage, preventing the red herring where models get confused/disoriented when it gets injected as separate human message.
 
- 0.3.3p: 
- - [] Fix a bug with Rails current iFrame paths not staying up to date as we navigate the rails app.
- - [] Clarify to Leonardo that the read_file tool call is the authoritative source, not grep/glob output
+ 0.3.3p:
+ - [x] Fix a bug with Rails current iFrame paths not staying up to date as we navigate the rails app.
+ - [x] Clarify to Leonardo that the read_file tool call is the authoritative source, not grep/glob output
 
   0.3.3q:
- - [] Improve test agent mode by adding a bug reproduction (will create a failing test) for Leonardo
- - [] Include request tests in the ticket mode (not just model tests anymore)
+ - [x] Improve test agent mode by adding a bug reproduction (will create a failing test) for Leonardo
+ - [x] Include request tests in the ticket mode (not just model tests anymore)
 
- 0.3.3r: 
- - [] Switch to Gemini-3.0-Flash for summarization & sub-agent research task
- - [] Add message threads to database + sidebar (lazy loading to prevent server from loading all threads into RAM and crashing)
- 
+ 0.3.3r:
+ - [x] Switch to Gemini-3.0-Flash for summarization & sub-agent research task
+ - [x] Add message threads to database + sidebar (lazy loading to prevent server from loading all threads into RAM and crashing)
+
  0.3.3s:
- - [] Add a summarized LLM call for the message title
+ - [x] Add a summarized LLM call for the message title
+
+ 0.3.3t: 
+ - [] Make the subagent LLM Model match the main agent thread submodel
+
+ 0.3.3u: 
+ - [] Add deepseek option

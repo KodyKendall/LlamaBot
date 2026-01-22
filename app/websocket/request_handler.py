@@ -95,6 +95,7 @@ class RequestHandler:
                         # - Anthropic/Claude: content is a list of content blocks [{type: "text", text: "..."}]
                         # - Gemini: content is a list of content blocks [{type: "text", text: "..."}, {type: "image_url", ...}]
                         # - Thinking/Reasoning blocks: [{type: "thinking"/"reasoning", text/thinking: "..."}]
+                        # - DeepSeek: reasoning_content in additional_kwargs (separate from content)
                         content = base_message_as_dict["content"]
                         logger.info(f"🍅 Content type: {type(content)}, Content: {content}")
 
@@ -103,15 +104,24 @@ class RequestHandler:
                         thinking_content = None
                         text_content = content
 
+                        # Check for DeepSeek reasoning_content in additional_kwargs
+                        # DeepSeek returns reasoning as a separate field, not in content blocks
+                        additional_kwargs = base_message_as_dict.get("additional_kwargs", {})
+                        deepseek_reasoning = additional_kwargs.get("reasoning_content")
+                        if deepseek_reasoning:
+                            thinking_content = [{"type": "thinking", "thinking": deepseek_reasoning}]
+                            logger.info(f"🧠 DeepSeek reasoning_content: {deepseek_reasoning[:100]}...")
+
                         if isinstance(content, list):
                             # Extract thinking/reasoning blocks (varies by provider)
                             # - Claude: {type: "thinking", thinking: "..."}
-                            # - OpenAI: {type: "reasoning", text: "..."}
+                            # - OpenAI: {type: "reasoning", summary: [...]} or {type: "reasoning_summary", text: "..."}
                             # - Gemini (langchain-google-genai): {type: "thinking", thinking: "...", signature: "..."}
                             thinking_blocks = [
                                 b for b in content
                                 if isinstance(b, dict) and (
                                     b.get("type") == "reasoning" or
+                                    b.get("type") == "reasoning_summary" or
                                     b.get("type") == "thinking" or
                                     b.get("thought") == True
                                 )

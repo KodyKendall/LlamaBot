@@ -57,6 +57,7 @@ langchain-google-genai>=4.0.0
 langchain-google-vertexai>=2.0.0
 langchain-ollama==1.0.0
 langchain-openai==1.0.0
+langchain-deepseek>=0.1.0
 langchain-text-splitters==1.0.0
 langgraph>=1.0.2
 langgraph-api>=0.2.110

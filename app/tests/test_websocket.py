@@ -182,6 +182,69 @@ class TestWebSocketRequestContext:
         assert context.langgraph_checkpointer is None
 
 
+class TestWebSocketDisconnectScenarios:
+    """Tests for WebSocket disconnect edge cases - reproducing error loop from production."""
+
+    @pytest.mark.asyncio
+    async def test_receive_after_disconnect_should_exit_gracefully(self):
+        """
+        Reproduces: WebSocket error: WebSocket is not connected. Need to call "accept" first.
+
+        When receive_json() raises RuntimeError because the WebSocket is not connected,
+        the handler SHOULD break out of the loop and exit gracefully.
+
+        Currently FAILS because the exception is caught in the inner try/except,
+        which logs the error and continues the while True loop.
+        """
+        import asyncio
+
+        mock_websocket = AsyncMock()
+        mock_manager = AsyncMock()
+        mock_manager.connect = AsyncMock()
+        mock_manager.disconnect = MagicMock()
+        mock_manager.send_personal_message = AsyncMock()
+
+        # Track how many times receive_json is called
+        call_count = 0
+        max_calls = 5  # If we hit this many, we're in an infinite loop
+
+        async def mock_receive_json():
+            nonlocal call_count
+            call_count += 1
+            # Yield control to allow timeout to work
+            await asyncio.sleep(0)
+            if call_count >= max_calls:
+                # Stop the loop after max_calls to prevent actual infinite loop
+                raise KeyboardInterrupt(f"Stopped after {call_count} calls - infinite loop detected!")
+            # Simulate the exact error from Starlette when WebSocket is not connected
+            raise RuntimeError('WebSocket is not connected. Need to call "accept" first.')
+
+        mock_websocket.receive_json = mock_receive_json
+        # client_state shows DISCONNECTED (connection is closed)
+        mock_websocket.client_state = WebSocketState.DISCONNECTED
+
+        handler = WebSocketHandler(mock_websocket, mock_manager)
+
+        with patch.object(handler, 'request_handler') as mock_request_handler:
+            mock_request_handler.cleanup_connection = MagicMock()
+
+            # Run the handler
+            try:
+                await handler.handle_websocket()
+            except KeyboardInterrupt:
+                pass  # Expected if we hit the infinite loop guard
+
+            # Verify: Connection was established and cleaned up
+            mock_manager.connect.assert_called_once()
+            mock_manager.disconnect.assert_called_once()
+
+            # KEY ASSERTION: receive_json should only be called ONCE
+            # If it's called multiple times, we're in an error loop
+            assert call_count == 1, \
+                f"Expected 1 call to receive_json, got {call_count}. " \
+                "Handler is looping on error instead of exiting gracefully."
+
+
 class TestWebSocketIntegration:
     """Integration tests for WebSocket functionality."""
     
