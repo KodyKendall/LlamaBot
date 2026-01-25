@@ -98,6 +98,13 @@ export function getVSCodeUrl() {
 }
 
 /**
+ * Get Tickets URL based on current protocol
+ */
+export function getTicketsUrl() {
+  return getRailsUrl() + '/llama_bot/tickets';
+}
+
+/**
  * Get WebSocket URL based on current protocol
  */
 export function getWebSocketUrl() {

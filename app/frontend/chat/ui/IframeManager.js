@@ -13,7 +13,7 @@
  *    - Requires Rails debug info to maintain state
  */
 
-import { getRailsUrl, getVSCodeUrl, DEFAULT_CONFIG } from '../config.js';
+import { getRailsUrl, getVSCodeUrl, getTicketsUrl, DEFAULT_CONFIG } from '../config.js';
 
 export class IframeManager {
   constructor(container = null) {
@@ -27,6 +27,9 @@ export class IframeManager {
 
     // VS CODE iframe
     this.vsCodeFrame = this.querySelector('[data-llamabot="vscode-frame"]');
+
+    // TICKETS iframe
+    this.ticketsFrame = this.querySelector('[data-llamabot="tickets-frame"]');
 
     // URL input element
     this.urlInput = this.querySelector('[data-llamabot="url-input"]');
@@ -123,6 +126,11 @@ export class IframeManager {
     // Set VS Code iframe URL
     if (this.vsCodeFrame) {
       this.vsCodeFrame.src = getVSCodeUrl();
+    }
+
+    // Set Tickets iframe URL
+    if (this.ticketsFrame) {
+      this.ticketsFrame.src = getTicketsUrl();
     }
   }
 
@@ -537,6 +545,7 @@ export class IframeManager {
     const idToDataAttrMap = {
       'liveSiteFrame': 'live-site-frame',
       'vsCodeFrame': 'vscode-frame',
+      'ticketsFrame': 'tickets-frame',
       'contentFrame': 'content-frame',
       'gitFrame': 'git-frame',
       'logsFrame': 'logs-frame',
@@ -580,6 +589,7 @@ export class IframeManager {
     const idToDataAttrMap = {
       'liveSiteFrame': 'live-site-frame',
       'vsCodeFrame': 'vscode-frame',
+      'ticketsFrame': 'tickets-frame',
       'contentFrame': 'content-frame',
       'gitFrame': 'git-frame',
       'logsFrame': 'logs-frame',

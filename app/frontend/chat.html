@@ -150,6 +150,16 @@
                             </svg>
                         </button>
                     </div>
+                    <div class="tab" data-target="ticketsFrame">
+                        <span class="tab-text">Tickets</span>
+                        <button class="tab-external-link" data-iframe="ticketsFrame" title="Open in new tab">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                                <polyline points="15 3 21 3 21 9"></polyline>
+                                <line x1="10" y1="14" x2="21" y2="3"></line>
+                            </svg>
+                        </button>
+                    </div>
                     <!-- <div class="tab" data-target="gitFrame">Git Status</div> -->
                     <!-- <div class="tab" data-target="logsFrame">Logs</div> -->
                     <!-- <div class="tab" data-target="pgWebFrame">Database</div> -->
@@ -189,6 +199,7 @@
             <div class="browser-content">
                 <iframe data-llamabot="live-site-frame" title="Live Site Frame" class="content-iframe active"></iframe>
                 <iframe data-llamabot="vscode-frame" title="VS Code Frame" class="content-iframe" allow="clipboard-read; clipboard-write">  </iframe>
+                <iframe data-llamabot="tickets-frame" title="Tickets Frame" class="content-iframe"></iframe>
                 <!-- <iframe src="/agent_page/rails_agent" title="Git Status Frame" data-llamabot="git-frame" class="content-iframe"></iframe> -->
                 <!-- <iframe src="/logs" title="Logs Frame" data-llamabot="logs-frame" class="content-iframe"></iframe> -->
                 <!-- <iframe src="/page" title="Content Frame" data-llamabot="content-frame" class="content-iframe"></iframe> -->

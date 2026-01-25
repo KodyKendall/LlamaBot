@@ -22,12 +22,16 @@ from langchain_anthropic import ChatAnthropic
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.agents import create_agent
 from langchain.agents.middleware import SummarizationMiddleware
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import SystemMessage, ToolMessage
+from langchain.tools import tool, ToolRuntime
+from langgraph.types import Command
 from datetime import date
+import base64
 
 from app.agents.leonardo.rails_agent.state import RailsAgentState
 from app.agents.leonardo.rails_agent.tools import (
-    write_todos, ls, read_file, write_file, edit_file, search_file, bash_command
+    write_todos, ls, read_file, write_file, edit_file, search_file, bash_command,
+    rails_api_sh,
 )
 from app.agents.leonardo.rails_ticket_mode_agent.prompts import TICKET_MODE_AGENT_PROMPT
 from app.agents.leonardo.rails_ticket_mode_agent.middleware import (
@@ -68,6 +72,7 @@ default_tools = [
     ls, read_file, write_file, edit_file, search_file,
     bash_command,
     delegate_task,  # Sub-agent delegation for focused research tasks
+    write_final_ticket,
 ]
 
 
