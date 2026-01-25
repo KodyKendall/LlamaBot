@@ -1,0 +1,84 @@
+<h2>🐋🦙 LlamaBot v0.3.3 Release Notes</h2>
+
+<p>This release focuses on improved AI agent delegation, better search capabilities, multi-model support, and enhanced debugging tools.</p>
+
+<h3>✨ New Features</h3>
+
+<h4>🐋 Multi-Model Support</h4>
+<ul>
+  <li>Added ability to switch AI models in settings</li>
+  <li>Added OpenAI gpt-5-mini model option</li>
+  <li>Added DeepSeek model option</li>
+  <li>Subagents now follow the same LLM model as the main agent thread</li>
+</ul>
+
+<h4>Enhanced Search Tools</h4>
+<ul>
+  <li>Added <code>glob</code> and <code>grep</code> tools for significantly improved codebase search</li>
+  <li>Added ripgrep to Dockerfile for faster searching</li>
+  <li>Improved glob & grep tool prompts for better results</li>
+</ul>
+
+<h4>Message Threads</h4>
+<ul>
+  <li>Added message threads stored in database with sidebar navigation</li>
+  <li>Implemented lazy loading to prevent server memory issues</li>
+  <li>Added AI-generated summarized titles for message threads</li>
+</ul>
+
+<h4>Debugging Tools</h4>
+<ul>
+  <li>Added debug/record button to capture Rails logs for 5 seconds directly into chat</li>
+  <li>Added JavaScript console logs to bug button for advanced debugging</li>
+  <li>Added debugging prompt for better issue analysis</li>
+</ul>
+
+<h4>AI Thinking UI</h4>
+<ul>
+  <li>Added thinking prompts for Claude Haiku 4.5</li>
+  <li>New UI to display AI internal reasoning/thoughts</li>
+</ul>
+
+<h3>🔧 Improvements</h3>
+
+<h4>Agent Delegation</h4>
+<ul>
+  <li>More aggressive TODO tool usage in engineering mode</li>
+  <li>Improved subtask delegation for large, complex tasks spanning multiple entities</li>
+  <li>More aggressive delegation for search/read/explore tasks</li>
+  <li>Ticket mode now stays focused even with off-topic requests</li>
+</ul>
+
+<h4>Prompt Optimizations</h4>
+<ul>
+  <li>Added Rails best practices conventions for Ticket and Engineering modes</li>
+  <li>Tuned prompts for Gemini 3.0 Flash (follows instructions more literally)</li>
+  <li>Improved instructions to work across both Gemini 3.0 Flash and Claude Haiku 4.5</li>
+  <li>Clarified that <code>read_file</code> tool output is authoritative over grep/glob output</li>
+</ul>
+
+<h4>Ticket Mode Enhancements</h4>
+<ul>
+  <li>Added test plan generation for RSpec model tests (self-verification)</li>
+  <li>Expanded to include request tests (not just model tests)</li>
+  <li>Added bug reproduction flow that creates failing tests</li>
+  <li>Stricter instructions ensuring tickets are written to the file system</li>
+</ul>
+
+<h4>Performance & Stability</h4>
+<ul>
+  <li>Reduced summarization message limit to 8 (fixes continuous re-triggering issue)</li>
+  <li>Switched to Gemini 3.0 Flash for summarization & sub-agent research tasks</li>
+  <li>Added <code>LLAMABOT_AUTH_URI</code> env variable with <code>DB_AUTH_URI</code> fallback</li>
+</ul>
+
+<h3>🐛 Bug Fixes</h3>
+<ul>
+  <li>Fixed Rails iFrame paths not staying up to date during navigation</li>
+  <li>Fixed view path injection causing model confusion (now injected properly into HumanMessage)</li>
+  <li>Fixed file permissions for Rails log tracking tool</li>
+</ul>
+
+<hr>
+
+<p><strong>Full Changelog:</strong> v0.3.2...v0.3.3</p>
