@@ -91,6 +91,9 @@ class WebSocketHandler:
                     break
                 except Exception as e:
                     logger.error(f"WebSocket error: {str(e)}")
+                    # Break on disconnect-related errors to avoid infinite loop
+                    if "not connected" in str(e).lower() or not self._is_websocket_open(self.websocket):
+                        break
                     # Only send error message if WebSocket is still open
                     if self._is_websocket_open(self.websocket):
                         await self.manager.send_personal_message({
