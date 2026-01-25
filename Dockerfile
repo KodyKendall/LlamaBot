@@ -3,7 +3,7 @@ FROM nikolaik/python-nodejs:python3.11-nodejs18
 WORKDIR /app
 
 # install gh cli and docker cli
-RUN apt-get update && apt-get install -y curl gnupg ca-certificates && \
+RUN apt-get update && apt-get install -y curl gnupg ca-certificates ripgrep && \
     curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | gpg --dearmor -o /usr/share/keyrings/githubcli-archive-keyring.gpg && \
     chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg && \
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null && \
@@ -45,4 +45,4 @@ CMD ["bash", "-c", "if [ ! -z \"$DB_URI\" ]; then python init_pg_checkpointer.py
 # These commands document how to build the Docker image quickly and deploy to dockerhub
 # docker buildx build --file Dockerfile --platform linux/amd64,linux/arm64 --tag kody06/llamabot:0.2.21c --push .
 # docker buildx build --file Dockerfile --platform linux/amd64,linux/arm64 --tag kody06/llamabot:0.2.23 --push .
-# docker buildx build --file Dockerfile --platform linux/amd64,linux/arm64 --tag kody06/llamabot:0.3.3b --push .
+# docker buildx build --file Dockerfile --platform linux/amd64,linux/arm64 --tag kody06/llamabot:0.3.3u --push .

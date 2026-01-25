@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from main import app, manager
 from langgraph.checkpoint.memory import MemorySaver
-from main import auth
+from app.dependencies import auth
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -178,7 +178,7 @@ def mock_database():
 @pytest.fixture
 def mock_build_workflow():
     """Mock build_workflow function for testing."""
-    with patch('main.build_workflow') as mock:
+    with patch('app.agents.llamabot.nodes.build_workflow') as mock:
         workflow = MagicMock()
         workflow.stream = MagicMock(return_value=iter([]))
         workflow.get_state = MagicMock(return_value={"messages": []})

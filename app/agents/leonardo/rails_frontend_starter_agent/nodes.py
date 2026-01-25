@@ -25,7 +25,7 @@ from openai import OpenAI
 from app.agents.utils.images import encode_image
 
 from app.agents.leonardo.rails_agent.state import RailsAgentState
-from app.agents.leonardo.rails_agent.tools import write_todos, write_file, read_file, ls, edit_file, search_file, internet_search, bash_command, git_status, git_commit, git_command, view_page, github_cli_command
+from app.agents.leonardo.rails_agent.tools import write_todos, write_file, read_file, ls, edit_file, search_file, internet_search, bash_command, git_status, git_commit, git_command, github_cli_command
 from app.agents.leonardo.rails_frontend_starter_agent.prompts import RAILS_FRONTEND_STARTER_AGENT_PROMPT
 
 import logging

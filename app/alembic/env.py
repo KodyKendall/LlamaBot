@@ -11,7 +11,7 @@ from alembic import context
 from sqlmodel import SQLModel
 
 # Import all models so they're registered with SQLModel.metadata
-from app.models import User  # noqa: F401
+from app.models import User, ThreadMetadata  # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -27,10 +27,10 @@ target_metadata = SQLModel.metadata
 
 # Get database URL from environment
 def get_url():
-    """Get database URL from AUTH_DB_URI environment variable."""
-    url = os.getenv("AUTH_DB_URI")
+    """Get database URL from LEONARDO_DB_URI (or AUTH_DB_URI for backwards compat)."""
+    url = os.getenv("LEONARDO_DB_URI") or os.getenv("AUTH_DB_URI")
     if not url:
-        raise RuntimeError("AUTH_DB_URI environment variable is not set")
+        raise RuntimeError("LEONARDO_DB_URI or AUTH_DB_URI environment variable must be set")
     return url
 
 

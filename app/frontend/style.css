@@ -117,6 +117,59 @@ body {
     font-size: 18px;
 }
 
+/* Model toggle button - subtle, hidden by default */
+.model-toggle-btn {
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: none;
+    color: var(--text-color);
+    opacity: 0.25;
+    cursor: pointer;
+    transition: opacity 0.2s ease, background-color 0.2s ease;
+    border-radius: 4px;
+    padding: 0;
+}
+
+.model-toggle-btn:hover {
+    opacity: 0.6;
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+.model-toggle-btn.active {
+    opacity: 0.8;
+    background-color: rgba(139, 92, 246, 0.1);
+}
+
+.model-toggle-btn i {
+    font-size: 12px;
+}
+
+/* Model selector container - slides in when visible */
+.model-selector-container {
+    display: flex;
+    align-items: center;
+    transition: opacity 0.2s ease, transform 0.2s ease;
+    margin-right: auto;
+}
+
+.model-selector-container.hidden {
+    display: none;
+}
+
+.model-selector-container .custom-dropdown {
+    font-size: 0.7rem;
+    padding: 0.35rem 1.5rem 0.35rem 0.5rem;
+}
+
+/* When model selector is hidden, toggle button pushes itself to left */
+.send-controls .model-toggle-btn:not(.active) {
+    margin-right: auto;
+}
+
 /* Hamburger menu styles */
 .hamburger-menu {
     width: 32px;
@@ -470,6 +523,82 @@ body {
     white-space: nowrap;
 }
 
+/* ============================================
+   EXPANDABLE TOOL MESSAGES (Grep, Glob, Bash)
+   ============================================ */
+
+[data-llamabot="tool-expandable"] {
+    display: inline-flex;
+    flex-direction: column;
+    cursor: pointer;
+    max-width: 100%;
+}
+
+[data-llamabot="tool-expandable"] [data-llamabot="tool-compact"] {
+    cursor: pointer;
+}
+
+[data-llamabot="tool-expand-arrow"] {
+    font-size: 8px;
+    margin-left: 4px;
+    color: rgba(255, 255, 255, 0.4);
+    transition: transform 0.2s ease, opacity 0.2s ease;
+    display: none;  /* Hidden by default */
+}
+
+[data-llamabot="tool-expandable"].expanded [data-llamabot="tool-expand-arrow"] {
+    display: inline-block;  /* Show when expanded */
+    transform: rotate(90deg);
+}
+
+[data-llamabot="tool-expand-content"] {
+    display: none;
+    margin-top: 8px;
+    padding: 10px 12px;
+    background: rgba(0, 0, 0, 0.25);
+    border-radius: 6px;
+    border: 1px solid rgba(139, 92, 246, 0.15);
+    max-width: 600px;
+    width: 100%;
+}
+
+[data-llamabot="tool-expandable"].expanded [data-llamabot="tool-expand-content"] {
+    display: block;
+}
+
+[data-llamabot="tool-expand-section"] {
+    margin-bottom: 10px;
+}
+
+[data-llamabot="tool-expand-section"]:last-child {
+    margin-bottom: 0;
+}
+
+[data-llamabot="tool-expand-label"] {
+    font-size: 0.65rem;
+    font-weight: 600;
+    color: rgba(139, 92, 246, 0.8);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 4px;
+}
+
+[data-llamabot="tool-expand-code"] {
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-size: 0.7rem;
+    line-height: 1.4;
+    color: rgba(255, 255, 255, 0.75);
+    background: rgba(0, 0, 0, 0.3);
+    padding: 8px 10px;
+    border-radius: 4px;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 200px;
+    overflow-y: auto;
+    margin: 0;
+}
+
 [data-llamabot="error-message"] {
     background-color: rgba(255, 99, 71, 0.2);
     border: 1px solid rgba(255, 99, 71, 0.5);
@@ -627,6 +756,43 @@ body {
     50% {
         box-shadow: 0 0 0 4px rgba(76, 175, 80, 0);
     }
+}
+
+/* Capture logs button - subtle debug button */
+.capture-logs-btn {
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: none;
+    color: var(--text-color);
+    opacity: 0.25;
+    cursor: pointer;
+    transition: opacity 0.2s ease, background-color 0.2s ease;
+    border-radius: 4px;
+    padding: 0;
+}
+
+.capture-logs-btn:hover {
+    opacity: 0.6;
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+.capture-logs-btn.recording {
+    opacity: 1;
+    color: #ff4444;
+    animation: pulse-recording 1s ease-in-out infinite;
+}
+
+.capture-logs-btn i {
+    font-size: 12px;
+}
+
+@keyframes pulse-recording {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
 }
 
 /* Selected element badge */
@@ -1165,6 +1331,174 @@ body {
     display: inline-flex;
     align-items: center;
     gap: 8px;
+}
+
+/* Thinking content display - shows real model thinking/reasoning */
+.thinking-content {
+    width: 100%;
+}
+
+.thinking-content .thinking-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 6px;
+}
+
+.thinking-content .thinking-header.clickable {
+    cursor: pointer;
+}
+
+.thinking-content .thinking-header.clickable:hover {
+    opacity: 0.8;
+}
+
+.thinking-content .thinking-icon {
+    font-size: 1rem;
+}
+
+.thinking-content .thinking-label {
+    color: rgba(139, 92, 246, 0.9);
+    font-weight: 500;
+    font-size: 0.8rem;
+}
+
+.thinking-content .thinking-toggle {
+    margin-left: auto;
+    font-size: 0.7rem;
+    color: rgba(255, 255, 255, 0.5);
+    transition: transform 0.2s ease;
+}
+
+.thinking-content[data-expanded="true"] .thinking-toggle {
+    transform: rotate(90deg);
+}
+
+.thinking-content .thinking-text {
+    font-size: 0.8rem;
+    color: rgba(255, 255, 255, 0.7);
+    font-style: italic;
+    max-height: 150px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    line-height: 1.4;
+}
+
+/* Collapsed state styles */
+.thinking-content.collapsed .thinking-summary {
+    font-size: 0.75rem;
+    color: rgba(255, 255, 255, 0.5);
+    font-style: italic;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.thinking-content.collapsed .thinking-full {
+    display: none;
+    font-size: 0.8rem;
+    color: rgba(255, 255, 255, 0.7);
+    font-style: italic;
+    max-height: 200px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    line-height: 1.4;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(139, 92, 246, 0.2);
+}
+
+.thinking-content[data-expanded="true"] .thinking-summary {
+    display: none;
+}
+
+.thinking-content[data-expanded="true"] .thinking-full {
+    display: block;
+}
+
+/* Inline thinking message in chat history */
+.thinking-message {
+    margin: 0.2rem 0;
+}
+
+.thinking-message-content {
+    background: transparent;
+    padding: 0.3rem 0;
+    max-width: 90%;
+}
+
+/* Shimmer animation for the label text */
+@keyframes thinking-text-shimmer {
+    0% {
+        background-position: -200% 0;
+    }
+    100% {
+        background-position: 200% 0;
+    }
+}
+
+.thinking-message-header {
+    display: inline-flex;
+    align-items: center;
+    cursor: pointer;
+    user-select: none;
+}
+
+.thinking-message-header:hover {
+    opacity: 0.7;
+}
+
+/* Label - very subtle, blends with background */
+.thinking-message-header .thinking-label {
+    color: rgba(255, 255, 255, 0.15);
+    font-weight: 300;
+    font-size: 0.65rem;
+    text-transform: lowercase;
+    letter-spacing: 0.02em;
+}
+
+/* Shimmer on label only when streaming */
+.thinking-message-content.streaming .thinking-label {
+    background: linear-gradient(
+        90deg,
+        rgba(255, 255, 255, 0.12) 0%,
+        rgba(255, 255, 255, 0.25) 50%,
+        rgba(255, 255, 255, 0.12) 100%
+    );
+    background-size: 200% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: thinking-text-shimmer 1.5s ease-in-out infinite;
+}
+
+/* No shimmer when not streaming */
+.thinking-message-content:not(.streaming) .thinking-label {
+    animation: none;
+    background: none;
+    -webkit-text-fill-color: rgba(255, 255, 255, 0.15);
+}
+
+/* Thinking message text - hidden by default */
+.thinking-message-text {
+    display: none;
+    font-size: 0.7rem;
+    color: rgba(255, 255, 255, 0.4);
+    font-style: italic;
+    max-height: 200px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    line-height: 1.4;
+    margin-top: 4px;
+    padding-left: 0.5rem;
+}
+
+/* Expanded state - show text */
+.thinking-message-content.expanded .thinking-message-text {
+    display: block;
 }
 
 .hidden {

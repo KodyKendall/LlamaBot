@@ -194,8 +194,11 @@ class ChatApp {
       sendButton: this.container.querySelector('[data-llamabot="send-button"]'),
       agentModeSelect: this.container.querySelector('[data-llamabot="agent-mode-select"]'),
       modelSelect: this.container.querySelector('[data-llamabot="model-select"]'),
+      modelToggleBtn: this.container.querySelector('[data-llamabot="model-toggle-btn"]'),
+      modelSelectorContainer: this.container.querySelector('[data-llamabot="model-selector-container"]'),
       thinkingArea: this.container.querySelector('[data-llamabot="thinking-area"]'),
       elementSelectorBtn: this.container.querySelector('[data-llamabot="element-selector-btn"]'),
+      captureLogsBtn: this.container.querySelector('[data-llamabot="capture-logs-btn"]'),
       connectionStatus: this.container.querySelector('[data-llamabot="connection-status"]'),
       hamburgerMenu: this.container.querySelector('[data-llamabot="hamburger-menu"]'),
       menuDrawer: this.container.querySelector('[data-llamabot="menu-drawer"]'),
@@ -245,6 +248,30 @@ class ChatApp {
       this.updateDropdownLabel(this.elements.modelSelect);
     }
 
+    // Model toggle button - show/hide model selector
+    if (this.elements.modelToggleBtn && this.elements.modelSelectorContainer) {
+      this.elements.modelToggleBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isHidden = this.elements.modelSelectorContainer.classList.contains('hidden');
+        if (isHidden) {
+          this.elements.modelSelectorContainer.classList.remove('hidden');
+          this.elements.modelToggleBtn.classList.add('active');
+        } else {
+          this.elements.modelSelectorContainer.classList.add('hidden');
+          this.elements.modelToggleBtn.classList.remove('active');
+        }
+      });
+
+      // Close model selector when clicking outside
+      document.addEventListener('click', (e) => {
+        if (!this.elements.modelToggleBtn.contains(e.target) &&
+            !this.elements.modelSelectorContainer.contains(e.target)) {
+          this.elements.modelSelectorContainer.classList.add('hidden');
+          this.elements.modelToggleBtn.classList.remove('active');
+        }
+      });
+    }
+
     // Suggested prompts - handle clicks on all buttons with data-llamabot="suggested-prompt"
     const suggestedPrompts = this.container.querySelectorAll('[data-llamabot="suggested-prompt"]');
     suggestedPrompts.forEach(button => {
@@ -291,6 +318,42 @@ class ChatApp {
         this.tokenIndicator.reset();
       }
     });
+
+    // Capture Rails logs button
+    if (this.elements.captureLogsBtn) {
+      this.elements.captureLogsBtn.addEventListener('click', async () => {
+        this.elements.captureLogsBtn.classList.add('recording');
+        try {
+          // Clear old JS logs first
+          this.clearJsConsoleLogs();
+
+          // Wait for Rails logs (10 seconds) - JS logs accumulate during this time
+          const railsLogsRes = await fetch('/api/capture-rails-logs', { method: 'POST' }).then(r => r.json());
+
+          // Now fetch JS logs that accumulated during the 10s recording period
+          const jsLogs = await this.getJsConsoleLogs();
+
+          // Format combined output
+          let output = '';
+          if (jsLogs && jsLogs.length > 0) {
+            const formattedJsLogs = jsLogs.map(l => `[${l.type}] ${l.args.join(' ')}`).join('\n');
+            output += `JavaScript Console Logs:\n\`\`\`\n${formattedJsLogs}\n\`\`\`\n\n`;
+          }
+          output += `Rails Server Logs:\n\`\`\`\n${railsLogsRes.logs}\n\`\`\``;
+
+          if (this.elements.messageInput) {
+            const existing = this.elements.messageInput.value;
+            const separator = existing ? '\n\n' : '';
+            this.elements.messageInput.value = existing + separator + output;
+            this.elements.messageInput.dispatchEvent(new Event('input', { bubbles: true }));
+          }
+        } catch (err) {
+          console.error('Failed to capture logs:', err);
+        } finally {
+          this.elements.captureLogsBtn.classList.remove('recording');
+        }
+      });
+    }
   }
 
   /**
@@ -417,6 +480,45 @@ class ChatApp {
       window.removeEventListener("message", handleMessage);
       callback(new Error("No response from Rails iframe"));
     }, timeoutMs);
+  }
+
+  /**
+   * Clear JavaScript console logs in the Rails iframe via postMessage
+   */
+  clearJsConsoleLogs() {
+    const iframe = this.elements.liveSiteFrame;
+    if (iframe && iframe.contentWindow) {
+      iframe.contentWindow.postMessage({ source: 'leonardo', type: 'clear-console-logs' }, '*');
+    }
+  }
+
+  /**
+   * Get JavaScript console logs from the Rails iframe via postMessage
+   */
+  getJsConsoleLogs() {
+    return new Promise((resolve) => {
+      const iframe = this.elements.liveSiteFrame;
+      if (!iframe || !iframe.contentWindow) {
+        resolve([]);
+        return;
+      }
+
+      const handleMessage = (event) => {
+        if (event.data && event.data.source === 'llamapress' && event.data.type === 'console-logs') {
+          window.removeEventListener('message', handleMessage);
+          clearTimeout(timer);
+          resolve(event.data.logs || []);
+        }
+      };
+
+      window.addEventListener('message', handleMessage);
+      iframe.contentWindow.postMessage({ source: 'leonardo', type: 'get-console-logs' }, '*');
+
+      const timer = setTimeout(() => {
+        window.removeEventListener('message', handleMessage);
+        resolve([]); // Return empty if no response
+      }, 2000);
+    });
   }
 
   /**

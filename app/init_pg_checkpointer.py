@@ -10,7 +10,7 @@ from psycopg import Connection
 load_dotenv()
 
 db_uri = os.getenv("DB_URI")
-llamabot_db_uri = os.getenv("LLAMABOT_DB_URI") or os.getenv("AUTH_DB_URI")  # Backwards compat
+llamabot_db_uri = os.getenv("LLAMABOT_DB_URI") or os.getenv("LEONARDO_DB_URI") or os.getenv("AUTH_DB_URI")  # Backwards compat
 
 
 def ensure_env_variable(key: str, default_value: str, env_file: str = ".env") -> str:
@@ -141,9 +141,9 @@ def test_sqlalchemy_connection(uri: str) -> bool:
 
 # Initialize LlamaBot database if LLAMABOT_DB_URI is set
 if llamabot_db_uri is None:
-    print("LLAMABOT_DB_URI is not set, skipping LlamaBot database initialization")
+    print("LLAMABOT_DB_URI/LEONARDO_DB_URI/AUTH_DB_URI is not set, skipping LlamaBot database initialization")
 else:
-    print(f"LLAMABOT_DB_URI is set, initializing LlamaBot database...")
+    print(f"LLAMABOT_DB_URI/LEONARDO_DB_URI is set, initializing LlamaBot database...")
     if ensure_database_exists(llamabot_db_uri):
         # Test SQLAlchemy connection before running migrations
         if test_sqlalchemy_connection(llamabot_db_uri):

@@ -1,7 +1,7 @@
 """
-Middleware for Rails Ticket Mode Agent.
+Middleware for Rails Testing Agent.
 
-Reuses middleware from rails_agent and adds ticket-mode-specific middleware.
+Reuses middleware from rails_agent and adds testing-mode-specific middleware.
 """
 
 from langchain.agents.middleware import AgentMiddleware
@@ -18,25 +18,26 @@ from app.agents.leonardo.rails_agent.middleware import (
 
 
 # =============================================================================
-# Ticket Mode Context Injection (ticket-mode-specific)
+# Testing Mode Context Injection (testing-mode-specific)
 # =============================================================================
 
-class TicketModeContextMiddleware(AgentMiddleware):
-    """Inject ticket mode restrictions reminder into LLM context.
+class TestingModeContextMiddleware(AgentMiddleware):
+    """Inject testing mode context reminder into LLM context.
 
-    This middleware adds a system note reminding the agent that it's in Ticket Mode
-    and can only READ code files but WRITE only to .md files in rails/requirements/.
+    This middleware adds a system note reminding the agent that it's in Testing Mode
+    and should focus on TDD bug reproduction: write failing tests first, verify bugs,
+    then guide user to fix.
     """
 
-    def _inject_ticket_mode_context(self, request):
-        """Add ticket mode context to the last user message."""
-        context = '<CONTEXT type="mode">TICKET MODE: READ any file, WRITE only .md files in rails/requirements/. No code changes. Focus on: observation template, research, implementation tickets.</CONTEXT>'
+    def _inject_testing_mode_context(self, request):
+        """Add testing mode context to the last user message."""
+        context = '<CONTEXT type="mode">TESTING MODE: Focus on TDD bug reproduction. (1) Capture bug report, (2) Write failing test proving bug exists, (3) Run test to verify RED state, (4) Hand off to Engineer mode for fix, (5) Verify test passes (GREEN) after fix. Tests become permanent regression guards.</CONTEXT>'
 
         messages = list(request.messages)
         for i in range(len(messages) - 1, -1, -1):
             if isinstance(messages[i], HumanMessage):
                 content = messages[i].content
-                # Skip if already has ticket mode context
+                # Skip if already has testing mode context
                 if isinstance(content, str) and '<CONTEXT type="mode">' in content:
                     return request
                 # Prepend context
@@ -46,13 +47,13 @@ class TicketModeContextMiddleware(AgentMiddleware):
         return request
 
     def wrap_model_call(self, request, handler):
-        """Sync version: Inject ticket mode context into LLM request."""
-        modified_request = self._inject_ticket_mode_context(request)
+        """Sync version: Inject testing mode context into LLM request."""
+        modified_request = self._inject_testing_mode_context(request)
         return handler(modified_request)
 
     async def awrap_model_call(self, request, handler):
-        """Async version: Inject ticket mode context into LLM request."""
-        modified_request = self._inject_ticket_mode_context(request)
+        """Async version: Inject testing mode context into LLM request."""
+        modified_request = self._inject_testing_mode_context(request)
         return await handler(modified_request)
 
 
@@ -60,8 +61,8 @@ class TicketModeContextMiddleware(AgentMiddleware):
 # Convenience exports
 # =============================================================================
 
-# Ticket-mode-specific middleware instance
-inject_ticket_mode_context = TicketModeContextMiddleware()
+# Testing-mode-specific middleware instance
+inject_testing_mode_context = TestingModeContextMiddleware()
 
 # Re-export from rails_agent for convenience
 __all__ = [
@@ -71,7 +72,7 @@ __all__ = [
     'DynamicModelMiddleware',
     'inject_view_context',
     'check_failure_limit',
-    # Ticket-mode-specific
-    'TicketModeContextMiddleware',
-    'inject_ticket_mode_context',
+    # Testing-mode-specific
+    'TestingModeContextMiddleware',
+    'inject_testing_mode_context',
 ]

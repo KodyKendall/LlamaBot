@@ -32,6 +32,11 @@ Your contract:
 5. Rails verifies token, sets `current_user`, checks `llama_bot_allow` whitelist
 6. Controller actions scope all queries to `current_user.resources`
 
+**Common Debugging Points (for chat/job issues):**
+- `ChatChannel#send_message`: Where `data["message"]` is extracted from ActionCable
+- `AgentStateBuilder#build`: Where `@params["message"]` must use STRING keys (not symbols)
+- `ProcessChatMessageJob#perform`: Where `agent_state[:message]` arrives - check if nil here
+
 **Helper Function:**
 All LangGraph tools use `make_api_request_to_llamapress(method, endpoint, api_token, payload)` from `app/agents/utils/make_api_request_to_llamapress.py` to call Rails APIs.
 
@@ -1213,6 +1218,83 @@ async def get_chart_data(
 | Tool not available to agent | Not registered in tools list | Add to `tools = [...]` at bottom of nodes.py |
 | Validation errors | Missing required field | Check schema.rb for `null: false` constraints |
 | Pydantic validation error | State type mismatch | Ensure AgentStateBuilder returns types matching State class |
+| Job arguments are nil | State builder not extracting params correctly | Add logging in state builder, check @params string vs symbol keys |
+| Job silently fails | Exception caught by generic rescue | Check Rails logs for full backtrace before generic error |
+| Message received but not processed | Job enqueued with nil/blank required fields | Validate agent_state before `perform_later` |
+| "Unable to process ChatChannel#receive" | Method doesn't exist on channel | Add `receive` method that delegates to `send_message` |
+| ActionCable JSON parse error | Broadcasting Ruby Hash incorrectly | ActionCable auto-serializes - don't double-encode JSON |
+
+---
+
+## DEBUGGING BACKGROUND JOBS & ACTIONCABLE
+
+When chat messages aren't being processed or jobs fail silently, follow this systematic debugging approach.
+
+**Key Insight:** When you see `message=>nil` in job arguments, don't fix the job - trace back to where the message was supposed to come from.
+
+### Trace the Data Flow
+
+1. **ChatChannel receives data** - Confirm the message arrives:
+```ruby
+def send_message(data)
+  Rails.logger.info "📥 ChatChannel data: #{data.inspect}"
+  message = data["message"]
+  # ...
+```
+
+2. **State builder receives params** - Check what's passed:
+```ruby
+def initialize(params:, context:)
+  @params = params
+  Rails.logger.info "🔧 StateBuilder @params: #{@params.inspect}"
+end
+```
+
+3. **State builder returns** - Verify the built state:
+```ruby
+def build
+  result = {
+    message: @params["message"],  # Note: STRING keys, not symbols
+    thread_id: @params["thread_id"],
+    # ...
+  }
+  Rails.logger.info "📤 StateBuilder returning: #{result.inspect}"
+  result
+end
+```
+
+4. **Before job enqueue** - Validate required fields:
+```ruby
+agent_state = state_builder.build
+
+# CRITICAL: Validate before enqueue
+if agent_state[:message].blank?
+  Rails.logger.error "❌ agent_state missing message: #{agent_state.inspect}"
+  transmit({ type: "error", content: "Message processing failed" })
+  return
+end
+
+ProcessChatMessageJob.perform_later(agent_state, session_id, current_user.id)
+```
+
+### Common Issues Table
+
+| Symptom | Likely Cause | Fix |
+|---------|--------------|-----|
+| `message=>nil` in job args | String/symbol key mismatch | Use `@params["message"]` not `@params[:message]` |
+| Job enqueued but no response | Job exception caught by generic rescue | Check Rails logs for actual error |
+| "Unable to process ChatChannel#receive" | Method doesn't exist on channel | Add `receive` method that delegates to `send_message` |
+| ActionCable JSON parse error | Broadcasting Ruby Hash instead of proper format | ActionCable auto-serializes - don't double-encode |
+
+### Key Rule: Check What Arrives vs What Leaves
+
+When debugging nil parameters:
+1. Log what the ChatChannel RECEIVES: `data.inspect`
+2. Log what the StateBuilder RECEIVES: `@params.inspect`
+3. Log what the StateBuilder RETURNS: `result.inspect`
+4. Log what the Job RECEIVES: `agent_state.inspect` in `perform`
+
+The nil will appear at one of these stages - that's where your bug is.
 
 ---
 
@@ -1610,8 +1692,10 @@ Instead:
 Never repeat the same failing edit command.
 """
 
-TOOL_DESCRIPTION = """Reads a file from the local filesystem. You can access any file directly by using this tool.
-Assume this tool is able to read all files on the machine. If the User provides a path to a file assume that path is valid. It is okay to read a file that does not exist; an error will be returned.
+TOOL_DESCRIPTION = """Read the contents of a file from the filesystem. This provides the complete,
+authoritative file contents (with optional pagination via offset/limit parameters).
+If you've read a file without offset/limit, you have the complete current contents.
+Use this when you need to see the full file structure and all content.
 
 Usage:
 - The file_path parameter must be an absolute path, not a relative path
@@ -1619,7 +1703,7 @@ Usage:
 - You can optionally specify a line offset and limit (especially handy for long files), but it's recommended to read the whole file by not providing these parameters
 - Any lines longer than 2000 characters will be truncated
 - Results are returned using cat -n format, with line numbers starting at 1
-- You have the capability to call multiple tools in a single response. It is always better to speculatively read multiple files as a batch that are potentially useful. 
+- You have the capability to call multiple tools in a single response. It is always better to speculatively read multiple files as a batch that are potentially useful.
 - If you read a file that exists but has empty contents you will receive a system reminder warning in place of file contents."""
 
 INTERNET_SEARCH_DESCRIPTION="""

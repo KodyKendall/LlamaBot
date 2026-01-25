@@ -42,6 +42,9 @@ export class IframeManager {
     // Navigation history stack for back button (since we can't access cross-origin iframe history)
     this.navigationHistory = [];
 
+    // Track current path for reliable refresh (fallback when iframe query fails)
+    this.currentPath = '/';
+
     // Initialize iframe URLs
     this.initIframeSources();
 
@@ -75,10 +78,20 @@ export class IframeManager {
         if (this.urlInput && toPath) {
           this.urlInput.value = toPath;
         }
+
+        // Track current path for reliable refresh fallback
+        if (toPath) {
+          this.currentPath = toPath;
+        }
       } else if (event.data.type === 'page-loaded') {
         // Update URL display when Rails app loads a new page
         if (this.urlInput && event.data.path) {
           this.urlInput.value = event.data.path;
+        }
+
+        // Track current path for reliable refresh fallback
+        if (event.data.path) {
+          this.currentPath = event.data.path;
         }
       }
     });
@@ -261,9 +274,10 @@ export class IframeManager {
         if (this.liveSiteFrame.src) {
           let additionalRequestPath = debugInfoJson.request_path;
 
-          if (!additionalRequestPath) {
-            console.warn('Warning: debugInfoJson.request_path is undefined! Rails error likely.', debugInfoJson);
-            additionalRequestPath = '/';
+          // Use tracked currentPath as fallback when iframe query fails (e.g., 500 error)
+          if (!additionalRequestPath || debugInfoJson instanceof Error) {
+            console.warn('Warning: debugInfoJson.request_path is undefined! Using tracked path as fallback.', debugInfoJson);
+            additionalRequestPath = this.currentPath || '/';
           }
 
           this.liveSiteFrame.src = getRailsUrl() + additionalRequestPath;
@@ -307,6 +321,9 @@ export class IframeManager {
 
     // Update iframe src
     this.liveSiteFrame.src = getRailsUrl() + path;
+
+    // Track current path for reliable refresh fallback
+    this.currentPath = path;
 
     // Update URL input
     if (this.urlInput) {

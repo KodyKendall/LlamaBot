@@ -1,130 +1,130 @@
-from langchain_openai import ChatOpenAI
+"""
+Rails Testing Agent using LangChain 1.1+ create_agent with ToolRuntime.
+
+This agent specializes in TDD bug reproduction:
+- Stage 1: Bug Intake - Gather structured bug report from user
+- Stage 2: Test Design - Determine test type (model/request/feature spec)
+- Stage 3: Failing Test - Write test that proves bug exists (RED)
+- Stage 4: Verification - Run test to confirm failure
+- Stage 5: Hand-off - Ready for fix (user switches to Engineer mode)
+- Stage 6: Regression - After fix, test should pass (GREEN)
+
+Features:
+- Dynamic LLM model selection (defaults to Claude Haiku for efficiency)
+- Automatic context summarization for long sessions
+- View path context injection (via middleware)
+- Failure circuit breaker after 3 failed tool calls
+- ToolRuntime for state access in tools
+- Anthropic prompt caching for reduced latency and costs
+
+Note: We use langchain.agents.create_agent with ToolRuntime pattern instead of
+langgraph's InjectedState because create_agent provides middleware support.
+"""
+
 from langchain_anthropic import ChatAnthropic
-
-from langchain_core.tools import tool
-from dotenv import load_dotenv
-load_dotenv()
-
-from langgraph.graph import MessagesState
-from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
-
-from langgraph.graph import START, StateGraph, END
-from langgraph.types import Command
-from langgraph.prebuilt import tools_condition
-from langgraph.prebuilt import ToolNode
-
-import asyncio
-from pathlib import Path
-import os
-from typing import List, Literal, Optional, TypedDict
-
-from app.agents.utils.playwright_screenshot import capture_page_and_img_src
-
-from openai import OpenAI
-from app.agents.utils.images import encode_image
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain.agents import create_agent
+from langchain.agents.middleware import SummarizationMiddleware
+from langchain_core.messages import SystemMessage
+from datetime import date
 
 from app.agents.leonardo.rails_agent.state import RailsAgentState
 from app.agents.leonardo.rails_agent.tools import (
-    write_todos, write_file, read_file, ls, edit_file, search_file, bash_command,
-    # Agent file tools
+    write_todos, ls, read_file, write_file, edit_file, search_file, bash_command,
+    # Agent file tools (for reading test patterns from other agents)
     ls_agents, read_agent_file, write_agent_file, edit_agent_file,
     read_langgraph_json, edit_langgraph_json
 )
-from app.agents.leonardo.rails_testing_agent.prompts import RAILS_QA_SOFTWARE_ENGINEER_PROMPT
+from app.agents.leonardo.rails_testing_agent.prompts import RAILS_TESTING_AGENT_PROMPT
+from app.agents.leonardo.rails_testing_agent.middleware import (
+    inject_view_context,
+    inject_testing_mode_context,
+    check_failure_limit,
+    DynamicModelMiddleware,
+)
 
 import logging
 logger = logging.getLogger(__name__)
 
-# Define base paths relative to project root
-SCRIPT_DIR = Path(__file__).parent.resolve()
-PROJECT_ROOT = SCRIPT_DIR.parent.parent.parent  # Go up to LlamaBot root
-APP_DIR = PROJECT_ROOT / 'app'
 
-sys_msg = {
-        "role": "system",
-        "content": [
+def get_cached_system_prompt():
+    """Build system message with current date and prompt caching enabled.
+
+    Date is appended at the end so the main prompt can be cached,
+    and only the date portion changes daily.
+    """
+    current_date = date.today().strftime("%Y-%m-%d")
+    prompt_with_date = f"{RAILS_TESTING_AGENT_PROMPT}\n\n---\n**Today's Date:** {current_date}\n(Use this date for regression test naming: bug_{current_date}_description_spec.rb)"
+
+    return SystemMessage(
+        content=[
             {
                 "type": "text",
-                "text": f"{RAILS_QA_SOFTWARE_ENGINEER_PROMPT}",
-                "cache_control": {"type": "ephemeral"}, # only works for Anthropic models.
-            },
-        ],
-    }
+                "text": prompt_with_date,
+                "cache_control": {"type": "ephemeral"}
+            }
+        ]
+    )
 
+
+# Tool list - tools available to the Testing agent
 default_tools = [
     write_todos,
-    ls, read_file, write_file, edit_file, search_file, bash_command,
-    # Agent file tools
+    ls, read_file, write_file, edit_file, search_file,
+    bash_command,  # For running rspec tests
+    # Agent file tools (for reference/reading patterns)
     ls_agents, read_agent_file, write_agent_file, edit_agent_file,
     read_langgraph_json, edit_langgraph_json
 ]
 
-# Helper function to get LLM based on user selection
-def get_llm(model_name: str):
-   """Get LLM instance based on model name from frontend. 
-   """
-   # Default to Claude 4.5 Haiku
-   return ChatAnthropic(model="claude-haiku-4-5", max_tokens=16384)
 
-# Node
-def leonardo_test_builder(state: RailsAgentState) -> Command[Literal["tools"]]:
-   # ==================== LLM Model Selection ====================
-   # Get model selection from state (passed from frontend)
-   llm_model = state.get('llm_model', 'claude-4.5-haiku')
-   logger.info(f"🤖 Using LLM model: {llm_model}")
-   llm = get_llm(llm_model)
-   # =============================================================
-
-   view_path = (state.get('debug_info') or {}).get('view_path')
-
-   messages = [sys_msg] + state["messages"]
-   
-   if view_path:
-      messages = messages + [HumanMessage(content="<NOTE_FROM_SYSTEM> The user is currently viewing their Ruby on Rails webpage route at: " + view_path + " </NOTE_FROM_SYSTEM>")]
-
-   # Tools
-   tools = [
-      write_todos,
-      ls, read_file, write_file, edit_file, search_file, bash_command,
-      # Agent file tools
-      ls_agents, read_agent_file, write_agent_file, edit_agent_file,
-      read_langgraph_json, edit_langgraph_json
-   ]
-
-   failed_tool_calls_count = state.get("failed_tool_calls_count", 0)
-   if failed_tool_calls_count >= 3:
-      messages = messages + [HumanMessage(content="<NOTE_FROM_SYSTEM> The user has had too many failed tool calls. DO NOT DO ANY NEW TOOL CALLS. Tell the user it's failed, and you need to stop and ask the user to try again in a different way. </NOTE_FROM_SYSTEM>")]
-      # Don't bind tools when we've failed too many times - we want a text response only
-      response = llm.invoke(messages, cache_control={"type": "ephemeral"})
-      # Reset counter by subtracting current count (since reducer uses operator.add)
-      return {"messages": [response], "failed_tool_calls_count": -failed_tool_calls_count} # by adding a negative number, we subtract the current count and reset it to 0.
-
-   messages = messages + [HumanMessage(content="<NOTE_FROM_SYSTEM> The user is in engineer mode. You are allowed to use the tools. Here are the tools you can use: tools = [write_todos, ls, read_file, write_file, edit_file, search_file, bash_command, internet_search, ls_agents, read_agent_file, write_agent_file, edit_agent_file, read_langgraph_json, edit_langgraph_json] </NOTE_FROM_SYSTEM>")]
-   llm_with_tools = llm.bind_tools(tools, parallel_tool_calls=False)
-   # response = llm_with_tools.invoke(messages, cache_control={"type": "ephemeral"})
-   response = llm_with_tools.invoke(messages)
-
-   return {"messages": [response]}
-
-# Graph
 def build_workflow(checkpointer=None):
-    builder = StateGraph(RailsAgentState)
+    """Build the Testing agent workflow with create_agent.
 
-    # Define nodes: these do the work
-    builder.add_node("leonardo_test_builder", leonardo_test_builder)
-    builder.add_node("tools", ToolNode(default_tools))
+    Args:
+        checkpointer: Optional checkpointer for state persistence (e.g., PostgresSaver)
 
-    # Define edges: these determine how the control flow moves
-    builder.add_edge(START, "leonardo_test_builder")
+    Returns:
+        A compiled LangGraph agent
 
-    builder.add_conditional_edges(
-        "leonardo_test_builder",
-        tools_condition,
-        {"tools": "tools", END: END}, #"prototype_agent": "prototype_agent", END: END},
+    Note: Uses SystemMessage with cache_control for Anthropic prompt caching.
+    This requires LangChain 1.1.0+ which added SystemMessage support to create_agent.
+    The system prompt is cached for 5 minutes, reducing input token costs by ~90%.
+    """
+    # Default model (will be overridden by DynamicModelMiddleware based on state.llm_model)
+    default_model = ChatAnthropic(model="claude-haiku-4-5", max_tokens=16384)
+
+    # Configure middleware stack (order matters - executed top to bottom)
+    # Use Gemini 3 Flash for summarization (Google AI Studio, not Vertex)
+    summarization_model = ChatGoogleGenerativeAI(
+        model="gemini-3-flash-preview",
+        vertexai=False,  # Explicitly use Google AI Studio, not Vertex AI
+        temperature=1.0,
     )
+    middleware = [
+        # 1. Summarization for long conversations - prevents token limit issues
+        SummarizationMiddleware(
+            model=summarization_model,
+            trigger=("tokens", 80000),
+            keep=("messages", 8),
+            trim_tokens_to_summarize=None,  # KEY FIX: Disable trimming, let Gemini see everything
+        ),
+        # 2. Dynamic model selection based on state.llm_model from frontend
+        DynamicModelMiddleware(),
+        # 3. View path context injection - prepends page context to user messages
+        inject_view_context,
+        # 4. Testing mode context - reminds agent of TDD bug reproduction workflow
+        inject_testing_mode_context,
+        # 5. Circuit breaker - stop tool calls after 3 failures
+        check_failure_limit,
+    ]
 
-    builder.add_edge("tools", "leonardo_test_builder")
-
-    react_graph = builder.compile(checkpointer=checkpointer)
-
-    return react_graph
+    # Create and return the agent
+    return create_agent(
+        model=default_model,
+        tools=default_tools,
+        system_prompt=get_cached_system_prompt(),
+        state_schema=RailsAgentState,
+        middleware=middleware,
+        checkpointer=checkpointer,
+    )
