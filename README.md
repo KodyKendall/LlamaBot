@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="https://llamapress-ai-image-uploads.s3.us-west-2.amazonaws.com/4bmqe5iolvp84ceyk9ttz8vylrym" width="160" alt="LlamaBot logo">
+<img src="https://llamapress-ai-image-uploads.s3.us-west-2.amazonaws.com/uj1j3g2ffgcifri2qiq591u00tvy" width="160" alt="LlamaBot logo">
 
 # **LlamaBot**
 
