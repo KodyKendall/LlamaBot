@@ -232,6 +232,38 @@ async def available_agents():
     return {"agents": list(langgraph_json["graphs"].keys())}
 
 
+@router.get("/api/available-models", response_class=JSONResponse)
+async def available_models():
+    """Get list of available LLM models based on configured API keys.
+
+    Returns which models are available (have API keys) and which are not.
+    Frontend uses this to disable unavailable models in the dropdown.
+    """
+    # Map of model frontend values to their required API key env vars
+    model_api_keys = {
+        "claude-4.5-haiku": "ANTHROPIC_API_KEY",
+        "claude-4.5-sonnet": "ANTHROPIC_API_KEY",
+        "gpt-5-mini": "OPENAI_API_KEY",
+        "gpt-5-codex": "OPENAI_API_KEY",
+        "gemini-3-flash": "GOOGLE_API_KEY",
+        "deepseek-chat": "DEEPSEEK_API_KEY",
+        "deepseek-reasoner": "DEEPSEEK_API_KEY",
+    }
+
+    models = []
+    for model_value, env_var in model_api_keys.items():
+        api_key = os.environ.get(env_var, "")
+        has_key = bool(api_key and api_key.strip())
+
+        models.append({
+            "value": model_value,
+            "available": has_key,
+            "reason": None if has_key else f"{env_var} not configured in .env"
+        })
+
+    return {"models": models}
+
+
 @router.get("/rails-routes", response_class=JSONResponse)
 async def rails_routes():
     """Parse routes.rb and return available GET routes for `index` actions and home page."""

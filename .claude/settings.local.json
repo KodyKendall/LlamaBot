@@ -41,7 +41,20 @@
       "Bash(chmod:*)",
       "Bash(docker compose:*)",
       "Bash(docker volume:*)",
-      "Bash(wc:*)"
+      "Bash(wc:*)",
+      "Bash(xargs:*)",
+      "Bash(grep:*)",
+      "Bash(git restore:*)",
+      "Bash(ruby -c:*)",
+      "Bash(gh run list:*)",
+      "Bash(gh run view:*)",
+      "Bash(gh api:*)",
+      "Bash(timeout 30 python -m pytest:*)",
+      "Bash(timeout 30 python3 -m pytest:*)",
+      "Bash(docker images:*)",
+      "Bash(sort:*)",
+      "Bash(pip show:*)",
+      "Bash(ls:*)"
     ],
     "deny": [],
     "ask": []
