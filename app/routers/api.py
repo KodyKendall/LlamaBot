@@ -246,6 +246,7 @@ async def available_models():
         "gpt-5-mini": "OPENAI_API_KEY",
         "gpt-5-codex": "OPENAI_API_KEY",
         "gemini-3-flash": "GOOGLE_API_KEY",
+        "gemini-3-pro": "GOOGLE_API_KEY",
         "deepseek-chat": "DEEPSEEK_API_KEY",
         "deepseek-reasoner": "DEEPSEEK_API_KEY",
     }

@@ -529,18 +529,26 @@ class ChatApp {
    */
   loadSettingsFromCookies() {
     const savedMode = getCookie('agentMode');
-    if (savedMode && this.elements.agentModeSelect) {
-      if (Array.from(this.elements.agentModeSelect.options).some(option => option.value === savedMode)) {
+    if (this.elements.agentModeSelect) {
+      if (savedMode && Array.from(this.elements.agentModeSelect.options).some(option => option.value === savedMode)) {
+        // Cookie exists and is valid - use it
         this.elements.agentModeSelect.value = savedMode;
         this.appState.setAgentMode(savedMode);
+        this.updateDropdownLabel(this.elements.agentModeSelect);
+      } else {
+        // No cookie OR invalid cookie - sync state to match dropdown's current visual value
+        this.appState.setAgentMode(this.elements.agentModeSelect.value);
         this.updateDropdownLabel(this.elements.agentModeSelect);
       }
     }
 
     const savedModel = getCookie('llmModel');
-    if (savedModel && this.elements.modelSelect) {
-      if (Array.from(this.elements.modelSelect.options).some(option => option.value === savedModel)) {
+    if (this.elements.modelSelect) {
+      if (savedModel && Array.from(this.elements.modelSelect.options).some(option => option.value === savedModel)) {
         this.elements.modelSelect.value = savedModel;
+        this.updateDropdownLabel(this.elements.modelSelect);
+      } else {
+        // No cookie - just update the label to match current dropdown state
         this.updateDropdownLabel(this.elements.modelSelect);
       }
     }
