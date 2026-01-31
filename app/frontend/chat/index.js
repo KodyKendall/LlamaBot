@@ -322,6 +322,20 @@ class ChatApp {
       }
     });
 
+    // Listen for launchpad commands from Rails iframe (prefill chat input)
+    window.addEventListener('message', (event) => {
+      if (event.data && event.data.source === 'launchpad' && event.data.type === 'prefill-chat') {
+        const command = event.data.command;
+        if (command && this.elements.messageInput) {
+          this.elements.messageInput.value = command;
+          this.elements.messageInput.focus();
+          // Trigger input event to update send button state
+          this.elements.messageInput.dispatchEvent(new Event('input', { bubbles: true }));
+          console.log('Launchpad: Prefilled chat with command:', command);
+        }
+      }
+    });
+
     // Capture Rails logs button
     if (this.elements.captureLogsBtn) {
       this.elements.captureLogsBtn.addEventListener('click', async () => {

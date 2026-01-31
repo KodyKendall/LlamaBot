@@ -53,7 +53,7 @@ def get_cached_system_prompt():
     and only the date portion changes daily.
     """
     current_date = date.today().strftime("%Y-%m-%d")
-    prompt_with_date = f"{TICKET_MODE_AGENT_PROMPT}\n\n---\n**Today's Date:** {current_date}\n(Use this date when creating ticket filenames: {current_date}_TYPE_description.md)"
+    prompt_with_date = f"{TICKET_MODE_AGENT_PROMPT}\n\n---\n**Today's Date:** {current_date}"
 
     return SystemMessage(
         content=[
@@ -66,13 +66,86 @@ def get_cached_system_prompt():
     )
 
 
+WRITE_FINAL_TICKET_DESCRIPTION = """Create a ticket in the Rails database.
+
+Parameters:
+- title: Ticket title in format "YYYY-MM-DD - TYPE: Short Title" (e.g., "2025-01-25 - BUG: Line Item Rate Shows 0")
+- description: User-facing content - Original User Story (THE CONTRACT with URL, Current/Desired Behavior, Verification Criteria, Business Rules), Demo Path, Scope, Metadata, User-Facing Summary
+- ticket_type: One of: feature_new_model, feature_extend_existing_model, bug_debug, ux_copy, ux_layout, builder_integration
+- research_notes: ALL technical/engineering details - Root Cause, Five Whys, DB Schema, Models, Controllers, UI Components, Code Health Observations
+- notes: Implementation guidance - Implementation Notes, Test Plan, Constraints, Unresolved Questions, Split Check
+- status: Ticket status (default: 'backlog')
+
+Returns confirmation with the created ticket ID."""
+
+
+@tool(description=WRITE_FINAL_TICKET_DESCRIPTION)
+def write_final_ticket(
+    title: str,
+    description: str,
+    ticket_type: str,
+    runtime: ToolRuntime,
+    research_notes: str = "",
+    notes: str = "",
+    status: str = "backlog",
+) -> Command:
+    """Create a ticket directly in the Rails database."""
+    tool_call_id = runtime.tool_call_id
+
+    # Base64 encode all text fields to avoid shell/Ruby escaping issues
+    def b64(s: str) -> str:
+        return base64.b64encode(s.encode('utf-8')).decode('ascii')
+
+    title_b64 = b64(title)
+    description_b64 = b64(description)
+    research_notes_b64 = b64(research_notes)
+    notes_b64 = b64(notes)
+
+    # Ruby code that decodes base64 and creates the ticket
+    ruby_script = f'''
+require "base64"
+ticket = LlamaBotRails::Ticket.create!(
+  title: Base64.decode64("{title_b64}").force_encoding("UTF-8"),
+  description: Base64.decode64("{description_b64}").force_encoding("UTF-8"),
+  ticket_type: "{ticket_type}",
+  research_notes: Base64.decode64("{research_notes_b64}").force_encoding("UTF-8"),
+  notes: Base64.decode64("{notes_b64}").force_encoding("UTF-8"),
+  status: "{status}"
+)
+puts "TICKET_CREATED:" + ticket.id.to_s
+'''
+
+    # Execute via rails_api_sh
+    command = f"bin/rails runner '{ruby_script}'"
+    result = rails_api_sh(command)
+
+    # Parse result
+    if "TICKET_CREATED:" in result:
+        ticket_id = result.split("TICKET_CREATED:")[1].strip().split()[0]
+        success_msg = f"Ticket created successfully with ID: {ticket_id}"
+        tool_output = {"status": "success", "ticket_id": ticket_id}
+        return Command(
+            update={
+                "messages": [ToolMessage(success_msg, artifact=tool_output, tool_call_id=tool_call_id)]
+            }
+        )
+    else:
+        error_msg = f"Failed to create ticket: {result}"
+        tool_output = {"status": "error", "message": result}
+        return Command(
+            update={
+                "messages": [ToolMessage(error_msg, artifact=tool_output, tool_call_id=tool_call_id)]
+            }
+        )
+
+
 # Tool list - tools available to the Ticket Mode agent (NO internet_search)
 default_tools = [
     write_todos,
     ls, read_file, write_file, edit_file, search_file,
     bash_command,
     delegate_task,  # Sub-agent delegation for focused research tasks
-    write_final_ticket,
+    write_final_ticket,  # Creates ticket directly in Rails database
 ]
 
 
