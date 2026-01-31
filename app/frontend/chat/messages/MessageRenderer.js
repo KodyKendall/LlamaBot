@@ -219,6 +219,14 @@ export class MessageRenderer {
     // Stop the thinking indicator when an error occurs
     this.stopThinking();
 
+    // Play error sound
+    const taskErrorSound = document.getElementById('taskErrorSound');
+    if (taskErrorSound) {
+      taskErrorSound.play().catch(() => {
+        // Sound playback failed (likely due to autoplay restrictions)
+      });
+    }
+
     return messageDiv;
   }
 
