@@ -919,6 +919,13 @@ body {
     color: rgba(255, 255, 255, 0.6);
 }
 
+/* Disabled dropdown options (e.g., models without API keys) */
+.custom-dropdown option:disabled {
+    color: rgba(255, 255, 255, 0.35);
+    background: rgba(0, 0, 0, 0.2);
+    font-style: italic;
+}
+
 /* IFrame section (right 2/3) */
 .iframe-section {
     width: 66.67%;

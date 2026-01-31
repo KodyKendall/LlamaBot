@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="https://service-jobs-images.s3.us-east-2.amazonaws.com/7rl98t1weu387r43il97h6ipk1l7" width="160" alt="LlamaBot logo">
+<img src="https://llamapress-ai-image-uploads.s3.us-west-2.amazonaws.com/4bmqe5iolvp84ceyk9ttz8vylrym" width="160" alt="LlamaBot logo">
 
 # **LlamaBot**
 

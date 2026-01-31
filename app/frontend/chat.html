@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Leonardo</title>
     <!-- Favicon -->
-    <link rel="icon" type="image/png" href="https://service-jobs-images.s3.us-east-2.amazonaws.com/7rl98t1weu387r43il97h6ipk1l7">
+    <link rel="icon" type="image/png" href="https://llamapress-ai-image-uploads.s3.us-west-2.amazonaws.com/4bmqe5iolvp84ceyk9ttz8vylrym">
     <!-- Add marked.js for markdown parsing -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <!-- Font Awesome for icons -->
@@ -22,7 +22,7 @@
                 <span></span>
             </button>
             <div class="logo-container">
-                <img src="https://service-jobs-images.s3.us-east-2.amazonaws.com/7rl98t1weu387r43il97h6ipk1l7" alt="LlamaBot Logo">
+                <img src="https://llamapress-ai-image-uploads.s3.us-west-2.amazonaws.com/4bmqe5iolvp84ceyk9ttz8vylrym" alt="LlamaBot Logo">
                 <div class="connection-status disconnected" data-llamabot="connection-status">
                     <span class="status-dot"></span>
                 </div>
@@ -86,7 +86,8 @@
                         <div class="custom-dropdown-container">
                             <select data-llamabot="model-select" class="custom-dropdown">
                                 <option value="claude-4.5-haiku" data-short-label="Haiku">Claude 4.5 Haiku</option>
-                                <option value="gemini-3-flash" data-short-label="Gemini">Gemini 3 Flash</option>
+                                <option value="gemini-3-flash" data-short-label="Gemini Flash">Gemini 3 Flash</option>
+                                <option value="gemini-3-pro" data-short-label="Gemini Pro">Gemini 3 Pro</option>
                                 <option value="gpt-5-mini" data-short-label="GPT-5">GPT-5 Mini</option>
                                 <option value="deepseek-reasoner" data-short-label="DeepSeek">DeepSeek Reasoner</option>
                             </select>
@@ -211,6 +212,11 @@
     <!-- Audio element for task completion sound -->
     <audio id="taskCompletedSound" preload="auto">
         <source src="/frontend/Leonardo-Task-Completed-Sound.wav" type="audio/wav">
+    </audio>
+
+    <!-- Audio element for error sound -->
+    <audio id="taskErrorSound" preload="auto">
+        <source src="/frontend/Leonardo-Task-Error.mp3" type="audio/mpeg">
     </audio>
 
     <!-- Set document title with instance name if available -->

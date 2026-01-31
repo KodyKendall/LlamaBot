@@ -329,6 +329,11 @@ class DynamicModelMiddleware(AgentMiddleware):
                 include_thoughts=True
                 # thinking_level="low"
             )
+        elif model_name == 'gemini-3-pro':
+            return ChatGoogleGenerativeAI(
+                model="gemini-3-pro-preview",
+                include_thoughts=True
+            )
         elif model_name == 'claude-4.5-haiku':
             return ChatAnthropic(
                 model="claude-haiku-4-5",

@@ -180,6 +180,9 @@ class ChatApp {
     // Load settings from cookies
     this.loadSettingsFromCookies();
 
+    // Fetch available models and disable unavailable ones
+    this.fetchAvailableModels();
+
     // Dispatch ready event for external scripts to hook into
     window.dispatchEvent(new CustomEvent('llamabot:ready', { detail: { instance: this } }));
   }
@@ -316,6 +319,20 @@ class ChatApp {
       // Reset token indicator for new conversation
       if (this.tokenIndicator) {
         this.tokenIndicator.reset();
+      }
+    });
+
+    // Listen for launchpad commands from Rails iframe (prefill chat input)
+    window.addEventListener('message', (event) => {
+      if (event.data && event.data.source === 'launchpad' && event.data.type === 'prefill-chat') {
+        const command = event.data.command;
+        if (command && this.elements.messageInput) {
+          this.elements.messageInput.value = command;
+          this.elements.messageInput.focus();
+          // Trigger input event to update send button state
+          this.elements.messageInput.dispatchEvent(new Event('input', { bubbles: true }));
+          console.log('Launchpad: Prefilled chat with command:', command);
+        }
       }
     });
 
@@ -526,20 +543,97 @@ class ChatApp {
    */
   loadSettingsFromCookies() {
     const savedMode = getCookie('agentMode');
-    if (savedMode && this.elements.agentModeSelect) {
-      if (Array.from(this.elements.agentModeSelect.options).some(option => option.value === savedMode)) {
+    if (this.elements.agentModeSelect) {
+      if (savedMode && Array.from(this.elements.agentModeSelect.options).some(option => option.value === savedMode)) {
+        // Cookie exists and is valid - use it
         this.elements.agentModeSelect.value = savedMode;
         this.appState.setAgentMode(savedMode);
+        this.updateDropdownLabel(this.elements.agentModeSelect);
+      } else {
+        // No cookie OR invalid cookie - sync state to match dropdown's current visual value
+        this.appState.setAgentMode(this.elements.agentModeSelect.value);
         this.updateDropdownLabel(this.elements.agentModeSelect);
       }
     }
 
     const savedModel = getCookie('llmModel');
-    if (savedModel && this.elements.modelSelect) {
-      if (Array.from(this.elements.modelSelect.options).some(option => option.value === savedModel)) {
+    if (this.elements.modelSelect) {
+      if (savedModel && Array.from(this.elements.modelSelect.options).some(option => option.value === savedModel)) {
         this.elements.modelSelect.value = savedModel;
         this.updateDropdownLabel(this.elements.modelSelect);
+      } else {
+        // No cookie - just update the label to match current dropdown state
+        this.updateDropdownLabel(this.elements.modelSelect);
       }
+    }
+  }
+
+  /**
+   * Fetch available models from backend and disable unavailable ones
+   */
+  async fetchAvailableModels() {
+    if (!this.elements.modelSelect) return;
+
+    try {
+      const response = await fetch('/api/available-models');
+      if (!response.ok) {
+        console.warn('Failed to fetch available models:', response.status);
+        return;
+      }
+
+      const data = await response.json();
+      const modelAvailability = new Map(
+        data.models.map(m => [m.value, { available: m.available, reason: m.reason }])
+      );
+
+      // Track if current selection becomes unavailable
+      let currentValue = this.elements.modelSelect.value;
+      let needsNewSelection = false;
+
+      // Update each option in the dropdown
+      Array.from(this.elements.modelSelect.options).forEach(option => {
+        const modelInfo = modelAvailability.get(option.value);
+
+        if (modelInfo && !modelInfo.available) {
+          // Disable unavailable models
+          option.disabled = true;
+          option.title = modelInfo.reason || 'API key not configured';
+
+          // Add visual indicator to the label
+          const originalLabel = option.getAttribute('data-original-label') || option.textContent;
+          if (!originalLabel.includes('(No API Key)')) {
+            option.setAttribute('data-original-label', originalLabel);
+            option.textContent = `${originalLabel} (No API Key)`;
+          }
+
+          // Check if current selection is now unavailable
+          if (option.value === currentValue) {
+            needsNewSelection = true;
+          }
+        } else {
+          option.disabled = false;
+          option.title = '';
+        }
+      });
+
+      // If current selection is unavailable, switch to first available model
+      if (needsNewSelection) {
+        const firstAvailable = Array.from(this.elements.modelSelect.options)
+          .find(opt => !opt.disabled);
+
+        if (firstAvailable) {
+          this.elements.modelSelect.value = firstAvailable.value;
+          setCookie('llmModel', firstAvailable.value, this.config.cookieExpiryDays);
+          this.updateDropdownLabel(this.elements.modelSelect);
+          console.info(`Switched to ${firstAvailable.value} (previous model unavailable)`);
+        }
+      }
+
+      // Update the dropdown label display
+      this.updateDropdownLabel(this.elements.modelSelect);
+
+    } catch (error) {
+      console.warn('Error fetching available models:', error);
     }
   }
 
