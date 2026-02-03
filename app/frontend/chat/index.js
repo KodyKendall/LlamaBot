@@ -391,7 +391,7 @@ class ChatApp {
 
     let message = input.value.trim();
     const agentMode = this.elements.agentModeSelect?.value;
-    const llmModel = this.elements.modelSelect?.value || 'claude-4.5-haiku';
+    const llmModel = this.elements.modelSelect?.value || 'gemini-3-flash';
 
     if (!message || !this.webSocketManager) return;
 
