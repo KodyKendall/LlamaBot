@@ -57,7 +57,7 @@ class RequestHandler:
                 app, state, agent_config = self.get_langgraph_app_and_state(incoming_message)
 
                 # Default limits (can be overridden per-agent in langgraph.json)
-                DEFAULT_RECURSION_LIMIT = 200
+                DEFAULT_RECURSION_LIMIT = 450
 
                 # Get agent-specific limits or use defaults
                 recursion_limit = agent_config.get("recursion_limit", DEFAULT_RECURSION_LIMIT)
