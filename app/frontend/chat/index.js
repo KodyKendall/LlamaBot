@@ -16,6 +16,7 @@ import { ElementSelector } from './ui/ElementSelector.js';
 import { MenuManager } from './ui/MenuManager.js';
 import { MobileViewManager } from './ui/MobileViewManager.js';
 import { TokenIndicator } from './ui/TokenIndicator.js';
+import { PromptManager } from './ui/PromptManager.js';
 import { ThreadManager } from './threads/ThreadManager.js';
 import { LoadingVerbs } from './utils/LoadingVerbs.js';
 import { ClipboardFormatter } from './utils/ClipboardFormatter.js';
@@ -50,6 +51,7 @@ class ChatApp {
     this.mobileViewManager = null;
     this.threadManager = null;
     this.tokenIndicator = null;
+    this.promptManager = null;
     this.loadingVerbs = new LoadingVerbs();
 
     // Initialize WebSocket components
@@ -174,6 +176,11 @@ class ChatApp {
     this.elementSelector = new ElementSelector(this.iframeManager);
     this.elementSelector.init(this.elements.elementSelectorBtn, this.elements.messageInput);
 
+    // Initialize prompt manager
+    this.promptManager = new PromptManager();
+    const inputArea = this.container.querySelector('.input-area');
+    this.promptManager.init(this.elements.promptLibraryBtn, this.elements.messageInput, inputArea);
+
     // Load threads
     this.threadManager.fetchThreads();
 
@@ -207,7 +214,8 @@ class ChatApp {
       menuDrawer: this.container.querySelector('[data-llamabot="menu-drawer"]'),
       scrollToBottomBtn: this.container.querySelector('[data-llamabot="scroll-to-bottom"]'),
       liveSiteFrame: this.container.querySelector('[data-llamabot="live-site-frame"]'),
-      vsCodeFrame: this.container.querySelector('[data-llamabot="vscode-frame"]')
+      vsCodeFrame: this.container.querySelector('[data-llamabot="vscode-frame"]'),
+      promptLibraryBtn: this.container.querySelector('[data-llamabot="prompt-library-btn"]')
     };
   }
 
@@ -395,6 +403,12 @@ class ChatApp {
 
     if (!message || !this.webSocketManager) return;
 
+    // Prepend prompt content if a prompt is selected
+    const promptContent = this.promptManager?.getSelectedPromptContent();
+    if (promptContent) {
+      message = `${promptContent}\n\n${message}`;
+    }
+
     // Check if there's a selected element and append it to the message
     const selectedHTML = this.elementSelector?.getSelectedElementHTML();
     if (selectedHTML) {
@@ -436,6 +450,11 @@ class ChatApp {
     // Clear selected element badge
     if (this.elementSelector) {
       this.elementSelector.clearSelection();
+    }
+
+    // Clear selected prompt badge
+    if (this.promptManager) {
+      this.promptManager.clearSelection();
     }
 
     // Ensure thread ID exists

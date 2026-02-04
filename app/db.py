@@ -26,7 +26,7 @@ def init_db():
         return
 
     # Import models to register them with SQLModel
-    from app.models import User  # noqa: F401
+    from app.models import User, ThreadMetadata, Prompt  # noqa: F401
     try:
         SQLModel.metadata.create_all(engine)
         logger.info("✅ Auth database initialized")

@@ -34,3 +34,21 @@ class ThreadMetadata(ActiveRecordMixin, SQLModel, table=True):
     message_count: int = Field(default=0)
     user_id: Optional[int] = Field(default=None, foreign_key="user.id", index=True)
     agent_name: Optional[str] = Field(default=None, max_length=50)
+
+
+class Prompt(ActiveRecordMixin, SQLModel, table=True):
+    """A reusable prompt template in the global shared library.
+
+    Prompts can be organized by group and attached to chat messages.
+    All users share the same prompt library.
+    """
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(max_length=100, index=True)
+    content: str = Field(max_length=10000)
+    description: Optional[str] = Field(default=None, max_length=500)
+    group: str = Field(max_length=50, default="General", index=True)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: Optional[datetime] = Field(default=None)
+    is_active: bool = Field(default=True)
+    usage_count: int = Field(default=0)
