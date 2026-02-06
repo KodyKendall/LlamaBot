@@ -459,6 +459,49 @@ class RequestHandler:
         else:
             raise ValueError(f"Invalid format for agent '{agent_name}' in {cfg_path}. Expected string or object.")
     
+    def _build_message_content(self, message: dict) -> list | str:
+        """
+        Build multimodal content array for HumanMessage.
+
+        If there are no attachments, returns the plain text string for backwards compatibility.
+        If there are attachments, returns a list of content blocks in LangChain format:
+        - {"type": "text", "text": "..."} for text
+        - {"type": "file", "source_type": "base64", "mime_type": "...", "data": "..."} for files
+
+        This format is compatible with Gemini (langchain-google-genai v4.0+),
+        Claude (langchain-anthropic), and other multimodal providers.
+        """
+        text = message.get("message", "")
+        attachments = message.get("attachments", [])
+
+        # If no attachments, return plain string for backwards compatibility
+        if not attachments:
+            return text
+
+        # Build multimodal content array
+        content = []
+
+        # Add text content first
+        if text:
+            content.append({"type": "text", "text": text})
+
+        # Add file attachments
+        for attachment in attachments:
+            mime_type = attachment.get("mime_type")
+            data = attachment.get("data")
+            filename = attachment.get("filename", "unknown")
+
+            if mime_type and data:
+                content.append({
+                    "type": "file",
+                    "source_type": "base64",
+                    "mime_type": mime_type,
+                    "data": data
+                })
+                logger.info(f"Added file attachment: {filename} ({mime_type})")
+
+        return content
+
     def get_langgraph_app_and_state(self, message: dict):
         """
         Returns (app, state, agent_config) tuple.
@@ -476,11 +519,10 @@ class RequestHandler:
             if langgraph_workflow is not None:
                 app = self.get_app_from_workflow_string(langgraph_workflow)
 
-                # Create messages from the message content
-
+                # Create messages from the message content (with optional multimodal attachments)
                 # We removed this timestamp because we don't want to mess with prompt caching. If this date is different every time, it could cause a cache miss for the LLM provider.
-                # messages = [HumanMessage(content=message.get("message"), response_metadata={'created_at': datetime.now()})]
-                messages = [HumanMessage(content=message.get("message"))]
+                message_content = self._build_message_content(message)
+                messages = [HumanMessage(content=message_content)]
 
                 # Start with the transformed messages field
                 state = {"messages": messages}
@@ -489,7 +531,8 @@ class RequestHandler:
                 system_routing_fields = {
                     "message",      # We transformed this into messages
                     "agent_name",   # Used for workflow routing only
-                    "thread_id"     # Used for LangGraph config only
+                    "thread_id",    # Used for LangGraph config only
+                    "attachments"   # We transformed this into message content blocks
                 }
 
                 # Pass everything else through naturally

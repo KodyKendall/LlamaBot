@@ -343,6 +343,38 @@ def check_timestamp(request: Request):
     return {"timestamp": request.app.state.timestamp}
 
 
+@router.post("/api/update-activity", response_class=JSONResponse)
+async def update_activity(request: Request, username: str = Depends(auth)):
+    """Update last activity timestamp (called by frontend on user activity)."""
+    from datetime import datetime, timezone
+    request.app.state.timestamp = datetime.now(timezone.utc)
+    return {"timestamp": request.app.state.timestamp.isoformat()}
+
+
+@router.get("/api/lease-status", response_class=JSONResponse)
+async def get_lease_status(request: Request):
+    """Debug endpoint: show lease manager status."""
+    from datetime import datetime, timezone
+
+    mothership = getattr(request.app.state, 'mothership_client', None)
+    last_activity = getattr(request.app.state, 'timestamp', None)
+    now = datetime.now(timezone.utc)
+
+    if mothership is None:
+        return {
+            "mothership_enabled": False,
+            "error": "Mothership client not initialized"
+        }
+
+    return {
+        "mothership_enabled": mothership.enabled,
+        "instance_name": mothership.instance_name,
+        "last_activity": last_activity.isoformat() if last_activity else None,
+        "seconds_since_activity": (now - last_activity).total_seconds() if last_activity else None,
+        "lease_duration_seconds": mothership.lease_duration_seconds,
+    }
+
+
 @router.get("/api/instance-info", response_class=JSONResponse)
 async def get_instance_info():
     """Get instance info from .leonardo/instance.json if it exists."""

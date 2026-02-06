@@ -17,6 +17,7 @@ import { MenuManager } from './ui/MenuManager.js';
 import { MobileViewManager } from './ui/MobileViewManager.js';
 import { TokenIndicator } from './ui/TokenIndicator.js';
 import { PromptManager } from './ui/PromptManager.js';
+import { FileAttachmentManager } from './ui/FileAttachmentManager.js';
 import { ThreadManager } from './threads/ThreadManager.js';
 import { LoadingVerbs } from './utils/LoadingVerbs.js';
 import { ClipboardFormatter } from './utils/ClipboardFormatter.js';
@@ -52,6 +53,7 @@ class ChatApp {
     this.threadManager = null;
     this.tokenIndicator = null;
     this.promptManager = null;
+    this.fileAttachmentManager = null;
     this.loadingVerbs = new LoadingVerbs();
 
     // Initialize WebSocket components
@@ -60,6 +62,12 @@ class ChatApp {
 
     // Store element references (will be populated in initComponents)
     this.elements = {};
+
+    // Activity tracking for lease management
+    this.lastActivitySync = 0;
+    this.ACTIVITY_SYNC_INTERVAL = 60000; // Sync to backend every 60 seconds max
+    this.leaseConfig = null;
+    this.inactivityCheckInterval = null;
   }
 
   /**
@@ -176,13 +184,45 @@ class ChatApp {
     this.elementSelector = new ElementSelector(this.iframeManager);
     this.elementSelector.init(this.elements.elementSelectorBtn, this.elements.messageInput);
 
+    // Close toolbar when element selector is clicked
+    if (this.elements.elementSelectorBtn) {
+      this.elements.elementSelectorBtn.addEventListener('click', () => {
+        this.closeToolsToolbar();
+      });
+    }
+
     // Initialize prompt manager
     this.promptManager = new PromptManager();
     const inputArea = this.container.querySelector('.input-area');
     this.promptManager.init(this.elements.promptLibraryBtn, this.elements.messageInput, inputArea);
 
+    // Close toolbar when prompt library is clicked
+    if (this.elements.promptLibraryBtn) {
+      this.elements.promptLibraryBtn.addEventListener('click', () => {
+        this.closeToolsToolbar();
+      });
+    }
+
+    // Initialize file attachment manager
+    this.fileAttachmentManager = new FileAttachmentManager();
+    this.fileAttachmentManager.init(
+      this.elements.fileAttachBtn,
+      this.elements.fileInput,
+      this.elements.attachmentsPreview
+    );
+
+    // Close toolbar when file attach is clicked
+    if (this.elements.fileAttachBtn) {
+      this.elements.fileAttachBtn.addEventListener('click', () => {
+        this.closeToolsToolbar();
+      });
+    }
+
     // Load threads
     this.threadManager.fetchThreads();
+
+    // Setup activity tracking for lease management
+    this.setupActivityTracking();
 
     // Load settings from cookies
     this.loadSettingsFromCookies();
@@ -215,7 +255,12 @@ class ChatApp {
       scrollToBottomBtn: this.container.querySelector('[data-llamabot="scroll-to-bottom"]'),
       liveSiteFrame: this.container.querySelector('[data-llamabot="live-site-frame"]'),
       vsCodeFrame: this.container.querySelector('[data-llamabot="vscode-frame"]'),
-      promptLibraryBtn: this.container.querySelector('[data-llamabot="prompt-library-btn"]')
+      promptLibraryBtn: this.container.querySelector('[data-llamabot="prompt-library-btn"]'),
+      fileAttachBtn: this.container.querySelector('[data-llamabot="file-attach-btn"]'),
+      fileInput: this.container.querySelector('[data-llamabot="file-input"]'),
+      attachmentsPreview: this.container.querySelector('[data-llamabot="attachments-preview"]'),
+      toolsToggleBtn: this.container.querySelector('[data-llamabot="tools-toggle-btn"]'),
+      toolsToolbar: this.container.querySelector('[data-llamabot="tools-toolbar"]')
     };
   }
 
@@ -259,7 +304,32 @@ class ChatApp {
       this.updateDropdownLabel(this.elements.modelSelect);
     }
 
-    // Model toggle button - show/hide model selector
+    // Tools toolbar toggle
+    if (this.elements.toolsToggleBtn && this.elements.toolsToolbar) {
+      this.elements.toolsToggleBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isHidden = this.elements.toolsToolbar.classList.contains('hidden');
+        if (isHidden) {
+          this.elements.toolsToolbar.classList.remove('hidden');
+          this.elements.toolsToggleBtn.classList.add('active');
+        } else {
+          this.elements.toolsToolbar.classList.add('hidden');
+          this.elements.toolsToggleBtn.classList.remove('active');
+        }
+      });
+
+      // Close toolbar when clicking outside
+      document.addEventListener('click', (e) => {
+        if (this.elements.toolsToolbar &&
+            !this.elements.toolsToolbar.contains(e.target) &&
+            !this.elements.toolsToggleBtn.contains(e.target)) {
+          this.elements.toolsToolbar.classList.add('hidden');
+          this.elements.toolsToggleBtn.classList.remove('active');
+        }
+      });
+    }
+
+    // Model toggle button - show/hide model selector (inside toolbar)
     if (this.elements.modelToggleBtn && this.elements.modelSelectorContainer) {
       this.elements.modelToggleBtn.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -267,6 +337,8 @@ class ChatApp {
         if (isHidden) {
           this.elements.modelSelectorContainer.classList.remove('hidden');
           this.elements.modelToggleBtn.classList.add('active');
+          // Close toolbar when model selector opens
+          this.closeToolsToolbar();
         } else {
           this.elements.modelSelectorContainer.classList.add('hidden');
           this.elements.modelToggleBtn.classList.remove('active');
@@ -347,6 +419,9 @@ class ChatApp {
     // Capture Rails logs button
     if (this.elements.captureLogsBtn) {
       this.elements.captureLogsBtn.addEventListener('click', async () => {
+        // Close toolbar
+        this.closeToolsToolbar();
+
         this.elements.captureLogsBtn.classList.add('recording');
         try {
           // Clear old JS logs first
@@ -457,6 +532,14 @@ class ChatApp {
       this.promptManager.clearSelection();
     }
 
+    // Get file attachments before clearing
+    const attachments = this.fileAttachmentManager?.getAttachments() || [];
+
+    // Clear file attachments
+    if (this.fileAttachmentManager) {
+      this.fileAttachmentManager.clearAttachments();
+    }
+
     // Ensure thread ID exists
     const threadId = this.appState.ensureThreadId();
 
@@ -471,7 +554,8 @@ class ChatApp {
       debug_info: debugInfo,
       agent_name: this.appState.getAgentConfig().name,
       agent_mode: agentMode,
-      llm_model: llmModel
+      llm_model: llmModel,
+      attachments: attachments
     };
 
     this.webSocketManager.send(messageData);
@@ -690,6 +774,128 @@ class ChatApp {
           this.updateDropdownLabel(selectElement);
         }, 150);
       }, { once: true });
+    }
+  }
+
+  // ============== Activity Tracking for Lease Management ==============
+
+  /**
+   * Setup activity tracking for lease renewal
+   * Tracks user interactions and syncs to backend periodically
+   */
+  setupActivityTracking() {
+    // Debounced activity reporter
+    const reportActivity = () => {
+      const now = Date.now();
+      if (now - this.lastActivitySync > this.ACTIVITY_SYNC_INTERVAL) {
+        this.lastActivitySync = now;
+        fetch('/api/update-activity', { method: 'POST' })
+          .catch(err => console.warn('Activity sync failed:', err));
+      }
+    };
+
+    // Track user interactions
+    if (this.elements.messageInput) {
+      this.elements.messageInput.addEventListener('keydown', reportActivity);
+    }
+    if (this.elements.messageHistory) {
+      this.elements.messageHistory.addEventListener('click', reportActivity);
+      this.elements.messageHistory.addEventListener('scroll', reportActivity);
+    }
+
+    // Also report activity when sending messages (in sendMessage method)
+    // This is already covered by keydown on Enter
+
+    // Fetch lease config for warning timing
+    this.fetchLeaseConfig();
+
+    // Start inactivity warning check
+    this.startInactivityCheck();
+
+    // Setup continue button handler
+    const continueBtn = this.container.querySelector('[data-llamabot="continue-session"]');
+    if (continueBtn) {
+      continueBtn.addEventListener('click', () => {
+        this.hideTimeoutWarning();
+        this.lastActivitySync = 0; // Force immediate sync
+        fetch('/api/update-activity', { method: 'POST' })
+          .catch(err => console.warn('Continue session activity sync failed:', err));
+      });
+    }
+  }
+
+  /**
+   * Fetch lease configuration from backend
+   */
+  async fetchLeaseConfig() {
+    try {
+      const res = await fetch('/api/lease-status');
+      if (res.ok) {
+        this.leaseConfig = await res.json();
+        console.log('Lease config loaded:', this.leaseConfig);
+      }
+    } catch (err) {
+      console.warn('Failed to fetch lease config:', err);
+    }
+  }
+
+  /**
+   * Start periodic inactivity check
+   */
+  startInactivityCheck() {
+    // Check every 30 seconds if we should show warning
+    this.inactivityCheckInterval = setInterval(() => this.checkInactivityWarning(), 30000);
+  }
+
+  /**
+   * Check if we should show the inactivity warning
+   */
+  checkInactivityWarning() {
+    // Skip if no lease config or mothership not enabled
+    if (!this.leaseConfig?.lease_duration_seconds || !this.leaseConfig?.mothership_enabled) {
+      return;
+    }
+
+    const leaseSeconds = this.leaseConfig.lease_duration_seconds;
+    const warningThreshold = (leaseSeconds - 60) * 1000; // Show warning 1 minute before expiry
+    const timeSinceSync = Date.now() - this.lastActivitySync;
+
+    // Only show warning if user has been inactive long enough
+    if (this.lastActivitySync > 0 && timeSinceSync > warningThreshold) {
+      this.showTimeoutWarning();
+    }
+  }
+
+  /**
+   * Show the timeout warning banner
+   */
+  showTimeoutWarning() {
+    const banner = this.container.querySelector('[data-llamabot="timeout-warning"]');
+    if (banner && banner.classList.contains('hidden')) {
+      banner.classList.remove('hidden');
+      console.log('Showing timeout warning - user inactive');
+    }
+  }
+
+  /**
+   * Hide the timeout warning banner
+   */
+  hideTimeoutWarning() {
+    const banner = this.container.querySelector('[data-llamabot="timeout-warning"]');
+    if (banner) {
+      banner.classList.add('hidden');
+    }
+  }
+
+  /**
+   * Close the tools toolbar
+   */
+  closeToolsToolbar() {
+    if (this.elements.toolsToolbar) {
+      this.elements.toolsToolbar.classList.add('hidden');
+    }
+    if (this.elements.toolsToggleBtn) {
+      this.elements.toolsToggleBtn.classList.remove('active');
     }
   }
 }

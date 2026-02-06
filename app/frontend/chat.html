@@ -54,6 +54,16 @@
                 </div>
             </div>
         </div>
+
+        <!-- Inactivity warning banner -->
+        <div class="timeout-warning-banner hidden" data-llamabot="timeout-warning">
+            <div class="warning-content">
+                <i class="fa-solid fa-clock"></i>
+                <span>Session expiring soon due to inactivity.</span>
+                <button class="continue-btn" data-llamabot="continue-session">Continue Working</button>
+            </div>
+        </div>
+
         <div class="message-history" data-llamabot="message-history">
             <div data-llamabot="ai-message">Hi! I'm Leonardo. What are we building today?</div>
         </div>
@@ -76,32 +86,51 @@
             </div>
             <!-- Thinking indicator area - displays above input -->
             <div data-llamabot="thinking-area" class="thinking-area hidden"></div>
+            <!-- File attachments preview area -->
+            <div data-llamabot="attachments-preview" class="attachments-preview hidden"></div>
             <textarea placeholder="Ask Leonardo..." data-llamabot="message-input"></textarea>
-            <div class="button-row">
-                <div class="send-controls">
-                    <button class="model-toggle-btn" data-llamabot="model-toggle-btn" title="Switch AI model">
-                        <i class="fa-solid fa-microchip"></i>
-                    </button>
-                    <div class="model-selector-container hidden" data-llamabot="model-selector-container">
-                        <div class="custom-dropdown-container">
-                            <select data-llamabot="model-select" class="custom-dropdown">
-                                <option value="gemini-3-flash" data-short-label="Gemini Flash">Gemini 3 Flash</option>
-                                <option value="gemini-3-pro" data-short-label="Gemini Pro">Gemini 3 Pro</option>
-                                <option value="claude-4.5-haiku" data-short-label="Haiku">Claude 4.5 Haiku</option>
-                                <option value="gpt-5-mini" data-short-label="GPT-5">GPT-5 Mini</option>
-                                <option value="deepseek-reasoner" data-short-label="DeepSeek">DeepSeek Reasoner</option>
-                            </select>
-                        </div>
-                    </div>
-                    <button data-llamabot="capture-logs-btn" class="capture-logs-btn" title="Capture Rails logs (10s)">
+            <!-- Floating contextual toolbar (hidden by default) -->
+            <div class="tools-toolbar hidden" data-llamabot="tools-toolbar">
+                <div class="toolbar-tools">
+                    <button data-llamabot="capture-logs-btn" class="toolbar-tool" title="Capture Rails logs (10s)">
                         <i class="fa-solid fa-bug"></i>
                     </button>
-                    <button data-llamabot="element-selector-btn" class="element-selector-btn" title="Select element from page">
+                    <button data-llamabot="element-selector-btn" class="toolbar-tool" title="Select element from page">
                         <i class="fa-solid fa-mouse-pointer"></i>
                     </button>
-                    <button data-llamabot="prompt-library-btn" class="prompt-library-btn" title="Prompt Library">
+                    <button data-llamabot="file-attach-btn" class="toolbar-tool" title="Attach file (PDF, images)">
+                        <i class="fa-solid fa-paperclip"></i>
+                    </button>
+                    <button data-llamabot="prompt-library-btn" class="toolbar-tool" title="Prompt Library">
                         <i class="fa-solid fa-book"></i>
                     </button>
+                </div>
+                <div class="toolbar-divider"></div>
+                <button data-llamabot="model-toggle-btn" class="toolbar-model-btn" title="Switch AI model">
+                    <i class="fa-solid fa-microchip"></i>
+                    <span>Model</span>
+                </button>
+            </div>
+            <input type="file" data-llamabot="file-input" class="hidden-file-input" accept=".pdf,.png,.jpg,.jpeg,.gif,.webp,image/png,image/jpeg,image/gif,image/webp,application/pdf" multiple>
+            <!-- Model selector (hidden by default, shown when model toggle clicked) -->
+            <div class="model-selector-container hidden" data-llamabot="model-selector-container">
+                <div class="custom-dropdown-container">
+                    <select data-llamabot="model-select" class="custom-dropdown">
+                        <option value="gemini-3-flash" data-short-label="Gemini Flash">Gemini 3 Flash</option>
+                        <option value="gemini-3-pro" data-short-label="Gemini Pro">Gemini 3 Pro</option>
+                        <option value="claude-4.5-haiku" data-short-label="Haiku">Claude 4.5 Haiku</option>
+                        <option value="gpt-5-mini" data-short-label="GPT-5">GPT-5 Mini</option>
+                        <option value="deepseek-reasoner" data-short-label="DeepSeek">DeepSeek Reasoner</option>
+                    </select>
+                </div>
+            </div>
+            <div class="button-row">
+                <div class="send-controls">
+                    <!-- Tools toggle button -->
+                    <button class="tools-toggle-btn" data-llamabot="tools-toggle-btn" title="More tools">
+                        <i class="fa-solid fa-plus"></i>
+                    </button>
+                    <!-- Agent mode selector (always visible) -->
                     <div class="custom-dropdown-container">
                         <select data-llamabot="agent-mode-select" class="custom-dropdown">
                             <option value="engineer" data-short-label="Engineer">Engineer Mode</option>

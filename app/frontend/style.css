@@ -117,43 +117,239 @@ body {
     font-size: 18px;
 }
 
-/* Model toggle button - subtle, hidden by default */
-.model-toggle-btn {
-    width: 24px;
-    height: 24px;
+/* ============================================
+   CONTEXTUAL TOOLS TOOLBAR
+   Modern floating toolbar with icon buttons
+   ============================================ */
+
+/* Tools toggle button (+ icon) */
+.tools-toggle-btn {
+    width: 32px;
+    height: 32px;
     display: flex;
     align-items: center;
     justify-content: center;
-    background: none;
-    border: none;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
     color: var(--text-color);
-    opacity: 0.25;
+    opacity: 0.7;
     cursor: pointer;
-    transition: opacity 0.2s ease, background-color 0.2s ease;
-    border-radius: 4px;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
     padding: 0;
+    flex-shrink: 0;
 }
 
-.model-toggle-btn:hover {
-    opacity: 0.6;
-    background-color: rgba(255, 255, 255, 0.05);
+.tools-toggle-btn:hover {
+    opacity: 1;
+    background: rgba(139, 92, 246, 0.12);
+    border-color: rgba(139, 92, 246, 0.25);
+    transform: scale(1.05);
 }
 
-.model-toggle-btn.active {
-    opacity: 0.8;
-    background-color: rgba(139, 92, 246, 0.1);
+.tools-toggle-btn.active {
+    opacity: 1;
+    background: rgba(139, 92, 246, 0.2);
+    border-color: rgba(139, 92, 246, 0.4);
+    color: #a78bfa;
 }
 
-.model-toggle-btn i {
+.tools-toggle-btn.active i {
+    transform: rotate(45deg);
+}
+
+.tools-toggle-btn i {
+    font-size: 14px;
+    transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Floating toolbar container */
+.tools-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 10px;
+    background: linear-gradient(135deg, rgba(45, 40, 60, 0.95) 0%, rgba(35, 30, 50, 0.98) 100%);
+    border: 1px solid rgba(139, 92, 246, 0.2);
+    border-radius: 12px;
+    margin-bottom: 10px;
+    box-shadow:
+        0 4px 24px rgba(0, 0, 0, 0.3),
+        0 0 0 1px rgba(255, 255, 255, 0.05),
+        inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(20px);
+    animation: toolbar-slide-in 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.tools-toolbar.hidden {
+    display: none;
+}
+
+@keyframes toolbar-slide-in {
+    from {
+        opacity: 0;
+        transform: translateY(8px) scale(0.95);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+/* Tool buttons container */
+.toolbar-tools {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+
+/* Individual tool button */
+.toolbar-tool {
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    border-radius: 8px;
+    color: rgba(255, 255, 255, 0.6);
+    cursor: pointer;
+    transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+}
+
+.toolbar-tool:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.95);
+    transform: translateY(-2px);
+}
+
+.toolbar-tool:active {
+    transform: translateY(0) scale(0.95);
+    background: rgba(139, 92, 246, 0.2);
+}
+
+.toolbar-tool i {
+    font-size: 15px;
+    transition: transform 0.15s ease;
+}
+
+.toolbar-tool:hover i {
+    transform: scale(1.1);
+}
+
+/* Active state (e.g., element selector active) */
+.toolbar-tool.active {
+    background: rgba(76, 175, 80, 0.2);
+    color: #4CAF50;
+}
+
+.toolbar-tool.active::after {
+    content: '';
+    position: absolute;
+    bottom: 4px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 4px;
+    height: 4px;
+    background: #4CAF50;
+    border-radius: 50%;
+}
+
+/* Recording state for capture logs */
+.toolbar-tool.recording {
+    color: #ff4444;
+    animation: pulse-glow 1s ease-in-out infinite;
+}
+
+@keyframes pulse-glow {
+    0%, 100% {
+        box-shadow: 0 0 0 0 rgba(255, 68, 68, 0.4);
+    }
+    50% {
+        box-shadow: 0 0 12px 4px rgba(255, 68, 68, 0.2);
+    }
+}
+
+/* Toolbar divider */
+.toolbar-divider {
+    width: 1px;
+    height: 24px;
+    background: linear-gradient(180deg, transparent 0%, rgba(255, 255, 255, 0.15) 50%, transparent 100%);
+    margin: 0 8px;
+}
+
+/* Model button in toolbar */
+.toolbar-model-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+    white-space: nowrap;
+}
+
+.toolbar-model-btn:hover {
+    background: rgba(139, 92, 246, 0.15);
+    border-color: rgba(139, 92, 246, 0.3);
+    color: rgba(255, 255, 255, 0.95);
+}
+
+.toolbar-model-btn.active {
+    background: rgba(139, 92, 246, 0.2);
+    border-color: rgba(139, 92, 246, 0.4);
+    color: #a78bfa;
+}
+
+.toolbar-model-btn i {
     font-size: 12px;
+    opacity: 0.8;
 }
 
-/* Model selector container - slides in when visible */
+.toolbar-model-btn span {
+    font-weight: 500;
+}
+
+/* Tooltip for toolbar tools */
+.toolbar-tool::before {
+    content: attr(title);
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 50%;
+    transform: translateX(-50%) scale(0.9);
+    padding: 6px 10px;
+    background: rgba(20, 20, 25, 0.95);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 0.75rem;
+    white-space: nowrap;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.15s ease;
+    pointer-events: none;
+    z-index: 100;
+}
+
+.toolbar-tool:hover::before {
+    opacity: 1;
+    visibility: visible;
+    transform: translateX(-50%) scale(1);
+}
+
+/* Model selector container */
 .model-selector-container {
     display: flex;
     align-items: center;
-    transition: opacity 0.2s ease, transform 0.2s ease;
-    margin-right: auto;
+    margin-bottom: 10px;
+    animation: toolbar-slide-in 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .model-selector-container.hidden {
@@ -161,13 +357,40 @@ body {
 }
 
 .model-selector-container .custom-dropdown {
-    font-size: 0.7rem;
-    padding: 0.35rem 1.5rem 0.35rem 0.5rem;
+    font-size: 0.8rem;
+    padding: 0.5rem 2rem 0.5rem 0.75rem;
+    background: rgba(45, 40, 60, 0.95);
+    border-color: rgba(139, 92, 246, 0.3);
 }
 
-/* When model selector is hidden, toggle button pushes itself to left */
-.send-controls .model-toggle-btn:not(.active) {
-    margin-right: auto;
+/* Mobile responsive for toolbar */
+@media screen and (max-width: 480px) {
+    .tools-toolbar {
+        padding: 4px 6px;
+        gap: 2px;
+    }
+
+    .toolbar-tool {
+        width: 32px;
+        height: 32px;
+    }
+
+    .toolbar-tool i {
+        font-size: 13px;
+    }
+
+    .toolbar-model-btn {
+        padding: 4px 8px;
+        font-size: 0.75rem;
+    }
+
+    .toolbar-model-btn span {
+        display: none;
+    }
+
+    .toolbar-divider {
+        margin: 0 4px;
+    }
 }
 
 /* Hamburger menu styles */
@@ -718,37 +941,7 @@ body {
     border-color: rgba(139, 92, 246, 0.1);
 }
 
-/* Element selector button */
-.element-selector-btn {
-    width: 28px;
-    height: 28px;
-    padding: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: rgba(76, 175, 80, 0.08);
-    border: 1px solid rgba(76, 175, 80, 0.2);
-    border-radius: 6px;
-    flex-shrink: 0;
-    font-size: 13px;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    color: var(--text-color);
-}
-
-.element-selector-btn:hover {
-    background: rgba(76, 175, 80, 0.15);
-    border-color: rgba(76, 175, 80, 0.3);
-    transform: translateY(-1px) scale(1.05);
-}
-
-.element-selector-btn.active {
-    background: rgba(76, 175, 80, 0.25);
-    border-color: rgba(76, 175, 80, 0.5);
-    color: #4CAF50;
-    animation: pulse-selector 1.5s ease-in-out infinite;
-}
-
+/* Element selector active state (for overflow menu item) */
 @keyframes pulse-selector {
     0%, 100% {
         box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.7);
@@ -758,38 +951,7 @@ body {
     }
 }
 
-/* Capture logs button - subtle debug button */
-.capture-logs-btn {
-    width: 24px;
-    height: 24px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: none;
-    border: none;
-    color: var(--text-color);
-    opacity: 0.25;
-    cursor: pointer;
-    transition: opacity 0.2s ease, background-color 0.2s ease;
-    border-radius: 4px;
-    padding: 0;
-}
-
-.capture-logs-btn:hover {
-    opacity: 0.6;
-    background-color: rgba(255, 255, 255, 0.05);
-}
-
-.capture-logs-btn.recording {
-    opacity: 1;
-    color: #ff4444;
-    animation: pulse-recording 1s ease-in-out infinite;
-}
-
-.capture-logs-btn i {
-    font-size: 12px;
-}
-
+/* Recording animation for capture logs */
 @keyframes pulse-recording {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.5; }
@@ -2850,5 +3012,192 @@ body {
 
     .prompt-panel-list {
         max-height: 180px;
+    }
+}
+
+/* ============== Inactivity Warning Banner ============== */
+.timeout-warning-banner {
+    background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+    border-bottom: 2px solid #f59e0b;
+    padding: 10px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    animation: slideDown 0.3s ease-out;
+    flex-shrink: 0;
+}
+
+.timeout-warning-banner.hidden {
+    display: none;
+}
+
+.timeout-warning-banner .warning-content {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: #92400e;
+    font-weight: 500;
+    font-size: 0.9rem;
+}
+
+.timeout-warning-banner .warning-content i {
+    font-size: 1.1rem;
+}
+
+.timeout-warning-banner .continue-btn {
+    background: #f59e0b;
+    color: white;
+    border: none;
+    padding: 6px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.85rem;
+    transition: background 0.2s;
+}
+
+.timeout-warning-banner .continue-btn:hover {
+    background: #d97706;
+}
+
+@keyframes slideDown {
+    from {
+        transform: translateY(-100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+/* ============================================
+   FILE ATTACHMENT STYLES
+   ============================================ */
+
+/* Hidden file input */
+.hidden-file-input {
+    display: none;
+}
+
+/* File attach button - paperclip icon */
+.file-attach-btn {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(59, 130, 246, 0.08);
+    border: 1px solid rgba(59, 130, 246, 0.2);
+    border-radius: 6px;
+    flex-shrink: 0;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    color: var(--text-color);
+}
+
+.file-attach-btn:hover {
+    background: rgba(59, 130, 246, 0.15);
+    border-color: rgba(59, 130, 246, 0.3);
+    transform: translateY(-1px) scale(1.05);
+}
+
+.file-attach-btn.has-files {
+    background: rgba(59, 130, 246, 0.25);
+    border-color: rgba(59, 130, 246, 0.5);
+    color: #3b82f6;
+}
+
+/* File attachments preview area */
+.attachments-preview {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.attachments-preview.hidden {
+    display: none !important;
+}
+
+/* Individual attachment badge */
+.attachment-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.4rem 0.6rem;
+    background: rgba(59, 130, 246, 0.12);
+    border: 1px solid rgba(59, 130, 246, 0.25);
+    border-radius: 6px;
+    font-size: 0.8rem;
+    color: var(--text-color);
+    max-width: 200px;
+}
+
+.attachment-badge i {
+    color: #3b82f6;
+    font-size: 0.9rem;
+    flex-shrink: 0;
+}
+
+.attachment-badge .attachment-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #60a5fa;
+    font-weight: 500;
+}
+
+.attachment-badge .attachment-size {
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 0.7rem;
+    flex-shrink: 0;
+}
+
+.attachment-badge .attachment-remove {
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.5);
+    cursor: pointer;
+    padding: 0;
+    width: 16px;
+    height: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 3px;
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+    margin-left: 0.2rem;
+}
+
+.attachment-badge .attachment-remove:hover {
+    background: rgba(239, 68, 68, 0.2);
+    color: #ef4444;
+}
+
+.attachment-badge .attachment-remove i {
+    font-size: 0.7rem;
+    color: inherit;
+}
+
+/* PDF icon specific color */
+.attachment-badge i.fa-file-pdf {
+    color: #ef4444;
+}
+
+/* Mobile responsive for attachments */
+@media screen and (max-width: 768px) {
+    .attachments-preview {
+        gap: 0.4rem;
+    }
+
+    .attachment-badge {
+        max-width: 150px;
+        padding: 0.35rem 0.5rem;
+        font-size: 0.75rem;
     }
 }
