@@ -141,3 +141,34 @@ def search_prompts(
         (Prompt.name.ilike(search_term)) | (Prompt.content.ilike(search_term))
     ).order_by(Prompt.usage_count.desc())
     return list(session.exec(stmt).all())
+
+
+def seed_default_prompts(session: Session) -> int:
+    """Seed default prompts into the database if they don't exist.
+
+    Returns the number of prompts created.
+    """
+    from app.services.default_prompts import DEFAULT_PROMPTS
+
+    created_count = 0
+    for prompt_data in DEFAULT_PROMPTS:
+        # Check if prompt with this name already exists
+        stmt = select(Prompt).where(Prompt.name == prompt_data["name"])
+        existing = session.exec(stmt).first()
+
+        if existing is None:
+            prompt = Prompt(
+                name=prompt_data["name"],
+                content=prompt_data["content"],
+                group=prompt_data.get("group", "General"),
+                description=prompt_data.get("description")
+            )
+            session.add(prompt)
+            created_count += 1
+            logger.info(f"Seeded default prompt: {prompt.name}")
+
+    if created_count > 0:
+        session.commit()
+        logger.info(f"Seeded {created_count} default prompts")
+
+    return created_count

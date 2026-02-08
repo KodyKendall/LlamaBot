@@ -208,6 +208,9 @@ export class MessageHandler {
       const parser = this.messageRenderer.markdownParser;
       let fullMessage = this.appState.getMessageBuffer();
       currentMessage.innerHTML = parser.parse(fullMessage);
+
+      // Store raw content for copy functionality
+      currentMessage.setAttribute('data-raw-content', fullMessage);
     }
 
     // Handle scrolling

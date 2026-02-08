@@ -53,16 +53,26 @@ export class MessageRenderer {
   }
 
   /**
-   * Render human message
+   * Render human message with markdown support and copy button
    */
   renderHumanMessage(content) {
     const messageDiv = document.createElement('div');
     messageDiv.setAttribute('data-llamabot', 'human-message');
-    messageDiv.textContent = content;
+
+    // Store raw content for copy functionality
+    messageDiv.setAttribute('data-raw-content', content);
+
+    // Parse markdown (same as AI messages)
+    messageDiv.innerHTML = this.markdownParser.parse(content);
 
     // Apply custom CSS classes if configured
     if (this.config.cssClasses?.humanMessage) {
       messageDiv.className = this.config.cssClasses.humanMessage;
+    }
+
+    // Add copy button for human messages with content
+    if (content && content.trim()) {
+      this.addCopyButton(messageDiv);
     }
 
     this.insertMessage(messageDiv);
@@ -70,7 +80,7 @@ export class MessageRenderer {
   }
 
   /**
-   * Render AI message
+   * Render AI message with copy button
    */
   renderAiMessage(content, baseMessage) {
     const messageDiv = document.createElement('div');
@@ -80,6 +90,9 @@ export class MessageRenderer {
     const safeContent = (content !== undefined && content !== null && content !== 'undefined')
       ? String(content)
       : '';
+
+    // Store raw markdown for copy functionality
+    messageDiv.setAttribute('data-raw-content', safeContent);
 
     messageDiv.innerHTML = this.markdownParser.parse(safeContent);
 
@@ -101,10 +114,37 @@ export class MessageRenderer {
       if (this.config.cssClasses?.aiMessage) {
         messageDiv.className = this.config.cssClasses.aiMessage;
       }
+
+      // Add copy button for regular AI messages (not tool messages)
+      if (safeContent) {
+        this.addCopyButton(messageDiv);
+      }
     }
 
     this.insertMessage(messageDiv);
     return messageDiv;
+  }
+
+  /**
+   * Add a copy button to a message element
+   * @param {HTMLElement} messageDiv - The message element to add the button to
+   */
+  addCopyButton(messageDiv) {
+    const copyBtn = document.createElement('button');
+    copyBtn.setAttribute('data-llamabot', 'copy-btn');
+    copyBtn.innerHTML = '<i class="fa-regular fa-copy"></i>';
+    copyBtn.title = 'Copy raw markdown';
+    copyBtn.onclick = (e) => {
+      e.stopPropagation();
+      const rawContent = messageDiv.getAttribute('data-raw-content');
+      navigator.clipboard.writeText(rawContent).then(() => {
+        copyBtn.innerHTML = '<i class="fa-solid fa-check"></i>';
+        setTimeout(() => {
+          copyBtn.innerHTML = '<i class="fa-regular fa-copy"></i>';
+        }, 1500);
+      });
+    };
+    messageDiv.appendChild(copyBtn);
   }
 
   /**
@@ -277,6 +317,9 @@ export class MessageRenderer {
     // Stop the thinking indicator
     this.stopThinking();
 
+    // Finalize all AI messages (add copy buttons to those that don't have them)
+    this.finalizeAiMessages();
+
     // Play task completed sound
     const taskCompletedSound = document.getElementById('taskCompletedSound');
     if (taskCompletedSound) {
@@ -289,6 +332,29 @@ export class MessageRenderer {
     window.dispatchEvent(new CustomEvent('streamEnded'));
 
     return null;
+  }
+
+  /**
+   * Finalize all AI messages by adding copy buttons to those that don't have them
+   * Called when streaming ends to add copy buttons to streamed messages
+   */
+  finalizeAiMessages() {
+    const aiMessages = this.messageHistory.querySelectorAll('[data-llamabot="ai-message"]');
+    aiMessages.forEach(messageDiv => {
+      // Skip if already has a copy button
+      if (messageDiv.querySelector('[data-llamabot="copy-btn"]')) {
+        return;
+      }
+
+      // Skip if no content
+      const rawContent = messageDiv.getAttribute('data-raw-content');
+      if (!rawContent || rawContent.trim() === '') {
+        return;
+      }
+
+      // Add copy button
+      this.addCopyButton(messageDiv);
+    });
   }
 
   /**

@@ -30,6 +30,13 @@ def init_db():
     try:
         SQLModel.metadata.create_all(engine)
         logger.info("✅ Auth database initialized")
+
+        # Seed default prompts
+        from app.services.prompt_service import seed_default_prompts
+        with Session(engine) as session:
+            count = seed_default_prompts(session)
+            if count > 0:
+                logger.info(f"✅ Seeded {count} default prompts")
     except Exception as e:
         logger.error(f"❌ Failed to initialize auth database: {e}")
         raise
