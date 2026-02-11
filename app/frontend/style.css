@@ -272,6 +272,118 @@ body {
     }
 }
 
+/* Recording timer display */
+.recording-timer {
+    color: #ff4444;
+    font-size: 0.8rem;
+    font-weight: 600;
+    margin-left: 4px;
+    font-variant-numeric: tabular-nums;
+    animation: pulse-glow 1s ease-in-out infinite;
+}
+
+.recording-timer.hidden {
+    display: none;
+}
+
+/* Recording preview modal */
+.recording-preview-modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.85);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+    animation: modal-fade-in 0.2s ease-out;
+}
+
+@keyframes modal-fade-in {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+.recording-preview-content {
+    background: var(--chat-bg);
+    padding: 24px;
+    border-radius: 16px;
+    max-width: 800px;
+    width: 90%;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+    border: 1px solid var(--border-color);
+    animation: modal-slide-up 0.3s ease-out;
+}
+
+@keyframes modal-slide-up {
+    from {
+        transform: translateY(20px);
+        opacity: 0;
+    }
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+.recording-preview-content h3 {
+    margin: 0 0 16px 0;
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--text-color);
+}
+
+.recording-preview-content video {
+    width: 100%;
+    border-radius: 8px;
+    margin-bottom: 16px;
+    background: #000;
+}
+
+.recording-preview-actions {
+    display: flex;
+    gap: 12px;
+    justify-content: flex-end;
+}
+
+.recording-preview-actions button {
+    padding: 10px 20px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: all 0.15s ease;
+}
+
+.recording-preview-actions .download-btn {
+    background: var(--accent-color);
+    color: white;
+    border: none;
+}
+
+.recording-preview-actions .download-btn:hover {
+    background: var(--button-hover);
+    transform: translateY(-1px);
+}
+
+.recording-preview-actions .discard-btn {
+    background: transparent;
+    border: 1px solid var(--border-color);
+    color: var(--text-color);
+}
+
+.recording-preview-actions .discard-btn:hover {
+    background: rgba(255, 68, 68, 0.1);
+    border-color: #ff4444;
+    color: #ff4444;
+}
+
 /* Toolbar divider */
 .toolbar-divider {
     width: 1px;

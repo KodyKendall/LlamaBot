@@ -18,6 +18,7 @@ import { MobileViewManager } from './ui/MobileViewManager.js';
 import { TokenIndicator } from './ui/TokenIndicator.js';
 import { PromptManager } from './ui/PromptManager.js';
 import { FileAttachmentManager } from './ui/FileAttachmentManager.js';
+import { ScreenRecorder } from './ui/ScreenRecorder.js';
 import { ThreadManager } from './threads/ThreadManager.js';
 import { LoadingVerbs } from './utils/LoadingVerbs.js';
 import { ClipboardFormatter } from './utils/ClipboardFormatter.js';
@@ -54,6 +55,7 @@ class ChatApp {
     this.tokenIndicator = null;
     this.promptManager = null;
     this.fileAttachmentManager = null;
+    this.screenRecorder = null;
     this.loadingVerbs = new LoadingVerbs();
 
     // Initialize WebSocket components
@@ -218,6 +220,10 @@ class ChatApp {
       });
     }
 
+    // Initialize screen recorder
+    this.screenRecorder = new ScreenRecorder();
+    this.initScreenRecording();
+
     // Load threads
     this.threadManager.fetchThreads();
 
@@ -260,7 +266,9 @@ class ChatApp {
       fileInput: this.container.querySelector('[data-llamabot="file-input"]'),
       attachmentsPreview: this.container.querySelector('[data-llamabot="attachments-preview"]'),
       toolsToggleBtn: this.container.querySelector('[data-llamabot="tools-toggle-btn"]'),
-      toolsToolbar: this.container.querySelector('[data-llamabot="tools-toolbar"]')
+      toolsToolbar: this.container.querySelector('[data-llamabot="tools-toolbar"]'),
+      screenRecordBtn: this.container.querySelector('[data-llamabot="screen-record-btn"]'),
+      recordingTimer: this.container.querySelector('[data-llamabot="recording-timer"]')
     };
   }
 
@@ -896,6 +904,89 @@ class ChatApp {
     }
     if (this.elements.toolsToggleBtn) {
       this.elements.toolsToggleBtn.classList.remove('active');
+    }
+  }
+
+  /**
+   * Initialize screen recording functionality
+   */
+  initScreenRecording() {
+    const btn = this.elements.screenRecordBtn;
+    const timer = this.elements.recordingTimer;
+
+    if (!btn) return;
+
+    btn.addEventListener('click', async () => {
+      // Close toolbar
+      this.closeToolsToolbar();
+
+      if (!this.screenRecorder.isRecording) {
+        // Start recording
+        try {
+          await this.screenRecorder.startRecording(
+            // Timer update callback
+            (timeStr) => {
+              if (timer) {
+                timer.textContent = timeStr;
+              }
+            },
+            // On stop callback (when user clicks "Stop sharing" in browser)
+            (blob) => {
+              this.updateRecordButtonState(false);
+              if (blob) {
+                this.screenRecorder.showPreviewModal(blob);
+              }
+            }
+          );
+
+          this.updateRecordButtonState(true);
+        } catch (err) {
+          // User cancelled the screen picker or error occurred
+          console.log('Screen recording cancelled or failed:', err.message);
+        }
+      } else {
+        // Stop recording
+        const blob = await this.screenRecorder.stopRecording();
+        this.updateRecordButtonState(false);
+        if (blob) {
+          this.screenRecorder.showPreviewModal(blob);
+        }
+      }
+    });
+  }
+
+  /**
+   * Update record button visual state
+   * @param {boolean} isRecording - Whether currently recording
+   */
+  updateRecordButtonState(isRecording) {
+    const btn = this.elements.screenRecordBtn;
+    const timer = this.elements.recordingTimer;
+    const icon = btn?.querySelector('i');
+
+    if (!btn) return;
+
+    if (isRecording) {
+      btn.classList.add('recording');
+      btn.title = 'Stop recording';
+      if (icon) {
+        icon.classList.remove('fa-circle');
+        icon.classList.add('fa-stop');
+      }
+      if (timer) {
+        timer.textContent = '00:00';
+        timer.classList.remove('hidden');
+      }
+    } else {
+      btn.classList.remove('recording');
+      btn.title = 'Record screen';
+      if (icon) {
+        icon.classList.remove('fa-stop');
+        icon.classList.add('fa-circle');
+      }
+      if (timer) {
+        timer.classList.add('hidden');
+      }
     }
   }
 }

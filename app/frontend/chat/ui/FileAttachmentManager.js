@@ -14,6 +14,7 @@ const ALLOWED_TYPES = {
   'image/jpeg': { ext: 'jpg', icon: 'fa-file-image' },
   'image/gif': { ext: 'gif', icon: 'fa-file-image' },
   'image/webp': { ext: 'webp', icon: 'fa-file-image' },
+  'video/webm': { ext: 'webm', icon: 'fa-file-video' },
 };
 
 export class FileAttachmentManager {

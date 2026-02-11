@@ -107,6 +107,10 @@
                     <button data-llamabot="prompt-library-btn" class="toolbar-tool" title="Prompt Library">
                         <i class="fa-solid fa-book"></i>
                     </button>
+                    <button data-llamabot="screen-record-btn" class="toolbar-tool" title="Record screen">
+                        <i class="fa-solid fa-circle"></i>
+                    </button>
+                    <span class="recording-timer hidden" data-llamabot="recording-timer">00:00</span>
                 </div>
                 <div class="toolbar-divider"></div>
                 <button data-llamabot="model-toggle-btn" class="toolbar-model-btn" title="Switch AI model">
@@ -114,7 +118,7 @@
                     <span>Model</span>
                 </button>
             </div>
-            <input type="file" data-llamabot="file-input" class="hidden-file-input" accept=".pdf,.png,.jpg,.jpeg,.gif,.webp,image/png,image/jpeg,image/gif,image/webp,application/pdf" multiple>
+            <input type="file" data-llamabot="file-input" class="hidden-file-input" accept=".pdf,.png,.jpg,.jpeg,.gif,.webp,.webm,image/png,image/jpeg,image/gif,image/webp,video/webm,application/pdf" multiple>
             <!-- Model selector (hidden by default, shown when model toggle clicked) -->
             <div class="model-selector-container hidden" data-llamabot="model-selector-container">
                 <div class="custom-dropdown-container">
