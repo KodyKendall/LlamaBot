@@ -807,7 +807,7 @@ def bash_command(
         }
     )
 
-tavily_client = TavilyClient(api_key=os.environ["TAVILY_API_KEY"])
+tavily_client = TavilyClient(api_key=os.environ.get("TAVILY_API_KEY", ""))
 @tool(description=INTERNET_SEARCH_DESCRIPTION)
 # Search tool to use to do research
 def internet_search(

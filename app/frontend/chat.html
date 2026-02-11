@@ -43,7 +43,10 @@
         <div class="menu-drawer" data-llamabot="menu-drawer">
             <div class="drawer-content">
                 <div class="drawer-header">
-                    <h3>Conversations</h3>
+                    <div class="drawer-title">
+                        <h3>Conversations</h3>
+                        <span class="version-badge" data-llamabot="version-badge"></span>
+                    </div>
                     <button class="new-thread-btn" data-llamabot="new-thread-btn" title="Start new conversation">
                         <i class="fa-solid fa-plus"></i>
                     </button>
@@ -252,7 +255,7 @@
         <source src="/frontend/Leonardo-Task-Error.mp3" type="audio/mpeg">
     </audio>
 
-    <!-- Set document title with instance name if available -->
+    <!-- Set document title with instance name if available, and fetch version -->
     <script>
         (async function() {
             try {
@@ -265,6 +268,20 @@
                 }
             } catch (e) {
                 // Silently fail - just use default "Leonardo" title
+            }
+
+            // Fetch and display version in drawer
+            try {
+                const versionResponse = await fetch('/api/version');
+                if (versionResponse.ok) {
+                    const versionData = await versionResponse.json();
+                    const versionBadge = document.querySelector('[data-llamabot="version-badge"]');
+                    if (versionBadge && versionData.version) {
+                        versionBadge.textContent = `v${versionData.version}`;
+                    }
+                }
+            } catch (e) {
+                // Silently fail - version display is optional
             }
         })();
     </script>

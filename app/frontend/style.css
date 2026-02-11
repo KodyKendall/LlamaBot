@@ -474,12 +474,24 @@ body {
     gap: 0.8rem;
 }
 
+.drawer-header .drawer-title {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+}
+
 .drawer-header h3 {
     font-size: 1.2rem;
     font-weight: 600;
     color: var(--text-color);
     margin: 0;
-    flex: 1;
+}
+
+.drawer-header .version-badge {
+    font-size: 0.55rem;
+    color: #666;
+    font-weight: 400;
+    margin-top: 1px;
 }
 
 .new-thread-btn {
@@ -553,6 +565,18 @@ body {
 
 .menu-item:hover {
     background-color: var(--hover-bg);
+}
+
+.thread-title {
+    font-size: 0.95rem;
+    line-height: 1.3;
+}
+
+.thread-timestamp {
+    font-size: 0.75rem;
+    color: var(--text-muted, #888);
+    margin-top: 2px;
+    opacity: 0.7;
 }
 
 /* Overlay for when drawer is open */

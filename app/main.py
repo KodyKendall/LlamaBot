@@ -264,9 +264,10 @@ async def startup_event():
                 lambda s=sig: asyncio.create_task(graceful_shutdown(s))
             )
         logger.info("Signal handlers registered for graceful shutdown")
-    except NotImplementedError:
+    except (NotImplementedError, RuntimeError):
         # Windows doesn't support add_signal_handler
-        logger.warning("Signal handlers not supported on this platform")
+        # RuntimeError occurs when not in main thread (e.g., pytest)
+        logger.warning("Signal handlers not supported on this platform/context")
 
 
 # Mount MCP Server (stubbed out for now - MCP not yet fully implemented)

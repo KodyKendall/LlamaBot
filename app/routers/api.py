@@ -54,6 +54,63 @@ class UpdatePromptRequest(BaseModel):
     is_active: bool | None = None
 
 
+# ============== Version API ==============
+
+def get_container_version() -> str:
+    """Get the version from docker-compose.yml (mounted at /app/leonardo) or Docker API."""
+    import socket
+
+    # First, try to parse from mounted docker-compose-dev.yml
+    compose_paths = [
+        "/app/leonardo/docker-compose-dev.yml",
+        "/app/leonardo/docker-compose.yml",
+    ]
+    for compose_path in compose_paths:
+        try:
+            with open(compose_path, 'r') as f:
+                for line in f:
+                    # Look for image line with llamabot (commented or not)
+                    # e.g., "# image: kody06/llamabot:0.3.5c" or "image: kody06/llamabot:0.3.5c"
+                    if 'image:' in line and 'llamabot:' in line:
+                        # Extract version from "kody06/llamabot:0.3.5c"
+                        match = re.search(r'llamabot:([^\s"\']+)', line)
+                        if match:
+                            return match.group(1)
+        except FileNotFoundError:
+            continue
+        except Exception as e:
+            logger.debug(f"Could not parse {compose_path}: {e}")
+
+    # Fallback: Query Docker API
+    try:
+        container_id = socket.gethostname()
+        import http.client
+        conn = http.client.HTTPConnection("localhost")
+        conn.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        conn.sock.connect("/var/run/docker.sock")
+        conn.request("GET", f"/containers/{container_id}/json")
+        response = conn.getresponse()
+
+        if response.status == 200:
+            data = json.loads(response.read().decode())
+            image = data.get("Config", {}).get("Image", "")
+            if ":" in image:
+                version = image.split(":")[-1]
+                if version != "latest":
+                    return version
+        return "dev"
+    except Exception as e:
+        logger.debug(f"Could not get container version: {e}")
+        return "dev"
+
+
+@router.get("/api/version", response_class=JSONResponse)
+async def api_get_version():
+    """Get the current LlamaBot version from docker-compose.yml or Docker image tag."""
+    version = get_container_version()
+    return {"version": version}
+
+
 # ============== User Management API ==============
 
 @router.get("/api/users", response_class=JSONResponse)
