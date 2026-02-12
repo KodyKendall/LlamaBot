@@ -22,11 +22,12 @@ export class MessageRenderer {
    * @param {string} content - The content of the message
    * @param {string} type - The type of message ('human', 'ai', 'tool', 'error', 'queued', 'end')
    * @param {object} baseMessage - The base langgraph message object
+   * @param {Array} attachments - Optional array of attachment metadata {filename, mime_type}
    * @returns {HTMLElement|null} The message div or null
    */
-  addMessage(content, type, baseMessage = null) {
+  addMessage(content, type, baseMessage = null, attachments = null) {
     if (type === 'human') {
-      return this.renderHumanMessage(content);
+      return this.renderHumanMessage(content, attachments);
     }
 
     if (type === 'ai') {
@@ -53,9 +54,11 @@ export class MessageRenderer {
   }
 
   /**
-   * Render human message with markdown support and copy button
+   * Render human message with markdown support, copy button, and attachment badges
+   * @param {string} content - Text content of the message
+   * @param {Array} attachments - Optional array of attachment metadata {filename, mime_type}
    */
-  renderHumanMessage(content) {
+  renderHumanMessage(content, attachments = []) {
     const messageDiv = document.createElement('div');
     messageDiv.setAttribute('data-llamabot', 'human-message');
 
@@ -70,6 +73,12 @@ export class MessageRenderer {
       messageDiv.className = this.config.cssClasses.humanMessage;
     }
 
+    // Add attachment badges if present
+    if (attachments && attachments.length > 0) {
+      const attachmentContainer = this.createAttachmentBadges(attachments);
+      messageDiv.appendChild(attachmentContainer);
+    }
+
     // Add copy button for human messages with content
     if (content && content.trim()) {
       this.addCopyButton(messageDiv);
@@ -77,6 +86,60 @@ export class MessageRenderer {
 
     this.insertMessage(messageDiv);
     return messageDiv;
+  }
+
+  /**
+   * Create attachment badges for display in message history
+   * @param {Array} attachments - Array of attachment objects with filename, mime_type
+   * @returns {HTMLElement} - Container with attachment badges
+   */
+  createAttachmentBadges(attachments) {
+    const container = document.createElement('div');
+    container.className = 'message-attachments';
+
+    // Icon mapping for different file types
+    const iconMap = {
+      'application/pdf': 'fa-file-pdf',
+      'image/png': 'fa-file-image',
+      'image/jpeg': 'fa-file-image',
+      'image/gif': 'fa-file-image',
+      'image/webp': 'fa-file-image',
+      'video/webm': 'fa-file-video',
+      'video/mp4': 'fa-file-video',
+      'audio/mpeg': 'fa-file-audio',
+      'audio/wav': 'fa-file-audio',
+    };
+
+    attachments.forEach(attachment => {
+      const badge = document.createElement('div');
+      badge.className = 'message-attachment-badge';
+
+      const icon = iconMap[attachment.mime_type] || 'fa-file';
+      const filename = attachment.filename || 'attachment';
+
+      badge.innerHTML = `
+        <i class="fa-solid ${icon}"></i>
+        <span class="attachment-filename" title="${filename}">${this.truncateFilename(filename)}</span>
+      `;
+
+      container.appendChild(badge);
+    });
+
+    return container;
+  }
+
+  /**
+   * Truncate filename for display while preserving extension
+   * @param {string} filename - The filename to truncate
+   * @param {number} maxLength - Maximum length before truncation
+   * @returns {string} - Truncated filename
+   */
+  truncateFilename(filename, maxLength = 20) {
+    if (filename.length <= maxLength) return filename;
+    const ext = filename.split('.').pop();
+    const name = filename.slice(0, -(ext.length + 1));
+    const truncatedName = name.slice(0, maxLength - ext.length - 4) + '...';
+    return `${truncatedName}.${ext}`;
   }
 
   /**

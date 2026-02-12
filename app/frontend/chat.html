@@ -8,6 +8,8 @@
     <link rel="icon" type="image/png" href="https://llamapress-ai-image-uploads.s3.us-west-2.amazonaws.com/4bmqe5iolvp84ceyk9ttz8vylrym">
     <!-- Add marked.js for markdown parsing -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- Fabric.js for screenshot annotation -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
     <!-- Font Awesome for icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <!-- Link to external CpSS -->
@@ -31,6 +33,9 @@
             <a href="/settings" class="settings-btn" title="Settings">
                 <i class="fa-solid fa-gear"></i>
             </a>
+            <button class="collapse-sidebar-btn" data-llamabot="collapse-sidebar-btn" title="Collapse sidebar">
+                <i class="fa-solid fa-angles-left"></i>
+            </button>
             <button class="mobile-view-toggle" data-llamabot="show-preview-btn">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
@@ -71,6 +76,16 @@
             <div data-llamabot="ai-message">Hi! I'm Leonardo. What are we building today?</div>
         </div>
         <div class="input-area">
+            <!-- Collapsed toolbar (shown when sidebar is collapsed) -->
+            <div class="collapsed-toolbar" data-llamabot="collapsed-toolbar">
+                <button data-llamabot="collapsed-screen-record-btn" class="toolbar-tool" title="Record screen">
+                    <i class="fa-solid fa-circle"></i>
+                </button>
+                <span class="recording-timer hidden" data-llamabot="collapsed-recording-timer">00:00</span>
+                <button data-llamabot="collapsed-screenshot-btn" class="toolbar-tool" title="Capture screenshot">
+                    <i class="fa-solid fa-camera"></i>
+                </button>
+            </div>
             <!-- Floating scroll-to-bottom button -->
             <button class="scroll-to-bottom" data-llamabot="scroll-to-bottom" title="Scroll to bottom">
                 <i class="fa-solid fa-arrow-down"></i>
@@ -98,9 +113,6 @@
                     <button data-llamabot="capture-logs-btn" class="toolbar-tool" title="Capture Rails logs (10s)">
                         <i class="fa-solid fa-bug"></i>
                     </button>
-                    <button data-llamabot="element-selector-btn" class="toolbar-tool" title="Select element from page">
-                        <i class="fa-solid fa-mouse-pointer"></i>
-                    </button>
                     <button data-llamabot="file-attach-btn" class="toolbar-tool" title="Attach file (PDF, images)">
                         <i class="fa-solid fa-paperclip"></i>
                     </button>
@@ -111,6 +123,9 @@
                         <i class="fa-solid fa-circle"></i>
                     </button>
                     <span class="recording-timer hidden" data-llamabot="recording-timer">00:00</span>
+                    <button data-llamabot="screenshot-btn" class="toolbar-tool" title="Capture screenshot">
+                        <i class="fa-solid fa-camera"></i>
+                    </button>
                 </div>
                 <div class="toolbar-divider"></div>
                 <button data-llamabot="model-toggle-btn" class="toolbar-model-btn" title="Switch AI model">
@@ -133,9 +148,20 @@
             </div>
             <div class="button-row">
                 <div class="send-controls">
+                    <!-- Recording indicator (visible when recording, positioned outside toolbar) -->
+                    <div class="floating-record-indicator hidden" data-llamabot="floating-record-indicator">
+                        <button class="stop-recording-btn" data-llamabot="stop-recording-btn" title="Stop recording">
+                            <i class="fa-solid fa-stop"></i>
+                        </button>
+                        <span class="floating-record-timer" data-llamabot="floating-record-timer">00:00</span>
+                    </div>
                     <!-- Tools toggle button -->
                     <button class="tools-toggle-btn" data-llamabot="tools-toggle-btn" title="More tools">
                         <i class="fa-solid fa-plus"></i>
+                    </button>
+                    <!-- Element selector (always visible) -->
+                    <button data-llamabot="element-selector-btn" class="tools-toggle-btn" title="Select element from page">
+                        <i class="fa-solid fa-mouse-pointer"></i>
                     </button>
                     <!-- Agent mode selector (always visible) -->
                     <div class="custom-dropdown-container">
@@ -155,6 +181,9 @@
                 </div>
             </div>
         </div>
+    </div>
+    <div class="resize-handle" data-llamabot="resize-handle">
+        <div class="resize-handle-line"></div>
     </div>
     <div class="iframe-section">
         <div class="browser-window">
@@ -181,7 +210,7 @@
                             </svg>
                         </button>
                     </div>
-                    <div class="tab" data-target="vsCodeFrame">
+                    <div class="tab" data-target="vsCodeFrame" data-engineer-only="true">
                         <span class="tab-text">Code</span>
                         <button class="tab-external-link" data-iframe="vsCodeFrame" title="Open in new tab">
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -191,9 +220,19 @@
                             </svg>
                         </button>
                     </div>
-                    <div class="tab" data-target="ticketsFrame">
+                    <div class="tab" data-target="ticketsFrame" data-engineer-only="true">
                         <span class="tab-text">Tickets</span>
                         <button class="tab-external-link" data-iframe="ticketsFrame" title="Open in new tab">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                                <polyline points="15 3 21 3 21 9"></polyline>
+                                <line x1="10" y1="14" x2="21" y2="3"></line>
+                            </svg>
+                        </button>
+                    </div>
+                    <div class="tab" data-target="feedbackFrame">
+                        <span class="tab-text">Feedback</span>
+                        <button class="tab-external-link" data-iframe="feedbackFrame" title="Open in new tab">
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
                                 <polyline points="15 3 21 3 21 9"></polyline>
@@ -241,6 +280,7 @@
                 <iframe data-llamabot="live-site-frame" title="Live Site Frame" class="content-iframe active"></iframe>
                 <iframe data-llamabot="vscode-frame" title="VS Code Frame" class="content-iframe" allow="clipboard-read; clipboard-write">  </iframe>
                 <iframe data-llamabot="tickets-frame" title="Tickets Frame" class="content-iframe"></iframe>
+                <iframe data-llamabot="feedback-frame" title="Feedback Frame" class="content-iframe"></iframe>
                 <!-- <iframe src="/agent_page/rails_agent" title="Git Status Frame" data-llamabot="git-frame" class="content-iframe"></iframe> -->
                 <!-- <iframe src="/logs" title="Logs Frame" data-llamabot="logs-frame" class="content-iframe"></iframe> -->
                 <!-- <iframe src="/page" title="Content Frame" data-llamabot="content-frame" class="content-iframe"></iframe> -->
@@ -290,13 +330,15 @@
         })();
     </script>
 
-    <!-- Role-based mode restriction -->
+    <!-- Role-based mode and tab restriction -->
     <script>
         // If user role is 'user', only show Feedback mode (engineers get all modes)
+        // Also hide Code and Tickets tabs for non-engineers
         // Wait for LlamaBot to initialize before modifying the dropdown
         window.addEventListener('llamabot:ready', function() {
             const userRole = window.LLAMABOT_USER_ROLE || 'engineer';
             if (userRole === 'user') {
+                // Restrict agent mode dropdown to only feedback
                 const modeSelect = document.querySelector('[data-llamabot="agent-mode-select"]');
                 if (modeSelect) {
                     // Keep only feedback mode
@@ -309,6 +351,12 @@
                     // Dispatch change event so LlamaBot updates its internal state
                     modeSelect.dispatchEvent(new Event('change', { bubbles: true }));
                 }
+
+                // Hide tabs marked as engineer-only (Code and Tickets)
+                const engineerOnlyTabs = document.querySelectorAll('.tab[data-engineer-only="true"]');
+                engineerOnlyTabs.forEach(tab => {
+                    tab.style.display = 'none';
+                });
             }
         });
     </script>

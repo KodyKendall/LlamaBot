@@ -35,11 +35,248 @@ body {
 /* Chat section (left 1/3) */
 .chat-section {
     width: 33.33%;
+    min-width: 280px;
     height: 100%;
     display: flex;
     flex-direction: column;
     border-right: 1px solid var(--border-color);
     position: relative;
+    transition: width 0.15s ease, min-width 0.15s ease;
+}
+
+/* Resize handle between chat and iframe sections */
+.resize-handle {
+    width: 6px;
+    height: 100%;
+    background: transparent;
+    cursor: col-resize;
+    position: relative;
+    flex-shrink: 0;
+    z-index: 10;
+    transition: background-color 0.15s ease;
+}
+
+.resize-handle:hover,
+.resize-handle.dragging {
+    background: rgba(139, 92, 246, 0.3);
+}
+
+.resize-handle-line {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 2px;
+    height: 40px;
+    background: var(--border-color);
+    border-radius: 1px;
+    transition: height 0.15s ease, background-color 0.15s ease;
+}
+
+.resize-handle:hover .resize-handle-line,
+.resize-handle.dragging .resize-handle-line {
+    height: 60px;
+    background: rgba(139, 92, 246, 0.8);
+}
+
+/* Collapse/Expand button in header */
+.collapse-sidebar-btn {
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    color: var(--text-color);
+    opacity: 0.7;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    padding: 0;
+    flex-shrink: 0;
+}
+
+.collapse-sidebar-btn:hover {
+    opacity: 1;
+    background: rgba(139, 92, 246, 0.12);
+    border-color: rgba(139, 92, 246, 0.25);
+}
+
+.collapse-sidebar-btn i {
+    font-size: 14px;
+    transition: transform 0.2s ease;
+}
+
+/* Collapsed state - rotate chevron */
+.chat-section.collapsed .collapse-sidebar-btn i {
+    transform: rotate(180deg);
+}
+
+/* ============================================
+   COLLAPSED SIDEBAR MODE
+   ============================================ */
+
+.chat-section.collapsed {
+    width: 64px !important;
+    min-width: 64px !important;
+}
+
+/* Hide elements in collapsed mode */
+.chat-section.collapsed .chat-header h1,
+.chat-section.collapsed .chat-header .settings-btn,
+.chat-section.collapsed .chat-header .mobile-view-toggle,
+.chat-section.collapsed .chat-header .hamburger-menu,
+.chat-section.collapsed .menu-drawer,
+.chat-section.collapsed .timeout-warning-banner,
+.chat-section.collapsed .message-history,
+.chat-section.collapsed .input-area textarea,
+.chat-section.collapsed .input-area .token-indicator,
+.chat-section.collapsed .input-area .thinking-area,
+.chat-section.collapsed .input-area .attachments-preview,
+.chat-section.collapsed .input-area .scroll-to-bottom,
+.chat-section.collapsed .input-area .button-row,
+.chat-section.collapsed .tools-toolbar,
+.chat-section.collapsed .model-selector-container,
+.chat-section.collapsed .custom-dropdown-container {
+    display: none !important;
+}
+
+/* Collapsed header layout - keep logo and collapse button */
+.chat-section.collapsed .chat-header {
+    flex-direction: column;
+    height: auto;
+    padding: 0.5rem;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.chat-section.collapsed .logo-container {
+    width: 36px;
+    height: 36px;
+    margin: 0;
+}
+
+.chat-section.collapsed .chat-header img {
+    width: 36px;
+    height: 36px;
+}
+
+/* Rotate the collapse button icon when collapsed */
+.chat-section.collapsed .collapse-sidebar-btn i {
+    transform: rotate(180deg);
+}
+
+/* Collapsed input area - only show the collapsed toolbar */
+.chat-section.collapsed .input-area {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 0.5rem;
+    gap: 0.5rem;
+}
+
+/* Collapsed toolbar - always visible and vertical */
+.chat-section.collapsed .collapsed-toolbar {
+    display: flex !important;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+}
+
+/* Expanded state - hide collapsed toolbar */
+.chat-section:not(.collapsed) .collapsed-toolbar {
+    display: none !important;
+}
+
+/* Collapsed toolbar button styles */
+.collapsed-toolbar .toolbar-tool {
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    color: rgba(255, 255, 255, 0.7);
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.collapsed-toolbar .toolbar-tool:hover {
+    background: rgba(139, 92, 246, 0.15);
+    border-color: rgba(139, 92, 246, 0.3);
+    color: rgba(255, 255, 255, 0.95);
+}
+
+.collapsed-toolbar .toolbar-tool.active,
+.collapsed-toolbar .toolbar-tool.recording {
+    background: rgba(139, 92, 246, 0.2);
+    border-color: rgba(139, 92, 246, 0.4);
+    color: #a78bfa;
+}
+
+.collapsed-toolbar .toolbar-tool.recording {
+    color: #ff4444;
+    background: rgba(255, 68, 68, 0.15);
+    border-color: rgba(255, 68, 68, 0.4);
+    animation: pulse-glow 1s ease-in-out infinite;
+}
+
+/* Recording timer in collapsed toolbar */
+.collapsed-toolbar .recording-timer {
+    color: #ff4444;
+    font-size: 0.7rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    animation: pulse-glow 1s ease-in-out infinite;
+    padding: 2px 6px;
+    background: rgba(255, 68, 68, 0.1);
+    border-radius: 4px;
+}
+
+.collapsed-toolbar .recording-timer.hidden {
+    display: none;
+}
+
+.collapsed-toolbar .toolbar-divider {
+    width: 32px;
+    height: 1px;
+    background: rgba(255, 255, 255, 0.15);
+    margin: 0.25rem 0;
+}
+
+/* Mode icon in collapsed state - hidden but styles preserved */
+.collapsed-toolbar .mode-icon-btn {
+    display: none;
+    width: 40px;
+    height: 40px;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    color: rgba(255, 255, 255, 0.7);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    position: relative;
+}
+
+.collapsed-toolbar .mode-icon-btn:hover {
+    background: rgba(139, 92, 246, 0.15);
+    border-color: rgba(139, 92, 246, 0.3);
+    color: rgba(255, 255, 255, 0.95);
+}
+
+/* Send button in collapsed mode - hidden but styles preserved */
+.collapsed-toolbar .send-icon-button {
+    display: none;
+    width: 40px;
+    height: 40px;
+    border-radius: 8px;
 }
 
 /* Header with logo */
@@ -286,6 +523,52 @@ body {
     display: none;
 }
 
+/* Floating recording indicator (visible outside toolbar when recording) */
+.floating-record-indicator {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px 4px 4px;
+    background: rgba(255, 68, 68, 0.15);
+    border: 1px solid rgba(255, 68, 68, 0.4);
+    border-radius: 8px;
+    animation: pulse-glow 1s ease-in-out infinite;
+}
+
+.floating-record-indicator.hidden {
+    display: none;
+}
+
+.floating-record-indicator .stop-recording-btn {
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #ff4444;
+    border: none;
+    border-radius: 6px;
+    color: white;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.floating-record-indicator .stop-recording-btn:hover {
+    background: #ff2222;
+    transform: scale(1.05);
+}
+
+.floating-record-indicator .stop-recording-btn i {
+    font-size: 12px;
+}
+
+.floating-record-indicator .floating-record-timer {
+    color: #ff4444;
+    font-size: 0.85rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
 /* Recording preview modal */
 .recording-preview-modal {
     position: fixed;
@@ -382,6 +665,218 @@ body {
     background: rgba(255, 68, 68, 0.1);
     border-color: #ff4444;
     color: #ff4444;
+}
+
+/* ============================================
+   SCREENSHOT ANNOTATION MODAL
+   Full-screen modal with Fabric.js canvas
+   ============================================ */
+
+.screenshot-annotation-modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.92);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+    animation: modal-fade-in 0.2s ease-out;
+}
+
+.annotation-content {
+    background: var(--chat-bg);
+    padding: 20px;
+    border-radius: 16px;
+    max-width: 95vw;
+    max-height: 95vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    border: 1px solid var(--border-color);
+    animation: modal-slide-up 0.3s ease-out;
+}
+
+.annotation-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.annotation-header h3 {
+    margin: 0;
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--text-color);
+}
+
+.annotation-tools {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 10px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.annotation-tools .tool-btn {
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    border-radius: 8px;
+    color: rgba(255, 255, 255, 0.6);
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.annotation-tools .tool-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.95);
+}
+
+.annotation-tools .tool-btn.active {
+    background: rgba(139, 92, 246, 0.25);
+    color: #a78bfa;
+}
+
+.annotation-tools .tool-btn i {
+    font-size: 14px;
+}
+
+.annotation-tools .tool-divider {
+    width: 1px;
+    height: 24px;
+    background: rgba(255, 255, 255, 0.15);
+    margin: 0 8px;
+}
+
+.annotation-tools .color-picker {
+    width: 32px;
+    height: 32px;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    background: transparent;
+    padding: 0;
+}
+
+.annotation-tools .color-picker::-webkit-color-swatch-wrapper {
+    padding: 2px;
+}
+
+.annotation-tools .color-picker::-webkit-color-swatch {
+    border: 2px solid rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+}
+
+.annotation-canvas-container {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #1a1a1a;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid var(--border-color);
+    margin-bottom: 16px;
+}
+
+.annotation-canvas-container canvas {
+    display: block;
+}
+
+.annotation-actions {
+    display: flex;
+    gap: 12px;
+    justify-content: flex-end;
+}
+
+.annotation-actions button {
+    padding: 10px 20px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: all 0.15s ease;
+}
+
+.annotation-actions .attach-btn {
+    background: transparent;
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+    padding: 6px 12px;
+    font-size: 0.8rem;
+}
+
+.annotation-actions .attach-btn:hover {
+    background: rgba(139, 92, 246, 0.1);
+    border-color: #8b5cf6;
+    color: #a78bfa;
+}
+
+.annotation-actions .download-btn {
+    background: linear-gradient(135deg, #8b5cf6 0%, #a78bfa 100%);
+    color: white;
+    border: none;
+}
+
+.annotation-actions .download-btn:hover {
+    background: linear-gradient(135deg, #7c3aed 0%, #8b5cf6 100%);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(139, 92, 246, 0.3);
+}
+
+.annotation-actions .discard-btn {
+    background: transparent;
+    border: 1px solid var(--border-color);
+    color: var(--text-color);
+}
+
+.annotation-actions .discard-btn:hover {
+    background: rgba(255, 68, 68, 0.1);
+    border-color: #ff4444;
+    color: #ff4444;
+}
+
+/* Responsive adjustments for annotation modal */
+@media (max-width: 768px) {
+    .annotation-content {
+        padding: 12px;
+        max-width: 100vw;
+        max-height: 100vh;
+        border-radius: 0;
+    }
+
+    .annotation-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .annotation-tools {
+        width: 100%;
+        justify-content: center;
+        flex-wrap: wrap;
+    }
+
+    .annotation-actions {
+        flex-wrap: wrap;
+        justify-content: center;
+    }
+
+    .annotation-actions button {
+        flex: 1;
+        min-width: 100px;
+        justify-content: center;
+    }
 }
 
 /* Toolbar divider */
@@ -2226,6 +2721,19 @@ body {
         z-index: 1;
     }
 
+    /* Hide resize handle and collapse button on mobile */
+    .resize-handle,
+    .collapse-sidebar-btn,
+    .collapsed-toolbar {
+        display: none !important;
+    }
+
+    /* Reset chat-section to not be collapsed on mobile */
+    .chat-section.collapsed {
+        width: 100vw !important;
+        min-width: 100vw !important;
+    }
+
     /* Mobile view states */
     body.mobile-chat-view .chat-section {
         transform: translateX(0);
@@ -3386,5 +3894,331 @@ body {
         max-width: 150px;
         padding: 0.35rem 0.5rem;
         font-size: 0.75rem;
+    }
+}
+
+/* ============== Message Attachment Badges (in conversation history) ============== */
+.message-attachments {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-top: 0.5rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.message-attachment-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.25rem 0.5rem;
+    background: rgba(59, 130, 246, 0.1);
+    border: 1px solid rgba(59, 130, 246, 0.2);
+    border-radius: 4px;
+    font-size: 0.75rem;
+    color: #60a5fa;
+}
+
+.message-attachment-badge i {
+    font-size: 0.8rem;
+}
+
+.message-attachment-badge i.fa-file-pdf {
+    color: #ef4444;
+}
+
+.message-attachment-badge i.fa-file-video {
+    color: #8b5cf6;
+}
+
+.message-attachment-badge i.fa-file-audio {
+    color: #10b981;
+}
+
+.message-attachment-badge i.fa-file-image {
+    color: #f59e0b;
+}
+
+.message-attachment-badge .attachment-filename {
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* ============== Slash Command Dropdown ============== */
+.slash-command-dropdown {
+    position: absolute;
+    bottom: 100%;
+    left: 0;
+    right: 0;
+    max-height: 280px;
+    overflow-y: auto;
+    background: rgba(30, 24, 45, 0.98);
+    border: 1px solid rgba(139, 92, 246, 0.3);
+    border-radius: 12px;
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.4);
+    margin-bottom: 8px;
+    z-index: 100;
+    backdrop-filter: blur(10px);
+}
+
+.slash-command-dropdown.hidden {
+    display: none;
+}
+
+.slash-command-item {
+    padding: 12px 16px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    border-bottom: 1px solid rgba(139, 92, 246, 0.1);
+    transition: background 0.15s ease;
+}
+
+.slash-command-item:last-child {
+    border-bottom: none;
+}
+
+.slash-command-item:hover,
+.slash-command-item.selected {
+    background: rgba(139, 92, 246, 0.15);
+}
+
+.slash-command-item .command-name {
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+    color: #a78bfa;
+    font-weight: 600;
+    min-width: 160px;
+    font-size: 0.95rem;
+}
+
+.slash-command-item .command-description {
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 0.85rem;
+    flex: 1;
+}
+
+.slash-command-item .command-warning {
+    color: #fbbf24;
+    font-size: 0.9rem;
+}
+
+/* ============== Slash Command Confirmation Modal ============== */
+.slash-command-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.75);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    animation: fadeIn 0.2s ease;
+}
+
+.slash-command-modal.hidden {
+    display: none;
+}
+
+.slash-command-modal-content {
+    background: linear-gradient(145deg, rgba(30, 24, 45, 0.98) 0%, rgba(20, 16, 35, 0.98) 100%);
+    border: 1px solid rgba(139, 92, 246, 0.3);
+    border-radius: 16px;
+    padding: 24px;
+    max-width: 420px;
+    width: 90%;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    animation: slideUp 0.25s ease;
+}
+
+@keyframes slideUp {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+.slash-command-modal .modal-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 20px;
+    color: #fff;
+    font-size: 1.15rem;
+    font-weight: 600;
+}
+
+.slash-command-modal .modal-header i {
+    color: #a78bfa;
+    font-size: 1.2rem;
+}
+
+.slash-command-modal .modal-body .modal-command {
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+    color: #a78bfa;
+    font-size: 1.3rem;
+    margin-bottom: 12px;
+    font-weight: 600;
+}
+
+.slash-command-modal .modal-body .modal-message {
+    color: rgba(255, 255, 255, 0.8);
+    line-height: 1.6;
+    font-size: 0.95rem;
+}
+
+.slash-command-modal .modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    margin-top: 24px;
+}
+
+.slash-command-modal .modal-actions button {
+    padding: 10px 20px;
+    border-radius: 8px;
+    border: none;
+    cursor: pointer;
+    font-size: 0.95rem;
+    font-weight: 500;
+    transition: all 0.2s ease;
+}
+
+.slash-command-modal .modal-cancel {
+    background: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.8);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.slash-command-modal .modal-cancel:hover {
+    background: rgba(255, 255, 255, 0.15);
+    color: #fff;
+}
+
+.slash-command-modal .modal-confirm {
+    background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+    color: #fff;
+}
+
+.slash-command-modal .modal-confirm:hover {
+    background: linear-gradient(135deg, #9d6ff8 0%, #8b5cf6 100%);
+    transform: translateY(-1px);
+}
+
+.slash-command-modal .modal-confirm.dangerous {
+    background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+}
+
+.slash-command-modal .modal-confirm.dangerous:hover {
+    background: linear-gradient(135deg, #f87171 0%, #ef4444 100%);
+}
+
+/* ============== Slash Command Toast Notifications ============== */
+.slash-command-toast {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    max-width: 400px;
+    background: rgba(30, 24, 45, 0.98);
+    border: 1px solid rgba(139, 92, 246, 0.3);
+    border-radius: 12px;
+    padding: 16px 20px;
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    z-index: 1001;
+    opacity: 0;
+    transform: translateY(20px);
+    transition: all 0.3s ease;
+}
+
+.slash-command-toast.visible {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.slash-command-toast.hiding {
+    opacity: 0;
+    transform: translateY(20px);
+}
+
+.slash-command-toast .toast-icon {
+    font-size: 1.2rem;
+    flex-shrink: 0;
+}
+
+.slash-command-toast.success .toast-icon {
+    color: #22c55e;
+}
+
+.slash-command-toast.error .toast-icon {
+    color: #ef4444;
+}
+
+.slash-command-toast.info .toast-icon {
+    color: #3b82f6;
+}
+
+.slash-command-toast .toast-message {
+    flex: 1;
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 0.9rem;
+    line-height: 1.5;
+    word-break: break-word;
+}
+
+.slash-command-toast .toast-close {
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.5);
+    cursor: pointer;
+    padding: 0;
+    font-size: 0.9rem;
+    transition: color 0.2s ease;
+}
+
+.slash-command-toast .toast-close:hover {
+    color: rgba(255, 255, 255, 0.9);
+}
+
+/* Mobile responsive for slash commands */
+@media screen and (max-width: 768px) {
+    .slash-command-dropdown {
+        max-height: 200px;
+    }
+
+    .slash-command-item .command-name {
+        min-width: 120px;
+        font-size: 0.85rem;
+    }
+
+    .slash-command-item .command-description {
+        font-size: 0.8rem;
+    }
+
+    .slash-command-modal-content {
+        padding: 20px;
+        margin: 16px;
+    }
+
+    .slash-command-toast {
+        left: 16px;
+        right: 16px;
+        bottom: 16px;
+        max-width: none;
     }
 }

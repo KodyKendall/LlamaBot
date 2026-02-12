@@ -106,6 +106,13 @@ export function getTicketsUrl() {
 }
 
 /**
+ * Get Feedback URL based on current protocol
+ */
+export function getFeedbackUrl() {
+  return getRailsUrl() + '/llama_bot/feedback';
+}
+
+/**
  * Get WebSocket URL based on current protocol
  */
 export function getWebSocketUrl() {

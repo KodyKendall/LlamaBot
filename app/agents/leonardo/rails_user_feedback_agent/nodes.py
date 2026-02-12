@@ -1,5 +1,6 @@
 from langchain_openai import ChatOpenAI
 from langchain_anthropic import ChatAnthropic
+from langchain_google_genai import ChatGoogleGenerativeAI
 
 from langchain_core.tools import tool
 from dotenv import load_dotenv
@@ -61,10 +62,36 @@ default_tools = [
 
 # Helper function to get LLM based on user selection
 def get_llm(model_name: str):
-   """Get LLM instance based on model name from frontend. 
-   """
-   # Default to Claude 4.5 Haiku
-   return ChatAnthropic(model="claude-haiku-4-5", max_tokens=16384)
+   """Get LLM instance based on model name from frontend."""
+   if model_name == "gpt-5-codex":
+      return ChatOpenAI(
+         model="gpt-5-codex",
+         use_responses_api=True,
+         reasoning={"effort": "low"}
+      )
+   elif model_name == "gpt-5-mini":
+      return ChatOpenAI(
+         model="gpt-5-mini",
+         use_responses_api=True,
+         reasoning={"effort": "low"}
+      )
+   elif model_name == "claude-4.5-sonnet":
+      return ChatAnthropic(model="claude-sonnet-4-5-20250929", max_tokens=16384)
+   elif model_name == "claude-4.5-haiku":
+      return ChatAnthropic(model="claude-haiku-4-5", max_tokens=16384)
+   elif model_name == "gemini-3-flash":
+      return ChatGoogleGenerativeAI(
+         model="gemini-3-flash-preview",
+         include_thoughts=True
+      )
+   elif model_name == "gemini-3-pro":
+      return ChatGoogleGenerativeAI(
+         model="gemini-3-pro-preview",
+         include_thoughts=True
+      )
+   else:
+      # Default to Claude 4.5 Haiku
+      return ChatAnthropic(model="claude-haiku-4-5", max_tokens=16384)
 
 # Node
 def leonardo_user_feedback(state: RailsAgentState) -> Command[Literal["tools"]]:
@@ -100,7 +127,13 @@ def leonardo_user_feedback(state: RailsAgentState) -> Command[Literal["tools"]]:
       return {"messages": [response], "failed_tool_calls_count": -failed_tool_calls_count} # by adding a negative number, we subtract the current count and reset it to 0.
 
    messages = messages + [HumanMessage(content="<NOTE_FROM_SYSTEM> The user is in Feedback Mode. You can READ any file but can ONLY WRITE/EDIT .md files in rails/requirements/user_feedback/. NO CODE CHANGES ALLOWED. </NOTE_FROM_SYSTEM>")]
-   llm_with_tools = llm.bind_tools(tools, parallel_tool_calls=False)
+
+   # Bind tools - parallel_tool_calls is not supported by Gemini
+   if llm_model.startswith("gemini"):
+      llm_with_tools = llm.bind_tools(tools)
+   else:
+      llm_with_tools = llm.bind_tools(tools, parallel_tool_calls=False)
+
    # response = llm_with_tools.invoke(messages, cache_control={"type": "ephemeral"})
    response = llm_with_tools.invoke(messages)
 

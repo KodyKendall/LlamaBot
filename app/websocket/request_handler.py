@@ -28,6 +28,45 @@ load_dotenv()
 
 from typing import Any, Dict, TypedDict
 
+# Model capabilities for multimodal content
+# Each model has different support for images, video, PDFs, etc.
+MODEL_CAPABILITIES = {
+    # Gemini models support video, images, PDFs
+    'gemini-3-flash': {'images': True, 'video': True, 'pdf': True},
+    'gemini-3-pro': {'images': True, 'video': True, 'pdf': True},
+    'gemini-2.5-flash': {'images': True, 'video': True, 'pdf': True},
+    'gemini-2.5-pro': {'images': True, 'video': True, 'pdf': True},
+
+    # Claude models support images and PDFs only (no video)
+    'claude-4.5-haiku': {'images': True, 'video': False, 'pdf': True},
+    'claude-4.5-sonnet': {'images': True, 'video': False, 'pdf': True},
+    'claude-sonnet-4': {'images': True, 'video': False, 'pdf': True},
+    'claude-opus-4': {'images': True, 'video': False, 'pdf': True},
+
+    # OpenAI/GPT models support images only
+    'gpt-4o': {'images': True, 'video': False, 'pdf': False},
+    'gpt-4o-mini': {'images': True, 'video': False, 'pdf': False},
+    'gpt-5-codex': {'images': True, 'video': False, 'pdf': False},
+
+    # DeepSeek - primarily text focused
+    'deepseek-chat': {'images': False, 'video': False, 'pdf': False},
+    'deepseek-reasoner': {'images': False, 'video': False, 'pdf': False},
+}
+
+def get_model_capabilities(model_name: str) -> dict:
+    """Get capabilities for a model, defaulting to Gemini if unknown (most permissive)."""
+    return MODEL_CAPABILITIES.get(model_name, {'images': True, 'video': True, 'pdf': True})
+
+def get_file_category(mime_type: str) -> str:
+    """Categorize a mime type into content category."""
+    if mime_type.startswith('image/'):
+        return 'images'
+    elif mime_type.startswith('video/'):
+        return 'video'
+    elif mime_type == 'application/pdf':
+        return 'pdf'
+    return 'unknown'
+
 class RequestHandler:
     def __init__(self, app: FastAPI):
         self.locks: Dict[int, Lock] = {}
@@ -463,42 +502,78 @@ class RequestHandler:
         """
         Build multimodal content array for HumanMessage.
 
-        If there are no attachments, returns the plain text string for backwards compatibility.
-        If there are attachments, returns a list of content blocks in LangChain format:
-        - {"type": "text", "text": "..."} for text
-        - {"type": "file", "source_type": "base64", "mime_type": "...", "data": "..."} for files
+        Now model-aware: checks if the selected LLM supports each file type.
+        - Gemini: Supports images, video, PDFs
+        - Claude: Supports images and PDFs only (no video)
+        - GPT: Supports images only
+        - DeepSeek: Text only
 
-        This format is compatible with Gemini (langchain-google-genai v4.0+),
-        Claude (langchain-anthropic), and other multimodal providers.
+        If there are no attachments, returns the plain text string for backwards compatibility.
+        If there are attachments, returns a list of content blocks in LangChain format.
+        For unsupported file types, adds a text note instead of the binary content.
         """
         text = message.get("message", "")
         attachments = message.get("attachments", [])
+        llm_model = message.get("llm_model", "gemini-3-flash")
 
         # If no attachments, return plain string for backwards compatibility
         if not attachments:
             return text
 
+        # Get model capabilities
+        capabilities = get_model_capabilities(llm_model)
+
         # Build multimodal content array
         content = []
+        unsupported_files = []
 
         # Add text content first
         if text:
             content.append({"type": "text", "text": text})
 
-        # Add file attachments
+        # Add file attachments based on model capabilities
         for attachment in attachments:
             mime_type = attachment.get("mime_type")
             data = attachment.get("data")
             filename = attachment.get("filename", "unknown")
 
-            if mime_type and data:
-                content.append({
-                    "type": "file",
-                    "source_type": "base64",
-                    "mime_type": mime_type,
-                    "data": data
-                })
+            if not mime_type or not data:
+                continue
+
+            file_category = get_file_category(mime_type)
+
+            # Check if model supports this file type
+            if capabilities.get(file_category, False):
+                # Model supports this type - add the content block
+                if mime_type.startswith('image/'):
+                    # Use image_url format for images (widely supported)
+                    content.append({
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:{mime_type};base64,{data}"
+                        }
+                    })
+                else:
+                    # Use file format for PDFs, videos
+                    content.append({
+                        "type": "file",
+                        "source_type": "base64",
+                        "mime_type": mime_type,
+                        "data": data
+                    })
                 logger.info(f"Added file attachment: {filename} ({mime_type})")
+            else:
+                # Model doesn't support this type - track for user notification
+                unsupported_files.append(f"{filename} ({mime_type})")
+                logger.warning(f"Model {llm_model} doesn't support {mime_type}, skipping: {filename}")
+
+        # If there were unsupported files, add a note to the text content
+        if unsupported_files:
+            note = f"\n\n[Note: The following attachments were not sent because {llm_model} doesn't support them: {', '.join(unsupported_files)}. Consider using Gemini for video support.]"
+            if content and content[0].get("type") == "text":
+                content[0]["text"] += note
+            else:
+                content.insert(0, {"type": "text", "text": note.strip()})
 
         return content
 

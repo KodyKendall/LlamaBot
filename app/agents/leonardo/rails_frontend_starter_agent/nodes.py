@@ -1,5 +1,6 @@
 from langchain_openai import ChatOpenAI
 from langchain_anthropic import ChatAnthropic
+from langchain_google_genai import ChatGoogleGenerativeAI
 
 from langchain_core.tools import tool
 from dotenv import load_dotenv
@@ -60,10 +61,26 @@ def get_llm(model_name: str):
          use_responses_api=True,
          reasoning={"effort": "low"}
       )
+   elif model_name == "gpt-5-mini":
+      return ChatOpenAI(
+         model="gpt-5-mini",
+         use_responses_api=True,
+         reasoning={"effort": "low"}
+      )
    elif model_name == "claude-4.5-sonnet":
       return ChatAnthropic(model="claude-sonnet-4-5-20250929", max_tokens=16384)
    elif model_name == "claude-4.5-haiku":
       return ChatAnthropic(model="claude-haiku-4-5", max_tokens=16384)
+   elif model_name == "gemini-3-flash":
+      return ChatGoogleGenerativeAI(
+         model="gemini-3-flash-preview",
+         include_thoughts=True
+      )
+   elif model_name == "gemini-3-pro":
+      return ChatGoogleGenerativeAI(
+         model="gemini-3-pro-preview",
+         include_thoughts=True
+      )
    else:
       # Default to Claude 4.5 Haiku
       return ChatAnthropic(model="claude-haiku-4-5", max_tokens=16384)
@@ -95,7 +112,12 @@ def leonardo_design(state: RailsAgentState) -> Command[Literal["tools"]]:
       # Reset counter by subtracting current count (since reducer uses operator.add)
       return {"messages": [response], "failed_tool_calls_count": -failed_tool_calls_count} # by adding a negative number, we subtract the current count and reset it to 0.
 
-   llm_with_tools = llm.bind_tools(tools, parallel_tool_calls=False)
+   # Bind tools - parallel_tool_calls is not supported by Gemini
+   if llm_model.startswith("gemini"):
+      llm_with_tools = llm.bind_tools(tools)
+   else:
+      llm_with_tools = llm.bind_tools(tools, parallel_tool_calls=False)
+
    response = llm_with_tools.invoke(messages, cache_control={"type": "ephemeral"})
    return {"messages": [response]}
 
