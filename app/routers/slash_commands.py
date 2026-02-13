@@ -1,6 +1,5 @@
 """Slash Commands API for executing host scripts."""
 
-import json
 import logging
 import subprocess
 import os
@@ -10,8 +9,10 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from sqlmodel import Session, select
 
-from app.dependencies import auth
+from app.dependencies import auth, get_db_session
+from app.models import CommandHistory
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -71,7 +72,7 @@ SLASH_COMMANDS = {
     },
     "chown": {
         "script": None,  # Direct command
-        "command": "sudo chown -R $(id -u):$(id -g) .",
+        "command": "chown -R $(id -u):$(id -g) .",
         "description": "Fix file ownership permissions",
         "dangerous": True,
         "confirm_message": "This will change ownership of all files to current user. Continue?"
@@ -95,6 +96,14 @@ SLASH_COMMANDS = {
         "dangerous": True,
         "confirm_message": "This will execute a custom bash command. Continue?",
         "accepts_args": True
+    },
+    "history": {
+        "script": None,
+        "command": None,
+        "description": "View command execution history",
+        "dangerous": False,
+        "confirm_message": "View command history?",
+        "client_only": True  # Handled entirely on frontend
     }
 }
 
@@ -239,7 +248,8 @@ async def get_slash_commands(username: str = Depends(auth)) -> List[dict]:
 @router.post("/api/slash-commands/execute", response_class=JSONResponse)
 async def execute_slash_command(
     request: ExecuteRequest,
-    username: str = Depends(auth)
+    username: str = Depends(auth),
+    session: Session = Depends(get_db_session)
 ):
     """Execute a slash command."""
     cmd_name = request.command
@@ -249,6 +259,15 @@ async def execute_slash_command(
         raise HTTPException(status_code=404, detail=f"Unknown command: {cmd_name}")
 
     cmd_config = SLASH_COMMANDS[cmd_name]
+
+    # Client-only commands (like /history) shouldn't be executed server-side
+    if cmd_config.get("client_only"):
+        return {
+            "success": True,
+            "output": "This command is handled by the client",
+            "client_only": True,
+            "command": cmd_name
+        }
 
     # Validate /bash command has args
     if cmd_config.get("accepts_args") and not args:
@@ -270,6 +289,19 @@ async def execute_slash_command(
         success=result["success"]
     )
 
+    # Save to database
+    history_entry = CommandHistory(
+        command=cmd_name,
+        args=args,
+        username=username,
+        success=result["success"],
+        stdout=result.get("stdout", ""),
+        stderr=result.get("stderr", ""),
+        return_code=result.get("return_code", -1)
+    )
+    session.add(history_entry)
+    session.commit()
+
     if result["success"]:
         logger.info(f"Slash command /{cmd_name} completed successfully")
     else:
@@ -289,3 +321,32 @@ async def execute_slash_command(
         "command": cmd_name,
         "args": args
     }
+
+
+@router.get("/api/slash-commands/history", response_class=JSONResponse)
+async def get_command_history(
+    username: str = Depends(auth),
+    session: Session = Depends(get_db_session)
+):
+    """Get the last 50 command executions."""
+    stmt = (
+        select(CommandHistory)
+        .order_by(CommandHistory.executed_at.desc())
+        .limit(50)
+    )
+    history = session.exec(stmt).all()
+
+    return [
+        {
+            "id": entry.id,
+            "command": entry.command,
+            "args": entry.args,
+            "username": entry.username,
+            "success": entry.success,
+            "stdout": entry.stdout,
+            "stderr": entry.stderr,
+            "return_code": entry.return_code,
+            "executed_at": entry.executed_at.isoformat()
+        }
+        for entry in history
+    ]

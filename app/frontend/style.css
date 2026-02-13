@@ -4195,6 +4195,423 @@ body {
     color: rgba(255, 255, 255, 0.9);
 }
 
+/* ============== Command History Modal ============== */
+.command-history-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.75);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    backdrop-filter: blur(4px);
+}
+
+.command-history-modal.hidden {
+    display: none;
+}
+
+.command-history-modal-content {
+    background: linear-gradient(145deg, rgba(30, 24, 45, 0.98) 0%, rgba(20, 16, 35, 0.98) 100%);
+    border: 1px solid rgba(139, 92, 246, 0.3);
+    border-radius: 16px;
+    width: 90%;
+    max-width: 650px;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+    animation: slideUp 0.25s ease;
+}
+
+.command-history-modal .modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 24px;
+    border-bottom: 1px solid rgba(139, 92, 246, 0.2);
+}
+
+.command-history-modal .modal-header-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.command-history-modal .modal-header-left i {
+    color: #a78bfa;
+    font-size: 1.2rem;
+}
+
+.command-history-modal .modal-title {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.95);
+}
+
+.command-history-modal .modal-close {
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.5);
+    cursor: pointer;
+    padding: 8px;
+    font-size: 1rem;
+    transition: color 0.2s ease;
+    border-radius: 8px;
+}
+
+.command-history-modal .modal-close:hover {
+    color: rgba(255, 255, 255, 0.9);
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.command-history-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+}
+
+.history-loading,
+.history-empty,
+.history-error {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 40px 20px;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 0.95rem;
+}
+
+.history-error {
+    color: #ef4444;
+}
+
+.command-history-item {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    margin-bottom: 10px;
+    overflow: hidden;
+    transition: border-color 0.2s ease;
+}
+
+.command-history-item:hover {
+    border-color: rgba(139, 92, 246, 0.3);
+}
+
+.command-history-item.success .history-status-icon {
+    color: #22c55e;
+}
+
+.command-history-item.error .history-status-icon {
+    color: #ef4444;
+}
+
+.history-item-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 16px;
+    cursor: pointer;
+    transition: background 0.2s ease;
+}
+
+.history-item-header:hover {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.history-item-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: 1;
+    min-width: 0;
+}
+
+.history-status-icon {
+    font-size: 1rem;
+    flex-shrink: 0;
+}
+
+.history-command {
+    color: #a78bfa;
+    font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+    font-size: 0.9rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.history-item-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-shrink: 0;
+}
+
+.history-time {
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 0.8rem;
+}
+
+.history-expand-icon {
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 0.75rem;
+    transition: transform 0.2s ease;
+}
+
+.history-item-output {
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    padding: 16px;
+    background: rgba(0, 0, 0, 0.2);
+}
+
+.history-item-output.hidden {
+    display: none;
+}
+
+.history-output-section {
+    margin-bottom: 12px;
+}
+
+.history-output-section:last-of-type {
+    margin-bottom: 0;
+}
+
+.history-output-section.stderr .history-output-label {
+    color: #ef4444;
+}
+
+.history-output-label {
+    font-size: 0.75rem;
+    color: rgba(255, 255, 255, 0.5);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 6px;
+}
+
+.history-output-content {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    padding: 12px;
+    margin: 0;
+    font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+    font-size: 0.8rem;
+    color: rgba(255, 255, 255, 0.85);
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 200px;
+    overflow-y: auto;
+    line-height: 1.5;
+}
+
+.history-meta {
+    display: flex;
+    gap: 16px;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    font-size: 0.75rem;
+    color: rgba(255, 255, 255, 0.4);
+}
+
+/* Mobile responsive for command history */
+@media screen and (max-width: 768px) {
+    .command-history-modal-content {
+        width: 95%;
+        max-height: 85vh;
+        margin: 16px;
+    }
+
+    .history-item-header {
+        padding: 12px 14px;
+    }
+
+    .history-command {
+        font-size: 0.85rem;
+    }
+
+    .history-output-content {
+        font-size: 0.75rem;
+        padding: 10px;
+    }
+}
+
+/* ============== Command Output Modal ============== */
+.command-output-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.75);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1002;
+    backdrop-filter: blur(4px);
+}
+
+.command-output-modal.hidden {
+    display: none;
+}
+
+.command-output-modal-content {
+    background: linear-gradient(145deg, rgba(30, 24, 45, 0.98) 0%, rgba(20, 16, 35, 0.98) 100%);
+    border: 1px solid rgba(139, 92, 246, 0.3);
+    border-radius: 16px;
+    width: 90%;
+    max-width: 700px;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+    animation: slideUp 0.25s ease;
+}
+
+.command-output-modal .modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 24px;
+    border-bottom: 1px solid rgba(139, 92, 246, 0.2);
+}
+
+.command-output-modal .modal-header-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: 1;
+    min-width: 0;
+}
+
+.command-output-modal .output-status-icon {
+    font-size: 1.2rem;
+    flex-shrink: 0;
+}
+
+.command-output-modal .modal-title {
+    font-size: 1rem;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.95);
+    font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.command-output-modal .modal-close {
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.5);
+    cursor: pointer;
+    padding: 8px;
+    font-size: 1rem;
+    transition: color 0.2s ease;
+    border-radius: 8px;
+    flex-shrink: 0;
+}
+
+.command-output-modal .modal-close:hover {
+    color: rgba(255, 255, 255, 0.9);
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.command-output-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px 24px;
+}
+
+.command-output-modal .output-section {
+    margin-bottom: 16px;
+}
+
+.command-output-modal .output-section:last-of-type {
+    margin-bottom: 0;
+}
+
+.command-output-modal .output-label {
+    font-size: 0.75rem;
+    color: rgba(255, 255, 255, 0.5);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 8px;
+}
+
+.command-output-modal .output-label.stderr {
+    color: #ef4444;
+}
+
+.command-output-modal .output-content {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    padding: 16px;
+    margin: 0;
+    font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+    font-size: 0.85rem;
+    color: rgba(255, 255, 255, 0.85);
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 300px;
+    overflow-y: auto;
+    line-height: 1.6;
+}
+
+.command-output-modal .output-meta {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    font-size: 0.8rem;
+    color: rgba(255, 255, 255, 0.4);
+}
+
+.command-output-modal .stderr-section.hidden {
+    display: none;
+}
+
+/* Clickable toast styles */
+.slash-command-toast.clickable .toast-content {
+    cursor: pointer;
+    transition: opacity 0.2s ease;
+}
+
+.slash-command-toast.clickable .toast-content:hover {
+    opacity: 0.8;
+}
+
+.slash-command-toast .toast-content {
+    flex: 1;
+    min-width: 0;
+}
+
+.slash-command-toast .toast-hint {
+    font-size: 0.75rem;
+    color: rgba(255, 255, 255, 0.4);
+    margin-top: 6px;
+}
+
+/* Mobile responsive for output modal */
+@media screen and (max-width: 768px) {
+    .command-output-modal-content {
+        width: 95%;
+        max-height: 85vh;
+        margin: 16px;
+    }
+
+    .command-output-modal .output-content {
+        font-size: 0.75rem;
+        padding: 12px;
+        max-height: 200px;
+    }
+}
+
 /* Mobile responsive for slash commands */
 @media screen and (max-width: 768px) {
     .slash-command-dropdown {

@@ -121,14 +121,14 @@ export class FileAttachmentManager {
 
   /**
    * Get all current attachments
-   * @returns {Array} - Array of attachment objects with filename, mime_type, and data
+   * @returns {Array} - Array of attachment objects with filename, mime_type, data, and size
    */
   getAttachments() {
-    // Return only the fields needed for transmission (exclude size)
-    return this.attachments.map(({ filename, mime_type, data }) => ({
+    return this.attachments.map(({ filename, mime_type, data, size }) => ({
       filename,
       mime_type,
       data,
+      size,
     }));
   }
 

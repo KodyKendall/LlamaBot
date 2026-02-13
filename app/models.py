@@ -52,3 +52,17 @@ class Prompt(ActiveRecordMixin, SQLModel, table=True):
     updated_at: Optional[datetime] = Field(default=None)
     is_active: bool = Field(default=True)
     usage_count: int = Field(default=0)
+
+
+class CommandHistory(ActiveRecordMixin, SQLModel, table=True):
+    """Stores slash command execution history."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    command: str = Field(max_length=50, index=True)
+    args: Optional[str] = Field(default=None, max_length=1000)
+    username: str = Field(max_length=50, index=True)
+    success: bool
+    stdout: str = Field(default="")
+    stderr: str = Field(default="")
+    return_code: int
+    executed_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), index=True)

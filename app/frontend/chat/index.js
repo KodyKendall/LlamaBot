@@ -531,14 +531,26 @@ class ChatApp {
 
     // Show thinking indicator in the dedicated thinking area
     if (this.elements.thinkingArea) {
-      const verb = this.loadingVerbs.getRandomVerb();
-      this.elements.thinkingArea.innerHTML = `<div class="typing-indicator">🦙 ${verb}...</div>`;
+      // Check if we have large attachments (>10MB) that will take time to upload
+      const hasLargeAttachment = attachments.some(a => a.size > 10 * 1024 * 1024);
+
+      if (hasLargeAttachment) {
+        // Show upload indicator for large files
+        const totalSize = attachments.reduce((sum, a) => sum + (a.size || 0), 0);
+        const sizeStr = (totalSize / 1024 / 1024).toFixed(1);
+        this.elements.thinkingArea.innerHTML = `<div class="typing-indicator">📤 Uploading ${sizeStr}MB...</div>`;
+      } else {
+        const verb = this.loadingVerbs.getRandomVerb();
+        this.elements.thinkingArea.innerHTML = `<div class="typing-indicator">🦙 ${verb}...</div>`;
+      }
       this.elements.thinkingArea.classList.remove('hidden');
 
-      // Start cycling the verb in the thinking area
-      const thinkingDiv = this.elements.thinkingArea.querySelector('.typing-indicator');
-      if (thinkingDiv) {
-        this.loadingVerbs.startCycling(thinkingDiv);
+      // Start cycling the verb in the thinking area (only for non-upload states)
+      if (!hasLargeAttachment) {
+        const thinkingDiv = this.elements.thinkingArea.querySelector('.typing-indicator');
+        if (thinkingDiv) {
+          this.loadingVerbs.startCycling(thinkingDiv);
+        }
       }
     }
 
