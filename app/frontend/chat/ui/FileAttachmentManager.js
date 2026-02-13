@@ -5,7 +5,7 @@
  * over WebSocket to LangChain agents.
  */
 
-const MAX_FILE_SIZE_MB = 25;
+const MAX_FILE_SIZE_MB = 100;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 
 const ALLOWED_TYPES = {
