@@ -9,10 +9,13 @@ export class ScreenshotAnnotator {
     this.isCapturing = false;
     this.fabricCanvas = null;
     this.modal = null;
-    this.currentTool = 'select'; // 'select', 'pen', 'rectangle', 'arrow', 'text'
+    this.currentTool = 'select'; // 'select', 'pen', 'rectangle', 'arrow', 'text', 'crop'
     this.currentColor = '#ff4444';
     this.brushWidth = 3;
     this.onAttachCallback = null;
+    this.cropRect = null;
+    this.isCropping = false;
+    this.imageHistory = []; // Stack of previous image states for undo
   }
 
   /**
@@ -48,9 +51,6 @@ export class ScreenshotAnnotator {
 
     // Create canvas to capture the frame
     const canvas = document.createElement('canvas');
-
-    // Handle device pixel ratio for crisp screenshots on retina displays
-    const dpr = window.devicePixelRatio || 1;
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
 
@@ -112,6 +112,9 @@ export class ScreenshotAnnotator {
             <button class="tool-btn" data-tool="text" title="Text">
               <i class="fa-solid fa-font"></i>
             </button>
+            <button class="tool-btn" data-tool="crop" title="Crop">
+              <i class="fa-solid fa-crop"></i>
+            </button>
             <div class="tool-divider"></div>
             <input type="color" class="color-picker" value="#ff4444" title="Color">
             <button class="tool-btn" data-action="undo" title="Undo">
@@ -120,6 +123,14 @@ export class ScreenshotAnnotator {
             <button class="tool-btn" data-action="clear" title="Clear All">
               <i class="fa-solid fa-trash"></i>
             </button>
+            <div class="crop-actions hidden">
+              <button class="tool-btn crop-apply" data-action="apply-crop" title="Apply Crop">
+                <i class="fa-solid fa-check"></i>
+              </button>
+              <button class="tool-btn crop-cancel" data-action="cancel-crop" title="Cancel Crop">
+                <i class="fa-solid fa-xmark"></i>
+              </button>
+            </div>
           </div>
         </div>
         <div class="annotation-canvas-container">
@@ -237,6 +248,16 @@ export class ScreenshotAnnotator {
       this.clearAnnotations();
     });
 
+    // Apply crop button
+    this.modal.querySelector('[data-action="apply-crop"]').addEventListener('click', () => {
+      this.applyCrop();
+    });
+
+    // Cancel crop button
+    this.modal.querySelector('[data-action="cancel-crop"]').addEventListener('click', () => {
+      this.cancelCrop();
+    });
+
     // Attach button
     this.modal.querySelector('.attach-btn').addEventListener('click', () => {
       this.attachScreenshot();
@@ -310,6 +331,10 @@ export class ScreenshotAnnotator {
 
       case 'text':
         this.setupTextTool();
+        break;
+
+      case 'crop':
+        this.setupCropTool();
         break;
     }
   }
@@ -486,14 +511,247 @@ export class ScreenshotAnnotator {
   }
 
   /**
-   * Undo last action
+   * Setup crop tool - draw a selection rectangle to crop the image
+   */
+  setupCropTool() {
+    let isDrawing = false;
+    let startX, startY;
+
+    this.fabricCanvas.selection = false;
+    this.fabricCanvas.defaultCursor = 'crosshair';
+    this.isCropping = true;
+
+    // Show crop action buttons
+    const cropActions = this.modal.querySelector('.crop-actions');
+    if (cropActions) cropActions.classList.remove('hidden');
+
+    // Remove any existing crop rectangle
+    if (this.cropRect) {
+      this.fabricCanvas.remove(this.cropRect);
+      this.cropRect = null;
+    }
+
+    this.fabricCanvas.on('mouse:down', (opt) => {
+      if (opt.target && opt.target !== this.cropRect) return;
+
+      // Remove previous crop rect when starting new selection
+      if (this.cropRect) {
+        this.fabricCanvas.remove(this.cropRect);
+        this.cropRect = null;
+      }
+
+      isDrawing = true;
+      const pointer = this.fabricCanvas.getPointer(opt.e);
+      startX = pointer.x;
+      startY = pointer.y;
+
+      this.cropRect = new fabric.Rect({
+        left: startX,
+        top: startY,
+        width: 0,
+        height: 0,
+        fill: 'rgba(0, 200, 255, 0.15)',
+        stroke: '#00c8ff',
+        strokeWidth: 2,
+        strokeDashArray: [5, 5],
+        selectable: false,
+        evented: false,
+        shadow: new fabric.Shadow({
+          color: 'rgba(0, 0, 0, 0.5)',
+          blur: 4,
+          offsetX: 0,
+          offsetY: 0
+        })
+      });
+      this.fabricCanvas.add(this.cropRect);
+    });
+
+    this.fabricCanvas.on('mouse:move', (opt) => {
+      if (!isDrawing || !this.cropRect) return;
+
+      const pointer = this.fabricCanvas.getPointer(opt.e);
+
+      let left = Math.min(startX, pointer.x);
+      let top = Math.min(startY, pointer.y);
+      let width = Math.abs(pointer.x - startX);
+      let height = Math.abs(pointer.y - startY);
+
+      this.cropRect.set({ left, top, width, height });
+      this.fabricCanvas.renderAll();
+    });
+
+    this.fabricCanvas.on('mouse:up', () => {
+      isDrawing = false;
+      // Remove if too small
+      if (this.cropRect && this.cropRect.width < 10 && this.cropRect.height < 10) {
+        this.fabricCanvas.remove(this.cropRect);
+        this.cropRect = null;
+      }
+    });
+  }
+
+  /**
+   * Apply the crop to the image
+   */
+  applyCrop() {
+    if (!this.cropRect) {
+      alert('Please draw a crop selection first.');
+      return;
+    }
+
+    const rect = this.cropRect;
+    const left = rect.left;
+    const top = rect.top;
+    const width = rect.width;
+    const height = rect.height;
+
+    // Remove the crop rectangle
+    this.fabricCanvas.remove(this.cropRect);
+    this.cropRect = null;
+
+    // Deselect everything
+    this.fabricCanvas.discardActiveObject();
+
+    // Save current state to history before cropping (for undo)
+    const multiplier = 1 / this.displayScale;
+    const currentStateDataUrl = this.fabricCanvas.toDataURL({
+      format: 'png',
+      quality: 1,
+      multiplier: multiplier
+    });
+    this.imageHistory.push({
+      dataUrl: currentStateDataUrl,
+      width: this.originalWidth,
+      height: this.originalHeight
+    });
+
+    // Export current state at original resolution
+    const fullDataUrl = this.fabricCanvas.toDataURL({
+      format: 'png',
+      quality: 1,
+      multiplier: multiplier
+    });
+
+    // Calculate crop coordinates at original resolution
+    const cropLeft = left * multiplier;
+    const cropTop = top * multiplier;
+    const cropWidth = width * multiplier;
+    const cropHeight = height * multiplier;
+
+    // Create a temporary canvas to crop the image
+    const img = new Image();
+    img.onload = () => {
+      const tempCanvas = document.createElement('canvas');
+      tempCanvas.width = cropWidth;
+      tempCanvas.height = cropHeight;
+      const ctx = tempCanvas.getContext('2d');
+      ctx.drawImage(img, cropLeft, cropTop, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
+
+      const croppedDataUrl = tempCanvas.toDataURL('image/png');
+
+      // Reinitialize the canvas with cropped image
+      this.reinitializeWithImage(croppedDataUrl, cropWidth, cropHeight);
+    };
+    img.src = fullDataUrl;
+  }
+
+  /**
+   * Reinitialize canvas with a new image after cropping
+   */
+  reinitializeWithImage(imageDataUrl, originalWidth, originalHeight) {
+    // Dispose old canvas
+    this.fabricCanvas.dispose();
+
+    const canvasContainer = this.modal.querySelector('.annotation-canvas-container');
+    const canvasEl = this.modal.querySelector('#annotation-canvas');
+
+    // Calculate new display size
+    const maxWidth = window.innerWidth * 0.85;
+    const maxHeight = window.innerHeight * 0.65;
+
+    const scaleX = maxWidth / originalWidth;
+    const scaleY = maxHeight / originalHeight;
+    const scale = Math.min(scaleX, scaleY, 1);
+
+    const displayWidth = originalWidth * scale;
+    const displayHeight = originalHeight * scale;
+
+    // Update canvas dimensions
+    canvasEl.width = displayWidth;
+    canvasEl.height = displayHeight;
+    canvasContainer.style.width = `${displayWidth}px`;
+    canvasContainer.style.height = `${displayHeight}px`;
+
+    // Reinitialize Fabric canvas
+    this.fabricCanvas = new fabric.Canvas('annotation-canvas', {
+      width: displayWidth,
+      height: displayHeight,
+      selection: true,
+      backgroundColor: '#1a1a1a'
+    });
+
+    // Update stored dimensions
+    this.originalWidth = originalWidth;
+    this.originalHeight = originalHeight;
+    this.displayScale = scale;
+
+    // Set new background image
+    fabric.Image.fromURL(imageDataUrl, (fabricImg) => {
+      fabricImg.scaleToWidth(displayWidth);
+      this.fabricCanvas.setBackgroundImage(fabricImg, this.fabricCanvas.renderAll.bind(this.fabricCanvas));
+    });
+
+    // Exit crop mode
+    this.cancelCrop();
+  }
+
+  /**
+   * Cancel cropping and return to select mode
+   */
+  cancelCrop() {
+    // Remove crop rectangle if exists
+    if (this.cropRect) {
+      this.fabricCanvas.remove(this.cropRect);
+      this.cropRect = null;
+    }
+
+    this.isCropping = false;
+
+    // Hide crop action buttons
+    const cropActions = this.modal.querySelector('.crop-actions');
+    if (cropActions) cropActions.classList.add('hidden');
+
+    // Switch to select tool
+    this.setTool('select');
+    this.modal.querySelectorAll('.tool-btn[data-tool]').forEach(b => b.classList.remove('active'));
+    this.modal.querySelector('[data-tool="select"]').classList.add('active');
+  }
+
+  /**
+   * Undo last action (annotation or crop)
    */
   undo() {
     const objects = this.fabricCanvas.getObjects();
+
+    // If there are annotations, remove the last one
     if (objects.length > 0) {
       this.fabricCanvas.remove(objects[objects.length - 1]);
       this.fabricCanvas.renderAll();
     }
+    // If no annotations but we have crop history, undo the last crop
+    else if (this.imageHistory.length > 0) {
+      this.undoCrop();
+    }
+  }
+
+  /**
+   * Undo the last crop operation
+   */
+  undoCrop() {
+    if (this.imageHistory.length === 0) return;
+
+    const previousState = this.imageHistory.pop();
+    this.reinitializeWithImage(previousState.dataUrl, previousState.width, previousState.height);
   }
 
   /**

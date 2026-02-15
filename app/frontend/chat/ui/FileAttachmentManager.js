@@ -48,16 +48,104 @@ export class FileAttachmentManager {
 
     // Handle file selection
     this.fileInput.addEventListener('change', (e) => {
-      this.handleFileSelect(e);
+      this.handleFileSelect(e.target.files);
     });
   }
 
   /**
-   * Handle file selection from the input
-   * @param {Event} event - The change event from file input
+   * Setup paste functionality for image attachments
+   * @param {HTMLElement} inputElement - The input/textarea element to listen for paste events
    */
-  async handleFileSelect(event) {
-    const files = Array.from(event.target.files);
+  setupPaste(inputElement) {
+    if (!inputElement) {
+      console.warn('FileAttachmentManager: Missing input element for paste');
+      return;
+    }
+
+    inputElement.addEventListener('paste', async (e) => {
+      const clipboardData = e.clipboardData;
+      if (!clipboardData) return;
+
+      const items = clipboardData.items;
+      const imageFiles = [];
+
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        // Check if the item is an image
+        if (item.type.startsWith('image/')) {
+          const file = item.getAsFile();
+          if (file) {
+            imageFiles.push(file);
+          }
+        }
+      }
+
+      // If we found images, handle them as attachments
+      if (imageFiles.length > 0) {
+        // Don't prevent default if there's also text - let text paste through
+        // But do handle the images
+        await this.handleFileSelect(imageFiles);
+      }
+    });
+  }
+
+  /**
+   * Setup drag and drop functionality for file attachments
+   * @param {HTMLElement} container - The container element to listen for drag events
+   * @param {HTMLElement} overlay - The overlay element to show/hide during drag
+   */
+  setupDragAndDrop(container, overlay) {
+    if (!container || !overlay) {
+      console.warn('FileAttachmentManager: Missing drag-drop elements');
+      return;
+    }
+
+    this.dropContainer = container;
+    this.dropOverlay = overlay;
+    this.dragCounter = 0;
+
+    // Prevent default drag behaviors on document to avoid browser opening files
+    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+      container.addEventListener(eventName, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+      });
+    });
+
+    // Show overlay on drag enter
+    container.addEventListener('dragenter', (e) => {
+      this.dragCounter++;
+      if (e.dataTransfer.types.includes('Files')) {
+        this.dropOverlay.classList.remove('hidden');
+      }
+    });
+
+    // Hide overlay on drag leave (only when actually leaving the container)
+    container.addEventListener('dragleave', () => {
+      this.dragCounter--;
+      if (this.dragCounter === 0) {
+        this.dropOverlay.classList.add('hidden');
+      }
+    });
+
+    // Handle drop
+    container.addEventListener('drop', (e) => {
+      this.dragCounter = 0;
+      this.dropOverlay.classList.add('hidden');
+
+      const files = e.dataTransfer.files;
+      if (files.length > 0) {
+        this.handleFileSelect(files);
+      }
+    });
+  }
+
+  /**
+   * Handle file selection from input or drag-drop
+   * @param {FileList} fileList - The files to process
+   */
+  async handleFileSelect(fileList) {
+    const files = Array.from(fileList);
 
     for (const file of files) {
       // Validate file type

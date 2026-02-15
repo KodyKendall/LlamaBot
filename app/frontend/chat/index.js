@@ -212,6 +212,11 @@ class ChatApp {
       this.elements.fileInput,
       this.elements.attachmentsPreview
     );
+    this.fileAttachmentManager.setupDragAndDrop(
+      this.elements.inputArea,
+      this.elements.dropZoneOverlay
+    );
+    this.fileAttachmentManager.setupPaste(this.elements.messageInput);
 
     // Close toolbar when file attach is clicked
     if (this.elements.fileAttachBtn) {
@@ -273,6 +278,8 @@ class ChatApp {
       fileAttachBtn: this.container.querySelector('[data-llamabot="file-attach-btn"]'),
       fileInput: this.container.querySelector('[data-llamabot="file-input"]'),
       attachmentsPreview: this.container.querySelector('[data-llamabot="attachments-preview"]'),
+      dropZoneOverlay: this.container.querySelector('[data-llamabot="drop-zone-overlay"]'),
+      inputArea: this.container.querySelector('.input-area'),
       toolsToggleBtn: this.container.querySelector('[data-llamabot="tools-toggle-btn"]'),
       toolsToolbar: this.container.querySelector('[data-llamabot="tools-toolbar"]'),
       screenRecordBtn: this.container.querySelector('[data-llamabot="screen-record-btn"]'),

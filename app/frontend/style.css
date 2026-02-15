@@ -776,6 +776,37 @@ body {
     border-radius: 4px;
 }
 
+/* Crop action buttons */
+.annotation-tools .crop-actions {
+    display: flex;
+    gap: 4px;
+    margin-left: 8px;
+    padding-left: 8px;
+    border-left: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.annotation-tools .crop-actions.hidden {
+    display: none;
+}
+
+.annotation-tools .crop-apply {
+    color: #4ade80;
+}
+
+.annotation-tools .crop-apply:hover {
+    background: rgba(74, 222, 128, 0.2);
+    color: #4ade80;
+}
+
+.annotation-tools .crop-cancel {
+    color: #f87171;
+}
+
+.annotation-tools .crop-cancel:hover {
+    background: rgba(248, 113, 113, 0.2);
+    color: #f87171;
+}
+
 .annotation-canvas-container {
     display: flex;
     align-items: center;
@@ -3895,6 +3926,41 @@ body {
         padding: 0.35rem 0.5rem;
         font-size: 0.75rem;
     }
+}
+
+/* ============== Drop Zone Overlay (drag-and-drop file uploads) ============== */
+.drop-zone-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(59, 130, 246, 0.15);
+    border: 2px dashed #3b82f6;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    pointer-events: none;
+}
+
+.drop-zone-overlay.hidden {
+    display: none;
+}
+
+.drop-zone-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+    color: #3b82f6;
+    font-weight: 500;
+}
+
+.drop-zone-content i {
+    font-size: 2rem;
+}
+
+.drop-zone-content span {
+    font-size: 0.9rem;
 }
 
 /* ============== Message Attachment Badges (in conversation history) ============== */
