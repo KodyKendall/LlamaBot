@@ -40,6 +40,7 @@ from app.agents.leonardo.rails_ticket_mode_agent.middleware import (
     check_failure_limit,
     DynamicModelMiddleware,
 )
+from app.agents.utils.token_counter import gemini_multimodal_token_counter, SUMMARIZATION_TOKEN_THRESHOLD
 from app.agents.leonardo.rails_ticket_mode_agent.sub_agents import delegate_task
 
 import logging
@@ -135,7 +136,11 @@ Please provide your summary based on the conversation so far, following this str
 There may be additional summarization instructions provided in the included context. If so, remember to follow these instructions when creating the above summary.
 
 # Summary Instructions
-When summarizing the conversation, focus on Ruby on Rails code changes including models, controllers, views, migrations, and routes. Include RSpec test output and remember the mistakes you made and how you fixed them."""
+When summarizing the conversation, focus on Ruby on Rails code changes including models, controllers, views, migrations, and routes. Include RSpec test output and remember the mistakes you made and how you fixed them.
+
+# Conversation to summarize:
+{messages}
+"""
 
 
 def get_cached_system_prompt():
@@ -268,10 +273,11 @@ def build_workflow(checkpointer=None):
         # 1. Summarization for long conversations - prevents token limit issues
         SummarizationMiddleware(
             model=summarization_model,
-            trigger=("tokens", 80000),
+            trigger=("tokens", SUMMARIZATION_TOKEN_THRESHOLD),
             keep=("messages", 20),  # Match Claude Code's default
+            token_counter=gemini_multimodal_token_counter,
             trim_tokens_to_summarize=None,  # KEY FIX: Disable trimming, let Gemini see everything
-            prompt=SUMMARIZATION_PROMPT,
+            summary_prompt=SUMMARIZATION_PROMPT,
         ),
         # 2. Dynamic model selection based on state.llm_model from frontend
         DynamicModelMiddleware(),
