@@ -36,6 +36,7 @@ from app.agents.leonardo.rails_agent.tools import (
     read_langgraph_json, edit_langgraph_json
 )
 from app.agents.leonardo.rails_testing_agent.prompts import RAILS_TESTING_AGENT_PROMPT
+from app.agents.leonardo.project_context import build_system_prompt_with_project_context
 from app.agents.leonardo.rails_testing_agent.middleware import (
     inject_view_context,
     inject_testing_mode_context,
@@ -145,19 +146,23 @@ When summarizing the conversation, focus on Ruby on Rails code changes including
 
 
 def get_cached_system_prompt():
-    """Build system message with current date and prompt caching enabled.
+    """Build system message with project context, date, and prompt caching enabled.
 
-    Date is appended at the end so the main prompt can be cached,
-    and only the date portion changes daily.
+    Loads LEONARDO.md if it exists and appends it to the base prompt.
+    Date is appended at the end so the main prompt can be cached.
     """
     current_date = date.today().strftime("%Y-%m-%d")
-    prompt_with_date = f"{RAILS_TESTING_AGENT_PROMPT}\n\n---\n**Today's Date:** {current_date}\n(Use this date for regression test naming: bug_{current_date}_description_spec.rb)"
+    date_suffix = f"\n\n---\n**Today's Date:** {current_date}\n(Use this date for regression test naming: bug_{current_date}_description_spec.rb)"
+    full_prompt = build_system_prompt_with_project_context(
+        RAILS_TESTING_AGENT_PROMPT,
+        suffix=date_suffix
+    )
 
     return SystemMessage(
         content=[
             {
                 "type": "text",
-                "text": prompt_with_date,
+                "text": full_prompt,
                 "cache_control": {"type": "ephemeral"}
             }
         ]

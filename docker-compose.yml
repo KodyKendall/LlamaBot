@@ -40,6 +40,7 @@ services:
       - ./llamapress/rails:/app/app/rails
       - auth_data:/app/auth.json
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./.leonardo:/app/.leonardo  # Project context (LEONARDO.md, instance.json)
     ports:
       - "8000:8000"
     depends_on:

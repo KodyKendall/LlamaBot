@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from sqlmodel import Session
 
 from app.models import User, ThreadMetadata
-from app.dependencies import get_db_session, auth, admin_required
+from app.dependencies import get_db_session, auth, admin_required, engineer_or_admin_required, get_current_user
 from app.services.thread_service import get_thread_list
 from app.services.user_service import (
     get_all_users, get_user_by_username, update_user, delete_user
@@ -109,6 +109,21 @@ async def api_get_version():
     """Get the current LlamaBot version from docker-compose.yml or Docker image tag."""
     version = get_container_version()
     return {"version": version}
+
+
+# ============== WebSocket Authentication API ==============
+
+@router.get("/api/ws-token", response_class=JSONResponse)
+async def get_ws_token(current_user: User = Depends(get_current_user)):
+    """
+    Generate a JWT token for WebSocket authentication.
+
+    The token is used by the frontend to authenticate WebSocket connections.
+    It expires after WS_TOKEN_EXPIRY_MINUTES (default 30 minutes).
+    """
+    from app.services.token_service import create_ws_token, EXPIRY_MINUTES
+    token = create_ws_token(current_user)
+    return {"token": token, "expires_in": EXPIRY_MINUTES * 60}
 
 
 # ============== User Management API ==============
@@ -616,3 +631,49 @@ async def api_use_prompt(
         raise HTTPException(status_code=404, detail="Prompt not found")
 
     return {"usage_count": prompt.usage_count}
+
+
+# ============== LEONARDO.md API ==============
+
+class UpdateLeonardoMdRequest(BaseModel):
+    content: str
+
+
+@router.get("/api/leonardo-md", response_class=JSONResponse)
+async def get_leonardo_md(username: str = Depends(auth)):
+    """Get LEONARDO.md content if it exists."""
+    leonardo_md_path = ".leonardo/LEONARDO.md"
+
+    if not os.path.exists(leonardo_md_path):
+        return {"content": None, "exists": False}
+
+    try:
+        with open(leonardo_md_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        return {"content": content, "exists": True}
+    except Exception as e:
+        logger.warning(f"Error reading LEONARDO.md: {e}")
+        return {"content": None, "exists": False, "error": str(e)}
+
+
+@router.put("/api/leonardo-md", response_class=JSONResponse)
+async def update_leonardo_md(
+    request: UpdateLeonardoMdRequest,
+    current_user: User = Depends(engineer_or_admin_required)
+):
+    """Update LEONARDO.md content (engineer/admin only)."""
+    leonardo_dir = ".leonardo"
+    leonardo_md_path = f"{leonardo_dir}/LEONARDO.md"
+
+    # Ensure .leonardo directory exists
+    os.makedirs(leonardo_dir, exist_ok=True)
+
+    try:
+        with open(leonardo_md_path, "w", encoding="utf-8") as f:
+            f.write(request.content)
+
+        logger.info(f"User '{current_user.username}' updated LEONARDO.md")
+        return {"message": "LEONARDO.md updated successfully"}
+    except Exception as e:
+        logger.error(f"Error writing LEONARDO.md: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to write file: {e}")

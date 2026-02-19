@@ -28,6 +28,7 @@ from app.agents.leonardo.rails_agent.tools import (
     git_command, github_cli_command, internet_search
 )
 from app.agents.leonardo.rails_agent.prompts import RAILS_AGENT_PROMPT
+from app.agents.leonardo.project_context import build_system_prompt_with_project_context
 from app.agents.leonardo.rails_agent.middleware import (
     inject_view_context,
     check_failure_limit,
@@ -40,17 +41,22 @@ from app.agents.leonardo.rails_agent.sub_agents import delegate_task
 import logging
 logger = logging.getLogger(__name__)
 
-# System message with Anthropic prompt caching enabled
-# This caches the ~4000 token system prompt for 5 minutes, reducing input token costs by ~90%
-CACHED_SYSTEM_PROMPT = SystemMessage(
-    content=[
-        {
-            "type": "text",
-            "text": RAILS_AGENT_PROMPT,
-            "cache_control": {"type": "ephemeral"}
-        }
-    ]
-)
+def get_cached_system_prompt():
+    """Build system message with project context and prompt caching.
+
+    Loads LEONARDO.md if it exists and appends it to the base prompt.
+    Uses Anthropic's ephemeral cache control for cost reduction (~90% input token savings).
+    """
+    full_prompt = build_system_prompt_with_project_context(RAILS_AGENT_PROMPT)
+    return SystemMessage(
+        content=[
+            {
+                "type": "text",
+                "text": full_prompt,
+                "cache_control": {"type": "ephemeral"}
+            }
+        ]
+    )
 
 # Detailed summarization prompt for context extraction
 # Creates structured summaries that preserve technical details, code patterns, and user intent
@@ -209,7 +215,7 @@ def build_workflow(checkpointer=None):
     return create_agent(
         model=default_model,
         tools=default_tools,
-        system_prompt=CACHED_SYSTEM_PROMPT,
+        system_prompt=get_cached_system_prompt(),
         state_schema=RailsAgentState,
         middleware=middleware,
         checkpointer=checkpointer,

@@ -25,6 +25,7 @@ from app.agents.leonardo.rails_agent.tools import (
     # Note: bash_command is NOT included - no code execution allowed
 )
 from app.agents.leonardo.rails_architect_agent.prompts import ARCHITECT_AGENT_PROMPT
+from app.agents.leonardo.project_context import build_system_prompt_with_project_context
 
 import logging
 logger = logging.getLogger(__name__)
@@ -34,17 +35,22 @@ SCRIPT_DIR = Path(__file__).parent.resolve()
 PROJECT_ROOT = SCRIPT_DIR.parent.parent.parent  # Go up to LlamaBot root
 APP_DIR = PROJECT_ROOT / 'app'
 
-# System message with cache control for Anthropic models
-sys_msg = {
-    "role": "system",
-    "content": [
-        {
-            "type": "text",
-            "text": f"{ARCHITECT_AGENT_PROMPT}",
-            "cache_control": {"type": "ephemeral"},  # Only works for Anthropic models
-        },
-    ],
-}
+def get_sys_msg():
+    """Build system message with project context and prompt caching.
+
+    Loads LEONARDO.md if it exists and appends it to the base prompt.
+    """
+    full_prompt = build_system_prompt_with_project_context(ARCHITECT_AGENT_PROMPT)
+    return {
+        "role": "system",
+        "content": [
+            {
+                "type": "text",
+                "text": full_prompt,
+                "cache_control": {"type": "ephemeral"},  # Only works for Anthropic models
+            },
+        ],
+    }
 
 # Define tools available to this agent
 # Limited set - read-focused with write only for .md reports
@@ -102,7 +108,7 @@ def leonardo_architect(state: RailsAgentState) -> Command[Literal["tools"]]:
     # Get view context if available
     view_path = (state.get('debug_info') or {}).get('view_path')
 
-    messages = [sys_msg] + state["messages"]
+    messages = [get_sys_msg()] + state["messages"]
 
     # Inject view context if user is viewing a Rails page
     if view_path:

@@ -5,6 +5,7 @@
 
 import { getWebSocketUrl, getRailsUrl } from '../config.js';
 import { ActionCableAdapter } from './ActionCableAdapter.js';
+import { TokenManager } from '../auth/TokenManager.js';
 
 export class WebSocketManager {
   constructor(messageHandler, config = {}, elements = {}) {
@@ -14,6 +15,7 @@ export class WebSocketManager {
     this.socket = null;
     this.reconnectTimer = null;
     this.isActionCable = false;
+    this.isAuthenticated = false;
   }
 
   /**
@@ -88,6 +90,28 @@ export class WebSocketManager {
 
     // Emit custom event
     window.dispatchEvent(new CustomEvent('websocketConnected'));
+
+    // Send authentication token (for native WebSocket connections only)
+    // ActionCable connections handle auth via the Rails gem
+    if (!this.isActionCable) {
+      this.sendAuthMessage();
+    }
+  }
+
+  /**
+   * Send authentication message with JWT token
+   */
+  async sendAuthMessage() {
+    try {
+      const token = await TokenManager.getToken();
+      if (token) {
+        this.send({ type: 'auth', token: token });
+      } else {
+        console.warn('No auth token available - WebSocket may be unauthenticated');
+      }
+    } catch (error) {
+      console.error('Failed to send auth message:', error);
+    }
   }
 
   /**
@@ -129,6 +153,28 @@ export class WebSocketManager {
     const data = JSON.parse(event.data);
     // console.log('Received:', data.type);
     // console.log('Data:', data);
+
+    // Handle authentication responses
+    if (data.type === 'auth_success') {
+      this.isAuthenticated = true;
+      console.log('WebSocket authenticated as:', data.user);
+      return;
+    }
+
+    if (data.type === 'auth_error') {
+      this.isAuthenticated = false;
+      console.error('WebSocket auth failed:', data.content);
+      // Clear cached token so we fetch a fresh one on reconnect
+      TokenManager.clearToken();
+      return;
+    }
+
+    if (data.type === 'auth_warning') {
+      console.warn('WebSocket auth warning:', data.content);
+      // Try to authenticate again
+      this.sendAuthMessage();
+      return;
+    }
 
     // Delegate to message handler
     if (this.messageHandler) {

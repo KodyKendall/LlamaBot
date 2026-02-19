@@ -28,6 +28,7 @@ from app.agents.utils.images import encode_image
 from app.agents.leonardo.rails_agent.state import RailsAgentState
 from app.agents.leonardo.rails_agent.tools import write_todos, write_file, read_file, ls, edit_file, search_file, internet_search, bash_command, git_status, git_commit, git_command, github_cli_command
 from app.agents.leonardo.rails_frontend_starter_agent.prompts import RAILS_FRONTEND_STARTER_AGENT_PROMPT
+from app.agents.leonardo.project_context import build_system_prompt_with_project_context
 
 import logging
 logger = logging.getLogger(__name__)
@@ -37,14 +38,19 @@ SCRIPT_DIR = Path(__file__).parent.resolve()
 PROJECT_ROOT = SCRIPT_DIR.parent.parent.parent  # Go up to LlamaBot root
 APP_DIR = PROJECT_ROOT / 'app'
 
-# System message
-sys_msg = {
+def get_sys_msg():
+    """Build system message with project context and prompt caching.
+
+    Loads LEONARDO.md if it exists and appends it to the base prompt.
+    """
+    full_prompt = build_system_prompt_with_project_context(RAILS_FRONTEND_STARTER_AGENT_PROMPT)
+    return {
         "role": "system",
         "content": [
             {
                 "type": "text",
-                "text": f"{RAILS_FRONTEND_STARTER_AGENT_PROMPT}",
-                "cache_control": {"type": "ephemeral"}, # only works for Anthropic models.
+                "text": full_prompt,
+                "cache_control": {"type": "ephemeral"},  # Only works for Anthropic models.
             },
         ],
     }
@@ -96,7 +102,7 @@ def leonardo_design(state: RailsAgentState) -> Command[Literal["tools"]]:
 
    view_path = (state.get('debug_info') or {}).get('view_path')
 
-   messages = [sys_msg] + state["messages"]
+   messages = [get_sys_msg()] + state["messages"]
    if view_path:
       messages = messages + [HumanMessage(content="<NOTE_FROM_SYSTEM> The user is currently viewing their Ruby on Rails webpage route at: " + view_path + " </NOTE_FROM_SYSTEM>")]
 

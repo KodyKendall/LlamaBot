@@ -1090,6 +1090,11 @@ async def settings_page(current_user: User = Depends(get_current_user)):
 
         <div class='card'><a href='/prompt-library' class='menu-item'><i class='fa-solid fa-book'></i><span>Prompt Library</span><i class='fa-solid fa-chevron-right chevron'></i></a></div>
 
+        <div class='card'>
+            <div class='card-header'>Project Context</div>
+            <a href='/leonardo-md' class='menu-item'><i class='fa-solid fa-file-lines'></i><span>LEONARDO.md</span><i class='fa-solid fa-chevron-right chevron'></i></a>
+        </div>
+
         <div class="card">
             <button class="logout-btn" onclick="logout()">
                 <i class="fa-solid fa-right-from-bracket"></i>
@@ -1129,6 +1134,262 @@ async def logout():
         detail="Logged out",
         headers={"WWW-Authenticate": "Basic"}
     )
+
+
+@router.get("/leonardo-md", response_class=HTMLResponse)
+async def leonardo_md_page(current_user: User = Depends(get_current_user)):
+    """Serve the LEONARDO.md editor page."""
+    can_edit = current_user.is_admin or getattr(current_user, 'role', 'user') == "engineer"
+
+    html = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <title>LlamaBot - LEONARDO.md</title>
+    <link rel="icon" type="image/png" href="https://llamapress-ai-image-uploads.s3.us-west-2.amazonaws.com/4bmqe5iolvp84ceyk9ttz8vylrym">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        :root {{
+            --bg-color: #1a1a1a;
+            --chat-bg: #2d2d2d;
+            --text-color: #e0e0e0;
+            --border-color: #404040;
+            --accent-color: #4CAF50;
+        }}
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 0;
+            min-height: 100vh;
+        }}
+        .container {{
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }}
+        .header {{
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 30px;
+        }}
+        .back-btn {{
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 40px;
+            height: 40px;
+            background: var(--chat-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            color: var(--text-color);
+            text-decoration: none;
+            transition: background 0.2s;
+        }}
+        .back-btn:hover {{
+            background: var(--border-color);
+        }}
+        h1 {{
+            font-size: 1.5rem;
+            margin: 0;
+        }}
+        .card {{
+            background: var(--chat-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 20px;
+        }}
+        .card-header {{
+            font-size: 0.85rem;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }}
+        .card-header-note {{
+            font-size: 0.75rem;
+            color: #666;
+            text-transform: none;
+            letter-spacing: normal;
+        }}
+        textarea {{
+            width: 100%;
+            min-height: 400px;
+            padding: 16px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            background: var(--bg-color);
+            color: var(--text-color);
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 14px;
+            line-height: 1.6;
+            resize: vertical;
+            box-sizing: border-box;
+        }}
+        textarea:focus {{
+            outline: none;
+            border-color: var(--accent-color);
+        }}
+        textarea:read-only {{
+            opacity: 0.7;
+            cursor: not-allowed;
+        }}
+        .btn {{
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            font-size: 0.95rem;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            transition: background 0.2s;
+        }}
+        .btn-primary {{
+            background: var(--accent-color);
+            color: white;
+        }}
+        .btn-primary:hover {{
+            background: #45a049;
+        }}
+        .btn-primary:disabled {{
+            background: #666;
+            cursor: not-allowed;
+        }}
+        .actions {{
+            margin-top: 16px;
+            display: flex;
+            justify-content: flex-end;
+            gap: 12px;
+        }}
+        .message {{
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            display: none;
+        }}
+        .message.success {{
+            display: block;
+            background: rgba(76, 175, 80, 0.2);
+            color: #81c784;
+            border: 1px solid rgba(76, 175, 80, 0.3);
+        }}
+        .message.error {{
+            display: block;
+            background: rgba(244, 67, 54, 0.2);
+            color: #e57373;
+            border: 1px solid rgba(244, 67, 54, 0.3);
+        }}
+        .read-only-notice {{
+            color: #888;
+            font-size: 0.85rem;
+            margin-top: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <a href="/settings" class="back-btn">
+                <i class="fa-solid fa-arrow-left"></i>
+            </a>
+            <h1>LEONARDO.md</h1>
+        </div>
+
+        <div id="message" class="message"></div>
+
+        <div class="card">
+            <div class="card-header">
+                Project Context
+                <span class="card-header-note">- Appended to all Leonardo agent system prompts</span>
+            </div>
+            <textarea id="content" placeholder="# Project Context
+
+Add project-specific instructions here...
+
+## About This Project
+Describe what this application does and the problem it solves.
+
+## Technical Details
+- Framework: Ruby on Rails
+- Database: PostgreSQL
+- Key gems or dependencies
+
+## Coding Conventions
+- Any specific patterns to follow
+- Naming conventions
+- Testing requirements
+
+## Important Notes
+- Business rules to keep in mind
+- Edge cases to handle
+" {'readonly' if not can_edit else ''}></textarea>
+            {'<div class="actions"><button class="btn btn-primary" onclick="saveContent()" id="saveBtn"><i class="fa-solid fa-save"></i> Save</button></div>' if can_edit else '<p class="read-only-notice"><i class="fa-solid fa-lock"></i> View only - engineer or admin role required to edit</p>'}
+        </div>
+    </div>
+
+    <script>
+        async function loadContent() {{
+            try {{
+                const response = await fetch('/api/leonardo-md');
+                const data = await response.json();
+                if (data.content !== null) {{
+                    document.getElementById('content').value = data.content;
+                }}
+            }} catch (error) {{
+                showMessage('Error loading content: ' + error.message, 'error');
+            }}
+        }}
+
+        async function saveContent() {{
+            const btn = document.getElementById('saveBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Saving...';
+
+            const content = document.getElementById('content').value;
+            try {{
+                const response = await fetch('/api/leonardo-md', {{
+                    method: 'PUT',
+                    headers: {{'Content-Type': 'application/json'}},
+                    body: JSON.stringify({{content: content}})
+                }});
+                if (response.ok) {{
+                    showMessage('Saved successfully!', 'success');
+                }} else {{
+                    const error = await response.json();
+                    showMessage(error.detail || 'Error saving', 'error');
+                }}
+            }} catch (error) {{
+                showMessage('Error: ' + error.message, 'error');
+            }} finally {{
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fa-solid fa-save"></i> Save';
+            }}
+        }}
+
+        function showMessage(text, type) {{
+            const msg = document.getElementById('message');
+            msg.textContent = text;
+            msg.className = 'message ' + type;
+            setTimeout(() => {{ msg.className = 'message'; }}, 4000);
+        }}
+
+        // Load content on page load
+        loadContent();
+    </script>
+</body>
+</html>
+"""
+    return HTMLResponse(content=html)
 
 
 @router.get("/conversations", response_class=HTMLResponse)
