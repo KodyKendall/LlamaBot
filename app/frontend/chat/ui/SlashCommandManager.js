@@ -589,6 +589,29 @@ export class SlashCommandManager {
         body: JSON.stringify({ command: commandName })
       });
 
+      // Handle restart command specially - the server may restart before responding
+      if (commandName === 'restart') {
+        // Try to parse response, but if it fails, assume restart was initiated
+        try {
+          const text = await response.text();
+          if (text) {
+            const result = JSON.parse(text);
+            if (result.success) {
+              this.showSystemMessage(`/${commandName} initiated. The page will reload shortly...`, 'success', result);
+            } else {
+              this.showSystemMessage(`/${commandName} failed:\n\n${result.output}`, 'error', result);
+            }
+          } else {
+            // Empty response - server likely restarted
+            this.showSystemMessage(`/${commandName} initiated. The server is restarting...`, 'info');
+          }
+        } catch (parseError) {
+          // JSON parse failed - server likely restarted mid-response
+          this.showSystemMessage(`/${commandName} initiated. The server is restarting...`, 'info');
+        }
+        return;
+      }
+
       const result = await response.json();
 
       if (result.success) {
@@ -598,6 +621,11 @@ export class SlashCommandManager {
       }
 
     } catch (error) {
+      // For restart command, network errors are expected
+      if (commandName === 'restart') {
+        this.showSystemMessage(`/${commandName} initiated. The server is restarting...`, 'info');
+        return;
+      }
       console.error('Failed to execute command:', error);
       this.showSystemMessage(`Error executing /${commandName}: ${error.message}`, 'error');
     }

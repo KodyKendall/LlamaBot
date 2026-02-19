@@ -180,6 +180,11 @@ class ChatApp {
     const socket = this.webSocketManager.connect();
     this.appState.setSocket(socket);
 
+    // Listen for websocket disconnection to hide thinking indicator
+    window.addEventListener('websocketDisconnected', () => {
+      this.hideThinkingIndicator();
+    });
+
     // Initialize event listeners
     this.initEventListeners();
 
@@ -447,17 +452,36 @@ class ChatApp {
 
     // Capture Rails logs button
     if (this.elements.captureLogsBtn) {
+      // Track the current capture request so we can cancel it
+      this.captureLogsAbortController = null;
+
       this.elements.captureLogsBtn.addEventListener('click', async () => {
         // Close toolbar
         this.closeToolsToolbar();
 
+        // If already recording, cancel the capture
+        if (this.elements.captureLogsBtn.classList.contains('recording')) {
+          if (this.captureLogsAbortController) {
+            this.captureLogsAbortController.abort();
+            this.captureLogsAbortController = null;
+          }
+          this.elements.captureLogsBtn.classList.remove('recording');
+          console.log('Log capture cancelled');
+          return;
+        }
+
         this.elements.captureLogsBtn.classList.add('recording');
+        this.captureLogsAbortController = new AbortController();
+
         try {
           // Clear old JS logs first
           this.clearJsConsoleLogs();
 
           // Wait for Rails logs (10 seconds) - JS logs accumulate during this time
-          const railsLogsRes = await fetch('/api/capture-rails-logs', { method: 'POST' }).then(r => r.json());
+          const railsLogsRes = await fetch('/api/capture-rails-logs', {
+            method: 'POST',
+            signal: this.captureLogsAbortController.signal
+          }).then(r => r.json());
 
           // Now fetch JS logs that accumulated during the 10s recording period
           const jsLogs = await this.getJsConsoleLogs();
@@ -477,9 +501,14 @@ class ChatApp {
             this.elements.messageInput.dispatchEvent(new Event('input', { bubbles: true }));
           }
         } catch (err) {
-          console.error('Failed to capture logs:', err);
+          if (err.name === 'AbortError') {
+            console.log('Log capture was cancelled');
+          } else {
+            console.error('Failed to capture logs:', err);
+          }
         } finally {
           this.elements.captureLogsBtn.classList.remove('recording');
+          this.captureLogsAbortController = null;
         }
       });
     }
@@ -943,6 +972,41 @@ class ChatApp {
     }
     if (this.elements.toolsToggleBtn) {
       this.elements.toolsToggleBtn.classList.remove('active');
+    }
+  }
+
+  /**
+   * Hide the thinking indicator when websocket disconnects
+   * Stops the loading verb cycling and hides the thinking area
+   * Shows error message if we were in the middle of thinking
+   */
+  hideThinkingIndicator() {
+    // Check if we were thinking (thinking area was visible)
+    const wasThinking = this.elements.thinkingArea &&
+      !this.elements.thinkingArea.classList.contains('hidden');
+
+    // Stop the loading verb cycling
+    if (this.loadingVerbs) {
+      this.loadingVerbs.stopCycling();
+    }
+
+    // Hide the thinking area
+    if (this.elements.thinkingArea) {
+      this.elements.thinkingArea.classList.add('hidden');
+      this.elements.thinkingArea.innerHTML = '';
+    }
+
+    // Reset the message input placeholder
+    if (this.elements.messageInput) {
+      this.elements.messageInput.placeholder = 'Ask Leonardo...';
+    }
+
+    // If we were thinking, show error message and play error sound
+    if (wasThinking) {
+      // Show error message
+      if (this.messageRenderer) {
+        this.messageRenderer.renderErrorMessage('Lost connection');
+      }
     }
   }
 

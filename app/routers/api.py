@@ -60,10 +60,10 @@ def get_container_version() -> str:
     """Get the version from docker-compose.yml (mounted at /app/leonardo) or Docker API."""
     import socket
 
-    # First, try to parse from mounted docker-compose-dev.yml
+    # First, try to parse from mounted docker-compose.yml
     compose_paths = [
-        "/app/leonardo/docker-compose-dev.yml",
         "/app/leonardo/docker-compose.yml",
+        "/app/leonardo/docker-compose-dev.yml",
     ]
     for compose_path in compose_paths:
         try:

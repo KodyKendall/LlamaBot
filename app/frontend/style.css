@@ -331,6 +331,25 @@ body {
     font-weight: 600;
     color: var(--text-color);
     flex: 1;
+    position: relative;
+    cursor: default;
+}
+
+.chat-header h1[title]:hover::after {
+    content: attr(title);
+    position: absolute;
+    top: 100%;
+    left: 0;
+    margin-top: 4px;
+    padding: 4px 8px;
+    background: var(--bg-tertiary, #333);
+    color: var(--text-color, #fff);
+    font-size: 0.75rem;
+    font-weight: 400;
+    border-radius: 4px;
+    white-space: nowrap;
+    z-index: 1000;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
 }
 
 /* Settings button */

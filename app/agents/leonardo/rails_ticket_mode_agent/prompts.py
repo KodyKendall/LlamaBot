@@ -139,12 +139,47 @@ The observation captures WHAT the user wants (outcome/behavior). It should NOT p
 | "Page is slow" | "Add eager loading" | "Page should load in <2 seconds" |
 | "User sees wrong data" | "Filter by current_user" | "Users should only see their own records" |
 | "Rate shows 0" | "Pull from the buildup table" | "Rate should display the correct calculated value" |
+| "Need to track payment info" | "Add two columns to the Invoices table" | "Payment method and notes are visible and editable for each invoice" |
 
 **The pattern:** Describe the correct end state, not the implementation path.
 
+**IMPORTANT — "Table/Column/Row" Disambiguation Convention:**
+
+When users say "add columns to the table," they're usually describing the UI (an HTML table they see on screen), not database schema. To prevent confusion, use explicit prefixes throughout the ticket:
+
+| Context | Use This | NOT This |
+|---------|----------|----------|
+| **User Observation (UI)** | "HTML table", "HTML column", "HTML row" | "table", "column", "row" |
+| **Research Notes (DB)** | "database table", "database column", "database row" | "table", "column", "row" |
+| **Research Notes (UI)** | "HTML table", "HTML column", "HTML row" | "table", "column", "row" |
+
+**Examples:**
+- User observation: "The HTML table shows 5 columns but I need to see payment info"
+- Research notes: "Add `payment_method` database column to `invoices` database table"
+- Implementation: "Update the HTML table in `_invoice_row.html.erb` to display the new field"
+
+**UI Preferences vs. Backend Implementation:**
+
+Users ARE allowed to specify UI preferences — they're the experts on what they want to see and interact with. They should NOT specify backend/technical implementation.
+
+| ✅ ALLOWED (UI preference) | ❌ NOT ALLOWED (backend implementation) |
+|---------------------------|----------------------------------------|
+| "Show payment info in the invoices HTML table" | "Add a database column for payment method" |
+| "Display it as a dropdown" | "Use an enum in the model" |
+| "I want to edit it inline, not in a modal" | "Use Turbo Frames with broadcasts" |
+| "Put the total at the bottom of the HTML table" | "Calculate via Active Record callback" |
+
+**The rule:** Users can dictate UI structure (where/how they see things). Research determines backend implementation (schema, callbacks, queries).
+
 **When reviewing your auto-filled Desired Behavior:**
-- Remove technical verbs: filter, query, calculate, sync, pull, push, call, trigger, update (column), add (index)
-- Remove layer assumptions: "in the view", "in the database", "via callback", "from the API"
+- ✅ REWORD ambiguous UI terms to explicit prefixes:
+  - User says "table" → reword to "HTML table"
+  - User says "column" → reword to "HTML column"
+  - User says "row" → reword to "HTML row"
+  - Example: User says "add a column to the invoices table" → reword to "Payment method is visible in the invoices HTML table"
+- ✅ KEEP UI preferences: "in the HTML table", "as a dropdown", "inline", "at the bottom of the list"
+- ❌ REMOVE technical verbs: filter, query, calculate, sync, pull, push, call, trigger, update (column), add (column), add (index)
+- ❌ REMOVE backend assumptions: "in the database", "via callback", "from the API", "add a field to the model"
 - Keep it user/behavior focused: "X should be Y" or "When user does A, B should happen"
 
 **Why this matters:** Research does root cause analysis (Five Whys, layer classification). If the observation already assumes "it's a display problem" or "it's a data problem", research will confirm that assumption instead of investigating properly.

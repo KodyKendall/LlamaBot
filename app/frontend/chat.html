@@ -29,7 +29,7 @@
                     <span class="status-dot"></span>
                 </div>
             </div>
-            <h1>Leonardo</h1>
+            <h1 data-llamabot="leonardo-title">Leonardo</h1>
             <a href="/settings" class="settings-btn" title="Settings">
                 <i class="fa-solid fa-gear"></i>
             </a>
@@ -306,29 +306,26 @@
         <source src="/frontend/Leonardo-Task-Error.mp3" type="audio/mpeg">
     </audio>
 
-    <!-- Set document title with instance name if available, and fetch version -->
+    <!-- Set document title to current URL and fetch version -->
     <script>
-        (async function() {
-            try {
-                const response = await fetch('/api/instance-info');
-                if (response.ok) {
-                    const data = await response.json();
-                    if (data.instance_name) {
-                        document.title = `Leonardo - ${data.instance_name}`;
-                    }
-                }
-            } catch (e) {
-                // Silently fail - just use default "Leonardo" title
-            }
+        // Set title to current URL (hostname + port)
+        document.title = window.location.host;
 
-            // Fetch and display version in drawer
+        // Fetch and display version in drawer + title tooltip
+        (async function() {
             try {
                 const versionResponse = await fetch('/api/version');
                 if (versionResponse.ok) {
                     const versionData = await versionResponse.json();
-                    const versionBadge = document.querySelector('[data-llamabot="version-badge"]');
-                    if (versionBadge && versionData.version) {
-                        versionBadge.textContent = `v${versionData.version}`;
+                    if (versionData.version) {
+                        const versionBadge = document.querySelector('[data-llamabot="version-badge"]');
+                        if (versionBadge) {
+                            versionBadge.textContent = `v${versionData.version}`;
+                        }
+                        const leonardoTitle = document.querySelector('[data-llamabot="leonardo-title"]');
+                        if (leonardoTitle) {
+                            leonardoTitle.title = `v${versionData.version}`;
+                        }
                     }
                 }
             } catch (e) {

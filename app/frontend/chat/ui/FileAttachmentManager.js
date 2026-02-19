@@ -5,7 +5,7 @@
  * over WebSocket to LangChain agents.
  */
 
-const MAX_FILE_SIZE_MB = 100;
+const MAX_FILE_SIZE_MB = 250;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 
 const ALLOWED_TYPES = {
@@ -15,6 +15,7 @@ const ALLOWED_TYPES = {
   'image/gif': { ext: 'gif', icon: 'fa-file-image' },
   'image/webp': { ext: 'webp', icon: 'fa-file-image' },
   'video/webm': { ext: 'webm', icon: 'fa-file-video' },
+  'video/mp4': { ext: 'mp4', icon: 'fa-file-video' },
 };
 
 export class FileAttachmentManager {
@@ -151,7 +152,7 @@ export class FileAttachmentManager {
       // Validate file type
       if (!ALLOWED_TYPES[file.type]) {
         console.warn(`File type not allowed: ${file.type}`);
-        alert(`File type not supported: ${file.name}\nAllowed: PDF, PNG, JPEG, GIF, WebP`);
+        alert(`File type not supported: ${file.name}\nAllowed: PDF, PNG, JPEG, GIF, WebP, WebM, MP4`);
         continue;
       }
 

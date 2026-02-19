@@ -63,5 +63,26 @@
 - [x] Add websocket security
 - [x] Add .leonardo/LEONARDO.md
 
+0.3.5i: 
+- [x] Improve ticket mode prompt to delineate between HTML tables and database tables.
+- [x] UI/UX Chat - If websocket breaks, throw error and stop thinking mode so user knows.
+- [x] UI/UX Chat - If user is recording rails logs, and then presses bug record button, it stops recording rather than starting 2nd recording.
+- [x] Security - Add tests to verify websocket security
+
+0.3.5j: 
+- [x] In tab header, set to be the window's URL (localhost:8000) instead of static: "Leonardo"
+- [x] Make /restart command more robust & less likely to throw errors.
+
+0.3.5k: 
+- [x] Make docker-compose.yml first option to read LlamaBot version.
+- [x] Show version when hovering over Leonardo
+
+0.3.5l: 
+- [x] Fix restart script dying on llamabot takedown - making it impossible to restart from llamabot container unless disowning the spawned process using nsenter
+- [x] Fix tooltip version hover on Leonardo h1
+
+0.3.5ma: 
+- [x] Test restart tool
+
 Future:
 - [] Add JavaScript timer to track the user activity (is active in last 15 mins) on the /chat.html.erb homepage
