@@ -66,3 +66,19 @@ class CommandHistory(ActiveRecordMixin, SQLModel, table=True):
     stderr: str = Field(default="")
     return_code: int
     executed_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), index=True)
+
+
+class CheckpointInfo(ActiveRecordMixin, SQLModel, table=True):
+    """Git-based checkpoint for code rollback.
+
+    Stores metadata about git commits that represent checkpoints before AI agent edits.
+    Enables users to accept or reject AI changes with one-click rollback.
+    """
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    checkpoint_id: str = Field(max_length=64, index=True)  # Git commit SHA
+    thread_id: str = Field(max_length=100, index=True)  # Thread ID (no FK constraint - thread may not exist yet)
+    description: str = Field(max_length=500)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), index=True)
+    is_accepted: Optional[bool] = Field(default=None)  # None=pending, True=accepted, False=rejected
+    changed_files_count: int = Field(default=0)

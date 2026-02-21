@@ -29,7 +29,7 @@ from app.websocket.web_socket_connection_manager import WebSocketConnectionManag
 from app.websocket.request_handler import RequestHandler
 
 # Import routers
-from app.routers import ui, api, websocket, slash_commands
+from app.routers import ui, api, websocket, slash_commands, checkpoints
 
 # Configure logging to write info-level events to both chat_app.log and stdout
 logging.basicConfig(
@@ -163,6 +163,7 @@ app.include_router(ui.router)
 app.include_router(api.router)
 app.include_router(websocket.router)
 app.include_router(slash_commands.router)
+app.include_router(checkpoints.router)
 
 
 async def graceful_shutdown(sig):

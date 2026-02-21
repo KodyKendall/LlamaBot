@@ -25,6 +25,8 @@ import { PanelResizeManager } from './ui/PanelResizeManager.js';
 import { ThreadManager } from './threads/ThreadManager.js';
 import { LoadingVerbs } from './utils/LoadingVerbs.js';
 import { ClipboardFormatter } from './utils/ClipboardFormatter.js';
+import { CheckpointManager } from './checkpoints/CheckpointManager.js';
+import { DiffViewer } from './checkpoints/DiffViewer.js';
 
 /**
  * Main application class - LlamaBot Client
@@ -62,6 +64,7 @@ class ChatApp {
     this.screenshotAnnotator = null;
     this.slashCommandManager = null;
     this.panelResizeManager = null;
+    this.checkpointManager = null;
     this.loadingVerbs = new LoadingVerbs();
 
     // Initialize WebSocket components
@@ -163,6 +166,9 @@ class ChatApp {
       this.menuManager,
       this.scrollManager
     );
+
+    // Initialize checkpoint manager for code rollback
+    this.checkpointManager = new CheckpointManager(this);
 
     // Initialize message handler
     this.messageHandler = new MessageHandler(
@@ -424,6 +430,10 @@ class ChatApp {
       // Reset token indicator when switching threads (we don't have historical token counts)
       if (this.tokenIndicator) {
         this.tokenIndicator.reset();
+      }
+      // Notify checkpoint manager of thread change
+      if (this.checkpointManager) {
+        this.checkpointManager.onThreadChange(e.detail.threadId);
       }
     });
 
