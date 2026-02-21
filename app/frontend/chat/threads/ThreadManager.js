@@ -31,10 +31,20 @@ export class ThreadManager {
     const diffHours = Math.floor(diffMins / 60);
     const diffDays = Math.floor(diffHours / 24);
 
-    if (diffSecs < 60) {
+    if (diffSecs < 30) {
       return 'Just now';
-    } else if (diffMins < 60) {
+    } else if (diffSecs < 60) {
+      return '30s ago';
+    } else if (diffMins === 1) {
+      return '1m ago';
+    } else if (diffMins < 5) {
       return `${diffMins}m ago`;
+    } else if (diffMins < 60) {
+      // Round to nearest 5 minutes for cleaner display
+      const roundedMins = Math.round(diffMins / 5) * 5;
+      return `${roundedMins}m ago`;
+    } else if (diffHours === 1) {
+      return '1h ago';
     } else if (diffHours < 24) {
       return `${diffHours}h ago`;
     } else if (diffDays === 1) {

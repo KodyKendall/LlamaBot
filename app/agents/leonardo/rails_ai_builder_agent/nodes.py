@@ -131,7 +131,11 @@ def leonardo_ai_builder(state: RailsAgentState) -> Command[Literal["tools"]]:
    if failed_tool_calls_count >= 3:
       messages = messages + [HumanMessage(content="<NOTE_FROM_SYSTEM> The user has had too many failed tool calls. DO NOT DO ANY NEW TOOL CALLS. Tell the user it's failed, and you need to stop and ask the user to try again in a different way. </NOTE_FROM_SYSTEM>")]
       # Don't bind tools when we've failed too many times - we want a text response only
-      response = llm.invoke(messages, cache_control={"type": "ephemeral"})
+      # Only pass cache_control for Anthropic models
+      if llm_model.startswith("claude"):
+         response = llm.invoke(messages, cache_control={"type": "ephemeral"})
+      else:
+         response = llm.invoke(messages)
       # Reset counter by subtracting current count (since reducer uses operator.add)
       return {"messages": [response], "failed_tool_calls_count": -failed_tool_calls_count} # by adding a negative number, we subtract the current count and reset it to 0.
 
@@ -141,7 +145,11 @@ def leonardo_ai_builder(state: RailsAgentState) -> Command[Literal["tools"]]:
    else:
       llm_with_tools = llm.bind_tools(tools, parallel_tool_calls=False)
 
-   response = llm_with_tools.invoke(messages, cache_control={"type": "ephemeral"})
+   # Only pass cache_control for Anthropic models
+   if llm_model.startswith("claude"):
+      response = llm_with_tools.invoke(messages, cache_control={"type": "ephemeral"})
+   else:
+      response = llm_with_tools.invoke(messages)
    return {"messages": [response]}
 
 # Graph
