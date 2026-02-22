@@ -22,7 +22,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from main import app, manager
 from langgraph.checkpoint.memory import MemorySaver
-from app.dependencies import auth
+from app.dependencies import auth, get_current_user
+from app.models import User
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -56,13 +57,25 @@ def disable_langsmith_completely():
             os.environ.pop(var, None)
 
 
+@pytest.fixture
+def auth_headers():
+    """Provide HTTP Basic Auth headers for testing authenticated endpoints."""
+    import base64
+    credentials = base64.b64encode(b"testuser:testpass").decode("utf-8")
+    return {"Authorization": f"Basic {credentials}"}
+
+
 @pytest_asyncio.fixture
 async def async_client():
     """Create an async HTTP client for testing."""
+    # Create a mock user for testing
+    mock_user = User(id=1, username="testuser", role="engineer", is_admin=False)
+
     app.dependency_overrides[auth] = lambda: "testuser"
-    
+    app.dependency_overrides[get_current_user] = lambda: mock_user
+
     from fastapi.testclient import TestClient
-    
+
     with TestClient(app) as client:
         # We need to patch the client to work with our FastAPI app
         from fastapi.testclient import TestClient

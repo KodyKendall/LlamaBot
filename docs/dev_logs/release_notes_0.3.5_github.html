@@ -1,0 +1,187 @@
+<h1>🦙 LlamaBot v0.3.5 - Screenshot & Video Capture, Slash Commands, and UX Polish</h1>
+
+<p><strong>Release Date:</strong> February 21, 2026</p>
+
+<hr>
+
+<h2>🚀 What's New</h2>
+
+<h3>📸 Screenshot & Video Capture ⭐</h3>
+<p>Powerful new media capture tools for easier bug reporting and communication with Leonardo.</p>
+<ul>
+  <li><strong>Screenshot capture</strong> - Take screenshots directly from the chat interface with annotation support</li>
+  <li><strong>Screenshot cropping</strong> - Crop screenshots before sending for focused context</li>
+  <li><strong>Drag & drop support</strong> - Drag files directly into chat, or copy/paste images</li>
+  <li><strong>Video recording</strong> - Record your screen to show Leonardo complex interactions</li>
+  <li><strong>Video attachments for tickets</strong> - Attach videos to tickets for richer bug reports</li>
+  <li><strong>Gemini video analysis</strong> - Leonardo can watch and analyze attached videos when using Gemini models</li>
+  <li><strong>File upload progress</strong> - Visual progress indicator for large file uploads (up to 100MB)</li>
+</ul>
+
+<h3>⚡ Slash Commands for Instance Management ⭐</h3>
+<p>New slash commands for easier Leonardo instance management directly from chat.</p>
+<ul>
+  <li><strong>Database & backup management</strong> - View db & active_storage backups from LlamaBot</li>
+  <li><strong>File permissions</strong> - Manage file permissions</li>
+  <li><strong>Cron job installation</strong> - Install cron jobs via chat</li>
+  <li><strong>Robust /restart</strong> - More reliable restart command using systemd-run to survive container restarts</li>
+  <li><strong>Command history modal</strong> - View and re-run previous commands</li>
+</ul>
+
+<h3>📚 Prompt Library</h3>
+<p>Save and reuse prompts for common tasks.</p>
+<ul>
+  <li><strong>Save prompts</strong> - Store frequently used prompts for quick access</li>
+</ul>
+
+<h3>💬 Feedback System</h3>
+<p>New feedback tab for streamlined user feedback collection.</p>
+<ul>
+  <li><strong>Feedback form</strong> - Submit feedback through a dedicated form</li>
+  <li><strong>Easier tracking</strong> - Feedback stored in database for better organization</li>
+</ul>
+
+<h3>🤖 AI Agent Builder Mode Fix</h3>
+<p>Fixed AI Agent Builder Mode for creating user-facing agents within Rails apps.</p>
+
+<hr>
+
+<h2>🔧 Improvements</h2>
+
+<h3>Enhanced Summarization</h3>
+<ul>
+  <li><strong>Custom summarization prompt</strong> - Comprehensive prompt preserving technical details, code patterns, user intent, and errors/fixes</li>
+  <li><strong>Increased message retention</strong> - From 8 to 20 messages to match Claude Code defaults</li>
+  <li>Applied across all agents: rails_agent, rails_testing_agent, rails_ticket_mode_agent</li>
+</ul>
+
+<h3>UI/UX Enhancements</h3>
+<ul>
+  <li><strong>Resizable chat panel</strong> - Drag handle to resize the chat screen (great for screenshots)</li>
+  <li><strong>Selected element button</strong> - Moved out of hidden toolbar to be next to chat input</li>
+  <li><strong>Files in message bubbles</strong> - Attached files now display in the chat message</li>
+  <li><strong>Relative timestamps</strong> - Thread list shows "Just now", "5 minutes ago", "Yesterday", etc.</li>
+  <li><strong>Human-readable thread times</strong> - More readable conversation timestamps</li>
+  <li><strong>Dynamic tab title</strong> - Tab header shows window URL instead of static "Leonardo"</li>
+  <li><strong>Version tooltip</strong> - Hover over Leonardo header to see version</li>
+  <li><strong>User activity tracking</strong> - JavaScript timer tracks if user is active in last 15 minutes</li>
+</ul>
+
+<h3>WebSocket Reliability</h3>
+<ul>
+  <li><strong>WebSocket security</strong> - Added security layer for websocket connections</li>
+  <li><strong>Connection error handling</strong> - If websocket breaks, shows error and stops thinking mode</li>
+  <li><strong>Security tests</strong> - Added tests to verify websocket security</li>
+</ul>
+
+<h3>Recording Improvements</h3>
+<ul>
+  <li><strong>Smart recording toggle</strong> - If already recording rails logs and pressing bug record, it stops the current recording instead of starting a second one</li>
+</ul>
+
+<h3>DOM Structure Debugging</h3>
+<ul>
+  <li><strong>Nesting doll bug documentation</strong> - Documents the pattern of missing closing tags causing JS library failures</li>
+  <li><strong>Console debug script</strong> - For detecting DOM nesting issues</li>
+  <li><strong>HTML balance check</strong> - Quick Rails console check for HTML structure</li>
+  <li><strong>Testing patterns</strong> - Request spec and feature spec patterns for validating HTML structure</li>
+</ul>
+
+<h3>Ticket Mode Enhancements</h3>
+<ul>
+  <li><strong>HTML vs database tables</strong> - Improved prompt to delineate between HTML tables and database tables</li>
+</ul>
+
+<h3>Configuration</h3>
+<ul>
+  <li><strong>Gemini 3.0 Flash default</strong> - Set as the default model</li>
+  <li><strong>.leonardo/LEONARDO.md</strong> - Added project-specific context file support</li>
+  <li><strong>Version detection</strong> - docker-compose.yml is now the first option to read LlamaBot version</li>
+</ul>
+
+<hr>
+
+<h2>🐛 Bug Fixes</h2>
+<ul>
+  <li>Fixed TAVILY_API_KEY initialization using .get() with default empty string (prevents crash if not set)</li>
+  <li>Fixed RuntimeError handling in signal handler registration for pytest/non-main-thread contexts</li>
+  <li>Fixed restart script dying on llamabot takedown - now properly disowns spawned process using nsenter</li>
+  <li>Fixed tooltip version hover on Leonardo h1</li>
+  <li>Fixed AI Agent Builder Mode</li>
+</ul>
+
+<hr>
+
+<h2>📋 Previous Releases</h2>
+
+<details>
+<summary><strong>v0.3.0</strong> - Ticket Mode 2.0 & Enhanced Builder Pattern ⭐</summary>
+<ul>
+  <li>Complete redesign of Ticket Mode with single-conversation workflow</li>
+  <li>Sub-agent delegation for technical research</li>
+  <li>Builder Pattern documentation for complex UI architecture</li>
+  <li>Enhanced Git error handling</li>
+  <li>Debugging workflow with 🪲 emoji convention</li>
+  <li>Ticket Mode middleware stack</li>
+</ul>
+</details>
+
+<details>
+<summary><strong>v0.2.22</strong> - Middleware Architecture & Ticket Mode</summary>
+<ul>
+  <li>Modern middleware architecture with LangChain 1.1+</li>
+  <li>Initial Ticket Mode with 3-stage workflow</li>
+  <li>Sub-agent task delegation</li>
+  <li>Enhanced agent configuration via langgraph.json</li>
+  <li>Modular FastAPI routes</li>
+</ul>
+</details>
+
+<details>
+<summary><strong>v0.2.21</strong> - Multi-User & Admin System</summary>
+<ul>
+  <li>Multi-user management with PostgreSQL authentication</li>
+  <li>Admin permissions and role-based access control</li>
+  <li>ActiveRecord-like console utilities</li>
+  <li>User registration and session management</li>
+</ul>
+</details>
+
+<details>
+<summary><strong>v0.2.20</strong> - User Feedback Agent</summary>
+<ul>
+  <li>New user feedback agent mode for end-users to plan future development</li>
+  <li>Improved feedback agent prompt for better scope and sprint planning</li>
+  <li>Enables direct user input into product roadmap</li>
+</ul>
+</details>
+
+<details>
+<summary><strong>v0.2.19</strong> - AI Builder & Testing Mode ⭐</summary>
+<ul>
+  <li><strong>AI Builder Mode</strong> - Leonardo helps build user-facing agents within Rails apps</li>
+  <li><strong>QA Test Builder Mode</strong> - Automated test generation with RSpec & Vite-JS</li>
+  <li>New <code>user_agents</code> folder for custom agent definitions</li>
+  <li>Prompt caching for all agents (significant cost reduction)</li>
+  <li>Capybara/Cuprite browser tool for JavaScript debugging</li>
+</ul>
+</details>
+
+<details>
+<summary><strong>v0.2.18</strong> - UI/UX Overhaul ⭐</summary>
+<ul>
+  <li>Massive UI/UX overhaul for messages and iframe</li>
+  <li>Refactored chat.html into modular JavaScript packages</li>
+  <li>Support for any LLM model - Claude, Gemini, GPT Codex, GPT series</li>
+  <li>New task/planning component for clearer agent status</li>
+  <li>Auto-refreshing iframe shows changes in real-time</li>
+</ul>
+</details>
+
+<hr>
+
+<p>🦙 <strong>LlamaBot</strong> - AI Coding Agent Framework</p>
+<p>
+  <a href="https://github.com/KodyKendall/LlamaBot">GitHub</a> ·
+  <a href="https://discord.gg/7DapkvmWKZ">Discord</a>
+</p>
