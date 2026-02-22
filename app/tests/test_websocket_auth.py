@@ -399,14 +399,19 @@ class TestWebSocketAuthEnabled:
 class TestWSTokenEndpoint:
     """Tests for the /api/ws-token endpoint."""
 
-    async def test_ws_token_requires_auth(self, async_client):
+    def test_ws_token_requires_auth(self):
         """Test that /api/ws-token requires HTTP Basic auth."""
-        response = await async_client.get("/api/ws-token")
-        assert response.status_code == 401
+        from fastapi.testclient import TestClient
+        from main import app
 
-    async def test_ws_token_returns_valid_jwt(self, async_client, auth_headers):
+        # Use a fresh client without auth overrides
+        with TestClient(app) as client:
+            response = client.get("/api/ws-token")
+            assert response.status_code == 401
+
+    async def test_ws_token_returns_valid_jwt(self, authenticated_async_client, auth_headers):
         """Test that /api/ws-token returns a valid JWT token."""
-        response = await async_client.get("/api/ws-token", headers=auth_headers)
+        response = await authenticated_async_client.get("/api/ws-token", headers=auth_headers)
 
         if response.status_code == 401:
             pytest.skip("No valid auth headers available")
@@ -424,11 +429,11 @@ class TestWSTokenEndpoint:
         parts = data["token"].split(".")
         assert len(parts) == 3
 
-    async def test_ws_token_is_verifiable(self, async_client, auth_headers):
+    async def test_ws_token_is_verifiable(self, authenticated_async_client, auth_headers):
         """Test that returned token can be verified."""
         from app.services.token_service import verify_ws_token
 
-        response = await async_client.get("/api/ws-token", headers=auth_headers)
+        response = await authenticated_async_client.get("/api/ws-token", headers=auth_headers)
 
         if response.status_code == 401:
             pytest.skip("No valid auth headers available")

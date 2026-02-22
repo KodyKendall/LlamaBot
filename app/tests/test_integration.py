@@ -3,7 +3,7 @@ Integration tests for the complete application flow.
 """
 import pytest
 import json
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 from fastapi.testclient import TestClient
 
 
@@ -38,9 +38,24 @@ class TestApplicationIntegration:
         assert "write_html_agent" in data["agents"]
 
     @pytest.mark.asyncio
+    @patch("app.routers.ui.authenticate_user")
+    @patch("app.routers.ui.security", new_callable=AsyncMock)
+    @patch("app.routers.ui.has_any_users")
     @patch("builtins.open")
-    async def test_html_endpoints_integration(self, mock_open, async_client):
+    async def test_html_endpoints_integration(self, mock_open, mock_has_users, mock_security, mock_auth, async_client):
         """Test HTML-serving endpoints that exist."""
+        # Mock auth for endpoints that require it
+        mock_has_users.return_value = True
+        # Mock security to return credentials
+        mock_credentials = MagicMock()
+        mock_credentials.username = "testuser"
+        mock_credentials.password = "testpass"
+        mock_security.return_value = mock_credentials
+        # Mock authenticate_user to return a user
+        mock_user = MagicMock()
+        mock_user.role = "engineer"
+        mock_auth.return_value = mock_user
+
         # Only test endpoints that actually exist in the current API
         html_endpoints = [
             ("/", "chat.html"),
