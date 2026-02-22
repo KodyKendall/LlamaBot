@@ -2,8 +2,9 @@ FROM nikolaik/python-nodejs:python3.11-nodejs18
 
 WORKDIR /app
 
-# install gh cli and docker cli
-RUN apt-get update && apt-get install -y curl gnupg ca-certificates ripgrep && \
+# install gh cli, nsenter (for host command execution), and other tools
+RUN rm -rf /var/lib/apt/lists/* && \
+    apt-get update && apt-get install -y curl gnupg ca-certificates ripgrep util-linux && \
     curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | gpg --dearmor -o /usr/share/keyrings/githubcli-archive-keyring.gpg && \
     chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg && \
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null && \
@@ -40,7 +41,7 @@ ENV PYTHONPATH="/app:$PYTHONPATH"
 # Expose port
 EXPOSE 8000
 
-CMD ["bash", "-c", "if [ ! -z \"$DB_URI\" ]; then python init_pg_checkpointer.py; fi && uvicorn main:app --host 0.0.0.0 --port 8000"]
+CMD ["bash", "-c", "if [ ! -z \"$DB_URI\" ]; then python init_pg_checkpointer.py; fi && uvicorn main:app --host 0.0.0.0 --port 8000 --ws-max-size 157286400"]
 
 # These commands document how to build the Docker image quickly and deploy to dockerhub
-# docker buildx build --file Dockerfile --platform linux/amd64,linux/arm64 --tag kody06/llamabot:0.3.4a --push .
+# docker buildx build --file Dockerfile --platform linux/amd64,linux/arm64 --tag kody06/llamabot:0.3.5n --push .

@@ -1,5 +1,6 @@
 from langchain_openai import ChatOpenAI
 from langchain_anthropic import ChatAnthropic
+from langchain_google_genai import ChatGoogleGenerativeAI
 
 from langchain_core.tools import tool
 from dotenv import load_dotenv
@@ -30,6 +31,7 @@ from app.agents.leonardo.rails_agent.tools import (
     read_langgraph_json, edit_langgraph_json
 )
 from app.agents.leonardo.rails_ai_builder_agent.prompts import RAILS_AI_BUILDER_AGENT_PROMPT
+from app.agents.leonardo.project_context import build_system_prompt_with_project_context
 
 import logging
 logger = logging.getLogger(__name__)
@@ -42,14 +44,19 @@ APP_DIR = PROJECT_ROOT / 'app'
 
 # Global tools list
 
-# System message
-sys_msg = {
+def get_sys_msg():
+    """Build system message with project context and prompt caching.
+
+    Loads LEONARDO.md if it exists and appends it to the base prompt.
+    """
+    full_prompt = build_system_prompt_with_project_context(RAILS_AI_BUILDER_AGENT_PROMPT)
+    return {
         "role": "system",
         "content": [
             {
                 "type": "text",
-                "text": f"{RAILS_AI_BUILDER_AGENT_PROMPT}",
-                "cache_control": {"type": "ephemeral"}, # only works for Anthropic models.
+                "text": full_prompt,
+                "cache_control": {"type": "ephemeral"},  # Only works for Anthropic models.
             },
         ],
     }
@@ -71,10 +78,26 @@ def get_llm(model_name: str):
          use_responses_api=True,
          reasoning={"effort": "low"}
       )
+   elif model_name == "gpt-5-mini":
+      return ChatOpenAI(
+         model="gpt-5-mini",
+         use_responses_api=True,
+         reasoning={"effort": "low"}
+      )
    elif model_name == "claude-4.5-sonnet":
       return ChatAnthropic(model="claude-sonnet-4-5-20250929", max_tokens=16384)
    elif model_name == "claude-4.5-haiku":
       return ChatAnthropic(model="claude-haiku-4-5", max_tokens=16384)
+   elif model_name == "gemini-3-flash":
+      return ChatGoogleGenerativeAI(
+         model="gemini-3-flash-preview",
+         include_thoughts=True
+      )
+   elif model_name == "gemini-3-pro":
+      return ChatGoogleGenerativeAI(
+         model="gemini-3-pro-preview",
+         include_thoughts=True
+      )
    else:
       # Default to Claude 4.5 Haiku
       return ChatAnthropic(model="claude-haiku-4-5", max_tokens=16384)
@@ -90,7 +113,7 @@ def leonardo_ai_builder(state: RailsAgentState) -> Command[Literal["tools"]]:
 
    view_path = (state.get('debug_info') or {}).get('view_path')
 
-   messages = [sys_msg] + state["messages"]
+   messages = [get_sys_msg()] + state["messages"]
 
    if view_path:
       messages = messages + [HumanMessage(content="<NOTE_FROM_SYSTEM> The user is currently viewing their Ruby on Rails webpage route at: " + view_path + " </NOTE_FROM_SYSTEM>")]
@@ -108,12 +131,25 @@ def leonardo_ai_builder(state: RailsAgentState) -> Command[Literal["tools"]]:
    if failed_tool_calls_count >= 3:
       messages = messages + [HumanMessage(content="<NOTE_FROM_SYSTEM> The user has had too many failed tool calls. DO NOT DO ANY NEW TOOL CALLS. Tell the user it's failed, and you need to stop and ask the user to try again in a different way. </NOTE_FROM_SYSTEM>")]
       # Don't bind tools when we've failed too many times - we want a text response only
-      response = llm.invoke(messages, cache_control={"type": "ephemeral"})
+      # Only pass cache_control for Anthropic models
+      if llm_model.startswith("claude"):
+         response = llm.invoke(messages, cache_control={"type": "ephemeral"})
+      else:
+         response = llm.invoke(messages)
       # Reset counter by subtracting current count (since reducer uses operator.add)
       return {"messages": [response], "failed_tool_calls_count": -failed_tool_calls_count} # by adding a negative number, we subtract the current count and reset it to 0.
 
-   llm_with_tools = llm.bind_tools(tools, parallel_tool_calls=False)
-   response = llm_with_tools.invoke(messages, cache_control={"type": "ephemeral"})
+   # Bind tools - parallel_tool_calls is not supported by Gemini
+   if llm_model.startswith("gemini"):
+      llm_with_tools = llm.bind_tools(tools)
+   else:
+      llm_with_tools = llm.bind_tools(tools, parallel_tool_calls=False)
+
+   # Only pass cache_control for Anthropic models
+   if llm_model.startswith("claude"):
+      response = llm_with_tools.invoke(messages, cache_control={"type": "ephemeral"})
+   else:
+      response = llm_with_tools.invoke(messages)
    return {"messages": [response]}
 
 # Graph

@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import os
 import logging
 import asyncio
+import signal
 from datetime import datetime, timezone
 from pathlib import Path
 from collections import defaultdict
@@ -22,11 +23,13 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
 from app.db import init_db, engine
 from app.services.auth_migration import migrate_auth_json
+from app.services.mothership_client import MothershipClient
+from app.services.lease_manager import LeaseManager
 from app.websocket.web_socket_connection_manager import WebSocketConnectionManager
 from app.websocket.request_handler import RequestHandler
 
 # Import routers
-from app.routers import ui, api, websocket
+from app.routers import ui, api, websocket, slash_commands
 
 # Configure logging to write info-level events to both chat_app.log and stdout
 logging.basicConfig(
@@ -62,6 +65,10 @@ app.state.checkpointer = None
 app.state.async_checkpointer = None
 app.state.timestamp = datetime.now(timezone.utc)
 app.state.compiled_graphs = {}  # Cache for pre-compiled LangGraph workflows
+
+# Mothership integration for lease management
+app.state.mothership_client = MothershipClient()
+app.state.lease_manager = LeaseManager(app, app.state.mothership_client)
 
 # Path to legacy auth file (for migration)
 LEGACY_AUTH_FILE = Path(__file__).parent / "auth.json"
@@ -155,6 +162,24 @@ MAX_QUEUE_SIZE = 10
 app.include_router(ui.router)
 app.include_router(api.router)
 app.include_router(websocket.router)
+app.include_router(slash_commands.router)
+
+
+async def graceful_shutdown(sig):
+    """Handle SIGTERM/SIGINT for graceful shutdown."""
+    logger.info(f"Received signal {sig.name}, initiating graceful shutdown...")
+
+    # Stop lease manager
+    if hasattr(app.state, 'lease_manager'):
+        await app.state.lease_manager.stop()
+
+    # Notify mothership of teardown
+    if hasattr(app.state, 'mothership_client') and app.state.mothership_client.enabled:
+        try:
+            await app.state.mothership_client.notify_teardown(reason="sigterm")
+            logger.info("Mothership notified of teardown")
+        except Exception as e:
+            logger.error(f"Failed to notify mothership: {e}")
 
 
 @app.on_event("startup")
@@ -227,6 +252,23 @@ async def startup_event():
     # asyncio.create_task(tail_docker_logs())
     # asyncio.create_task(broadcast_logs())
     # logger.info("Docker log streaming started")
+
+    # Start lease manager background task
+    await app.state.lease_manager.start()
+
+    # Register signal handlers for graceful shutdown
+    try:
+        loop = asyncio.get_event_loop()
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            loop.add_signal_handler(
+                sig,
+                lambda s=sig: asyncio.create_task(graceful_shutdown(s))
+            )
+        logger.info("Signal handlers registered for graceful shutdown")
+    except (NotImplementedError, RuntimeError):
+        # Windows doesn't support add_signal_handler
+        # RuntimeError occurs when not in main thread (e.g., pytest)
+        logger.warning("Signal handlers not supported on this platform/context")
 
 
 # Mount MCP Server (stubbed out for now - MCP not yet fully implemented)

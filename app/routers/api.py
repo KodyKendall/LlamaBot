@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from sqlmodel import Session
 
 from app.models import User, ThreadMetadata
-from app.dependencies import get_db_session, auth, admin_required
+from app.dependencies import get_db_session, auth, admin_required, engineer_or_admin_required, get_current_user
 from app.services.thread_service import get_thread_list
 from app.services.user_service import (
     get_all_users, get_user_by_username, update_user, delete_user
@@ -37,6 +37,93 @@ class UpdateUserRequest(BaseModel):
     is_admin: bool | None = None
     new_password: str | None = None
     role: str | None = None
+
+
+class CreatePromptRequest(BaseModel):
+    name: str
+    content: str
+    group: str = "General"
+    description: str | None = None
+
+
+class UpdatePromptRequest(BaseModel):
+    name: str | None = None
+    content: str | None = None
+    group: str | None = None
+    description: str | None = None
+    is_active: bool | None = None
+
+
+# ============== Version API ==============
+
+def get_container_version() -> str:
+    """Get the version from docker-compose.yml (mounted at /app/leonardo) or Docker API."""
+    import socket
+
+    # First, try to parse from mounted docker-compose.yml
+    compose_paths = [
+        "/app/leonardo/docker-compose.yml",
+        "/app/leonardo/docker-compose-dev.yml",
+    ]
+    for compose_path in compose_paths:
+        try:
+            with open(compose_path, 'r') as f:
+                for line in f:
+                    # Look for image line with llamabot (commented or not)
+                    # e.g., "# image: kody06/llamabot:0.3.5c" or "image: kody06/llamabot:0.3.5c"
+                    if 'image:' in line and 'llamabot:' in line:
+                        # Extract version from "kody06/llamabot:0.3.5c"
+                        match = re.search(r'llamabot:([^\s"\']+)', line)
+                        if match:
+                            return match.group(1)
+        except FileNotFoundError:
+            continue
+        except Exception as e:
+            logger.debug(f"Could not parse {compose_path}: {e}")
+
+    # Fallback: Query Docker API
+    try:
+        container_id = socket.gethostname()
+        import http.client
+        conn = http.client.HTTPConnection("localhost")
+        conn.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        conn.sock.connect("/var/run/docker.sock")
+        conn.request("GET", f"/containers/{container_id}/json")
+        response = conn.getresponse()
+
+        if response.status == 200:
+            data = json.loads(response.read().decode())
+            image = data.get("Config", {}).get("Image", "")
+            if ":" in image:
+                version = image.split(":")[-1]
+                if version != "latest":
+                    return version
+        return "dev"
+    except Exception as e:
+        logger.debug(f"Could not get container version: {e}")
+        return "dev"
+
+
+@router.get("/api/version", response_class=JSONResponse)
+async def api_get_version():
+    """Get the current LlamaBot version from docker-compose.yml or Docker image tag."""
+    version = get_container_version()
+    return {"version": version}
+
+
+# ============== WebSocket Authentication API ==============
+
+@router.get("/api/ws-token", response_class=JSONResponse)
+async def get_ws_token(current_user: User = Depends(get_current_user)):
+    """
+    Generate a JWT token for WebSocket authentication.
+
+    The token is used by the frontend to authenticate WebSocket connections.
+    It expires after WS_TOKEN_EXPIRY_MINUTES (default 30 minutes).
+    """
+    from app.services.token_service import create_ws_token, EXPIRY_MINUTES
+    token = create_ws_token(current_user)
+    return {"token": token, "expires_in": EXPIRY_MINUTES * 60}
 
 
 # ============== User Management API ==============
@@ -328,6 +415,38 @@ def check_timestamp(request: Request):
     return {"timestamp": request.app.state.timestamp}
 
 
+@router.post("/api/update-activity", response_class=JSONResponse)
+async def update_activity(request: Request, username: str = Depends(auth)):
+    """Update last activity timestamp (called by frontend on user activity)."""
+    from datetime import datetime, timezone
+    request.app.state.timestamp = datetime.now(timezone.utc)
+    return {"timestamp": request.app.state.timestamp.isoformat()}
+
+
+@router.get("/api/lease-status", response_class=JSONResponse)
+async def get_lease_status(request: Request):
+    """Debug endpoint: show lease manager status."""
+    from datetime import datetime, timezone
+
+    mothership = getattr(request.app.state, 'mothership_client', None)
+    last_activity = getattr(request.app.state, 'timestamp', None)
+    now = datetime.now(timezone.utc)
+
+    if mothership is None:
+        return {
+            "mothership_enabled": False,
+            "error": "Mothership client not initialized"
+        }
+
+    return {
+        "mothership_enabled": mothership.enabled,
+        "instance_name": mothership.instance_name,
+        "last_activity": last_activity.isoformat() if last_activity else None,
+        "seconds_since_activity": (now - last_activity).total_seconds() if last_activity else None,
+        "lease_duration_seconds": mothership.lease_duration_seconds,
+    }
+
+
 @router.get("/api/instance-info", response_class=JSONResponse)
 async def get_instance_info():
     """Get instance info from .leonardo/instance.json if it exists."""
@@ -355,3 +474,206 @@ async def capture_rails_logs_endpoint(request: Request, username: str = Depends(
     logs = Path(file_path).read_text()
 
     return {"logs": logs, "file_path": file_path}
+
+
+# ============== Prompt Library API ==============
+
+@router.get("/api/prompts", response_class=JSONResponse)
+async def api_get_prompts(
+    username: str = Depends(auth),
+    session: Session = Depends(get_db_session),
+    group: Optional[str] = Query(None, description="Filter by group"),
+    search: Optional[str] = Query(None, description="Search term")
+):
+    """Get all prompts, optionally filtered by group or search term."""
+    from app.services.prompt_service import (
+        get_all_prompts, get_prompts_by_group, search_prompts
+    )
+
+    if search:
+        prompts = search_prompts(session, search)
+    elif group:
+        prompts = get_prompts_by_group(session, group)
+    else:
+        prompts = get_all_prompts(session)
+
+    return [
+        {
+            "id": p.id,
+            "name": p.name,
+            "content": p.content,
+            "description": p.description,
+            "group": p.group,
+            "usage_count": p.usage_count,
+            "created_at": p.created_at.isoformat() if p.created_at else None,
+            "updated_at": p.updated_at.isoformat() if p.updated_at else None,
+        }
+        for p in prompts
+    ]
+
+
+@router.get("/api/prompts/groups", response_class=JSONResponse)
+async def api_get_prompt_groups(
+    username: str = Depends(auth),
+    session: Session = Depends(get_db_session)
+):
+    """Get list of unique prompt groups."""
+    from app.services.prompt_service import get_prompt_groups
+    groups = get_prompt_groups(session)
+    return {"groups": groups}
+
+
+@router.get("/api/prompts/{prompt_id}", response_class=JSONResponse)
+async def api_get_prompt(
+    prompt_id: int,
+    username: str = Depends(auth),
+    session: Session = Depends(get_db_session)
+):
+    """Get a specific prompt by ID."""
+    from app.services.prompt_service import get_prompt_by_id
+    prompt = get_prompt_by_id(session, prompt_id)
+    if not prompt:
+        raise HTTPException(status_code=404, detail="Prompt not found")
+
+    return {
+        "id": prompt.id,
+        "name": prompt.name,
+        "content": prompt.content,
+        "description": prompt.description,
+        "group": prompt.group,
+        "usage_count": prompt.usage_count,
+        "created_at": prompt.created_at.isoformat() if prompt.created_at else None,
+        "updated_at": prompt.updated_at.isoformat() if prompt.updated_at else None,
+    }
+
+
+@router.post("/api/prompts", response_class=JSONResponse)
+async def api_create_prompt(
+    request: CreatePromptRequest,
+    username: str = Depends(auth),
+    session: Session = Depends(get_db_session)
+):
+    """Create a new prompt."""
+    from app.services.prompt_service import create_prompt
+
+    if not request.name or not request.name.strip():
+        raise HTTPException(status_code=400, detail="Name is required")
+    if not request.content or not request.content.strip():
+        raise HTTPException(status_code=400, detail="Content is required")
+
+    prompt = create_prompt(
+        session,
+        name=request.name,
+        content=request.content,
+        group=request.group,
+        description=request.description
+    )
+
+    return {
+        "id": prompt.id,
+        "name": prompt.name,
+        "message": "Prompt created successfully"
+    }
+
+
+@router.patch("/api/prompts/{prompt_id}", response_class=JSONResponse)
+async def api_update_prompt(
+    prompt_id: int,
+    request: UpdatePromptRequest,
+    username: str = Depends(auth),
+    session: Session = Depends(get_db_session)
+):
+    """Update an existing prompt."""
+    from app.services.prompt_service import update_prompt
+
+    prompt = update_prompt(
+        session, prompt_id,
+        name=request.name,
+        content=request.content,
+        group=request.group,
+        description=request.description,
+        is_active=request.is_active
+    )
+
+    if not prompt:
+        raise HTTPException(status_code=404, detail="Prompt not found")
+
+    return {"message": "Prompt updated successfully"}
+
+
+@router.delete("/api/prompts/{prompt_id}", response_class=JSONResponse)
+async def api_delete_prompt(
+    prompt_id: int,
+    username: str = Depends(auth),
+    session: Session = Depends(get_db_session),
+    hard_delete: bool = Query(False, description="Permanently delete")
+):
+    """Delete a prompt (soft delete by default)."""
+    from app.services.prompt_service import delete_prompt
+
+    if not delete_prompt(session, prompt_id, hard_delete=hard_delete):
+        raise HTTPException(status_code=404, detail="Prompt not found")
+
+    return {"message": "Prompt deleted successfully"}
+
+
+@router.post("/api/prompts/{prompt_id}/use", response_class=JSONResponse)
+async def api_use_prompt(
+    prompt_id: int,
+    username: str = Depends(auth),
+    session: Session = Depends(get_db_session)
+):
+    """Increment usage count when a prompt is attached to a message."""
+    from app.services.prompt_service import increment_usage
+
+    prompt = increment_usage(session, prompt_id)
+    if not prompt:
+        raise HTTPException(status_code=404, detail="Prompt not found")
+
+    return {"usage_count": prompt.usage_count}
+
+
+# ============== LEONARDO.md API ==============
+
+class UpdateLeonardoMdRequest(BaseModel):
+    content: str
+
+
+@router.get("/api/leonardo-md", response_class=JSONResponse)
+async def get_leonardo_md(username: str = Depends(auth)):
+    """Get LEONARDO.md content if it exists."""
+    leonardo_md_path = ".leonardo/LEONARDO.md"
+
+    if not os.path.exists(leonardo_md_path):
+        return {"content": None, "exists": False}
+
+    try:
+        with open(leonardo_md_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        return {"content": content, "exists": True}
+    except Exception as e:
+        logger.warning(f"Error reading LEONARDO.md: {e}")
+        return {"content": None, "exists": False, "error": str(e)}
+
+
+@router.put("/api/leonardo-md", response_class=JSONResponse)
+async def update_leonardo_md(
+    request: UpdateLeonardoMdRequest,
+    current_user: User = Depends(engineer_or_admin_required)
+):
+    """Update LEONARDO.md content (engineer/admin only)."""
+    leonardo_dir = ".leonardo"
+    leonardo_md_path = f"{leonardo_dir}/LEONARDO.md"
+
+    # Ensure .leonardo directory exists
+    os.makedirs(leonardo_dir, exist_ok=True)
+
+    try:
+        with open(leonardo_md_path, "w", encoding="utf-8") as f:
+            f.write(request.content)
+
+        logger.info(f"User '{current_user.username}' updated LEONARDO.md")
+        return {"message": "LEONARDO.md updated successfully"}
+    except Exception as e:
+        logger.error(f"Error writing LEONARDO.md: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to write file: {e}")

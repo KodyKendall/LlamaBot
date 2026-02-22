@@ -16,6 +16,12 @@ import { ElementSelector } from './ui/ElementSelector.js';
 import { MenuManager } from './ui/MenuManager.js';
 import { MobileViewManager } from './ui/MobileViewManager.js';
 import { TokenIndicator } from './ui/TokenIndicator.js';
+import { PromptManager } from './ui/PromptManager.js';
+import { FileAttachmentManager } from './ui/FileAttachmentManager.js';
+import { ScreenRecorder } from './ui/ScreenRecorder.js';
+import { ScreenshotAnnotator } from './ui/ScreenshotAnnotator.js';
+import { SlashCommandManager } from './ui/SlashCommandManager.js';
+import { PanelResizeManager } from './ui/PanelResizeManager.js';
 import { ThreadManager } from './threads/ThreadManager.js';
 import { LoadingVerbs } from './utils/LoadingVerbs.js';
 import { ClipboardFormatter } from './utils/ClipboardFormatter.js';
@@ -50,6 +56,12 @@ class ChatApp {
     this.mobileViewManager = null;
     this.threadManager = null;
     this.tokenIndicator = null;
+    this.promptManager = null;
+    this.fileAttachmentManager = null;
+    this.screenRecorder = null;
+    this.screenshotAnnotator = null;
+    this.slashCommandManager = null;
+    this.panelResizeManager = null;
     this.loadingVerbs = new LoadingVerbs();
 
     // Initialize WebSocket components
@@ -58,6 +70,12 @@ class ChatApp {
 
     // Store element references (will be populated in initComponents)
     this.elements = {};
+
+    // Activity tracking for lease management
+    this.lastActivitySync = 0;
+    this.ACTIVITY_SYNC_INTERVAL = 60000; // Sync to backend every 60 seconds max
+    this.leaseConfig = null;
+    this.inactivityCheckInterval = null;
   }
 
   /**
@@ -122,6 +140,7 @@ class ChatApp {
     this.iframeManager = new IframeManager(this.container);
     this.menuManager = new MenuManager(this.container);
     this.mobileViewManager = new MobileViewManager(this.scrollManager, this.container, this.elements);
+    this.panelResizeManager = new PanelResizeManager(this.container, this.elements);
     this.tokenIndicator = new TokenIndicator();
     this.clipboardFormatter = new ClipboardFormatter(this.elements.messageHistory);
     this.clipboardFormatter.init();
@@ -161,6 +180,11 @@ class ChatApp {
     const socket = this.webSocketManager.connect();
     this.appState.setSocket(socket);
 
+    // Listen for websocket disconnection to hide thinking indicator
+    window.addEventListener('websocketDisconnected', () => {
+      this.hideThinkingIndicator();
+    });
+
     // Initialize event listeners
     this.initEventListeners();
 
@@ -174,8 +198,55 @@ class ChatApp {
     this.elementSelector = new ElementSelector(this.iframeManager);
     this.elementSelector.init(this.elements.elementSelectorBtn, this.elements.messageInput);
 
+    // Initialize prompt manager
+    this.promptManager = new PromptManager();
+    const inputArea = this.container.querySelector('.input-area');
+    this.promptManager.init(this.elements.promptLibraryBtn, this.elements.messageInput, inputArea);
+
+    // Close toolbar when prompt library is clicked
+    if (this.elements.promptLibraryBtn) {
+      this.elements.promptLibraryBtn.addEventListener('click', () => {
+        this.closeToolsToolbar();
+      });
+    }
+
+    // Initialize file attachment manager
+    this.fileAttachmentManager = new FileAttachmentManager();
+    this.fileAttachmentManager.init(
+      this.elements.fileAttachBtn,
+      this.elements.fileInput,
+      this.elements.attachmentsPreview
+    );
+    this.fileAttachmentManager.setupDragAndDrop(
+      this.elements.inputArea,
+      this.elements.dropZoneOverlay
+    );
+    this.fileAttachmentManager.setupPaste(this.elements.messageInput);
+
+    // Close toolbar when file attach is clicked
+    if (this.elements.fileAttachBtn) {
+      this.elements.fileAttachBtn.addEventListener('click', () => {
+        this.closeToolsToolbar();
+      });
+    }
+
+    // Initialize screen recorder
+    this.screenRecorder = new ScreenRecorder();
+    this.initScreenRecording();
+
+    // Initialize screenshot annotator
+    this.screenshotAnnotator = new ScreenshotAnnotator();
+    this.initScreenshotCapture();
+
+    // Initialize slash command manager
+    this.slashCommandManager = new SlashCommandManager(this.container);
+    this.slashCommandManager.init(this.elements.messageInput, this);
+
     // Load threads
     this.threadManager.fetchThreads();
+
+    // Setup activity tracking for lease management
+    this.setupActivityTracking();
 
     // Load settings from cookies
     this.loadSettingsFromCookies();
@@ -207,7 +278,23 @@ class ChatApp {
       menuDrawer: this.container.querySelector('[data-llamabot="menu-drawer"]'),
       scrollToBottomBtn: this.container.querySelector('[data-llamabot="scroll-to-bottom"]'),
       liveSiteFrame: this.container.querySelector('[data-llamabot="live-site-frame"]'),
-      vsCodeFrame: this.container.querySelector('[data-llamabot="vscode-frame"]')
+      vsCodeFrame: this.container.querySelector('[data-llamabot="vscode-frame"]'),
+      promptLibraryBtn: this.container.querySelector('[data-llamabot="prompt-library-btn"]'),
+      fileAttachBtn: this.container.querySelector('[data-llamabot="file-attach-btn"]'),
+      fileInput: this.container.querySelector('[data-llamabot="file-input"]'),
+      attachmentsPreview: this.container.querySelector('[data-llamabot="attachments-preview"]'),
+      dropZoneOverlay: this.container.querySelector('[data-llamabot="drop-zone-overlay"]'),
+      inputArea: this.container.querySelector('.input-area'),
+      toolsToggleBtn: this.container.querySelector('[data-llamabot="tools-toggle-btn"]'),
+      toolsToolbar: this.container.querySelector('[data-llamabot="tools-toolbar"]'),
+      screenRecordBtn: this.container.querySelector('[data-llamabot="screen-record-btn"]'),
+      recordingTimer: this.container.querySelector('[data-llamabot="recording-timer"]'),
+      screenshotBtn: this.container.querySelector('[data-llamabot="screenshot-btn"]'),
+      collapsedScreenRecordBtn: this.container.querySelector('[data-llamabot="collapsed-screen-record-btn"]'),
+      collapsedRecordingTimer: this.container.querySelector('[data-llamabot="collapsed-recording-timer"]'),
+      floatingRecordIndicator: this.container.querySelector('[data-llamabot="floating-record-indicator"]'),
+      floatingRecordTimer: this.container.querySelector('[data-llamabot="floating-record-timer"]'),
+      stopRecordingBtn: this.container.querySelector('[data-llamabot="stop-recording-btn"]')
     };
   }
 
@@ -251,7 +338,32 @@ class ChatApp {
       this.updateDropdownLabel(this.elements.modelSelect);
     }
 
-    // Model toggle button - show/hide model selector
+    // Tools toolbar toggle
+    if (this.elements.toolsToggleBtn && this.elements.toolsToolbar) {
+      this.elements.toolsToggleBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isHidden = this.elements.toolsToolbar.classList.contains('hidden');
+        if (isHidden) {
+          this.elements.toolsToolbar.classList.remove('hidden');
+          this.elements.toolsToggleBtn.classList.add('active');
+        } else {
+          this.elements.toolsToolbar.classList.add('hidden');
+          this.elements.toolsToggleBtn.classList.remove('active');
+        }
+      });
+
+      // Close toolbar when clicking outside
+      document.addEventListener('click', (e) => {
+        if (this.elements.toolsToolbar &&
+            !this.elements.toolsToolbar.contains(e.target) &&
+            !this.elements.toolsToggleBtn.contains(e.target)) {
+          this.elements.toolsToolbar.classList.add('hidden');
+          this.elements.toolsToggleBtn.classList.remove('active');
+        }
+      });
+    }
+
+    // Model toggle button - show/hide model selector (inside toolbar)
     if (this.elements.modelToggleBtn && this.elements.modelSelectorContainer) {
       this.elements.modelToggleBtn.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -259,6 +371,8 @@ class ChatApp {
         if (isHidden) {
           this.elements.modelSelectorContainer.classList.remove('hidden');
           this.elements.modelToggleBtn.classList.add('active');
+          // Close toolbar when model selector opens
+          this.closeToolsToolbar();
         } else {
           this.elements.modelSelectorContainer.classList.add('hidden');
           this.elements.modelToggleBtn.classList.remove('active');
@@ -338,14 +452,36 @@ class ChatApp {
 
     // Capture Rails logs button
     if (this.elements.captureLogsBtn) {
+      // Track the current capture request so we can cancel it
+      this.captureLogsAbortController = null;
+
       this.elements.captureLogsBtn.addEventListener('click', async () => {
+        // Close toolbar
+        this.closeToolsToolbar();
+
+        // If already recording, cancel the capture
+        if (this.elements.captureLogsBtn.classList.contains('recording')) {
+          if (this.captureLogsAbortController) {
+            this.captureLogsAbortController.abort();
+            this.captureLogsAbortController = null;
+          }
+          this.elements.captureLogsBtn.classList.remove('recording');
+          console.log('Log capture cancelled');
+          return;
+        }
+
         this.elements.captureLogsBtn.classList.add('recording');
+        this.captureLogsAbortController = new AbortController();
+
         try {
           // Clear old JS logs first
           this.clearJsConsoleLogs();
 
           // Wait for Rails logs (10 seconds) - JS logs accumulate during this time
-          const railsLogsRes = await fetch('/api/capture-rails-logs', { method: 'POST' }).then(r => r.json());
+          const railsLogsRes = await fetch('/api/capture-rails-logs', {
+            method: 'POST',
+            signal: this.captureLogsAbortController.signal
+          }).then(r => r.json());
 
           // Now fetch JS logs that accumulated during the 10s recording period
           const jsLogs = await this.getJsConsoleLogs();
@@ -365,9 +501,14 @@ class ChatApp {
             this.elements.messageInput.dispatchEvent(new Event('input', { bubbles: true }));
           }
         } catch (err) {
-          console.error('Failed to capture logs:', err);
+          if (err.name === 'AbortError') {
+            console.log('Log capture was cancelled');
+          } else {
+            console.error('Failed to capture logs:', err);
+          }
         } finally {
           this.elements.captureLogsBtn.classList.remove('recording');
+          this.captureLogsAbortController = null;
         }
       });
     }
@@ -391,9 +532,15 @@ class ChatApp {
 
     let message = input.value.trim();
     const agentMode = this.elements.agentModeSelect?.value;
-    const llmModel = this.elements.modelSelect?.value || 'claude-4.5-haiku';
+    const llmModel = this.elements.modelSelect?.value || 'gemini-3-flash';
 
     if (!message || !this.webSocketManager) return;
+
+    // Prepend prompt content if a prompt is selected
+    const promptContent = this.promptManager?.getSelectedPromptContent();
+    if (promptContent) {
+      message = `${promptContent}\n\n${message}`;
+    }
 
     // Check if there's a selected element and append it to the message
     const selectedHTML = this.elementSelector?.getSelectedElementHTML();
@@ -406,19 +553,40 @@ class ChatApp {
     this.streamingState.reset();
     this.iframeManager.removeStreamingOverlay();
 
-    // Add user message (show original without HTML)
-    this.messageRenderer.addMessage(input.value.trim(), 'human', null);
+    // Get file attachments before clearing (needed for display)
+    const attachments = this.fileAttachmentManager?.getAttachments() || [];
+
+    // Extract attachment metadata for display (without large base64 data)
+    const attachmentMeta = attachments.map(a => ({
+      filename: a.filename,
+      mime_type: a.mime_type
+    }));
+
+    // Add user message with attachment badges
+    this.messageRenderer.addMessage(input.value.trim(), 'human', null, attachmentMeta);
 
     // Show thinking indicator in the dedicated thinking area
     if (this.elements.thinkingArea) {
-      const verb = this.loadingVerbs.getRandomVerb();
-      this.elements.thinkingArea.innerHTML = `<div class="typing-indicator">🦙 ${verb}...</div>`;
+      // Check if we have large attachments (>10MB) that will take time to upload
+      const hasLargeAttachment = attachments.some(a => a.size > 10 * 1024 * 1024);
+
+      if (hasLargeAttachment) {
+        // Show upload indicator for large files
+        const totalSize = attachments.reduce((sum, a) => sum + (a.size || 0), 0);
+        const sizeStr = (totalSize / 1024 / 1024).toFixed(1);
+        this.elements.thinkingArea.innerHTML = `<div class="typing-indicator">📤 Uploading ${sizeStr}MB...</div>`;
+      } else {
+        const verb = this.loadingVerbs.getRandomVerb();
+        this.elements.thinkingArea.innerHTML = `<div class="typing-indicator">🦙 ${verb}...</div>`;
+      }
       this.elements.thinkingArea.classList.remove('hidden');
 
-      // Start cycling the verb in the thinking area
-      const thinkingDiv = this.elements.thinkingArea.querySelector('.typing-indicator');
-      if (thinkingDiv) {
-        this.loadingVerbs.startCycling(thinkingDiv);
+      // Start cycling the verb in the thinking area (only for non-upload states)
+      if (!hasLargeAttachment) {
+        const thinkingDiv = this.elements.thinkingArea.querySelector('.typing-indicator');
+        if (thinkingDiv) {
+          this.loadingVerbs.startCycling(thinkingDiv);
+        }
       }
     }
 
@@ -438,6 +606,16 @@ class ChatApp {
       this.elementSelector.clearSelection();
     }
 
+    // Clear selected prompt badge
+    if (this.promptManager) {
+      this.promptManager.clearSelection();
+    }
+
+    // Clear file attachments (already captured above for display)
+    if (this.fileAttachmentManager) {
+      this.fileAttachmentManager.clearAttachments();
+    }
+
     // Ensure thread ID exists
     const threadId = this.appState.ensureThreadId();
 
@@ -452,7 +630,8 @@ class ChatApp {
       debug_info: debugInfo,
       agent_name: this.appState.getAgentConfig().name,
       agent_mode: agentMode,
-      llm_model: llmModel
+      llm_model: llmModel,
+      attachments: attachments
     };
 
     this.webSocketManager.send(messageData);
@@ -671,6 +850,349 @@ class ChatApp {
           this.updateDropdownLabel(selectElement);
         }, 150);
       }, { once: true });
+    }
+  }
+
+  // ============== Activity Tracking for Lease Management ==============
+
+  /**
+   * Setup activity tracking for lease renewal
+   * Tracks user interactions and syncs to backend periodically
+   */
+  setupActivityTracking() {
+    // Debounced activity reporter
+    const reportActivity = () => {
+      const now = Date.now();
+      if (now - this.lastActivitySync > this.ACTIVITY_SYNC_INTERVAL) {
+        this.lastActivitySync = now;
+        fetch('/api/update-activity', { method: 'POST' })
+          .catch(err => console.warn('Activity sync failed:', err));
+      }
+    };
+
+    // Track user interactions
+    if (this.elements.messageInput) {
+      this.elements.messageInput.addEventListener('keydown', reportActivity);
+    }
+    if (this.elements.messageHistory) {
+      this.elements.messageHistory.addEventListener('click', reportActivity);
+      this.elements.messageHistory.addEventListener('scroll', reportActivity);
+    }
+
+    // Also report activity when sending messages (in sendMessage method)
+    // This is already covered by keydown on Enter
+
+    // Fetch lease config for warning timing
+    this.fetchLeaseConfig();
+
+    // Start inactivity warning check
+    this.startInactivityCheck();
+
+    // Setup continue button handler
+    const continueBtn = this.container.querySelector('[data-llamabot="continue-session"]');
+    if (continueBtn) {
+      continueBtn.addEventListener('click', () => {
+        this.hideTimeoutWarning();
+        this.lastActivitySync = 0; // Force immediate sync
+        fetch('/api/update-activity', { method: 'POST' })
+          .catch(err => console.warn('Continue session activity sync failed:', err));
+      });
+    }
+  }
+
+  /**
+   * Fetch lease configuration from backend
+   */
+  async fetchLeaseConfig() {
+    try {
+      const res = await fetch('/api/lease-status');
+      if (res.ok) {
+        this.leaseConfig = await res.json();
+        console.log('Lease config loaded:', this.leaseConfig);
+      }
+    } catch (err) {
+      console.warn('Failed to fetch lease config:', err);
+    }
+  }
+
+  /**
+   * Start periodic inactivity check
+   */
+  startInactivityCheck() {
+    // Check every 30 seconds if we should show warning
+    this.inactivityCheckInterval = setInterval(() => this.checkInactivityWarning(), 30000);
+  }
+
+  /**
+   * Check if we should show the inactivity warning
+   */
+  checkInactivityWarning() {
+    // Skip if no lease config or mothership not enabled
+    if (!this.leaseConfig?.lease_duration_seconds || !this.leaseConfig?.mothership_enabled) {
+      return;
+    }
+
+    const leaseSeconds = this.leaseConfig.lease_duration_seconds;
+    const warningThreshold = (leaseSeconds - 60) * 1000; // Show warning 1 minute before expiry
+    const timeSinceSync = Date.now() - this.lastActivitySync;
+
+    // Only show warning if user has been inactive long enough
+    if (this.lastActivitySync > 0 && timeSinceSync > warningThreshold) {
+      this.showTimeoutWarning();
+    }
+  }
+
+  /**
+   * Show the timeout warning banner
+   */
+  showTimeoutWarning() {
+    const banner = this.container.querySelector('[data-llamabot="timeout-warning"]');
+    if (banner && banner.classList.contains('hidden')) {
+      banner.classList.remove('hidden');
+      console.log('Showing timeout warning - user inactive');
+    }
+  }
+
+  /**
+   * Hide the timeout warning banner
+   */
+  hideTimeoutWarning() {
+    const banner = this.container.querySelector('[data-llamabot="timeout-warning"]');
+    if (banner) {
+      banner.classList.add('hidden');
+    }
+  }
+
+  /**
+   * Close the tools toolbar
+   */
+  closeToolsToolbar() {
+    if (this.elements.toolsToolbar) {
+      this.elements.toolsToolbar.classList.add('hidden');
+    }
+    if (this.elements.toolsToggleBtn) {
+      this.elements.toolsToggleBtn.classList.remove('active');
+    }
+  }
+
+  /**
+   * Hide the thinking indicator when websocket disconnects
+   * Stops the loading verb cycling and hides the thinking area
+   * Shows error message if we were in the middle of thinking
+   */
+  hideThinkingIndicator() {
+    // Check if we were thinking (thinking area was visible)
+    const wasThinking = this.elements.thinkingArea &&
+      !this.elements.thinkingArea.classList.contains('hidden');
+
+    // Stop the loading verb cycling
+    if (this.loadingVerbs) {
+      this.loadingVerbs.stopCycling();
+    }
+
+    // Hide the thinking area
+    if (this.elements.thinkingArea) {
+      this.elements.thinkingArea.classList.add('hidden');
+      this.elements.thinkingArea.innerHTML = '';
+    }
+
+    // Reset the message input placeholder
+    if (this.elements.messageInput) {
+      this.elements.messageInput.placeholder = 'Ask Leonardo...';
+    }
+
+    // If we were thinking, show error message and play error sound
+    if (wasThinking) {
+      // Show error message
+      if (this.messageRenderer) {
+        this.messageRenderer.renderErrorMessage('Lost connection');
+      }
+    }
+  }
+
+  /**
+   * Initialize screen recording functionality
+   */
+  initScreenRecording() {
+    const btn = this.elements.screenRecordBtn;
+    const timer = this.elements.recordingTimer;
+    const collapsedTimer = this.elements.collapsedRecordingTimer;
+    const floatingTimer = this.elements.floatingRecordTimer;
+    const stopRecordingBtn = this.elements.stopRecordingBtn;
+
+    if (!btn) return;
+
+    // Helper function to stop recording
+    const stopRecording = async () => {
+      const blob = await this.screenRecorder.stopRecording();
+      this.updateRecordButtonState(false);
+      if (blob) {
+        this.screenRecorder.showPreviewModal(blob);
+      }
+    };
+
+    btn.addEventListener('click', async () => {
+      // Close toolbar
+      this.closeToolsToolbar();
+
+      if (!this.screenRecorder.isRecording) {
+        // Start recording
+        try {
+          await this.screenRecorder.startRecording(
+            // Timer update callback - update all timers (toolbar, collapsed, floating)
+            (timeStr) => {
+              if (timer) {
+                timer.textContent = timeStr;
+              }
+              if (collapsedTimer) {
+                collapsedTimer.textContent = timeStr;
+              }
+              if (floatingTimer) {
+                floatingTimer.textContent = timeStr;
+              }
+            },
+            // On stop callback (when user clicks "Stop sharing" in browser)
+            (blob) => {
+              this.updateRecordButtonState(false);
+              if (blob) {
+                this.screenRecorder.showPreviewModal(blob);
+              }
+            }
+          );
+
+          this.updateRecordButtonState(true);
+        } catch (err) {
+          // User cancelled the screen picker or error occurred
+          console.log('Screen recording cancelled or failed:', err.message);
+        }
+      } else {
+        // Stop recording
+        await stopRecording();
+      }
+    });
+
+    // Floating stop button click handler
+    if (stopRecordingBtn) {
+      stopRecordingBtn.addEventListener('click', async () => {
+        if (this.screenRecorder.isRecording) {
+          await stopRecording();
+        }
+      });
+    }
+  }
+
+  /**
+   * Initialize screenshot capture functionality
+   */
+  initScreenshotCapture() {
+    const btn = this.elements.screenshotBtn;
+
+    if (!btn) return;
+
+    btn.addEventListener('click', async () => {
+      // Close toolbar
+      this.closeToolsToolbar();
+
+      try {
+        await this.screenshotAnnotator.startCapture((attachment) => {
+          // Add the screenshot to attachments
+          if (this.fileAttachmentManager) {
+            this.fileAttachmentManager.attachments.push(attachment);
+            this.fileAttachmentManager.renderPreview();
+          }
+        });
+      } catch (err) {
+        // User cancelled the screen picker or error occurred
+        console.log('Screenshot cancelled or failed:', err.message);
+      }
+    });
+  }
+
+  /**
+   * Update record button visual state
+   * @param {boolean} isRecording - Whether currently recording
+   */
+  updateRecordButtonState(isRecording) {
+    const btn = this.elements.screenRecordBtn;
+    const timer = this.elements.recordingTimer;
+    const icon = btn?.querySelector('i');
+
+    // Collapsed toolbar elements
+    const collapsedBtn = this.elements.collapsedScreenRecordBtn;
+    const collapsedTimer = this.elements.collapsedRecordingTimer;
+    const collapsedIcon = collapsedBtn?.querySelector('i');
+
+    // Floating indicator elements (visible in expanded mode outside toolbar)
+    const floatingIndicator = this.elements.floatingRecordIndicator;
+    const floatingTimer = this.elements.floatingRecordTimer;
+
+    if (isRecording) {
+      // Expanded button state (inside toolbar)
+      if (btn) {
+        btn.classList.add('recording');
+        btn.title = 'Stop recording';
+      }
+      if (icon) {
+        icon.classList.remove('fa-circle');
+        icon.classList.add('fa-stop');
+      }
+      if (timer) {
+        timer.textContent = '00:00';
+        timer.classList.remove('hidden');
+      }
+
+      // Collapsed button state
+      if (collapsedBtn) {
+        collapsedBtn.classList.add('recording');
+        collapsedBtn.title = 'Stop recording';
+      }
+      if (collapsedIcon) {
+        collapsedIcon.classList.remove('fa-circle');
+        collapsedIcon.classList.add('fa-stop');
+      }
+      if (collapsedTimer) {
+        collapsedTimer.textContent = '00:00';
+        collapsedTimer.classList.remove('hidden');
+      }
+
+      // Floating indicator (visible in expanded mode)
+      if (floatingIndicator) {
+        floatingIndicator.classList.remove('hidden');
+      }
+      if (floatingTimer) {
+        floatingTimer.textContent = '00:00';
+      }
+    } else {
+      // Expanded button state
+      if (btn) {
+        btn.classList.remove('recording');
+        btn.title = 'Record screen';
+      }
+      if (icon) {
+        icon.classList.remove('fa-stop');
+        icon.classList.add('fa-circle');
+      }
+      if (timer) {
+        timer.classList.add('hidden');
+      }
+
+      // Collapsed button state
+      if (collapsedBtn) {
+        collapsedBtn.classList.remove('recording');
+        collapsedBtn.title = 'Record screen';
+      }
+      if (collapsedIcon) {
+        collapsedIcon.classList.remove('fa-stop');
+        collapsedIcon.classList.add('fa-circle');
+      }
+      if (collapsedTimer) {
+        collapsedTimer.classList.add('hidden');
+      }
+
+      // Floating indicator
+      if (floatingIndicator) {
+        floatingIndicator.classList.add('hidden');
+      }
     }
   }
 }

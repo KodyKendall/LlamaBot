@@ -13,7 +13,7 @@
  *    - Requires Rails debug info to maintain state
  */
 
-import { getRailsUrl, getVSCodeUrl, getTicketsUrl, DEFAULT_CONFIG } from '../config.js';
+import { getRailsUrl, getVSCodeUrl, getTicketsUrl, getFeedbackUrl, DEFAULT_CONFIG } from '../config.js';
 
 export class IframeManager {
   constructor(container = null) {
@@ -30,6 +30,9 @@ export class IframeManager {
 
     // TICKETS iframe
     this.ticketsFrame = this.querySelector('[data-llamabot="tickets-frame"]');
+
+    // FEEDBACK iframe
+    this.feedbackFrame = this.querySelector('[data-llamabot="feedback-frame"]');
 
     // URL input element
     this.urlInput = this.querySelector('[data-llamabot="url-input"]');
@@ -131,6 +134,11 @@ export class IframeManager {
     // Set Tickets iframe URL
     if (this.ticketsFrame) {
       this.ticketsFrame.src = getTicketsUrl();
+    }
+
+    // Set Feedback iframe URL
+    if (this.feedbackFrame) {
+      this.feedbackFrame.src = getFeedbackUrl();
     }
   }
 
@@ -546,6 +554,7 @@ export class IframeManager {
       'liveSiteFrame': 'live-site-frame',
       'vsCodeFrame': 'vscode-frame',
       'ticketsFrame': 'tickets-frame',
+      'feedbackFrame': 'feedback-frame',
       'contentFrame': 'content-frame',
       'gitFrame': 'git-frame',
       'logsFrame': 'logs-frame',
@@ -590,6 +599,7 @@ export class IframeManager {
       'liveSiteFrame': 'live-site-frame',
       'vsCodeFrame': 'vscode-frame',
       'ticketsFrame': 'tickets-frame',
+      'feedbackFrame': 'feedback-frame',
       'contentFrame': 'content-frame',
       'gitFrame': 'git-frame',
       'logsFrame': 'logs-frame',

@@ -10,12 +10,25 @@ from main import app
 
 class TestMainEndpoints:
     """Test the main application endpoints."""
-    
+
     @pytest.mark.asyncio
+    @patch("app.routers.ui.authenticate_user")
+    @patch("app.routers.ui.security", new_callable=AsyncMock)
+    @patch("app.routers.ui.has_any_users")
     @patch("builtins.open")
-    async def test_root_endpoint(self, mock_open, async_client):
+    async def test_root_endpoint(self, mock_open, mock_has_users, mock_security, mock_auth, async_client):
         """Test the root endpoint returns HTML."""
         mock_open.return_value.__enter__.return_value.read.return_value = "<html><body><h1>Mock home.html</h1></body></html>"
+        mock_has_users.return_value = True
+        # Mock security to return credentials
+        mock_credentials = MagicMock()
+        mock_credentials.username = "testuser"
+        mock_credentials.password = "testpass"
+        mock_security.return_value = mock_credentials
+        # Mock authenticate_user to return a user
+        mock_user = MagicMock()
+        mock_user.role = "engineer"
+        mock_auth.return_value = mock_user
         response = await async_client.get("/")
         assert response.status_code == 200
         assert "text/html" in response.headers.get("content-type", "")

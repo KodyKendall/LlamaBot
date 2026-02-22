@@ -30,7 +30,8 @@ export const DEFAULT_CONFIG = {
     ai_builder: 'rails_ai_builder_agent',
     testing: 'rails_testing_agent',
     feedback: 'rails_user_feedback_agent',
-    ticket: 'rails_ticket_mode_agent'
+    ticket: 'rails_ticket_mode_agent',
+    architect: 'rails_architect_agent'
   },
 
   // Streaming configuration
@@ -102,6 +103,13 @@ export function getVSCodeUrl() {
  */
 export function getTicketsUrl() {
   return getRailsUrl() + '/llama_bot/tickets';
+}
+
+/**
+ * Get Feedback URL based on current protocol
+ */
+export function getFeedbackUrl() {
+  return getRailsUrl() + '/llama_bot/feedback';
 }
 
 /**

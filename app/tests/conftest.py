@@ -22,7 +22,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from main import app, manager
 from langgraph.checkpoint.memory import MemorySaver
-from app.dependencies import auth
+from app.dependencies import auth, get_current_user
+from app.models import User
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -56,13 +57,59 @@ def disable_langsmith_completely():
             os.environ.pop(var, None)
 
 
+@pytest.fixture
+def auth_headers():
+    """Provide HTTP Basic Auth headers for testing authenticated endpoints."""
+    import base64
+    credentials = base64.b64encode(b"testuser:testpass").decode("utf-8")
+    return {"Authorization": f"Basic {credentials}"}
+
+
+@pytest_asyncio.fixture
+async def authenticated_async_client():
+    """Create an async HTTP client with full auth mocking for endpoints using get_current_user."""
+    # Create a mock user for testing
+    mock_user = User(id=1, username="testuser", role="engineer", is_admin=False)
+
+    app.dependency_overrides[auth] = lambda: "testuser"
+    app.dependency_overrides[get_current_user] = lambda: mock_user
+
+    from fastapi.testclient import TestClient
+
+    with TestClient(app) as client:
+        sync_client = TestClient(app)
+
+        class AsyncClientWrapper:
+            def __init__(self, sync_client):
+                self._sync_client = sync_client
+
+            async def get(self, url, **kwargs):
+                return self._sync_client.get(url, **kwargs)
+
+            async def post(self, url, **kwargs):
+                return self._sync_client.post(url, **kwargs)
+
+            async def put(self, url, **kwargs):
+                return self._sync_client.put(url, **kwargs)
+
+            async def delete(self, url, **kwargs):
+                return self._sync_client.delete(url, **kwargs)
+
+            async def patch(self, url, **kwargs):
+                return self._sync_client.patch(url, **kwargs)
+
+        yield AsyncClientWrapper(sync_client)
+
+    app.dependency_overrides = {}
+
+
 @pytest_asyncio.fixture
 async def async_client():
     """Create an async HTTP client for testing."""
     app.dependency_overrides[auth] = lambda: "testuser"
-    
+
     from fastapi.testclient import TestClient
-    
+
     with TestClient(app) as client:
         # We need to patch the client to work with our FastAPI app
         from fastapi.testclient import TestClient

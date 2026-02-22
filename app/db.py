@@ -26,10 +26,17 @@ def init_db():
         return
 
     # Import models to register them with SQLModel
-    from app.models import User  # noqa: F401
+    from app.models import User, ThreadMetadata, Prompt  # noqa: F401
     try:
         SQLModel.metadata.create_all(engine)
         logger.info("✅ Auth database initialized")
+
+        # Seed default prompts
+        from app.services.prompt_service import seed_default_prompts
+        with Session(engine) as session:
+            count = seed_default_prompts(session)
+            if count > 0:
+                logger.info(f"✅ Seeded {count} default prompts")
     except Exception as e:
         logger.error(f"❌ Failed to initialize auth database: {e}")
         raise

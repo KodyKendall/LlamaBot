@@ -16,6 +16,48 @@ export class ThreadManager {
   }
 
   /**
+   * Format a timestamp into a human-readable relative time
+   * @param {string} isoString - ISO timestamp string
+   * @returns {string} - Human readable time like "2 hours ago", "Yesterday", etc.
+   */
+  formatRelativeTime(isoString) {
+    if (!isoString) return '';
+
+    const date = new Date(isoString);
+    const now = new Date();
+    const diffMs = now - date;
+    const diffSecs = Math.floor(diffMs / 1000);
+    const diffMins = Math.floor(diffSecs / 60);
+    const diffHours = Math.floor(diffMins / 60);
+    const diffDays = Math.floor(diffHours / 24);
+
+    if (diffSecs < 30) {
+      return 'Just now';
+    } else if (diffSecs < 60) {
+      return '30s ago';
+    } else if (diffMins === 1) {
+      return '1m ago';
+    } else if (diffMins < 5) {
+      return `${diffMins}m ago`;
+    } else if (diffMins < 60) {
+      // Round to nearest 5 minutes for cleaner display
+      const roundedMins = Math.round(diffMins / 5) * 5;
+      return `${roundedMins}m ago`;
+    } else if (diffHours === 1) {
+      return '1h ago';
+    } else if (diffHours < 24) {
+      return `${diffHours}h ago`;
+    } else if (diffDays === 1) {
+      return 'Yesterday';
+    } else if (diffDays < 7) {
+      return `${diffDays}d ago`;
+    } else {
+      // Format as short date
+      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    }
+  }
+
+  /**
    * Fetch threads from server with cursor-based pagination
    * @param {string|null} cursor - Optional cursor for pagination
    */
@@ -23,7 +65,7 @@ export class ThreadManager {
     try {
       this.showThreadsLoading();
 
-      let url = '/threads?limit=3';
+      let url = '/threads?limit=5';
       if (cursor) {
         url += `&before=${encodeURIComponent(cursor)}`;
       }
@@ -136,7 +178,21 @@ export class ThreadManager {
 
       const menuItem = document.createElement('div');
       menuItem.className = 'menu-item';
-      menuItem.textContent = title;
+
+      // Create title element
+      const titleEl = document.createElement('div');
+      titleEl.className = 'thread-title';
+      titleEl.textContent = title;
+      menuItem.appendChild(titleEl);
+
+      // Create timestamp element (subtle, below title)
+      const timestamp = this.formatRelativeTime(thread.updated_at);
+      if (timestamp) {
+        const timeEl = document.createElement('div');
+        timeEl.className = 'thread-timestamp';
+        timeEl.textContent = timestamp;
+        menuItem.appendChild(timeEl);
+      }
 
       menuItem.onclick = () => this.handleThreadClick(thread.thread_id, title);
 
@@ -168,7 +224,7 @@ export class ThreadManager {
     }
 
     try {
-      const url = `/threads?limit=3&before=${encodeURIComponent(this.nextCursor)}`;
+      const url = `/threads?limit=5&before=${encodeURIComponent(this.nextCursor)}`;
       const response = await fetch(url);
       const data = await response.json();
       const { threads, next_cursor, has_more } = data;
@@ -217,7 +273,22 @@ export class ThreadManager {
 
       const menuItem = document.createElement('div');
       menuItem.className = 'menu-item';
-      menuItem.textContent = title;
+
+      // Create title element
+      const titleEl = document.createElement('div');
+      titleEl.className = 'thread-title';
+      titleEl.textContent = title;
+      menuItem.appendChild(titleEl);
+
+      // Create timestamp element (subtle, below title)
+      const timestamp = this.formatRelativeTime(thread.updated_at);
+      if (timestamp) {
+        const timeEl = document.createElement('div');
+        timeEl.className = 'thread-timestamp';
+        timeEl.textContent = timestamp;
+        menuItem.appendChild(timeEl);
+      }
+
       menuItem.onclick = () => this.handleThreadClick(thread.thread_id, title);
       menuItems.appendChild(menuItem);
     });

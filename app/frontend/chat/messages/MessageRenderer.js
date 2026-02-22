@@ -22,11 +22,12 @@ export class MessageRenderer {
    * @param {string} content - The content of the message
    * @param {string} type - The type of message ('human', 'ai', 'tool', 'error', 'queued', 'end')
    * @param {object} baseMessage - The base langgraph message object
+   * @param {Array} attachments - Optional array of attachment metadata {filename, mime_type}
    * @returns {HTMLElement|null} The message div or null
    */
-  addMessage(content, type, baseMessage = null) {
+  addMessage(content, type, baseMessage = null, attachments = null) {
     if (type === 'human') {
-      return this.renderHumanMessage(content);
+      return this.renderHumanMessage(content, attachments);
     }
 
     if (type === 'ai') {
@@ -53,16 +54,34 @@ export class MessageRenderer {
   }
 
   /**
-   * Render human message
+   * Render human message with markdown support, copy button, and attachment badges
+   * @param {string} content - Text content of the message
+   * @param {Array} attachments - Optional array of attachment metadata {filename, mime_type}
    */
-  renderHumanMessage(content) {
+  renderHumanMessage(content, attachments = []) {
     const messageDiv = document.createElement('div');
     messageDiv.setAttribute('data-llamabot', 'human-message');
-    messageDiv.textContent = content;
+
+    // Store raw content for copy functionality
+    messageDiv.setAttribute('data-raw-content', content);
+
+    // Parse markdown (same as AI messages)
+    messageDiv.innerHTML = this.markdownParser.parse(content);
 
     // Apply custom CSS classes if configured
     if (this.config.cssClasses?.humanMessage) {
       messageDiv.className = this.config.cssClasses.humanMessage;
+    }
+
+    // Add attachment badges if present
+    if (attachments && attachments.length > 0) {
+      const attachmentContainer = this.createAttachmentBadges(attachments);
+      messageDiv.appendChild(attachmentContainer);
+    }
+
+    // Add copy button for human messages with content
+    if (content && content.trim()) {
+      this.addCopyButton(messageDiv);
     }
 
     this.insertMessage(messageDiv);
@@ -70,7 +89,61 @@ export class MessageRenderer {
   }
 
   /**
-   * Render AI message
+   * Create attachment badges for display in message history
+   * @param {Array} attachments - Array of attachment objects with filename, mime_type
+   * @returns {HTMLElement} - Container with attachment badges
+   */
+  createAttachmentBadges(attachments) {
+    const container = document.createElement('div');
+    container.className = 'message-attachments';
+
+    // Icon mapping for different file types
+    const iconMap = {
+      'application/pdf': 'fa-file-pdf',
+      'image/png': 'fa-file-image',
+      'image/jpeg': 'fa-file-image',
+      'image/gif': 'fa-file-image',
+      'image/webp': 'fa-file-image',
+      'video/webm': 'fa-file-video',
+      'video/mp4': 'fa-file-video',
+      'audio/mpeg': 'fa-file-audio',
+      'audio/wav': 'fa-file-audio',
+    };
+
+    attachments.forEach(attachment => {
+      const badge = document.createElement('div');
+      badge.className = 'message-attachment-badge';
+
+      const icon = iconMap[attachment.mime_type] || 'fa-file';
+      const filename = attachment.filename || 'attachment';
+
+      badge.innerHTML = `
+        <i class="fa-solid ${icon}"></i>
+        <span class="attachment-filename" title="${filename}">${this.truncateFilename(filename)}</span>
+      `;
+
+      container.appendChild(badge);
+    });
+
+    return container;
+  }
+
+  /**
+   * Truncate filename for display while preserving extension
+   * @param {string} filename - The filename to truncate
+   * @param {number} maxLength - Maximum length before truncation
+   * @returns {string} - Truncated filename
+   */
+  truncateFilename(filename, maxLength = 20) {
+    if (filename.length <= maxLength) return filename;
+    const ext = filename.split('.').pop();
+    const name = filename.slice(0, -(ext.length + 1));
+    const truncatedName = name.slice(0, maxLength - ext.length - 4) + '...';
+    return `${truncatedName}.${ext}`;
+  }
+
+  /**
+   * Render AI message with copy button
    */
   renderAiMessage(content, baseMessage) {
     const messageDiv = document.createElement('div');
@@ -80,6 +153,9 @@ export class MessageRenderer {
     const safeContent = (content !== undefined && content !== null && content !== 'undefined')
       ? String(content)
       : '';
+
+    // Store raw markdown for copy functionality
+    messageDiv.setAttribute('data-raw-content', safeContent);
 
     messageDiv.innerHTML = this.markdownParser.parse(safeContent);
 
@@ -101,10 +177,37 @@ export class MessageRenderer {
       if (this.config.cssClasses?.aiMessage) {
         messageDiv.className = this.config.cssClasses.aiMessage;
       }
+
+      // Add copy button for regular AI messages (not tool messages)
+      if (safeContent) {
+        this.addCopyButton(messageDiv);
+      }
     }
 
     this.insertMessage(messageDiv);
     return messageDiv;
+  }
+
+  /**
+   * Add a copy button to a message element
+   * @param {HTMLElement} messageDiv - The message element to add the button to
+   */
+  addCopyButton(messageDiv) {
+    const copyBtn = document.createElement('button');
+    copyBtn.setAttribute('data-llamabot', 'copy-btn');
+    copyBtn.innerHTML = '<i class="fa-regular fa-copy"></i>';
+    copyBtn.title = 'Copy raw markdown';
+    copyBtn.onclick = (e) => {
+      e.stopPropagation();
+      const rawContent = messageDiv.getAttribute('data-raw-content');
+      navigator.clipboard.writeText(rawContent).then(() => {
+        copyBtn.innerHTML = '<i class="fa-solid fa-check"></i>';
+        setTimeout(() => {
+          copyBtn.innerHTML = '<i class="fa-regular fa-copy"></i>';
+        }, 1500);
+      });
+    };
+    messageDiv.appendChild(copyBtn);
   }
 
   /**
@@ -277,6 +380,9 @@ export class MessageRenderer {
     // Stop the thinking indicator
     this.stopThinking();
 
+    // Finalize all AI messages (add copy buttons to those that don't have them)
+    this.finalizeAiMessages();
+
     // Play task completed sound
     const taskCompletedSound = document.getElementById('taskCompletedSound');
     if (taskCompletedSound) {
@@ -289,6 +395,29 @@ export class MessageRenderer {
     window.dispatchEvent(new CustomEvent('streamEnded'));
 
     return null;
+  }
+
+  /**
+   * Finalize all AI messages by adding copy buttons to those that don't have them
+   * Called when streaming ends to add copy buttons to streamed messages
+   */
+  finalizeAiMessages() {
+    const aiMessages = this.messageHistory.querySelectorAll('[data-llamabot="ai-message"]');
+    aiMessages.forEach(messageDiv => {
+      // Skip if already has a copy button
+      if (messageDiv.querySelector('[data-llamabot="copy-btn"]')) {
+        return;
+      }
+
+      // Skip if no content
+      const rawContent = messageDiv.getAttribute('data-raw-content');
+      if (!rawContent || rawContent.trim() === '') {
+        return;
+      }
+
+      // Add copy button
+      this.addCopyButton(messageDiv);
+    });
   }
 
   /**

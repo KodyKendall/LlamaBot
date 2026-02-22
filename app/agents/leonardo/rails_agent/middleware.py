@@ -106,6 +106,41 @@ class ChatDeepSeekWithReasoning(ChatDeepSeek):
 class ViewPathContextMiddleware(AgentMiddleware):
     """Prepend page context to the last user message."""
 
+    def _prepend_context_to_content(self, content, context: str):
+        """Prepend context to message content, handling both string and multimodal list formats."""
+        if isinstance(content, str):
+            return context + content
+        elif isinstance(content, list):
+            # Multimodal content: find the first text block and prepend context to it
+            new_content = []
+            context_added = False
+            for block in content:
+                if not context_added and isinstance(block, dict) and block.get("type") == "text":
+                    # Prepend context to the first text block
+                    new_content.append({"type": "text", "text": context + block.get("text", "")})
+                    context_added = True
+                else:
+                    new_content.append(block)
+            # If no text block found, add context as a new text block at the start
+            if not context_added:
+                new_content.insert(0, {"type": "text", "text": context})
+            return new_content
+        else:
+            # Unknown format, return as-is
+            return content
+
+    def _has_context_prefix(self, content) -> bool:
+        """Check if content already has context prefix."""
+        if isinstance(content, str):
+            return content.startswith('<CONTEXT')
+        elif isinstance(content, list):
+            # Check first text block
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    return block.get("text", "").startswith('<CONTEXT')
+            return False
+        return False
+
     def wrap_model_call(self, request, handler):
         view_path = (request.state.get('debug_info') or {}).get('view_path')
         request_path = (request.state.get('debug_info') or {}).get('request_path')
@@ -117,11 +152,12 @@ class ViewPathContextMiddleware(AgentMiddleware):
                 if isinstance(messages[i], HumanMessage):
                     content = messages[i].content
                     # Skip if already has context
-                    if isinstance(content, str) and content.startswith('<CONTEXT'):
+                    if self._has_context_prefix(content):
                         break
                     # Prepend context
                     context = f'<CONTEXT page="{request_path}" file="{view_path}"/>\n\n'
-                    messages[i] = HumanMessage(content=context + content)
+                    new_content = self._prepend_context_to_content(content, context)
+                    messages[i] = HumanMessage(content=new_content)
                     return handler(request.override(messages=messages))
 
         return handler(request)
@@ -135,10 +171,11 @@ class ViewPathContextMiddleware(AgentMiddleware):
             for i in range(len(messages) - 1, -1, -1):
                 if isinstance(messages[i], HumanMessage):
                     content = messages[i].content
-                    if isinstance(content, str) and content.startswith('<CONTEXT'):
+                    if self._has_context_prefix(content):
                         break
                     context = f'<CONTEXT page="{request_path}" file="{view_path}"/>\n\n'
-                    messages[i] = HumanMessage(content=context + content)
+                    new_content = self._prepend_context_to_content(content, context)
+                    messages[i] = HumanMessage(content=new_content)
                     return await handler(request.override(messages=messages))
 
         return await handler(request)
@@ -163,6 +200,40 @@ class FailureCircuitBreakerMiddleware(AgentMiddleware):
         failed_count = state.get("failed_tool_calls_count", 0)
         return failed_count >= 3
 
+    def _has_warning(self, content) -> bool:
+        """Check if content already has failure warning."""
+        warning_marker = '<CONTEXT type="warning">'
+        if isinstance(content, str):
+            return warning_marker in content
+        elif isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    if warning_marker in block.get("text", ""):
+                        return True
+            return False
+        return False
+
+    def _prepend_warning(self, content, warning: str):
+        """Prepend warning to content, handling both string and multimodal list formats."""
+        if isinstance(content, str):
+            return warning + content
+        elif isinstance(content, list):
+            # Multimodal content: find the first text block and prepend warning to it
+            new_content = []
+            warning_added = False
+            for block in content:
+                if not warning_added and isinstance(block, dict) and block.get("type") == "text":
+                    new_content.append({"type": "text", "text": warning + block.get("text", "")})
+                    warning_added = True
+                else:
+                    new_content.append(block)
+            # If no text block found, add warning as a new text block at the start
+            if not warning_added:
+                new_content.insert(0, {"type": "text", "text": warning})
+            return new_content
+        else:
+            return content
+
     def _inject_failure_warning(self, request):
         """Add failure warning to the last user message if limit reached."""
         if not self._should_break(request.state):
@@ -173,11 +244,12 @@ class FailureCircuitBreakerMiddleware(AgentMiddleware):
             if isinstance(messages[i], HumanMessage):
                 content = messages[i].content
                 # Skip if warning already injected
-                if isinstance(content, str) and '<CONTEXT type="warning">' in content:
+                if self._has_warning(content):
                     return request
                 # Prepend warning
                 warning = '<CONTEXT type="warning">Too many failed tool calls. DO NOT make any new tool calls. Tell the user it failed and ask them to try a different approach.</CONTEXT>\n\n'
-                messages[i] = HumanMessage(content=warning + content)
+                new_content = self._prepend_warning(content, warning)
+                messages[i] = HumanMessage(content=new_content)
                 return request.override(messages=messages)
 
         return request

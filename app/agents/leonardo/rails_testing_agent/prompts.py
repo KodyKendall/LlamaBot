@@ -71,6 +71,8 @@ Determine the appropriate test type:
 | JavaScript interaction broken | Feature spec + `:js` tag | `spec/features/` |
 | Data calculation wrong | Model spec | `spec/models/` |
 | Authorization/permission bug | Request spec | `spec/requests/` |
+| Drag-and-drop/SortableJS broken | DOM structure spec | `spec/requests/` |
+| JS library works for 1 item only | DOM structure spec | `spec/requests/` |
 
 **Always ask user before creating feature specs** - they're slower and require browser automation.
 
@@ -195,6 +197,151 @@ end
 ```bash
 RAILS_ENV=test bundle exec rspec spec/features/line_item_rate_display_spec.rb --format documentation
 ```
+
+---
+
+## DOM STRUCTURE TESTING (Critical for JS-Driven UI)
+
+**When to suspect DOM structure issues:**
+- Drag-and-drop works for first item only
+- SortableJS/Stimulus controllers only affect one element
+- JavaScript library "works" in isolation but fails with multiple items
+- Visual layout looks correct but interactions are broken
+
+**Root cause pattern:** Invalid HTML (missing closing tags) causes browsers to "fix" the markup by nesting elements incorrectly. The DOM structure becomes wrong even though it renders visually correct.
+
+**Example: The "Nesting Doll" Bug**
+A missing `</div>` in a partial caused every line item after the first to nest inside the first item. SortableJS saw only 1 direct child, breaking drag-and-drop for all but the first item.
+
+### DOM Structure Request Spec Pattern
+
+When JS-driven features break unexpectedly, write a request spec that validates the HTML structure:
+
+```ruby
+# spec/requests/tender_builder_dom_structure_spec.rb
+require 'rails_helper'
+
+RSpec.describe "Tender Builder DOM Structure", type: :request do
+  let(:user) { create(:user) }
+  let(:api_token) { user.llama_bot_api_tokens.create! }
+  let(:auth_headers) { { 'Authorization' => "LlamaBot #{api_token.token}" } }
+
+  describe "line items container structure" do
+    it "renders line items as flat siblings (not nested)" do
+      tender = create(:tender, user: user)
+      create_list(:tender_line_item, 5, tender: tender)
+
+      get tender_builder_path(tender), headers: auth_headers
+      expect(response).to have_http_status(:ok)
+
+      doc = Nokogiri::HTML(response.body)
+
+      # Find the sortable container
+      container = doc.at_css("[data-controller~='sortable']") ||
+                  doc.at_css("#tender-line-items")
+
+      expect(container).to be_present, "Sortable container not found"
+
+      # CRITICAL: Verify direct children count matches record count
+      # This catches the "nesting doll" bug where items nest inside each other
+      direct_children = container.css(":scope > [data-tender-line-item-id]")
+
+      expect(direct_children.length).to eq(5),
+        "Expected 5 direct children but found #{direct_children.length}. " \
+        "Items may be nested inside each other due to invalid HTML."
+    end
+
+    it "has balanced HTML tags in line item partials" do
+      tender = create(:tender, user: user)
+      create(:tender_line_item, tender: tender)
+
+      get tender_builder_path(tender), headers: auth_headers
+
+      # Basic tag balance check - opening and closing divs should match
+      body = response.body
+      open_divs = body.scan(/<div/).count
+      close_divs = body.scan(/<\\/div>/).count
+
+      expect(open_divs).to eq(close_divs),
+        "Unbalanced div tags: #{open_divs} opening, #{close_divs} closing. " \
+        "Check partials for missing closing tags."
+    end
+  end
+end
+```
+
+### Feature Spec: JS Library Invariant Check
+
+When you can't simulate drag-and-drop in CI, test the prerequisites instead:
+
+```ruby
+# spec/features/sortable_invariants_spec.rb
+require 'rails_helper'
+
+RSpec.describe "Sortable Container Invariants", type: :feature, js: true do
+  let(:user) { create(:user) }
+
+  before do
+    Capybara.current_driver = :cuprite
+    visit "/users/sign_in"
+    fill_in "user[email]", with: user.email
+    fill_in "user[password]", with: "password123"
+    click_button "Log in"
+  end
+
+  it "sortable container has correct direct child count" do
+    tender = create(:tender, user: user)
+    create_list(:tender_line_item, 5, tender: tender)
+
+    visit tender_builder_path(tender)
+
+    # Use JavaScript to verify DOM structure
+    child_count = page.evaluate_script(<<~JS)
+      (function() {
+        const container = document.querySelector("[data-controller~='sortable']") ||
+                          document.querySelector("#tender-line-items");
+        if (!container) return null;
+        // Count direct children that are sortable items
+        return Array.from(container.children).filter(el =>
+          el.hasAttribute('data-tender-line-item-id') ||
+          el.classList.contains('sortable-item')
+        ).length;
+      })();
+    JS
+
+    expect(child_count).to eq(5),
+      "Container should have 5 direct sortable children, found #{child_count}. " \
+      "Check for nested elements due to invalid HTML."
+  end
+end
+```
+
+### Console Debugging Pattern for DOM Issues
+
+When investigating JS library failures, ask the user to run this in browser console:
+
+```javascript
+// Debug script to detect nesting issues
+(function() {
+  const container = document.querySelector("[data-controller~='sortable']");
+  if (!container) { console.log("🪲 No sortable container found"); return; }
+
+  console.log("🪲 Container:", container);
+  console.log("🪲 Direct children count:", container.children.length);
+  console.log("🪲 Direct children:", Array.from(container.children));
+
+  // Check for unexpected nesting
+  const allItems = container.querySelectorAll("[data-sortable-item]");
+  console.log("🪲 Total sortable items (nested or not):", allItems.length);
+
+  if (container.children.length !== allItems.length) {
+    console.error("🪲 NESTING DETECTED! Direct children != total items");
+    console.log("🪲 Some items are nested inside others due to invalid HTML");
+  }
+})();
+```
+
+**Key insight:** If `container.children.length` is 1 but you have multiple records, items are nested inside each other. Look for missing closing tags in the partial.
 
 ---
 

@@ -1,0 +1,91 @@
+01/31/2025:
+
+02/04/26: 
+0.3.5a:
+- [x] Set Gemini 3.0 Flash as default model
+- [x] Add prompt library you can use to save prompts.
+    - Question: What if you want to pull data out of the Rails database & format it? (it would be cool to pull that from the Rails Controller session variables somehow. or pass controller variables into the JavaScript somehow, and have it be able to inject that into the agent prompt.)
+    - Answer: It will come later.
+
+0.3.5b:
+- [] Adding meta-awareness of VM state for easier Leonardo instance management
+- [] Send pdf and image files to Leonardo
+- [] UI/UX: Consolidate our tool buttons into a single + that opens a tool bar (better UI - progressive disclosure)
+
+0.3.5c:
+- [] Improve Ticket mode for task decomposition if it spans too may layers.
+- [] LlamaPress-Simple version 0.3.3 - adding improvements ticket tracking
+- [] LlamaPress-Simple to 0.3.3 for tickets
+- [] Format HumanMessage as markdown
+- [] Add copy button for both AIMessage and HumanMessage to retain markdown formatting
+
+0.3.5d:
+- [x] Improved summarization with detailed custom prompt across all agents (rails_agent, rails_testing_agent, rails_ticket_mode_agent)
+  - Added comprehensive SUMMARIZATION_PROMPT that preserves technical details, code patterns, user intent, and errors/fixes
+  - Increased message retention from 8 to 20 messages to match Claude Code defaults
+- [x] Added DOM structure debugging guidance to rails_agent prompts
+  - Documents the "nesting doll" bug pattern (missing closing tags causing JS library failures)
+  - Added console debug script for detecting DOM nesting issues
+  - Added quick HTML balance check in Rails console
+- [x] Added DOM structure testing patterns to rails_testing_agent prompts
+  - Request spec pattern for validating HTML structure (flat siblings vs nested)
+  - Feature spec pattern for JS library invariant checks
+  - Console debugging pattern for SortableJS/Stimulus issues
+- [x] Fixed TAVILY_API_KEY initialization to use .get() with default empty string (prevents crash if not set)
+- [x] Added relative timestamps to thread list in frontend (ThreadManager.js)
+  - "Just now", "5 minutes ago", "2 hours ago", "Yesterday", etc.
+  - New formatRelativeTime() and getThreadTimestamp() methods
+- [x] Added CSS styling for thread timestamps (.thread-title, .thread-timestamp)
+- [x] Fixed RuntimeError handling in signal handler registration (main.py)
+  - Now catches RuntimeError for pytest/non-main-thread contexts in addition to NotImplementedError
+
+0.3.5e: 
+- [x] Add video record button
+- [x] Add screenshot capture capability & annotations for easier way to show Leonardo, and to save into the feedback database table.
+- [x] Add resize handle to resize the chat screen (helps when taking screenshots/video recordings)
+- [x] Files show in the chat message bubble when user attaches file and sends to Leonardo
+- [x] Leonardo can watch attached videos if using Gemini
+- [x] Move selected element button out of the hidden toolbar to be next to chat input to prioritize UX
+- [x] Add / commands for easier Leonardo instance management (backups, file permissions, install cron, etc.)
+- [x] Add feedback tab for submitting user feedback through a form (easier to collect and track user feedback)
+
+0.3.5fa: 
+- [x] Bump file limit to 100mb
+- [x] Work on commands to view db & active_storage backups from llamabot
+- [x] Allow video attachments to tickets
+
+0.3.5g:
+- [x] Add file progress in the file attachment process to Leonardo (better UX for large files)
+- [x] Add command history + modal
+
+0.3.5h:
+- [x] Screenshot UI/UX: Add drag & drop, screenshot cropping, and copy/paste mechanism to attach files
+- [x] Add websocket security
+- [x] Add .leonardo/LEONARDO.md
+
+0.3.5i: 
+- [x] Improve ticket mode prompt to delineate between HTML tables and database tables.
+- [x] UI/UX Chat - If websocket breaks, throw error and stop thinking mode so user knows.
+- [x] UI/UX Chat - If user is recording rails logs, and then presses bug record button, it stops recording rather than starting 2nd recording.
+- [x] Security - Add tests to verify websocket security
+
+0.3.5j: 
+- [x] In tab header, set to be the window's URL (localhost:8000) instead of static: "Leonardo"
+- [x] Make /restart command more robust & less likely to throw errors.
+
+0.3.5k: 
+- [x] Make docker-compose.yml first option to read LlamaBot version.
+- [x] Show version when hovering over Leonardo
+
+0.3.5l: 
+- [x] Fix restart script dying on llamabot takedown - making it impossible to restart from llamabot container unless disowning the spawned process using nsenter
+- [x] Fix tooltip version hover on Leonardo h1
+
+0.3.5ma: 
+- [x] Test restart tool
+
+0.3.n: 
+- [x] Add more human readable times for convo threads
+- [x] Fix AI Agent Builder Mode
+
+- [x] Add JavaScript timer to track the user activity (is active in last 15 mins) on the /chat.html.erb homepage

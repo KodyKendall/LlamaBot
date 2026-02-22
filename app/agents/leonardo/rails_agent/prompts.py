@@ -484,6 +484,8 @@ submitOnEnter(event) {
 **HTML Structure Mistakes:**
 - ❌ Multiple partials for the same model's CRUD operations (consolidate into one `_model.html.erb`)
 - ❌ Nesting delete `button_to` inside edit forms — HTML doesn't support nested forms. `button_to` generates its own `<form>`, so placing it inside a `form_with` causes the browser to ignore the inner form. Clicking the delete button submits the outer edit form (PATCH) instead of DELETE. This commonly happens with inline-editable rows that have both edit fields and a delete button. The fix: structure your HTML so the edit form and delete button are siblings, not nested.
+- ❌ **Missing closing tags in partials** — Browsers silently "fix" invalid HTML by nesting elements, creating a "nesting doll" DOM. This breaks JS libraries like SortableJS that rely on direct children. **Symptom:** drag-and-drop works for the first item only. **Cause:** A missing `</div>` causes all subsequent items to nest inside the first.
+- ❌ **Unbalanced tags after refactoring** — When adding wrapper divs for checkboxes, bulk-select, or new layouts, ALWAYS verify every opening tag has a closing tag. Count your divs before committing.
 
 ```erb
 <%# ❌ BAD - nested forms, delete will submit as PATCH %>
@@ -621,6 +623,47 @@ Tell the user: "Add some `console.log('🪲 DEBUG:', yourVariable)` statements w
 **Browser console:** Right-click > Inspect > Console (Cmd+Option+J on Mac)
 
 After debugging, remind user to search for and remove 🪲 debug statements.
+
+### DOM Structure Debugging (When JS Libraries Break)
+
+**Suspect DOM issues when:**
+- SortableJS/drag-and-drop works for first item only
+- Stimulus controllers fire for one element but not siblings
+- Visual layout looks correct but JS interactions are broken
+- Feature worked before a refactor that changed HTML structure
+
+**The "Nesting Doll" Bug Pattern:**
+Invalid HTML (missing closing `</div>`) causes browsers to "fix" the markup by nesting elements. The DOM becomes structurally wrong even though it renders visually correct.
+
+**Console Debug Script (ask user to run this):**
+```javascript
+// Paste in browser console to detect nesting issues
+(function() {
+  const container = document.querySelector("[data-controller~='sortable']");
+  if (!container) { console.log("🪲 No sortable container found"); return; }
+
+  console.log("🪲 Container:", container);
+  console.log("🪲 Direct children count:", container.children.length);
+
+  // If direct children = 1 but you have multiple records, items are NESTED
+  if (container.children.length === 1 && container.querySelectorAll('[data-sortable-item]').length > 1) {
+    console.error("🪲 NESTING BUG DETECTED!");
+    console.log("🪲 Look for missing </div> in the partial that renders these items");
+  }
+})();
+```
+
+**Quick HTML Balance Check:**
+When refactoring partials, count your tags:
+```ruby
+# In rails console - check a rendered partial
+html = render_to_string(partial: 'tender_line_items/tender_line_item', locals: { tender_line_item: TenderLineItem.first })
+puts "Opening divs: #{html.scan(/<div/).count}"
+puts "Closing divs: #{html.scan(/<\\/div>/).count}"
+# These numbers MUST match
+```
+
+**After fixing HTML issues:** Clear browser cache and hard refresh (Cmd+Shift+R) to ensure the fixed markup loads.
 
 ---
 

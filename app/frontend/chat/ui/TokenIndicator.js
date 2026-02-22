@@ -10,6 +10,8 @@ export class TokenIndicator {
     this.countEl = null;
 
     // Context window limit (80K = summarization threshold)
+    // Matches SUMMARIZATION_TOKEN_THRESHOLD in app/agents/utils/token_counter.py
+    // NOTE: Also update the display text in chat.html (search for "/ 80K tokens")
     this.maxTokens = 80000;
     this.currentTokens = 0;
 

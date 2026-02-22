@@ -64,6 +64,20 @@ def admin_required(
     return current_user
 
 
+def engineer_or_admin_required(
+    current_user: User = Depends(get_current_user)
+) -> User:
+    """Require engineer or admin role for privileged operations."""
+    if current_user.is_admin:
+        return current_user
+    if getattr(current_user, 'role', 'user') == "engineer":
+        return current_user
+    raise HTTPException(
+        status_code=403,
+        detail="Engineer or admin privileges required"
+    )
+
+
 def has_any_users() -> bool:
     """Check if there are any users in the database."""
     if engine is None:
