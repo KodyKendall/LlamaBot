@@ -278,8 +278,8 @@ async def threads(
                 {
                     "thread_id": t.thread_id,
                     "title": t.title,
-                    "created_at": t.created_at.isoformat(),
-                    "updated_at": t.updated_at.isoformat(),
+                    "created_at": t.created_at.isoformat() + "Z",
+                    "updated_at": t.updated_at.isoformat() + "Z",
                     "message_count": t.message_count,
                     "agent_name": t.agent_name
                 }

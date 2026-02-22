@@ -99,62 +99,15 @@ def normalize_whitespace(s: str) -> str:
     return s.strip()
 
 
-def maybe_create_checkpoint(runtime: ToolRuntime, description: str):
-    """Create a git checkpoint before file modifications if not already created this turn.
-
-    This enables users to accept or reject AI changes with one-click rollback.
-    Only creates one checkpoint per agent turn to avoid checkpoint spam.
-
-    Args:
-        runtime: ToolRuntime with thread_id and turn tracking
-        description: Human-readable description of the change
-
-    Raises:
-        Exception: If checkpoint creation fails (bubbles up to user)
-    """
-    import logging
-    import traceback
-    logger = logging.getLogger(__name__)
-
-    # Check if we already created a checkpoint this turn
-    # Use a runtime attribute to track checkpoint state per turn
-    if hasattr(runtime, '_checkpoint_created') and runtime._checkpoint_created:
-        logger.info(f"CheckpointManager: ⏩ Checkpoint already created this turn, skipping: {description}")
-        return
-
-    # Get thread_id from runtime config
-    thread_id = runtime.config.get("configurable", {}).get("thread_id", "unknown")
-
-    logger.info(f"CheckpointManager: 🔖 Creating checkpoint for thread {thread_id}: {description}")
-
-    try:
-        # Create checkpoint
-        result = checkpoint_service.create_checkpoint(
-            thread_id=thread_id,
-            description=description
-        )
-
-        # Mark checkpoint as created for this turn
-        runtime._checkpoint_created = True
-
-        logger.info(f"CheckpointManager: ✅ Checkpoint created successfully: {result['checkpoint_id'][:8]}")
-
-    except Exception as e:
-        # Log full error with stack trace
-        error_msg = f"CheckpointManager: ❌ CHECKPOINT CREATION FAILED\n" \
-                   f"Description: {description}\n" \
-                   f"Thread ID: {thread_id}\n" \
-                   f"Error: {str(e)}\n" \
-                   f"Stack trace:\n{traceback.format_exc()}"
-        logger.error(error_msg)
-
-        # Re-raise to show error to user
-        raise Exception(f"Failed to create checkpoint: {str(e)}\n\nThis is a critical error. "
-                       f"Checkpoints allow you to rollback AI changes. Please fix this before continuing.\n\n"
-                       f"Common fixes:\n"
-                       f"1. Ensure git is configured in the container\n"
-                       f"2. Run: git config --global --add safe.directory /app/leonardo\n"
-                       f"3. Check that /app/leonardo is mounted and writable") from e
+# NOTE: Auto-checkpoint functionality has been disabled.
+# Users now manually create checkpoints via the History panel UI.
+# The checkpoint_service is still used by the /api/checkpoints endpoint for manual creation.
+#
+# def maybe_create_checkpoint(runtime: ToolRuntime, description: str):
+#     """Create a git checkpoint before file modifications if not already created this turn.
+#     ...
+#     """
+#     pass
 
 
 @tool(description=LIST_DIRECTORY_DESCRIPTION)
@@ -237,8 +190,7 @@ def write_file(
     file_path = guard_against_beginning_slash_argument(file_path)
     full_path = APP_DIR / "rails" / file_path
 
-    # Auto-checkpoint before making changes
-    maybe_create_checkpoint(runtime, f"Before editing {file_path}")
+    # NOTE: Auto-checkpoint disabled. Users create checkpoints manually via History panel.
 
     try:
         full_path.parent.mkdir(parents=True, exist_ok=True)
@@ -289,8 +241,7 @@ def edit_file(
     file_path = guard_against_beginning_slash_argument(file_path)
     full_path = APP_DIR / "rails" / file_path
 
-    # Auto-checkpoint before making changes
-    maybe_create_checkpoint(runtime, f"Before editing {file_path}")
+    # NOTE: Auto-checkpoint disabled. Users create checkpoints manually via History panel.
 
     if not full_path.exists():
         error_message = f"Error: File '{file_path}' not found"

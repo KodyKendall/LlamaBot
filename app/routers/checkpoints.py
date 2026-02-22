@@ -16,7 +16,7 @@ router = APIRouter()
 # ============== Pydantic Models ==============
 
 class CreateCheckpointRequest(BaseModel):
-    thread_id: str
+    thread_id: Optional[str] = "manual"
     description: str
 
 
@@ -179,4 +179,81 @@ def get_current_head():
 
     except Exception as e:
         logger.error(f"Failed to get current HEAD: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/checkpoints/uncommitted")
+def get_uncommitted_changes():
+    """Check for uncommitted changes in the working directory.
+
+    Returns:
+        Dict with has_changes flag and list of changed/untracked files
+    """
+    try:
+        changes = checkpoint_service.get_uncommitted_changes()
+        return JSONResponse(content=changes)
+
+    except Exception as e:
+        logger.error(f"Failed to check uncommitted changes: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/checkpoints/discard")
+def discard_uncommitted_changes():
+    """Discard all uncommitted changes (reset to last commit).
+
+    This performs git checkout -- . and git clean -fd
+
+    Returns:
+        Success status and count of discarded files
+    """
+    try:
+        result = checkpoint_service.discard_uncommitted_changes()
+        return JSONResponse(content=result)
+
+    except Exception as e:
+        logger.error(f"Failed to discard changes: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/git/push")
+def git_push():
+    """Push commits to GitHub.
+
+    Returns:
+        Success status and git output message
+    """
+    import subprocess
+    from pathlib import Path
+
+    LEONARDO_PATH = Path("/app/leonardo")
+
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(LEONARDO_PATH), "push"],
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+
+        success = result.returncode == 0
+        message = result.stdout.strip() if success else result.stderr.strip()
+
+        # Provide a friendlier message
+        if success:
+            if "Everything up-to-date" in message or not message:
+                message = "Already up to date with GitHub"
+            else:
+                message = "Successfully pushed to GitHub"
+
+        return JSONResponse(content={
+            "success": success,
+            "message": message
+        })
+
+    except subprocess.TimeoutExpired:
+        logger.error("Git push timed out")
+        raise HTTPException(status_code=500, detail="Git push timed out after 60 seconds")
+    except Exception as e:
+        logger.error(f"Failed to push to GitHub: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))

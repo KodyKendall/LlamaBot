@@ -4732,6 +4732,7 @@ body {
 
 /* Checkpoint button in header */
 .checkpoint-btn {
+    position: relative;
     width: 32px;
     height: 32px;
     display: flex;
@@ -4751,6 +4752,22 @@ body {
 
 .checkpoint-btn i {
     font-size: 18px;
+}
+
+/* Unsaved changes badge (red dot) */
+.unsaved-badge {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 8px;
+    height: 8px;
+    background: #ef4444;
+    border-radius: 50%;
+    border: 1px solid var(--bg-color, #1a1a1a);
+}
+
+.unsaved-badge.hidden {
+    display: none;
 }
 
 /* Checkpoint panel */
@@ -4776,16 +4793,54 @@ body {
 
 .checkpoint-panel-header {
     display: flex;
-    justify-content: space-between;
     align-items: center;
     padding: 16px;
     border-bottom: 1px solid var(--border-color, #333);
+    gap: 8px;
 }
 
 .checkpoint-panel-header h3 {
     margin: 0;
     font-size: 1.1rem;
     color: var(--text-primary, #fff);
+    flex: 1;
+}
+
+.save-checkpoint-btn {
+    background: none;
+    border: none;
+    color: #8b5cf6;
+    font-size: 1.1rem;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+}
+
+.save-checkpoint-btn:hover {
+    background-color: rgba(139, 92, 246, 0.2);
+    color: #a78bfa;
+}
+
+.sync-github-btn {
+    background: none;
+    border: none;
+    color: var(--text-secondary, #aaa);
+    font-size: 1.1rem;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+}
+
+.sync-github-btn:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+    color: var(--text-primary, #fff);
+}
+
+.sync-github-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
 }
 
 .close-checkpoint-panel {
@@ -4802,6 +4857,117 @@ body {
 .close-checkpoint-panel:hover {
     background-color: rgba(255, 255, 255, 0.1);
     color: var(--text-primary, #fff);
+}
+
+/* Save checkpoint form */
+.save-checkpoint-form {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border-color, #333);
+    background: rgba(139, 92, 246, 0.05);
+}
+
+.save-checkpoint-form.hidden {
+    display: none;
+}
+
+.checkpoint-message-input {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--border-color, #333);
+    border-radius: 6px;
+    background: var(--background-tertiary, #2a2a2a);
+    color: var(--text-primary, #fff);
+    font-size: 0.9rem;
+    margin-bottom: 10px;
+}
+
+.checkpoint-message-input:focus {
+    outline: none;
+    border-color: #8b5cf6;
+    box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.2);
+}
+
+.checkpoint-message-input::placeholder {
+    color: var(--text-secondary, #aaa);
+}
+
+.save-checkpoint-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.btn-save-checkpoint {
+    flex: 1;
+    padding: 8px 12px;
+    border: none;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    background: #8b5cf6;
+    color: #fff;
+    transition: all 0.2s ease;
+}
+
+.btn-save-checkpoint:hover {
+    background: #7c3aed;
+}
+
+.btn-cancel-checkpoint {
+    padding: 8px 12px;
+    border: 1px solid var(--border-color, #333);
+    border-radius: 4px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    background: transparent;
+    color: var(--text-secondary, #aaa);
+    transition: all 0.2s ease;
+}
+
+.btn-cancel-checkpoint:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-primary, #fff);
+}
+
+/* Uncommitted changes banner */
+.uncommitted-changes-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 16px;
+    background: rgba(251, 191, 36, 0.15);
+    border-bottom: 1px solid rgba(251, 191, 36, 0.3);
+}
+
+.uncommitted-changes-banner.hidden {
+    display: none;
+}
+
+.uncommitted-changes-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #fbbf24;
+    font-size: 0.85rem;
+}
+
+.uncommitted-changes-info i {
+    font-size: 1rem;
+}
+
+.btn-discard-changes {
+    padding: 5px 10px;
+    border: 1px solid #ef4444;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    background: rgba(239, 68, 68, 0.2);
+    color: #ef4444;
+    transition: all 0.2s ease;
+}
+
+.btn-discard-changes:hover {
+    background: #ef4444;
+    color: #fff;
 }
 
 .checkpoint-panel-content {
@@ -4868,11 +5034,79 @@ body {
     font-style: italic;
 }
 
-.checkpoint-files {
+.checkpoint-files-toggle {
     background: rgba(74, 158, 255, 0.2);
     padding: 2px 8px;
     border-radius: 4px;
     color: var(--primary-color, #4a9eff);
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.checkpoint-files-toggle:hover {
+    background: rgba(74, 158, 255, 0.3);
+}
+
+.checkpoint-files-toggle .expand-icon {
+    font-size: 0.7rem;
+    margin-left: 4px;
+    transition: transform 0.2s ease;
+}
+
+/* File list (expandable) */
+.checkpoint-file-list {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 4px;
+    padding: 8px;
+    margin-bottom: 8px;
+    max-height: 150px;
+    overflow-y: auto;
+}
+
+.checkpoint-file-list.hidden {
+    display: none;
+}
+
+.checkpoint-file-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 6px;
+    font-size: 0.8rem;
+    color: var(--text-secondary, #aaa);
+    border-radius: 3px;
+}
+
+.checkpoint-file-item:hover {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.checkpoint-file-item i {
+    color: #8b5cf6;
+    font-size: 0.75rem;
+}
+
+.checkpoint-file-name {
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.75rem;
+    word-break: break-all;
+}
+
+.checkpoint-file-item.no-files,
+.checkpoint-file-item.error {
+    color: var(--text-secondary, #888);
+    font-style: italic;
+}
+
+.checkpoint-file-item.error {
+    color: #ef4444;
+}
+
+.checkpoint-file-list-loading {
+    color: var(--text-secondary, #aaa);
+    font-size: 0.8rem;
+    font-style: italic;
+    padding: 4px;
 }
 
 .checkpoint-actions {

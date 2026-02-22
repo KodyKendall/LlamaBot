@@ -356,6 +356,106 @@ Timestamp: {timestamp}
         except Exception as e:
             raise Exception(f"Failed to get current HEAD: {str(e)}")
 
+    @staticmethod
+    def get_uncommitted_changes() -> dict:
+        """Check for uncommitted changes in the working directory.
+
+        Returns:
+            Dict with:
+                - has_changes: bool
+                - changed_files: list of changed file paths
+                - untracked_files: list of new untracked files
+        """
+        try:
+            # Get modified/deleted files (staged and unstaged)
+            diff_result = subprocess.run(
+                ["git", "-C", str(LEONARDO_PATH), "diff", "--name-only", "HEAD"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            changed_files = [f.strip() for f in diff_result.stdout.split("\n") if f.strip()]
+
+            # Get untracked files
+            untracked_result = subprocess.run(
+                ["git", "-C", str(LEONARDO_PATH), "ls-files", "--others", "--exclude-standard"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            untracked_files = [f.strip() for f in untracked_result.stdout.split("\n") if f.strip()]
+
+            has_changes = len(changed_files) > 0 or len(untracked_files) > 0
+
+            return {
+                "has_changes": has_changes,
+                "changed_files": changed_files,
+                "untracked_files": untracked_files,
+                "total_count": len(changed_files) + len(untracked_files)
+            }
+
+        except subprocess.TimeoutExpired:
+            raise Exception("Git operation timed out")
+        except Exception as e:
+            raise Exception(f"Failed to check for uncommitted changes: {str(e)}")
+
+    @staticmethod
+    def discard_uncommitted_changes() -> dict:
+        """Discard all uncommitted changes (reset to HEAD).
+
+        This performs:
+        - git checkout -- . (discard modified files)
+        - git clean -fd (remove untracked files and directories)
+
+        Returns:
+            Dict with discarded file counts
+        """
+        try:
+            # First get what we're about to discard for reporting
+            changes = CheckpointService.get_uncommitted_changes()
+
+            if not changes["has_changes"]:
+                return {
+                    "success": True,
+                    "message": "No changes to discard",
+                    "discarded_count": 0
+                }
+
+            # Discard modified files (checkout to HEAD)
+            checkout_result = subprocess.run(
+                ["git", "-C", str(LEONARDO_PATH), "checkout", "--", "."],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+
+            if checkout_result.returncode != 0:
+                raise Exception(f"Git checkout failed: {checkout_result.stderr}")
+
+            # Remove untracked files and directories
+            clean_result = subprocess.run(
+                ["git", "-C", str(LEONARDO_PATH), "clean", "-fd"],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+
+            if clean_result.returncode != 0:
+                raise Exception(f"Git clean failed: {clean_result.stderr}")
+
+            return {
+                "success": True,
+                "message": f"Discarded {changes['total_count']} file(s)",
+                "discarded_modified": len(changes["changed_files"]),
+                "discarded_untracked": len(changes["untracked_files"]),
+                "discarded_count": changes["total_count"]
+            }
+
+        except subprocess.TimeoutExpired:
+            raise Exception("Git operation timed out")
+        except Exception as e:
+            raise Exception(f"Failed to discard changes: {str(e)}")
+
 
 # Singleton instance
 checkpoint_service = CheckpointService()

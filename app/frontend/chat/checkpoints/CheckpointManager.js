@@ -18,6 +18,7 @@ export class CheckpointManager {
     this.currentHead = null;
     this.isVisible = false;
     this.diffViewer = null;
+    this.badgeCheckInterval = null;
 
     this.initializeUI();
   }
@@ -32,6 +33,9 @@ export class CheckpointManager {
       this.checkpointButton.onclick = () => this.togglePanel();
     }
 
+    // Get the unsaved badge element
+    this.unsavedBadge = document.querySelector('[data-llamabot="unsaved-badge"]');
+
     // Create checkpoint panel (hidden by default)
     this.checkpointPanel = this.createCheckpointPanel();
 
@@ -39,6 +43,49 @@ export class CheckpointManager {
     const chatSection = document.querySelector('.chat-section');
     if (chatSection) {
       chatSection.appendChild(this.checkpointPanel);
+    }
+
+    // Initial badge check and start periodic polling
+    this.updateUnsavedBadge();
+    this.startBadgePolling();
+  }
+
+  /**
+   * Start polling for uncommitted changes (every 30 seconds)
+   */
+  startBadgePolling() {
+    // Clear any existing interval
+    if (this.badgeCheckInterval) {
+      clearInterval(this.badgeCheckInterval);
+    }
+
+    // Poll every 30 seconds
+    this.badgeCheckInterval = setInterval(() => {
+      this.updateUnsavedBadge();
+    }, 30000);
+  }
+
+  /**
+   * Update the unsaved badge visibility based on uncommitted changes
+   */
+  async updateUnsavedBadge() {
+    if (!this.unsavedBadge) return;
+
+    try {
+      const response = await fetch('/api/checkpoints/uncommitted', {
+        credentials: 'same-origin'
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.has_changes) {
+          this.unsavedBadge.classList.remove('hidden');
+        } else {
+          this.unsavedBadge.classList.add('hidden');
+        }
+      }
+    } catch (error) {
+      console.warn('Could not check for unsaved changes:', error);
     }
   }
 
@@ -63,13 +110,35 @@ export class CheckpointManager {
     panel.innerHTML = `
       <div class="checkpoint-panel-header">
         <h3><i class="fa-solid fa-clock-rotate-left"></i> History</h3>
+        <button class="save-checkpoint-btn" title="Save checkpoint">
+          <i class="fa-solid fa-plus"></i>
+        </button>
+        <button class="sync-github-btn" title="Sync to GitHub">
+          <i class="fa-brands fa-github"></i>
+        </button>
         <button class="close-checkpoint-panel" title="Close">✕</button>
+      </div>
+      <div class="uncommitted-changes-banner hidden">
+        <div class="uncommitted-changes-info">
+          <i class="fa-solid fa-circle-exclamation"></i>
+          <span class="uncommitted-changes-text">Unsaved changes</span>
+        </div>
+        <button class="btn-discard-changes" title="Discard all uncommitted changes">
+          <i class="fa-solid fa-trash"></i> Discard
+        </button>
+      </div>
+      <div class="save-checkpoint-form hidden">
+        <input type="text" class="checkpoint-message-input" placeholder="Describe your changes...">
+        <div class="save-checkpoint-actions">
+          <button class="btn-save-checkpoint"><i class="fa-solid fa-check"></i> Save</button>
+          <button class="btn-cancel-checkpoint">Cancel</button>
+        </div>
       </div>
       <div class="checkpoint-panel-content">
         <div class="checkpoint-list"></div>
         <div class="checkpoint-empty-state hidden">
           <p>No history yet</p>
-          <small>History is saved automatically before AI edits</small>
+          <small>Click + to save a checkpoint</small>
         </div>
       </div>
     `;
@@ -78,7 +147,99 @@ export class CheckpointManager {
     const closeBtn = panel.querySelector('.close-checkpoint-panel');
     closeBtn.onclick = () => this.togglePanel();
 
+    // Add save checkpoint button handler
+    const saveBtn = panel.querySelector('.save-checkpoint-btn');
+    saveBtn.onclick = () => this.showSaveCheckpointForm();
+
+    // Add sync to GitHub button handler
+    const syncBtn = panel.querySelector('.sync-github-btn');
+    syncBtn.onclick = () => this.syncToGitHub();
+
+    // Add discard changes button handler
+    const discardBtn = panel.querySelector('.btn-discard-changes');
+    discardBtn.onclick = () => this.discardUncommittedChanges();
+
+    // Add form handlers
+    const saveFormBtn = panel.querySelector('.btn-save-checkpoint');
+    const cancelFormBtn = panel.querySelector('.btn-cancel-checkpoint');
+    const messageInput = panel.querySelector('.checkpoint-message-input');
+
+    saveFormBtn.onclick = () => this.saveCheckpoint();
+    cancelFormBtn.onclick = () => this.hideSaveCheckpointForm();
+
+    // Allow Enter key to submit
+    messageInput.onkeydown = (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        this.saveCheckpoint();
+      } else if (e.key === 'Escape') {
+        this.hideSaveCheckpointForm();
+      }
+    };
+
     return panel;
+  }
+
+  /**
+   * Show the save checkpoint form
+   */
+  showSaveCheckpointForm() {
+    const form = this.checkpointPanel.querySelector('.save-checkpoint-form');
+    const input = this.checkpointPanel.querySelector('.checkpoint-message-input');
+    form.classList.remove('hidden');
+    input.value = '';
+    input.focus();
+  }
+
+  /**
+   * Hide the save checkpoint form
+   */
+  hideSaveCheckpointForm() {
+    const form = this.checkpointPanel.querySelector('.save-checkpoint-form');
+    form.classList.add('hidden');
+  }
+
+  /**
+   * Save a new checkpoint with the user's message
+   */
+  async saveCheckpoint() {
+    const input = this.checkpointPanel.querySelector('.checkpoint-message-input');
+    const message = input.value.trim();
+
+    if (!message) {
+      this.showError('Please enter a description for your checkpoint');
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/checkpoints', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          description: message
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || `Failed to save checkpoint: ${response.statusText}`);
+      }
+
+      await response.json();
+
+      // Hide form and refresh list
+      this.hideSaveCheckpointForm();
+      this.showSuccess(`Checkpoint saved: ${message}`);
+      this.fetchCheckpoints();
+      this.updateUnsavedBadge(); // Update badge after saving
+
+    } catch (error) {
+      console.error('Error saving checkpoint:', error);
+      this.showError('Failed to save checkpoint: ' + error.message);
+    }
   }
 
   /**
@@ -90,8 +251,118 @@ export class CheckpointManager {
     if (this.isVisible) {
       this.checkpointPanel.classList.remove('hidden');
       this.fetchCheckpoints();
+      this.checkUncommittedChanges();
     } else {
       this.checkpointPanel.classList.add('hidden');
+    }
+  }
+
+  /**
+   * Check for uncommitted changes and update the banner
+   */
+  async checkUncommittedChanges() {
+    try {
+      const response = await fetch('/api/checkpoints/uncommitted', {
+        credentials: 'same-origin'
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to check uncommitted changes: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      const banner = this.checkpointPanel.querySelector('.uncommitted-changes-banner');
+      const textSpan = banner.querySelector('.uncommitted-changes-text');
+
+      if (data.has_changes) {
+        const count = data.total_count;
+        textSpan.textContent = `${count} unsaved change${count !== 1 ? 's' : ''}`;
+        banner.classList.remove('hidden');
+      } else {
+        banner.classList.add('hidden');
+      }
+
+    } catch (error) {
+      console.warn('Could not check uncommitted changes:', error);
+    }
+  }
+
+  /**
+   * Discard all uncommitted changes
+   */
+  async discardUncommittedChanges() {
+    // Confirm with user
+    if (!confirm('Are you sure you want to discard all uncommitted changes? This cannot be undone.')) {
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/checkpoints/discard', {
+        method: 'POST',
+        credentials: 'same-origin'
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || `Failed to discard changes: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+
+      // Refresh the Rails iframe to show reverted state
+      if (this.chatApp.iframeManager) {
+        this.chatApp.iframeManager.refreshRailsApp((callback) => this.chatApp.getRailsDebugInfo(callback));
+      }
+
+      this.showSuccess(data.message);
+      this.checkUncommittedChanges(); // Update banner
+      this.updateUnsavedBadge(); // Update badge after discarding
+
+    } catch (error) {
+      console.error('Error discarding changes:', error);
+      this.showError('Failed to discard changes: ' + error.message);
+    }
+  }
+
+  /**
+   * Sync commits to GitHub (git push)
+   */
+  async syncToGitHub() {
+    // Confirm with user
+    if (!confirm('Push all commits to GitHub? This will sync your local changes with the remote repository.')) {
+      return;
+    }
+
+    try {
+      const syncBtn = this.checkpointPanel.querySelector('.sync-github-btn');
+      syncBtn.disabled = true;
+      syncBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+
+      const response = await fetch('/api/git/push', {
+        method: 'POST',
+        credentials: 'same-origin'
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || `Failed to push: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+
+      if (data.success) {
+        this.showSuccess(data.message);
+      } else {
+        this.showError(data.message || 'Failed to push to GitHub');
+      }
+
+    } catch (error) {
+      console.error('Error pushing to GitHub:', error);
+      this.showError('Failed to push to GitHub: ' + error.message);
+    } finally {
+      const syncBtn = this.checkpointPanel.querySelector('.sync-github-btn');
+      syncBtn.disabled = false;
+      syncBtn.innerHTML = '<i class="fa-brands fa-github"></i>';
     }
   }
 
@@ -181,7 +452,12 @@ export class CheckpointManager {
         </div>
         <div class="checkpoint-meta">
           <span class="checkpoint-time"><i class="fa-regular fa-clock"></i> ${timestamp}</span>
-          <span class="checkpoint-files"><i class="fa-regular fa-file-code"></i> ${fileCount} file${fileCount !== 1 ? 's' : ''}</span>
+          <span class="checkpoint-files-toggle" data-checkpoint-id="${checkpoint.checkpoint_id}">
+            <i class="fa-regular fa-file-code"></i> ${fileCount} file${fileCount !== 1 ? 's' : ''} <i class="fa-solid fa-chevron-down expand-icon"></i>
+          </span>
+        </div>
+        <div class="checkpoint-file-list hidden" data-checkpoint-id="${checkpoint.checkpoint_id}">
+          <div class="checkpoint-file-list-loading">Loading...</div>
         </div>
         <div class="checkpoint-actions">
           <button class="btn-rollback" data-checkpoint-id="${checkpoint.checkpoint_id}" ${isCurrent ? 'disabled' : ''}>
@@ -199,6 +475,14 @@ export class CheckpointManager {
    * Attach event listeners to checkpoint action buttons
    */
   attachCheckpointEventListeners() {
+    // File list toggle
+    this.checkpointPanel.querySelectorAll('.checkpoint-files-toggle').forEach(toggle => {
+      toggle.onclick = () => {
+        const checkpointId = toggle.dataset.checkpointId;
+        this.toggleFileList(checkpointId, toggle);
+      };
+    });
+
     // View diff buttons
     this.checkpointPanel.querySelectorAll('.btn-view-diff').forEach(btn => {
       btn.onclick = () => {
@@ -214,6 +498,64 @@ export class CheckpointManager {
         this.confirmRollback(checkpointId);
       };
     });
+  }
+
+  /**
+   * Toggle the file list for a checkpoint
+   */
+  async toggleFileList(checkpointId, toggleElement) {
+    const fileList = this.checkpointPanel.querySelector(`.checkpoint-file-list[data-checkpoint-id="${checkpointId}"]`);
+    const expandIcon = toggleElement.querySelector('.expand-icon');
+
+    if (fileList.classList.contains('hidden')) {
+      // Expand - show file list
+      fileList.classList.remove('hidden');
+      expandIcon.classList.remove('fa-chevron-down');
+      expandIcon.classList.add('fa-chevron-up');
+
+      // Fetch files if not already loaded
+      if (fileList.querySelector('.checkpoint-file-list-loading')) {
+        await this.loadFileList(checkpointId, fileList);
+      }
+    } else {
+      // Collapse
+      fileList.classList.add('hidden');
+      expandIcon.classList.remove('fa-chevron-up');
+      expandIcon.classList.add('fa-chevron-down');
+    }
+  }
+
+  /**
+   * Load the list of changed files for a checkpoint
+   */
+  async loadFileList(checkpointId, fileListElement) {
+    try {
+      const response = await fetch(`/api/checkpoints/${checkpointId}/diff`, {
+        credentials: 'same-origin'
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch files: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      const files = data.changed_files || [];
+
+      if (files.length === 0) {
+        fileListElement.innerHTML = '<div class="checkpoint-file-item no-files">No files changed</div>';
+      } else {
+        fileListElement.innerHTML = files.map(file => `
+          <div class="checkpoint-file-item">
+            <i class="fa-regular fa-file-code"></i>
+            <span class="checkpoint-file-name">${this.escapeHtml(file)}</span>
+          </div>
+        `).join('');
+      }
+
+    } catch (error) {
+      console.error('Error loading file list:', error);
+      fileListElement.innerHTML = '<div class="checkpoint-file-item error">Failed to load files</div>';
+    }
   }
 
   /**
