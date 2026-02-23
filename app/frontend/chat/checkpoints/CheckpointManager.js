@@ -113,8 +113,8 @@ export class CheckpointManager {
         <button class="save-checkpoint-btn" title="Save checkpoint">
           <i class="fa-solid fa-plus"></i>
         </button>
-        <button class="sync-github-btn" title="Sync to GitHub">
-          <i class="fa-brands fa-github"></i>
+        <button class="sync-github-btn" title="Push to remote">
+          <i class="fa-solid fa-cloud-arrow-up"></i>
         </button>
         <button class="close-checkpoint-panel" title="Close">✕</button>
       </div>
@@ -362,7 +362,7 @@ export class CheckpointManager {
     } finally {
       const syncBtn = this.checkpointPanel.querySelector('.sync-github-btn');
       syncBtn.disabled = false;
-      syncBtn.innerHTML = '<i class="fa-brands fa-github"></i>';
+      syncBtn.innerHTML = '<i class="fa-solid fa-cloud-arrow-up"></i>';
     }
   }
 
