@@ -59,7 +59,8 @@
       "Bash(curl:*)",
       "Bash(timeout 30 python3:*)",
       "Bash(timeout 10 python3:*)",
-      "Bash(docker system:*)"
+      "Bash(docker system:*)",
+      "Bash(gh auth login --help:*)"
     ],
     "deny": [],
     "ask": []

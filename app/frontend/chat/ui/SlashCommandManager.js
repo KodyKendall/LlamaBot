@@ -614,6 +614,12 @@ export class SlashCommandManager {
 
       const result = await response.json();
 
+      // Handle special commands with custom frontend behavior
+      if (result.special_handler === 'gh_auth') {
+        await this.handleGhAuth(result);
+        return;
+      }
+
       if (result.success) {
         this.showSystemMessage(`/${commandName} completed successfully:\n\n${result.output}`, 'success', result);
       } else {
@@ -628,6 +634,53 @@ export class SlashCommandManager {
       }
       console.error('Failed to execute command:', error);
       this.showSystemMessage(`Error executing /${commandName}: ${error.message}`, 'error');
+    }
+  }
+
+  /**
+   * Handle GitHub auth special flow - copy code to clipboard and open browser
+   */
+  async handleGhAuth(result) {
+    const output = result.stdout || result.output || '';
+
+    // Parse the one-time code (format: XXXX-XXXX)
+    const codeMatch = output.match(/one-time code:\s*([A-Z0-9]{4}-[A-Z0-9]{4})/i);
+    // Parse the URL
+    const urlMatch = output.match(/(https:\/\/github\.com\/login\/device)/);
+
+    if (codeMatch && urlMatch) {
+      const code = codeMatch[1];
+      const url = urlMatch[1];
+
+      try {
+        // Copy code to clipboard
+        await navigator.clipboard.writeText(code);
+
+        // Open URL in new tab
+        window.open(url, '_blank');
+
+        // Show success message with the code prominently displayed
+        this.showSystemMessage(
+          `GitHub auth started! Code copied to clipboard: ${code}\n\nPaste it in the browser tab that just opened.`,
+          'success',
+          { ...result, ghCode: code }
+        );
+      } catch (clipboardError) {
+        // Clipboard failed (maybe not HTTPS), show code for manual copy
+        window.open(url, '_blank');
+        this.showSystemMessage(
+          `GitHub auth started! Copy this code: ${code}\n\nPaste it in the browser tab that just opened.`,
+          'info',
+          { ...result, ghCode: code }
+        );
+      }
+    } else {
+      // Couldn't parse - show raw output (maybe gh not installed or already authed)
+      this.showSystemMessage(
+        `/${result.command} output:\n\n${output}`,
+        result.success ? 'info' : 'error',
+        result
+      );
     }
   }
 

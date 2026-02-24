@@ -81,7 +81,13 @@ psycopg_logger.setLevel(logging.ERROR)
 def get_or_create_checkpointer():
     """Get persistent checkpointer, creating once if needed"""
     if app.state.checkpointer is None:
-        db_uri = os.getenv("DB_URI")
+        # Use llamabot_production by default (consolidated with auth DB)
+        db_uri = (
+            os.getenv("CHECKPOINTER_DB_URI") or
+            os.getenv("LEONARDO_DB_URI") or
+            os.getenv("AUTH_DB_URI") or
+            os.getenv("DB_URI")  # Legacy fallback
+        )
         if db_uri and db_uri.strip():
             try:
                 # Create connection pool with limited retries and timeout
@@ -112,7 +118,13 @@ def get_or_create_checkpointer():
 def get_or_create_async_checkpointer():
     """Get async persistent checkpointer, creating once if needed"""
     if app.state.async_checkpointer is None:
-        db_uri = os.getenv("DB_URI")
+        # Use llamabot_production by default (consolidated with auth DB)
+        db_uri = (
+            os.getenv("CHECKPOINTER_DB_URI") or
+            os.getenv("LEONARDO_DB_URI") or
+            os.getenv("AUTH_DB_URI") or
+            os.getenv("DB_URI")  # Legacy fallback
+        )
         if db_uri and db_uri.strip():
             try:
                 # Create async connection pool with limited retries and timeout
@@ -127,6 +139,7 @@ def get_or_create_async_checkpointer():
                     reconnect_failed=lambda pool: logger.warning("PostgreSQL async connection failed, using MemorySaver for persistence")
                 )
                 app.state.async_checkpointer = AsyncPostgresSaver(pool)
+                app.state.checkpointer_pool = pool  # Store pool for checkpoint cleanup service
                 # app.state.async_checkpointer.setup()
                 logger.info("Connected to PostgreSQL (async) for persistence")
             except Exception as e:
@@ -247,6 +260,22 @@ async def startup_event():
         logger.error(f"Error compiling LangGraph workflows: {e}", exc_info=True)
         # Don't fail startup - fall back to per-request compilation
         app.state.compiled_graphs = {}
+
+    # Start checkpoint cleanup background task (if using PostgresSaver)
+    if hasattr(app.state, 'checkpointer_pool') and app.state.checkpointer_pool is not None:
+        try:
+            from app.services.checkpoint_cleanup import periodic_cleanup
+            stale_minutes = int(os.getenv("CHECKPOINT_STALE_MINUTES", "30"))
+            app.state.cleanup_task = asyncio.create_task(
+                periodic_cleanup(
+                    app.state.checkpointer_pool,
+                    interval_hours=24,
+                    stale_minutes=stale_minutes
+                )
+            )
+            logger.info(f"Checkpoint cleanup enabled (post-run + periodic every 24h, stale threshold: {stale_minutes}min)")
+        except Exception as e:
+            logger.warning(f"Failed to start checkpoint cleanup task: {e}")
 
     # Log streaming disabled for now
     pass

@@ -8,3 +8,13 @@
 
 0.3.6c:
 - [x] Change octocat icon to be cloud push icon instead (for pushing checkpoints to github)
+
+0.3.6d:
+- [x] Change langgraph checkpoints to save to llamabot database instead of llamapress database
+- [x] Add /restore_s3.sh command so we can restore from database backups
+- [x] Add a bin script where it's able to copy the ssh key from host into the vs code container instance automatically
+- [x] Add a way to sign into Github and authenticate from the Leonardo UI/UX.. ? Maybe like a /gh auth login command, that then gives us the URL and copies the code automatically to our keyboard?
+- [x] Add ssh setup slash command
+- [x] Only allow users with engineering role to run slash commands
+- [x] User Feedback Agent Mode v2 (can write feedback directly)
+- [x] Add checkpointing auto clean up to protect disk space & DB size on Leonardo instances

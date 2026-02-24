@@ -642,45 +642,57 @@ def list_all_files_recursive(directory: Path):
 WORKDIR = "/rails"  # path that contains bin/rails inside the Rails container
 
 def get_rails_container_name():
-    """Dynamically get the Rails container name by looking for containers ending with 'llamapress-1'."""
+    """Dynamically get the Rails container name by looking for containers with 'llamapress' in the name.
+
+    This function is called on each rails_api_sh invocation to handle container restarts.
+    Container names vary by environment:
+    - Production: llamapress-1
+    - Development: leonardo-llamapress-1 (or similar, based on docker-compose directory name)
+    """
     try:
         # List all running containers using Docker API
         cmd = [
             "curl", "--silent", "--unix-socket", "/var/run/docker.sock",
             "http://localhost/containers/json"
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+
         if result.returncode == 0:
             containers = json.loads(result.stdout)
             for container in containers:
                 # Container names are in the 'Names' array with leading '/'
                 names = container.get('Names', [])
                 for name in names:
-                    # Remove leading '/' and check if it ends with 'llamapress-1'
+                    # Remove leading '/' and check if it contains 'llamapress'
                     clean_name = name.lstrip('/')
-                    if clean_name.endswith('llamapress-1'):
+                    # Match any container with 'llamapress' in the name (handles various prefixes)
+                    if 'llamapress' in clean_name.lower() and 'llamabot' not in clean_name.lower():
                         return clean_name
-        
-        # Fallback to environment-specific defaults
-        # Check if we're in production (you might have an env var or other indicator)
+
+        # Fallback to common names
         import os
         if os.environ.get('ENV') == 'production':
             return "llamapress-1"
-        
-        # Default to development container name
-        return "rails-agent-llamapress-1"
-        
-    except Exception:
-        # If anything goes wrong, return a sensible default
-        return "rails-agent-llamapress-1"
 
-# Get the container name dynamically
-RAILS_CONT = get_rails_container_name()
+        # Default to leonardo prefix (most common dev setup)
+        return "leonardo-llamapress-1"
+
+    except Exception as e:
+        # If anything goes wrong, return a sensible default
+        import logging
+        logging.getLogger(__name__).warning(f"Failed to detect Rails container: {e}")
+        return "leonardo-llamapress-1"
+
+
+# NOTE: Container name is now fetched dynamically in rails_api_sh() to handle restarts
+_cached_rails_container = None
 
 def rails_api_sh(snippet: str, workdir: str = WORKDIR) -> str:
     """Execute a command in the Rails Docker container via Docker API."""
     try:
+        # Get container name dynamically (handles restarts and varying prefixes)
+        container_name = get_rails_container_name()
+
         # Create the exec payload
         payload = {
             "AttachStdout": True,
@@ -690,14 +702,14 @@ def rails_api_sh(snippet: str, workdir: str = WORKDIR) -> str:
             "WorkingDir": workdir,
             "User": "1000:1000"  # Run as UID 1000 to match host user and prevent permission issues
         }
-        
+
         # Create exec instance using curl
         create_cmd = [
             "curl", "--silent", "--show-error", "--fail-with-body",
             "--unix-socket", "/var/run/docker.sock",
             "-H", "Content-Type: application/json",
             "--data-binary", json.dumps(payload),
-            f"http://localhost/containers/{RAILS_CONT}/exec"
+            f"http://localhost/containers/{container_name}/exec"
         ]
         
         create_result = subprocess.run(create_cmd, capture_output=True, text=True, timeout=30)

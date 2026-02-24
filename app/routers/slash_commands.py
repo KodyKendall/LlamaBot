@@ -11,8 +11,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
-from app.dependencies import auth, get_db_session
-from app.models import CommandHistory
+from app.dependencies import auth, get_db_session, engineer_or_admin_required
+from app.models import CommandHistory, User
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -64,6 +64,20 @@ SLASH_COMMANDS = {
         "dangerous": False,
         "confirm_message": "View backup status?"
     },
+    "restore": {
+        "script": None,
+        "command": "echo 'y' | bin/db/restore_s3.sh",
+        "description": "Restore database from latest S3 backup",
+        "dangerous": True,
+        "confirm_message": "⚠️ WARNING: This will DESTROY all existing database data and restore from the latest S3 backup. This cannot be undone. Continue?"
+    },
+    "restore-storage": {
+        "script": None,
+        "command": "echo 'y' | bin/backups/restore_storage.sh",
+        "description": "Restore active storage files from latest S3 backup",
+        "dangerous": True,
+        "confirm_message": "⚠️ WARNING: This will overwrite all storage files with the latest S3 backup. Continue?"
+    },
     "install-cron": {
         "script": "bin/install/setup-cron-db-s3-backups.sh",
         "description": "Install automatic backup cron job",
@@ -104,6 +118,20 @@ SLASH_COMMANDS = {
         "dangerous": False,
         "confirm_message": "View command history?",
         "client_only": True  # Handled entirely on frontend
+    },
+    "gh": {
+        "script": None,
+        "command": "timeout 3 gh auth login -p https -h github.com -w 2>&1 || true",
+        "description": "Authenticate with GitHub (opens browser)",
+        "dangerous": False,
+        "confirm_message": "This will start GitHub authentication. A browser tab will open and the code will be copied to your clipboard. Continue?",
+        "special_handler": "gh_auth"  # Frontend handles code copy + URL open
+    },
+    "setup-ssh": {
+        "script": "bin/install/setup-ssh-full.sh",
+        "description": "Setup SSH key for VSCode container to access host",
+        "dangerous": False,
+        "confirm_message": "This will generate an SSH key and configure VSCode container access to the host. Continue?"
     }
 }
 
@@ -232,7 +260,7 @@ def execute_host_command(cmd_config: dict, args: Optional[str] = None) -> dict:
 
 
 @router.get("/api/slash-commands", response_class=JSONResponse)
-async def get_slash_commands(username: str = Depends(auth)) -> List[dict]:
+async def get_slash_commands(current_user: User = Depends(engineer_or_admin_required)) -> List[dict]:
     """Get list of available slash commands."""
     return [
         {
@@ -248,7 +276,7 @@ async def get_slash_commands(username: str = Depends(auth)) -> List[dict]:
 @router.post("/api/slash-commands/execute", response_class=JSONResponse)
 async def execute_slash_command(
     request: ExecuteRequest,
-    username: str = Depends(auth),
+    current_user: User = Depends(engineer_or_admin_required),
     session: Session = Depends(get_db_session)
 ):
     """Execute a slash command."""
@@ -273,14 +301,14 @@ async def execute_slash_command(
     if cmd_config.get("accepts_args") and not args:
         raise HTTPException(status_code=400, detail=f"Command /{cmd_name} requires arguments")
 
-    logger.info(f"User '{username}' executing slash command: /{cmd_name}{f' {args}' if args else ''}")
+    logger.info(f"User '{current_user.username}' executing slash command: /{cmd_name}{f' {args}' if args else ''}")
 
     # Execute the command
     result = execute_host_command(cmd_config, args=args)
 
     # Log to file in Leonardo repo
     log_to_file(
-        user=username,
+        user=current_user.username,
         command=cmd_name,
         args=args or "",
         stdout=result.get("stdout", ""),
@@ -293,7 +321,7 @@ async def execute_slash_command(
     history_entry = CommandHistory(
         command=cmd_name,
         args=args,
-        username=username,
+        username=current_user.username,
         success=result["success"],
         stdout=result.get("stdout", ""),
         stderr=result.get("stderr", ""),
@@ -319,13 +347,14 @@ async def execute_slash_command(
         "stderr": result.get("stderr", ""),
         "return_code": result.get("return_code", -1),
         "command": cmd_name,
-        "args": args
+        "args": args,
+        "special_handler": cmd_config.get("special_handler")
     }
 
 
 @router.get("/api/slash-commands/history", response_class=JSONResponse)
 async def get_command_history(
-    username: str = Depends(auth),
+    current_user: User = Depends(engineer_or_admin_required),
     session: Session = Depends(get_db_session)
 ):
     """Get the last 50 command executions."""
