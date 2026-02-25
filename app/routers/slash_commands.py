@@ -129,7 +129,7 @@ SLASH_COMMANDS = {
     },
     "gh-copy": {
         "script": None,
-        "command": "docker cp /home/ubuntu/.config/gh/. llamabot:/root/.config/gh/ && docker cp /home/ubuntu/.config/gh/. code:/config/.config/gh/ && echo 'GitHub credentials copied to llamabot and vscode containers'",
+        "command": "docker compose exec llamabot mkdir -p /root/.config/gh && docker compose exec code mkdir -p /config/.config/gh && docker compose cp /home/ubuntu/.config/gh/. llamabot:/root/.config/gh/ && docker compose cp /home/ubuntu/.config/gh/. code:/config/.config/gh/ && docker compose exec llamabot gh auth setup-git && docker compose exec code gh auth setup-git && echo 'GitHub credentials copied and git configured in llamabot and vscode containers'",
         "description": "Copy GitHub credentials from host to containers (run after /gh)",
         "dangerous": False,
         "confirm_message": "This will copy GitHub credentials from host to llamabot and vscode containers. Make sure you completed the /gh authentication first. Continue?"
