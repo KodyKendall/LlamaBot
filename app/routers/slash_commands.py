@@ -127,11 +127,24 @@ SLASH_COMMANDS = {
         "confirm_message": "This will start GitHub authentication. A browser tab will open and the code will be copied to your clipboard. Continue?",
         "special_handler": "gh_auth"  # Frontend handles code copy + URL open
     },
+    "gh-copy": {
+        "script": None,
+        "command": "docker cp /home/ubuntu/.config/gh/. llamabot:/root/.config/gh/ && docker cp /home/ubuntu/.config/gh/. code:/config/.config/gh/ && echo 'GitHub credentials copied to llamabot and vscode containers'",
+        "description": "Copy GitHub credentials from host to containers (run after /gh)",
+        "dangerous": False,
+        "confirm_message": "This will copy GitHub credentials from host to llamabot and vscode containers. Make sure you completed the /gh authentication first. Continue?"
+    },
     "setup-ssh": {
         "script": "bin/install/setup-ssh-full.sh",
         "description": "Setup SSH key for VSCode container to access host",
         "dangerous": False,
         "confirm_message": "This will generate an SSH key and configure VSCode container access to the host. Continue?"
+    },
+    "git-config": {
+        "script": "bin/install/git-config-vscode.sh",
+        "description": "Configure git user name and email in VSCode container",
+        "dangerous": False,
+        "confirm_message": "This will set git config in the VSCode container. Continue?"
     }
 }
 
