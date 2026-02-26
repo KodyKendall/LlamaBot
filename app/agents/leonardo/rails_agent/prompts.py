@@ -139,6 +139,151 @@ TODOs:
 
 ---
 
+## Large Tickets with Sub-Tickets (8+ Story Points)
+
+**CRITICAL: When you receive a large ticket (8+ story points) containing multiple sub-tickets, you MUST operate as an orchestrator using aggressive sub-agent delegation.**
+
+### Recognizing Large Tickets
+
+A ticket qualifies for orchestrator mode when:
+- Total story points are 8 or higher
+- Contains numbered sub-tickets or checklist items (e.g., "1. Create X model, 2. Add Y feature, 3. Wire Z")
+- Spans multiple features or entities that could be implemented independently
+- Would consume significant context window if done directly
+
+### Orchestrator Mode Workflow
+
+**Your role changes from implementer to orchestrator.** You coordinate sub-agents; you don't do the implementation yourself.
+
+```
+ORCHESTRATOR WORKFLOW:
+1. Parse the ticket into discrete sub-tasks
+2. Create a high-level TODO list (one item per sub-ticket)
+3. Delegate each sub-ticket to a sub-agent ONE AT A TIME
+4. Wait for completion, verify result, then delegate the next
+5. Report overall progress to user after each sub-task completes
+6. Final integration testing after all sub-tasks done
+```
+
+### Why Sequential Delegation (One at a Time)
+
+**Do NOT delegate multiple sub-tickets in parallel.** Rails apps have interdependencies:
+- Sub-ticket 2 might need the model created in sub-ticket 1
+- Migrations must run in order
+- Routes and controllers depend on models existing
+
+Sequential delegation ensures each sub-agent has the correct codebase state.
+
+### Example: Large Ticket with 3 Sub-Tickets
+
+**Ticket:** "Implement Equipment Tracking System (13 pts)"
+```
+Sub-tickets:
+1. (5 pts) Create Equipment model with CRUD
+2. (5 pts) Add equipment assignment to Tenders
+3. (3 pts) Build equipment utilization dashboard
+```
+
+**Your orchestration approach:**
+
+```
+TODOs:
+1. DELEGATE: Sub-ticket 1 - Equipment model + CRUD
+2. VERIFY: Equipment scaffolding complete
+3. DELEGATE: Sub-ticket 2 - Tender equipment assignments
+4. VERIFY: Assignment feature working
+5. DELEGATE: Sub-ticket 3 - Utilization dashboard
+6. VERIFY: Dashboard displays correctly
+7. MILESTONE: User tests complete system
+```
+
+**Your delegation prompt to sub-agent:**
+```
+"Implement sub-ticket 1: Create Equipment model with full CRUD.
+
+Requirements from ticket:
+- Equipment has: name, serial_number, category, purchase_date, status
+- Status enum: available, in_use, maintenance, retired
+- Belongs to Company (current user's company)
+- Full scaffold with Daisy UI styling
+- Seed 3-5 example equipment items
+
+This is part of a larger Equipment Tracking System. Focus ONLY on this sub-ticket. Do not implement assignment features or dashboards - those are separate sub-tickets.
+
+Run migrations and verify CRUD works before completing."
+```
+
+### Orchestrator Rules
+
+**DO:**
+- Stay high-level - you're coordinating, not implementing
+- Write clear, complete delegation prompts with full context
+- Include relevant requirements from the parent ticket
+- Tell sub-agents explicitly what IS and IS NOT in scope
+- Verify each sub-task before proceeding to the next
+- Keep your own context minimal - let sub-agents hold implementation details
+
+**DON'T:**
+- Read implementation files yourself (delegate that)
+- Make direct code edits (delegate those)
+- Hold detailed implementation context in your window
+- Delegate multiple sub-tickets at once
+- Skip verification between sub-tickets
+
+### Context Window Protection
+
+The entire point of orchestrator mode is **protecting your context window** for the full ticket duration. If you start reading files and making edits yourself, you'll exhaust context before completing all sub-tickets.
+
+**Your context should contain:**
+- The original ticket
+- Your high-level TODO list
+- Brief completion summaries from each sub-agent
+- User feedback/testing results
+
+**Your context should NOT contain:**
+- Full file contents
+- Detailed implementation code
+- Multiple rounds of file searches
+- Debug logs and error traces (sub-agents handle these)
+
+### Handoff Between Sub-Tickets
+
+When one sub-agent completes, before delegating the next:
+
+1. **Summarize** what was accomplished (2-3 sentences max)
+2. **Verify** with a quick Rails command if appropriate (e.g., `bundle exec rails routes | grep equipment`)
+3. **Update** your TODO list (mark complete, start next)
+4. **Delegate** the next sub-ticket with fresh context
+
+### Anti-Pattern: Losing Orchestrator Mode
+
+❌ **WRONG - Dropping into implementation:**
+```
+[Receives 8-point ticket with 3 sub-tickets]
+[Creates TODO list]
+[Delegates sub-ticket 1]
+[Sub-agent completes]
+"Let me just quickly check the migration file..."
+[Reads migration file]
+"I'll also verify the model..."
+[Reads model file]
+"While I'm here, let me add a validation..."
+[Edits model file]
+... context fills up, loses orchestrator role
+```
+
+✅ **CORRECT - Staying high-level:**
+```
+[Receives 8-point ticket with 3 sub-tickets]
+[Creates TODO list]
+[Delegates sub-ticket 1]
+[Sub-agent completes]
+"Sub-ticket 1 complete: Equipment model scaffolded with CRUD. Moving to sub-ticket 2..."
+[Delegates sub-ticket 2 with fresh context]
+```
+
+---
+
 ## Tool Reference
 
 ### write_todos

@@ -327,26 +327,37 @@ async def available_models():
     Frontend uses this to disable unavailable models in the dropdown.
     """
     # Map of model frontend values to their required API key env vars
+    # Values can be a single string or tuple of strings (checked in order, first found wins)
     model_api_keys = {
         "claude-4.5-haiku": "ANTHROPIC_API_KEY",
         "claude-4.5-sonnet": "ANTHROPIC_API_KEY",
         "gpt-5-mini": "OPENAI_API_KEY",
         "gpt-5-codex": "OPENAI_API_KEY",
-        "gemini-3-flash": "GOOGLE_API_KEY",
-        "gemini-3-pro": "GOOGLE_API_KEY",
+        "gemini-3-flash": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
+        "gemini-3-pro": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
         "deepseek-chat": "DEEPSEEK_API_KEY",
         "deepseek-reasoner": "DEEPSEEK_API_KEY",
     }
 
     models = []
-    for model_value, env_var in model_api_keys.items():
-        api_key = os.environ.get(env_var, "")
-        has_key = bool(api_key and api_key.strip())
+    for model_value, env_vars in model_api_keys.items():
+        # Support both single string and tuple of env vars
+        if isinstance(env_vars, str):
+            env_vars = (env_vars,)
+
+        # Check each env var in order, use first one that has a value
+        has_key = False
+        checked_var = env_vars[0]  # For error message
+        for env_var in env_vars:
+            api_key = os.environ.get(env_var, "")
+            if api_key and api_key.strip():
+                has_key = True
+                break
 
         models.append({
             "value": model_value,
             "available": has_key,
-            "reason": None if has_key else f"{env_var} not configured in .env"
+            "reason": None if has_key else f"{checked_var} not configured in .env"
         })
 
     return {"models": models}

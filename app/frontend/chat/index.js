@@ -27,6 +27,7 @@ import { LoadingVerbs } from './utils/LoadingVerbs.js';
 import { ClipboardFormatter } from './utils/ClipboardFormatter.js';
 import { CheckpointManager } from './checkpoints/CheckpointManager.js';
 import { DiffViewer } from './checkpoints/DiffViewer.js';
+import { FaviconBadgeManager } from './ui/FaviconBadgeManager.js';
 
 /**
  * Main application class - LlamaBot Client
@@ -65,6 +66,7 @@ class ChatApp {
     this.slashCommandManager = null;
     this.panelResizeManager = null;
     this.checkpointManager = null;
+    this.faviconBadgeManager = null;
     this.loadingVerbs = new LoadingVerbs();
 
     // Initialize WebSocket components
@@ -148,6 +150,9 @@ class ChatApp {
     this.clipboardFormatter = new ClipboardFormatter(this.elements.messageHistory);
     this.clipboardFormatter.init();
 
+    // Initialize favicon badge manager for tab notifications
+    this.faviconBadgeManager = new FaviconBadgeManager();
+
     // Initialize message renderer with iframe manager, debug info callback, scroll manager, and loading verbs
     this.messageRenderer = new MessageRenderer(
       this.elements.messageHistory,
@@ -157,7 +162,8 @@ class ChatApp {
       this.loadingVerbs,
       this.config,
       this.container,
-      this.elements
+      this.elements,
+      this.faviconBadgeManager
     );
 
     // Initialize thread manager
