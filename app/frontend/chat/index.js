@@ -153,6 +153,11 @@ class ChatApp {
     // Initialize favicon badge manager for tab notifications
     this.faviconBadgeManager = new FaviconBadgeManager();
 
+    // Wire up scroll manager to update favicon unread count
+    this.scrollManager.setUnreadCountCallback((count) => {
+      this.faviconBadgeManager.updateUnreadCount(count);
+    });
+
     // Initialize message renderer with iframe manager, debug info callback, scroll manager, and loading verbs
     this.messageRenderer = new MessageRenderer(
       this.elements.messageHistory,
@@ -604,6 +609,11 @@ class ChatApp {
           this.loadingVerbs.startCycling(thinkingDiv);
         }
       }
+    }
+
+    // Start favicon thinking indicator
+    if (this.faviconBadgeManager) {
+      this.faviconBadgeManager.startThinking();
     }
 
     // Change placeholder text while thinking

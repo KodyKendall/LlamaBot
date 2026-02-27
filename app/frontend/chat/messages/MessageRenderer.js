@@ -360,6 +360,11 @@ export class MessageRenderer {
     if (messageInput) {
       messageInput.placeholder = 'Ask Leonardo...';
     }
+
+    // Stop favicon thinking indicator (as safety net - showError/showComplete also stop it)
+    if (this.faviconBadgeManager) {
+      this.faviconBadgeManager.stopThinking();
+    }
   }
 
   /**
