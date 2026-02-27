@@ -196,7 +196,7 @@ def build_workflow(checkpointer=None):
         SummarizationMiddleware(
             model=summarization_model,
             trigger=("tokens", SUMMARIZATION_TOKEN_THRESHOLD),
-            keep=("messages", 20),  # Match Claude Code's default
+            keep=("messages", 15),  # Reduced from 20 for faster context recovery
             token_counter=gemini_multimodal_token_counter,
             trim_tokens_to_summarize=None,  # KEY FIX: Disable trimming, let Gemini see everything
             summary_prompt=SUMMARIZATION_PROMPT,

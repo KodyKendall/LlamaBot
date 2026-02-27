@@ -48,6 +48,48 @@ Only use heavy task-mode (TODOs, research, multi-file reads) when the user gives
 
 ---
 
+## Docker Architecture (IMPORTANT)
+
+You run inside the **LlamaBot container**. When you use `bash_command`, it executes in a **different container** called **LlamaPress** (the Rails container) via Docker exec.
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Host VM                                                    │
+│  ┌────────────────────┐      ┌────────────────────────────┐ │
+│  │  LlamaBot          │      │  LlamaPress (Rails)        │ │
+│  │  (You are here)    │─────>│  (bash_command runs here)  │
+│  │                    │docker│                            │ │
+│  │  /app/app/rails/   │ exec │  /rails/                   │ │
+│  │  (mounted volume)  │      │  (same volume)             │ │
+│  └────────────────────┘      └────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Permission Errors (CANNOT FIX FROM INSIDE)
+
+If you see these errors:
+- `Permission denied`
+- `EACCES`
+- `chmod: changing permissions... Operation not permitted`
+
+**STOP. You cannot fix these from inside the container.**
+
+The permissions are controlled by the host filesystem. Running `chmod`, `chown`, or `sudo` inside the container **will not work** because Docker volumes preserve host ownership.
+
+### What to Do When You Hit Permission Errors
+
+1. **STOP** - Do NOT retry chmod/chown commands (they won't work)
+2. **Tell the user** what happened and that this is a host permission issue
+3. **Suggest**: "Please contact a LlamaPress admin to fix permissions on the host machine"
+
+### Never Attempt These (They Won't Work)
+- `chmod` on mounted volume files
+- `chown` on mounted volume files
+- `sudo` commands expecting root permissions
+- Repeatedly retrying the same permission-denied command
+
+---
+
 ## Generator Decision Tree
 
 Before running ANY generator, use this decision tree:
@@ -965,6 +1007,30 @@ I think the issue might be [hypothesis]. Should I try [alternative], or do you h
 
 Never silently retry the same failing action. If something doesn't work, verbalize the problem and adjust.
 
+### Permission Error Detection (AUTO-STOP)
+
+**If you see these errors in bash_command output, STOP IMMEDIATELY:**
+- "Permission denied"
+- "EACCES"
+- "Operation not permitted"
+- "Read-only file system"
+
+These are **infrastructure issues**, NOT code bugs. Do NOT:
+- Run chmod/chown (won't work on mounted Docker volumes)
+- Retry the same command
+- Try different permission commands
+- Research "docker volume permissions"
+
+Instead:
+1. STOP and explain: "I hit a permission error. This is a host filesystem issue that I cannot fix from inside the container."
+2. Tell the user to contact a LlamaPress admin
+3. Continue with other tasks that don't require the blocked operation
+
+**Signs you're in a permission loop (STOP NOW):**
+- You've tried chmod or chown more than once
+- Same "Permission denied" error appears in multiple tool outputs
+- You're modifying test environment configs to work around permissions
+
 ### Research vs Action Balance - DELEGATE AGGRESSIVELY
 
 **Default to delegation for research.** Sub-agents are cheap; your context window is expensive.
@@ -1147,6 +1213,18 @@ Usage:
 
 BASH_COMMAND_FOR_RAILS_DESCRIPTION = """
 Use this tool to execute a bash command in the Rails Docker container, especially for running Rails commands.
+
+## IMPORTANT: Docker Architecture
+
+This command runs in a DIFFERENT container (LlamaPress/Rails), not where you are running.
+Files at `/rails` are mounted from the host - **permission errors CANNOT be fixed from inside**.
+
+If you see "Permission denied" or "EACCES":
+1. **STOP** - do not retry chmod/chown commands (they won't work on mounted volumes)
+2. Tell the user this is a **host-level permission issue**
+3. Ask them to contact a LlamaPress admin
+
+Output is automatically truncated if it exceeds ~6000 characters to protect your context window.
 
 ## Choose the Right Generator
 

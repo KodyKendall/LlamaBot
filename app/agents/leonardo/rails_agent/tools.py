@@ -39,6 +39,79 @@ import difflib
 from jinja2 import Environment, FileSystemLoader
 
 
+# ============================================================================
+# Bash Output Configuration
+# ============================================================================
+
+# Maximum characters for bash command output before truncation
+BASH_OUTPUT_MAX_CHARS = 6000
+
+# Moderate error detection - permission errors + common Rails errors
+# (excludes test failure patterns like "FAILED" to avoid false positives on intentional test runs)
+BASH_ERROR_PATTERNS = [
+    # Permission errors (critical)
+    "Permission denied",
+    "EACCES",
+    "Operation not permitted",
+    "Read-only file system",
+    # File system errors
+    "No such file or directory",
+    # Ruby/Rails errors
+    "LoadError",
+    "SyntaxError",
+    "NameError",
+    "NoMethodError",
+    "ArgumentError",
+    # Database errors
+    "ActiveRecord::StatementInvalid",
+    "PG::Error",
+    "Mysql2::Error",
+    # Process errors
+    "command not found",
+    "Killed",
+    "Segmentation fault",
+]
+
+# Critical errors that indicate infrastructure issues that CANNOT be fixed from inside container
+BASH_CRITICAL_ERROR_PATTERNS = [
+    "Permission denied",
+    "EACCES",
+    "Operation not permitted",
+    "Read-only file system",
+]
+
+
+def detect_bash_errors(output: str) -> tuple[bool, bool, list[str]]:
+    """Detect semantic errors in bash command output.
+
+    Returns:
+        tuple of (has_error, is_critical, matched_patterns)
+        - has_error: True if any error pattern was found
+        - is_critical: True if a critical/unrecoverable error was found
+        - matched_patterns: List of matched error pattern strings
+    """
+    matched = [p for p in BASH_ERROR_PATTERNS if p in output]
+    is_critical = any(p in output for p in BASH_CRITICAL_ERROR_PATTERNS)
+    return (len(matched) > 0, is_critical, matched)
+
+
+def truncate_output(output: str, max_chars: int = BASH_OUTPUT_MAX_CHARS) -> str:
+    """Truncate output if it exceeds max_chars, preserving beginning and end.
+
+    Strategy: Keep first 70% and last 30% of allowed characters to preserve
+    both the command start context and the final output/errors.
+    """
+    if len(output) <= max_chars:
+        return output
+
+    head_chars = int(max_chars * 0.7)
+    tail_chars = int(max_chars * 0.3)
+
+    truncation_msg = f"\n\n[...OUTPUT TRUNCATED - {len(output) - max_chars} characters removed...]\n\n"
+
+    return output[:head_chars] + truncation_msg + output[-tail_chars:]
+
+
 # Define base paths relative to project root
 SCRIPT_DIR = Path(__file__).parent.resolve()
 PROJECT_ROOT = SCRIPT_DIR.parent.parent.parent.parent  # Go up to LlamaBot root
@@ -829,15 +902,45 @@ def bash_command(
                 }
             )
 
-    result = rails_api_sh(command, workdir)
+    raw_result = rails_api_sh(command, workdir)
 
-    return Command(
-        update={
-            "messages": [
-                ToolMessage(f"Command output:\n{result}", tool_call_id=tool_call_id)
-            ],
-        }
-    )
+    # Truncate large outputs to prevent context window explosion
+    result = truncate_output(raw_result, BASH_OUTPUT_MAX_CHARS)
+
+    # Detect semantic errors in output
+    has_error, is_critical, matched_patterns = detect_bash_errors(result)
+
+    # Build the message content
+    if is_critical:
+        # Add strong guidance for critical errors (permission issues)
+        error_guidance = (
+            "\n\n<CRITICAL_ERROR>\n"
+            f"Detected critical error patterns: {', '.join(matched_patterns[:3])}\n"
+            "This error likely CANNOT be fixed from inside the container.\n"
+            "STOP trying to fix this with chmod/chown - these won't work on mounted volumes.\n"
+            "Tell the user this is a host permission issue and ask them to contact a LlamaPress admin.\n"
+            "</CRITICAL_ERROR>"
+        )
+        message_content = f"Command output:\n{result}{error_guidance}"
+    elif has_error:
+        # Add warning for non-critical errors
+        error_warning = f"\n\n[Warning: Detected potential errors: {', '.join(matched_patterns[:3])}]"
+        message_content = f"Command output:\n{result}{error_warning}"
+    else:
+        message_content = f"Command output:\n{result}"
+
+    # Build the update dict
+    update = {
+        "messages": [
+            ToolMessage(message_content, tool_call_id=tool_call_id)
+        ],
+    }
+
+    # Increment failure counter for errors (this triggers circuit breaker after 3 failures)
+    if has_error:
+        update["failed_tool_calls_count"] = 1
+
+    return Command(update=update)
 
 tavily_client = TavilyClient(api_key=os.environ.get("TAVILY_API_KEY", ""))
 @tool(description=INTERNET_SEARCH_DESCRIPTION)
