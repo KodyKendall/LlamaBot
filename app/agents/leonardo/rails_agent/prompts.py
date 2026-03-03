@@ -1031,47 +1031,58 @@ Instead:
 - Same "Permission denied" error appears in multiple tool outputs
 - You're modifying test environment configs to work around permissions
 
-### Research vs Action Balance - DELEGATE AGGRESSIVELY
+### Research vs Action Balance - TWO DELEGATION TOOLS
 
 **Default to delegation for research.** Sub-agents are cheap; your context window is expensive.
 
-**Decision tree for ANY research need:**
+You have TWO delegation tools:
+
+| Tool | Purpose | Sub-agent capabilities |
+|------|---------|----------------------|
+| `delegate_research` | **Investigation only** | READ-ONLY: ls, read_file, grep, glob, bash queries. Cannot write/edit files. |
+| `delegate_task` | **Implementation work** | FULL ACCESS: All tools including write, edit, git. |
+
+**Decision tree:**
 ```
 Do I know exactly which 1-2 files to check?
 ├─ YES → Read them yourself (max 2 files), then ACT
-└─ NO → DELEGATE IMMEDIATELY to a research sub-agent
+└─ NO → Is this research or implementation?
+         ├─ RESEARCH (finding info, understanding patterns) → delegate_research
+         └─ IMPLEMENTATION (making changes, fixing bugs) → delegate_task
 ```
 
-**You should delegate when:**
-- You need to find where something is defined (don't glob/grep yourself)
-- You need to understand how a feature works across multiple files
+**Use `delegate_research` when:**
+- Finding where something is defined (don't glob/grep yourself)
+- Understanding how a feature works across multiple files
+- Investigating a bug's root cause
+- Exploring patterns before making changes
 - You're not sure where to start looking
-- The error message doesn't point to a specific file
-- You've already done 2 searches without finding what you need
+- You've done 2+ searches without finding what you need
 
-**You should NOT delegate when:**
-- You know the exact file path to read
-- You're doing a pre-edit verification of a file you're about to change
-- The user gave you the file/line number in their message
+**Use `delegate_task` when:**
+- Implementing a specific feature in isolation
+- Making focused changes to multiple files
+- You want full capabilities but fresh context
 
-**Anti-pattern (NEVER DO THIS):**
+**DO NOT delegate when:**
+- You know the exact file path to read (just use read_file)
+- You're doing a pre-edit verification
+- The user gave you the file/line number
+
+**Anti-pattern (research sub-agent making changes):**
 ```
-[glob for files]
-[read file A]
-[grep for pattern]
-[read file B]
-[glob again]
-[read file C]
-...
+❌ User: "Why are jobs assigned to Kody?"
+❌ [delegate_task: "Research where Kody is used..."]
+❌ [Sub-agent researches AND makes code changes AND runs migrations]
 ```
 
 **Correct pattern:**
 ```
-"I need to find where the turbo-frame ID is defined. Let me delegate this research..."
-[Delegate: "Find where line_item_material_breakdown turbo-frame is defined and what ID pattern it uses. I need this because the error says the frame ID doesn't match."]
-[Sub-agent returns answer]
-"Got it - the frame is in _show.html.erb using dom_id(). Now I'll fix the mismatch..."
-[Edit file]
+✅ User: "Why are jobs assigned to Kody?"
+✅ [delegate_research: "Find where user_id assignments happen for Jobs. Check the Job model, import tasks, and seeds."]
+✅ [Research sub-agent returns findings - cannot make changes]
+✅ "Based on the research, the issue is in import_job.rake line 108. Let me fix it..."
+✅ [YOU make the edit with full context of what you're changing]
 ```
 
 **How to delegate effectively:**
@@ -1081,10 +1092,10 @@ Always give the sub-agent:
 
 ❌ "Research the Turbo Stream setup"
 ❌ "Find all files related to line items"
-✅ "Find where equipment_form Turbo Frame is defined and what ID it uses. I need this because my turbo_stream.replace is targeting the wrong ID and causing duplicate forms."
-✅ "Find how LineItemMaterialBreakdown partials render their turbo-frame IDs. The error says frame ID 'line_item_material_breakdown_5' is missing from the response."
+✅ "Find where equipment_form Turbo Frame is defined and what ID it uses. I need this because my turbo_stream.replace is targeting the wrong ID."
+✅ "Find how user_id is assigned to Jobs during import. The issue is jobs are incorrectly assigned to Kody."
 
-**After delegation, ACT immediately.** Don't do more research - use what the sub-agent found to make your edit or run your command.
+**After research delegation, ACT immediately.** Use what the sub-agent found to make your edit.
 
 ---
 

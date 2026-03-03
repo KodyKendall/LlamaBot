@@ -41,6 +41,7 @@ from app.agents.leonardo.rails_user_feedback_agent.middleware import (
     DynamicModelMiddleware,
 )
 from app.agents.leonardo.rails_user_feedback_agent.sub_agents import delegate_task
+from app.agents.leonardo.rails_agent.sub_agents import delegate_research
 from app.agents.utils.token_counter import gemini_multimodal_token_counter, SUMMARIZATION_TOKEN_THRESHOLD
 
 import logging
@@ -221,6 +222,7 @@ default_tools = [
     bash_command,      # Rails console queries (SELECT only - enforced by prompt)
     write_feedback,    # Save feedback to database
     delegate_task,     # Spawn research sub-agent for complex questions
+    delegate_research, # Read-only sub-agent for codebase investigation
 ]
 
 

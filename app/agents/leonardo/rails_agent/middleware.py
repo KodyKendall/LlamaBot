@@ -403,7 +403,7 @@ class DynamicModelMiddleware(AgentMiddleware):
             )
         elif model_name == 'gemini-3-pro':
             return ChatGoogleGenerativeAI(
-                model="gemini-3-pro-preview",
+                model="gemini-3.1-pro-preview",
                 include_thoughts=True
             )
         elif model_name == 'claude-4.5-haiku':

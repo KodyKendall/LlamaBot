@@ -18,6 +18,7 @@ charset-normalizer==3.4.2
 click==8.2.0
 cloudpickle==3.1.1
 coverage==7.9.1
+croniter==2.0.1
 cryptography==44.0.3
 dataclasses-json==0.6.7
 debugpy==1.8.16
@@ -101,6 +102,7 @@ pydantic_core==2.33.2
 pyee==13.0.0
 Pygments==2.19.1
 PyJWT==2.10.1
+pytz==2024.1
 pytest==8.3.4
 pytest-asyncio==0.25.0
 pytest-cov==6.0.0

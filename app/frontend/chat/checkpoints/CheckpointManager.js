@@ -119,14 +119,16 @@ export class CheckpointManager {
         <button class="close-checkpoint-panel" title="Close">✕</button>
       </div>
       <div class="uncommitted-changes-banner hidden">
-        <div class="uncommitted-changes-info">
+        <div class="uncommitted-changes-info" title="Click to see changed files">
           <i class="fa-solid fa-circle-exclamation"></i>
           <span class="uncommitted-changes-text">Unsaved changes</span>
+          <i class="fa-solid fa-chevron-down uncommitted-expand-icon"></i>
         </div>
         <button class="btn-discard-changes" title="Discard all uncommitted changes">
           <i class="fa-solid fa-trash"></i> Discard
         </button>
       </div>
+      <div class="uncommitted-file-list hidden"></div>
       <div class="save-checkpoint-form hidden">
         <input type="text" class="checkpoint-message-input" placeholder="Describe your changes...">
         <div class="save-checkpoint-actions">
@@ -158,6 +160,10 @@ export class CheckpointManager {
     // Add discard changes button handler
     const discardBtn = panel.querySelector('.btn-discard-changes');
     discardBtn.onclick = () => this.discardUncommittedChanges();
+
+    // Add uncommitted changes info click handler for expand/collapse
+    const uncommittedInfo = panel.querySelector('.uncommitted-changes-info');
+    uncommittedInfo.onclick = () => this.toggleUncommittedFileList();
 
     // Add form handlers
     const saveFormBtn = panel.querySelector('.btn-save-checkpoint');
@@ -273,17 +279,66 @@ export class CheckpointManager {
       const data = await response.json();
       const banner = this.checkpointPanel.querySelector('.uncommitted-changes-banner');
       const textSpan = banner.querySelector('.uncommitted-changes-text');
+      const fileList = this.checkpointPanel.querySelector('.uncommitted-file-list');
 
       if (data.has_changes) {
         const count = data.total_count;
         textSpan.textContent = `${count} unsaved change${count !== 1 ? 's' : ''}`;
         banner.classList.remove('hidden');
+
+        // Render the file list
+        this.renderUncommittedFileList(data.changed_files || [], data.untracked_files || []);
       } else {
         banner.classList.add('hidden');
+        fileList.classList.add('hidden');
+        fileList.innerHTML = '';
       }
 
     } catch (error) {
       console.warn('Could not check uncommitted changes:', error);
+    }
+  }
+
+  /**
+   * Render the list of uncommitted files
+   */
+  renderUncommittedFileList(changedFiles, untrackedFiles) {
+    const fileList = this.checkpointPanel.querySelector('.uncommitted-file-list');
+
+    const modifiedHtml = changedFiles.map(file => `
+      <div class="uncommitted-file-item modified">
+        <i class="fa-solid fa-pen"></i>
+        <span class="uncommitted-file-name">${this.escapeHtml(file)}</span>
+        <span class="uncommitted-file-type">modified</span>
+      </div>
+    `).join('');
+
+    const newHtml = untrackedFiles.map(file => `
+      <div class="uncommitted-file-item new">
+        <i class="fa-solid fa-plus"></i>
+        <span class="uncommitted-file-name">${this.escapeHtml(file)}</span>
+        <span class="uncommitted-file-type">new file</span>
+      </div>
+    `).join('');
+
+    fileList.innerHTML = modifiedHtml + newHtml;
+  }
+
+  /**
+   * Toggle the uncommitted file list visibility
+   */
+  toggleUncommittedFileList() {
+    const fileList = this.checkpointPanel.querySelector('.uncommitted-file-list');
+    const expandIcon = this.checkpointPanel.querySelector('.uncommitted-expand-icon');
+
+    if (fileList.classList.contains('hidden')) {
+      fileList.classList.remove('hidden');
+      expandIcon.classList.remove('fa-chevron-down');
+      expandIcon.classList.add('fa-chevron-up');
+    } else {
+      fileList.classList.add('hidden');
+      expandIcon.classList.remove('fa-chevron-up');
+      expandIcon.classList.add('fa-chevron-down');
     }
   }
 
@@ -352,6 +407,8 @@ export class CheckpointManager {
 
       if (data.success) {
         this.showSuccess(data.message);
+        // Refresh the uncommitted changes banner to reflect current state
+        await this.checkUncommittedChanges();
       } else {
         this.showError(data.message || 'Failed to push to GitHub');
       }

@@ -145,6 +145,12 @@ SLASH_COMMANDS = {
         "description": "Configure git user name and email in VSCode container",
         "dangerous": False,
         "confirm_message": "This will set git config in the VSCode container. Continue?"
+    },
+    "install-scheduler-cron": {
+        "script": "bin/install/setup-scheduled-jobs-cron.sh",
+        "description": "Install cron job for scheduled agent tasks",
+        "dangerous": True,
+        "confirm_message": "This will install a cron job that runs every minute to check for scheduled agent tasks. Make sure SCHEDULER_TOKEN is set in your environment. Continue?"
     }
 }
 

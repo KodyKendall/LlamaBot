@@ -29,7 +29,7 @@ from app.websocket.web_socket_connection_manager import WebSocketConnectionManag
 from app.websocket.request_handler import RequestHandler
 
 # Import routers
-from app.routers import ui, api, websocket, slash_commands, checkpoints
+from app.routers import ui, api, websocket, slash_commands, checkpoints, scheduled_jobs
 
 # Configure logging to write info-level events to both chat_app.log and stdout
 logging.basicConfig(
@@ -177,6 +177,7 @@ app.include_router(api.router)
 app.include_router(websocket.router)
 app.include_router(slash_commands.router)
 app.include_router(checkpoints.router)
+app.include_router(scheduled_jobs.router)
 
 
 async def graceful_shutdown(sig):
@@ -254,6 +255,12 @@ async def startup_event():
             app.state.compiled_graphs["rails_testing_agent"] = build_rails_testing(checkpointer=checkpointer)
         except ImportError:
             logger.info("rails_testing_agent not found, skipping")
+
+        try:
+            from app.agents.leonardo.rails_user_mode_agent.nodes import build_workflow as build_rails_user_mode
+            app.state.compiled_graphs["rails_user_mode_agent"] = build_rails_user_mode(checkpointer=checkpointer)
+        except ImportError:
+            logger.info("rails_user_mode_agent not found, skipping")
 
         logger.info(f"Compiled {len(app.state.compiled_graphs)} LangGraph workflows: {list(app.state.compiled_graphs.keys())}")
     except Exception as e:

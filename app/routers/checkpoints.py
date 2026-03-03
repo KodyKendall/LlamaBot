@@ -241,10 +241,7 @@ def git_push():
 
         # Provide a friendlier message
         if success:
-            if "Everything up-to-date" in message or not message:
-                message = "Already up to date with GitHub"
-            else:
-                message = "Successfully pushed to GitHub"
+            message = "Successfully pushed to Github"
 
         return JSONResponse(content={
             "success": success,

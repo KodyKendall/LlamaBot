@@ -44,7 +44,7 @@ from jinja2 import Environment, FileSystemLoader
 # ============================================================================
 
 # Maximum characters for bash command output before truncation
-BASH_OUTPUT_MAX_CHARS = 6000
+BASH_OUTPUT_MAX_CHARS = 12000
 
 # Moderate error detection - permission errors + common Rails errors
 # (excludes test failure patterns like "FAILED" to avoid false positives on intentional test runs)
@@ -98,14 +98,14 @@ def detect_bash_errors(output: str) -> tuple[bool, bool, list[str]]:
 def truncate_output(output: str, max_chars: int = BASH_OUTPUT_MAX_CHARS) -> str:
     """Truncate output if it exceeds max_chars, preserving beginning and end.
 
-    Strategy: Keep first 70% and last 30% of allowed characters to preserve
-    both the command start context and the final output/errors.
+    Strategy: Keep first 50% and last 50% of allowed characters to preserve
+    both the command start context and the final output/errors/summaries.
     """
     if len(output) <= max_chars:
         return output
 
-    head_chars = int(max_chars * 0.7)
-    tail_chars = int(max_chars * 0.3)
+    head_chars = int(max_chars * 0.5)
+    tail_chars = int(max_chars * 0.5)
 
     truncation_msg = f"\n\n[...OUTPUT TRUNCATED - {len(output) - max_chars} characters removed...]\n\n"
 

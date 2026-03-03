@@ -54,7 +54,10 @@
                 <div class="drawer-header">
                     <div class="drawer-title">
                         <h3>Conversations</h3>
-                        <span class="version-badge" data-llamabot="version-badge"></span>
+                        <div class="version-badge-container">
+                            <span class="version-badge" data-llamabot="version-badge"></span>
+                            <div class="version-tooltip" data-llamabot="version-tooltip"></div>
+                        </div>
                     </div>
                     <button class="new-thread-btn" data-llamabot="new-thread-btn" title="Start new conversation">
                         <i class="fa-solid fa-plus"></i>
@@ -180,6 +183,7 @@
                             <option value="engineer" data-short-label="Engineer">Engineer Mode</option>
                             <option value="ticket" data-short-label="Ticket">Ticket Mode</option>
                             <option value="feedback" data-short-label="Feedback">Feedback Mode</option>
+                            <option value="user" data-short-label="Database">Database Mode</option>
                             <option value="prototype" data-short-label="Design">Design Mode</option>
                             <option value="ai_builder" data-short-label="AI Builder">AI Builder Mode</option>
                             <option value="testing" data-short-label="Test Builder">Test Builder Mode</option>
@@ -315,20 +319,35 @@
         // Set title to current URL (hostname + port)
         document.title = window.location.host;
 
-        // Fetch and display version in drawer + title tooltip
+        // Fetch and display version in drawer + title tooltip + release notes
         (async function() {
             try {
-                const versionResponse = await fetch('/api/version');
-                if (versionResponse.ok) {
-                    const versionData = await versionResponse.json();
-                    if (versionData.version) {
+                // Fetch version notes (includes version)
+                const notesResponse = await fetch('/api/version-notes');
+                if (notesResponse.ok) {
+                    const data = await notesResponse.json();
+                    const version = data.version;
+                    const notes = data.notes || [];
+
+                    if (version) {
+                        // Update version badge
                         const versionBadge = document.querySelector('[data-llamabot="version-badge"]');
                         if (versionBadge) {
-                            versionBadge.textContent = `v${versionData.version}`;
+                            versionBadge.textContent = `v${version}`;
                         }
+
+                        // Update Leonardo title tooltip
                         const leonardoTitle = document.querySelector('[data-llamabot="leonardo-title"]');
                         if (leonardoTitle) {
-                            leonardoTitle.title = `v${versionData.version}`;
+                            leonardoTitle.title = `v${version}`;
+                        }
+
+                        // Populate version notes tooltip if we have notes
+                        const versionTooltip = document.querySelector('[data-llamabot="version-tooltip"]');
+                        if (versionTooltip && notes.length > 0) {
+                            const tooltipContent = notes.map(note => `• ${note}`).join('\n');
+                            versionTooltip.textContent = tooltipContent;
+                            versionTooltip.classList.add('has-notes');
                         }
                     }
                 }
@@ -340,27 +359,44 @@
 
     <!-- Role-based mode and tab restriction -->
     <script>
-        // If user role is 'user', only show Feedback mode (engineers get all modes)
-        // Also hide Code and Tickets tabs for non-engineers
+        // Filter agent modes based on user's visible_agents setting
+        // Also handle legacy 'user' role restriction and hide engineer-only tabs
         // Wait for LlamaBot to initialize before modifying the dropdown
         window.addEventListener('llamabot:ready', function() {
             const userRole = window.LLAMABOT_USER_ROLE || 'engineer';
-            if (userRole === 'user') {
-                // Restrict agent mode dropdown to only feedback
-                const modeSelect = document.querySelector('[data-llamabot="agent-mode-select"]');
-                if (modeSelect) {
-                    // Keep only feedback mode
+            const visibleAgents = window.LLAMABOT_VISIBLE_AGENTS || null;
+            const modeSelect = document.querySelector('[data-llamabot="agent-mode-select"]');
+
+            if (modeSelect) {
+                // If user role is 'user' and no visible_agents configured (legacy behavior)
+                if (userRole === 'user' && !visibleAgents) {
+                    // Restrict agent mode dropdown to only feedback
                     Array.from(modeSelect.options).forEach(option => {
                         if (option.value !== 'feedback') {
                             option.remove();
                         }
                     });
                     modeSelect.value = 'feedback';
-                    // Dispatch change event so LlamaBot updates its internal state
-                    modeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+                // If visible_agents is configured, filter dropdown to those agents only
+                else if (visibleAgents && Array.isArray(visibleAgents)) {
+                    Array.from(modeSelect.options).forEach(option => {
+                        if (!visibleAgents.includes(option.value)) {
+                            option.remove();
+                        }
+                    });
+                    // Set to first available if current value was removed
+                    if (!visibleAgents.includes(modeSelect.value) && modeSelect.options.length > 0) {
+                        modeSelect.value = modeSelect.options[0].value;
+                    }
                 }
 
-                // Hide tabs marked as engineer-only (Code and Tickets)
+                // Dispatch change event so LlamaBot updates its internal state
+                modeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+
+            // Hide tabs marked as engineer-only for 'user' role
+            if (userRole === 'user') {
                 const engineerOnlyTabs = document.querySelectorAll('.tab[data-engineer-only="true"]');
                 engineerOnlyTabs.forEach(tab => {
                     tab.style.display = 'none';

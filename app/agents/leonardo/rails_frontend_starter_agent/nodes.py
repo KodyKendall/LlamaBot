@@ -27,6 +27,7 @@ from app.agents.utils.images import encode_image
 
 from app.agents.leonardo.rails_agent.state import RailsAgentState
 from app.agents.leonardo.rails_agent.tools import write_todos, write_file, read_file, ls, edit_file, search_file, internet_search, bash_command, git_status, git_commit, git_command, github_cli_command
+from app.agents.leonardo.rails_agent.sub_agents import delegate_research
 from app.agents.leonardo.rails_frontend_starter_agent.prompts import RAILS_FRONTEND_STARTER_AGENT_PROMPT
 from app.agents.leonardo.project_context import build_system_prompt_with_project_context
 
@@ -55,8 +56,11 @@ def get_sys_msg():
         ],
     }
 
-default_tools = [write_todos,
-         ls, read_file, write_file, edit_file, search_file]
+default_tools = [
+    write_todos,
+    ls, read_file, write_file, edit_file, search_file,
+    delegate_research,  # Read-only sub-agent for codebase investigation
+]
 
 # Helper function to get LLM based on user selection
 def get_llm(model_name: str):
@@ -84,7 +88,7 @@ def get_llm(model_name: str):
       )
    elif model_name == "gemini-3-pro":
       return ChatGoogleGenerativeAI(
-         model="gemini-3-pro-preview",
+         model="gemini-3.1-pro-preview",
          include_thoughts=True
       )
    else:
@@ -107,8 +111,11 @@ def leonardo_design(state: RailsAgentState) -> Command[Literal["tools"]]:
       messages = messages + [HumanMessage(content="<NOTE_FROM_SYSTEM> The user is currently viewing their Ruby on Rails webpage route at: " + view_path + " </NOTE_FROM_SYSTEM>")]
 
    # Tools
-   tools = [write_todos,
-         ls, read_file, write_file, edit_file, search_file]
+   tools = [
+      write_todos,
+      ls, read_file, write_file, edit_file, search_file,
+      delegate_research,  # Read-only sub-agent for codebase investigation
+   ]
 
    failed_tool_calls_count = state.get("failed_tool_calls_count", 0)
    if failed_tool_calls_count >= 3:

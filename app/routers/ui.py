@@ -1,5 +1,6 @@
 """UI/HTML page routes for LlamaBot."""
 
+import json
 import logging
 from pathlib import Path
 
@@ -10,9 +11,14 @@ from sqlmodel import Session
 from app.db import engine
 from app.models import User
 from app.dependencies import (
-    security, get_db_session, auth, get_current_user, admin_required, has_any_users
+    security, get_db_session, auth, get_current_user, admin_required, has_any_users,
+    engineer_or_admin_required
 )
 from app.services.user_service import authenticate_user, get_user_by_username
+
+# Role-based default visible agents
+DEFAULT_VISIBLE_AGENTS_USER = ["feedback"]
+DEFAULT_VISIBLE_AGENTS_ENGINEER = ["ticket", "engineer", "testing", "feedback", "user", "prototype", "ai_builder", "architect"]
 
 logger = logging.getLogger(__name__)
 
@@ -39,12 +45,30 @@ async def root(request: Request):
                 headers={"WWW-Authenticate": "Basic"},
             )
 
-        # Serve the chat.html file with user role injected
+        # Get visible agents for this user (role-based defaults)
+        visible_agents = None
+        if user.visible_agents:
+            try:
+                visible_agents = json.loads(user.visible_agents)
+            except json.JSONDecodeError:
+                pass
+
+        # If no custom setting, use role-based defaults
+        if not visible_agents:
+            if getattr(user, "role", "engineer") == "user":
+                visible_agents = DEFAULT_VISIBLE_AGENTS_USER
+            else:
+                visible_agents = DEFAULT_VISIBLE_AGENTS_ENGINEER
+
+        # Serve the chat.html file with user role and visible agents injected
         with open(frontend_dir / "chat.html") as f:
             html = f.read()
-        # Inject user role as a global variable for the frontend
-        role_script = f'<script>window.LLAMABOT_USER_ROLE = "{getattr(user, "role", "engineer")}";</script>'
-        html = html.replace('</head>', f'{role_script}</head>')
+        # Inject user role and visible agents as global variables for the frontend
+        config_script = f'''<script>
+window.LLAMABOT_USER_ROLE = "{getattr(user, "role", "engineer")}";
+window.LLAMABOT_VISIBLE_AGENTS = {json.dumps(visible_agents)};
+</script>'''
+        html = html.replace('</head>', f'{config_script}</head>')
         return HTMLResponse(content=html)
 
 
@@ -1095,6 +1119,8 @@ async def settings_page(current_user: User = Depends(get_current_user)):
             <a href='/leonardo-md' class='menu-item'><i class='fa-solid fa-file-lines'></i><span>LEONARDO.md</span><i class='fa-solid fa-chevron-right chevron'></i></a>
         </div>
 
+        {"<div class='card'><div class='card-header'>Automation</div><a href='/scheduled-jobs' class='menu-item'><i class='fa-solid fa-clock'></i><span>Scheduled Jobs</span><i class='fa-solid fa-chevron-right chevron'></i></a></div>" if current_user.role == 'engineer' or current_user.is_admin else ""}
+
         <div class="card">
             <button class="logout-btn" onclick="logout()">
                 <i class="fa-solid fa-right-from-bracket"></i>
@@ -1396,3 +1422,683 @@ Describe what this application does and the problem it solves.
 async def conversations(username: str = Depends(auth)):
     with open("conversations.html") as f:
         return f.read()
+
+
+@router.get("/scheduled-jobs", response_class=HTMLResponse)
+async def scheduled_jobs_page(user: User = Depends(engineer_or_admin_required)):
+    """Serve the scheduled jobs management page."""
+    html = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>LlamaBot Scheduled Jobs</title>
+    <link rel="icon" type="image/png" href="https://llamapress-ai-image-uploads.s3.us-west-2.amazonaws.com/4bmqe5iolvp84ceyk9ttz8vylrym">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        :root {
+            --bg-color: #1a1a1a;
+            --chat-bg: #2d2d2d;
+            --text-color: #e0e0e0;
+            --border-color: #404040;
+            --accent-color: #4CAF50;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 0;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+        .header {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+        .back-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 40px;
+            height: 40px;
+            background: var(--chat-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            color: var(--text-color);
+            text-decoration: none;
+            transition: background 0.2s;
+        }
+        .back-btn:hover { background: var(--border-color); }
+        h1 { font-size: 1.5rem; margin: 0; flex: 1; }
+        .card {
+            background: var(--chat-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 20px;
+        }
+        .card-header {
+            font-size: 0.85rem;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid var(--border-color); }
+        th { color: #888; font-weight: 500; font-size: 0.85rem; }
+        tr:last-child td { border-bottom: none; }
+        .badge {
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 500;
+            text-transform: uppercase;
+        }
+        .badge-enabled { background: rgba(76, 175, 80, 0.2); color: #81c784; }
+        .badge-disabled { background: rgba(244, 67, 54, 0.2); color: #e57373; }
+        .badge-completed { background: rgba(76, 175, 80, 0.2); color: #81c784; }
+        .badge-running { background: rgba(33, 150, 243, 0.2); color: #64b5f6; }
+        .badge-failed { background: rgba(244, 67, 54, 0.2); color: #e57373; }
+        .badge-timeout { background: rgba(255, 152, 0, 0.2); color: #ffb74d; }
+        .badge-pending { background: rgba(158, 158, 158, 0.2); color: #bdbdbd; }
+        .btn {
+            padding: 6px 12px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            margin-right: 4px;
+            background: transparent;
+            color: var(--text-color);
+            transition: all 0.2s;
+        }
+        .btn:hover { background: var(--border-color); }
+        .btn-primary {
+            background: var(--accent-color);
+            border-color: var(--accent-color);
+            color: white;
+        }
+        .btn-primary:hover { opacity: 0.9; background: var(--accent-color); }
+        .btn-danger { border-color: #e57373; color: #e57373; }
+        .btn-danger:hover { background: rgba(244, 67, 54, 0.2); }
+        .btn-sm { padding: 4px 8px; font-size: 11px; }
+        .form-group { margin-bottom: 16px; }
+        .form-group label { display: block; margin-bottom: 6px; font-size: 0.85rem; color: #888; }
+        .form-group input, .form-group select, .form-group textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            background: var(--bg-color);
+            color: var(--text-color);
+            box-sizing: border-box;
+        }
+        .form-group textarea { min-height: 100px; resize: vertical; }
+        .form-group input:focus, .form-group select:focus, .form-group textarea:focus {
+            outline: none;
+            border-color: var(--accent-color);
+        }
+        .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        .message {
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: none;
+        }
+        .message.success { background: rgba(76, 175, 80, 0.2); color: #81c784; display: block; }
+        .message.error { background: rgba(244, 67, 54, 0.2); color: #e57373; display: block; }
+        .actions { white-space: nowrap; }
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.7);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+        .modal.active { display: flex; }
+        .modal-content {
+            background: var(--chat-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 24px;
+            width: 90%;
+            max-width: 600px;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        .modal-header h2 { margin: 0; font-size: 1.2rem; }
+        .close-btn {
+            background: none;
+            border: none;
+            color: var(--text-color);
+            font-size: 1.5rem;
+            cursor: pointer;
+        }
+        .output-box {
+            background: var(--bg-color);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 12px;
+            font-family: monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 20px;
+        }
+        .tab {
+            padding: 8px 16px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            cursor: pointer;
+            background: transparent;
+            color: var(--text-color);
+        }
+        .tab.active {
+            background: var(--accent-color);
+            border-color: var(--accent-color);
+        }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        .cron-help {
+            font-size: 11px;
+            color: #888;
+            margin-top: 8px;
+        }
+        .cron-presets {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 8px;
+        }
+        .cron-preset {
+            padding: 4px 8px;
+            background: var(--bg-color);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            font-size: 11px;
+            cursor: pointer;
+            color: var(--text-color);
+            transition: all 0.2s;
+        }
+        .cron-preset:hover {
+            border-color: var(--accent-color);
+            background: rgba(76, 175, 80, 0.1);
+        }
+        .cron-preset code {
+            color: #81c784;
+            margin-left: 4px;
+        }
+        .toggle {
+            position: relative;
+            display: inline-block;
+            width: 50px;
+            height: 26px;
+            cursor: pointer;
+        }
+        .toggle input { display: none; }
+        .toggle-slider {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: #555;
+            border-radius: 13px;
+            transition: 0.3s;
+            border: 2px solid #666;
+        }
+        .toggle-slider:before {
+            content: "";
+            position: absolute;
+            height: 18px;
+            width: 18px;
+            left: 2px;
+            bottom: 2px;
+            background: #aaa;
+            border-radius: 50%;
+            transition: 0.3s;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+        .toggle input:checked + .toggle-slider {
+            background: var(--accent-color);
+            border-color: var(--accent-color);
+        }
+        .toggle input:checked + .toggle-slider:before {
+            transform: translateX(24px);
+            background: white;
+        }
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #888;
+        }
+        .empty-state i { font-size: 48px; margin-bottom: 16px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <a href="/settings" class="back-btn">
+                <i class="fa-solid fa-arrow-left"></i>
+            </a>
+            <h1>Scheduled Jobs</h1>
+            <button class="btn btn-primary" onclick="openCreateModal()">
+                <i class="fa-solid fa-plus"></i> New Job
+            </button>
+        </div>
+
+        <div id="message" class="message"></div>
+
+        <div class="tabs">
+            <button class="tab active" onclick="showTab('jobs')">Jobs</button>
+            <button class="tab" onclick="showTab('runs')">Recent Runs</button>
+        </div>
+
+        <div id="jobs-tab" class="tab-content active">
+            <div class="card">
+                <div class="card-header">Scheduled Jobs</div>
+                <div id="jobsContainer">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Agent</th>
+                                <th>Schedule</th>
+                                <th>Last Run</th>
+                                <th>Next Run</th>
+                                <th>Enabled</th>
+                                <th class="actions">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="jobsTable">
+                            <tr><td colspan="7">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div id="runs-tab" class="tab-content">
+            <div class="card">
+                <div class="card-header">Recent Runs</div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Job</th>
+                            <th>Status</th>
+                            <th>Trigger</th>
+                            <th>Started</th>
+                            <th>Duration</th>
+                            <th>Tokens</th>
+                            <th class="actions">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="runsTable">
+                        <tr><td colspan="7">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create/Edit Job Modal -->
+    <div id="jobModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modalTitle">Create Job</h2>
+                <button class="close-btn" onclick="closeModal()">&times;</button>
+            </div>
+            <form id="jobForm">
+                <input type="hidden" id="jobId">
+                <div class="form-group">
+                    <label>Name</label>
+                    <input type="text" id="jobName" required placeholder="e.g., Daily Code Review">
+                </div>
+                <div class="form-group">
+                    <label>Description (optional)</label>
+                    <input type="text" id="jobDescription" placeholder="What this job does">
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Agent</label>
+                        <select id="jobAgent" required>
+                            <option value="rails_agent">Rails Agent</option>
+                            <option value="llamabot">LlamaBot</option>
+                            <option value="llamapress">LlamaPress</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Model</label>
+                        <select id="jobModel">
+                            <option value="gemini-3-flash">Gemini 3 Flash</option>
+                            <option value="claude-4.5-haiku">Claude 4.5 Haiku</option>
+                            <option value="claude-4.5-sonnet">Claude 4.5 Sonnet</option>
+                            <option value="gpt-4o-mini">GPT-4o Mini</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Prompt / Instructions</label>
+                    <textarea id="jobPrompt" required placeholder="What should the agent do when it wakes up?"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Cron Expression</label>
+                    <div class="form-row">
+                        <input type="text" id="jobCron" required placeholder="0 8 * * *" style="flex: 2;">
+                        <select id="jobTimezone" style="flex: 1;">
+                            <option value="UTC">UTC</option>
+                            <option value="America/Los_Angeles">Pacific (PT)</option>
+                            <option value="America/Denver">Mountain (MT)</option>
+                            <option value="America/Chicago">Central (CT)</option>
+                            <option value="America/New_York">Eastern (ET)</option>
+                            <option value="Africa/Johannesburg">South Africa (SAST)</option>
+                        </select>
+                    </div>
+                    <div class="cron-help">
+                        Format: <code>minute hour day-of-month month day-of-week</code>
+                    </div>
+                    <div class="cron-presets">
+                        <button type="button" class="cron-preset" onclick="setCron('* * * * *')">Every minute<code>* * * * *</code></button>
+                        <button type="button" class="cron-preset" onclick="setCron('*/5 * * * *')">Every 5 min<code>*/5 * * * *</code></button>
+                        <button type="button" class="cron-preset" onclick="setCron('*/30 * * * *')">Every 30 min<code>*/30 * * * *</code></button>
+                        <button type="button" class="cron-preset" onclick="setCron('0 * * * *')">Every hour<code>0 * * * *</code></button>
+                        <button type="button" class="cron-preset" onclick="setCron('0 */4 * * *')">Every 4 hours<code>0 */4 * * *</code></button>
+                        <button type="button" class="cron-preset" onclick="setCron('0 8 * * *')">Daily 8am<code>0 8 * * *</code></button>
+                        <button type="button" class="cron-preset" onclick="setCron('0 9 * * 1')">Weekly Mon 9am<code>0 9 * * 1</code></button>
+                        <button type="button" class="cron-preset" onclick="setCron('0 0 1 * *')">Monthly 1st<code>0 0 1 * *</code></button>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Timeout (seconds)</label>
+                        <input type="number" id="jobTimeout" value="300" min="60" max="3600">
+                    </div>
+                    <div class="form-group">
+                        <label>Recursion Limit</label>
+                        <input type="number" id="jobRecursion" value="100" min="10" max="1000">
+                    </div>
+                </div>
+                <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
+                    <button type="button" class="btn" onclick="closeModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Job</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Run Details Modal -->
+    <div id="runModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Run Details</h2>
+                <button class="close-btn" onclick="closeRunModal()">&times;</button>
+            </div>
+            <div id="runDetails"></div>
+        </div>
+    </div>
+
+    <script>
+        let jobs = [];
+        let runs = [];
+
+        async function loadJobs() {
+            try {
+                const response = await fetch('/api/scheduled-jobs');
+                jobs = await response.json();
+                renderJobs();
+            } catch (e) {
+                showMessage('Failed to load jobs: ' + e.message, 'error');
+            }
+        }
+
+        async function loadRuns() {
+            try {
+                const response = await fetch('/api/scheduled-jobs/runs/recent?limit=50');
+                runs = await response.json();
+                renderRuns();
+            } catch (e) {
+                showMessage('Failed to load runs: ' + e.message, 'error');
+            }
+        }
+
+        function renderJobs() {
+            const tbody = document.getElementById('jobsTable');
+            if (jobs.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7"><div class="empty-state"><i class="fa-solid fa-clock"></i><p>No scheduled jobs yet. Create one to get started!</p></div></td></tr>';
+                return;
+            }
+            tbody.innerHTML = jobs.map(job => `
+                <tr>
+                    <td><strong>${escapeHtml(job.name)}</strong><br><small style="color:#888">${escapeHtml(job.description || '')}</small></td>
+                    <td>${escapeHtml(job.agent_name)}</td>
+                    <td><code>${escapeHtml(job.cron_expression)}</code><br><small style="color:#888">${escapeHtml(job.timezone)}</small></td>
+                    <td>${job.last_run_at ? formatDate(job.last_run_at) : '-'}</td>
+                    <td>${job.next_run_at ? formatDate(job.next_run_at) : '-'}</td>
+                    <td>
+                        <label class="toggle">
+                            <input type="checkbox" ${job.is_enabled ? 'checked' : ''} onchange="toggleJob(${job.id}, this.checked)">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </td>
+                    <td class="actions">
+                        <button class="btn btn-sm" onclick="runJob(${job.id})" title="Run Now"><i class="fa-solid fa-play"></i></button>
+                        <button class="btn btn-sm" onclick="editJob(${job.id})" title="Edit"><i class="fa-solid fa-pen"></i></button>
+                        <button class="btn btn-sm" onclick="viewJobRuns(${job.id})" title="View Runs"><i class="fa-solid fa-history"></i></button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        function renderRuns() {
+            const tbody = document.getElementById('runsTable');
+            if (runs.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7"><div class="empty-state"><i class="fa-solid fa-history"></i><p>No runs yet</p></div></td></tr>';
+                return;
+            }
+            tbody.innerHTML = runs.map(run => {
+                const job = jobs.find(j => j.id === run.job_id);
+                return `
+                    <tr>
+                        <td>${job ? escapeHtml(job.name) : 'Job #' + run.job_id}</td>
+                        <td><span class="badge badge-${run.status}">${run.status}</span></td>
+                        <td>${run.trigger_type}</td>
+                        <td>${run.started_at ? formatDate(run.started_at) : '-'}</td>
+                        <td>${run.duration_seconds ? run.duration_seconds.toFixed(1) + 's' : '-'}</td>
+                        <td>${run.total_tokens > 0 ? run.total_tokens.toLocaleString() : '-'}</td>
+                        <td class="actions">
+                            <button class="btn btn-sm" onclick="viewRun(${run.id})" title="View Details"><i class="fa-solid fa-eye"></i></button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function showTab(tab) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+            document.querySelector(`.tab:nth-child(${tab === 'jobs' ? 1 : 2})`).classList.add('active');
+            document.getElementById(tab + '-tab').classList.add('active');
+            if (tab === 'runs') loadRuns();
+        }
+
+        function openCreateModal() {
+            document.getElementById('modalTitle').textContent = 'Create Job';
+            document.getElementById('jobForm').reset();
+            document.getElementById('jobId').value = '';
+            document.getElementById('jobModal').classList.add('active');
+        }
+
+        function closeModal() {
+            document.getElementById('jobModal').classList.remove('active');
+        }
+
+        function closeRunModal() {
+            document.getElementById('runModal').classList.remove('active');
+        }
+
+        async function editJob(id) {
+            const job = jobs.find(j => j.id === id);
+            if (!job) return;
+            document.getElementById('modalTitle').textContent = 'Edit Job';
+            document.getElementById('jobId').value = job.id;
+            document.getElementById('jobName').value = job.name;
+            document.getElementById('jobDescription').value = job.description || '';
+            document.getElementById('jobAgent').value = job.agent_name;
+            document.getElementById('jobModel').value = job.llm_model;
+            document.getElementById('jobPrompt').value = job.prompt;
+            document.getElementById('jobCron').value = job.cron_expression;
+            document.getElementById('jobTimezone').value = job.timezone;
+            document.getElementById('jobTimeout').value = job.max_duration_seconds;
+            document.getElementById('jobRecursion').value = job.recursion_limit;
+            document.getElementById('jobModal').classList.add('active');
+        }
+
+        async function toggleJob(id, enabled) {
+            try {
+                await fetch(`/api/scheduled-jobs/${id}/${enabled ? 'enable' : 'disable'}`, { method: 'POST' });
+                loadJobs();
+            } catch (e) {
+                showMessage('Failed to toggle job: ' + e.message, 'error');
+            }
+        }
+
+        async function runJob(id) {
+            if (!confirm('Run this job now?')) return;
+            try {
+                showMessage('Running job...', 'success');
+                const response = await fetch(`/api/scheduled-jobs/${id}/run`, { method: 'POST' });
+                const run = await response.json();
+                showMessage(`Job completed with status: ${run.status}`, run.status === 'completed' ? 'success' : 'error');
+                loadJobs();
+                loadRuns();
+            } catch (e) {
+                showMessage('Failed to run job: ' + e.message, 'error');
+            }
+        }
+
+        async function viewJobRuns(id) {
+            try {
+                const response = await fetch(`/api/scheduled-jobs/${id}/runs`);
+                runs = await response.json();
+                showTab('runs');
+                renderRuns();
+            } catch (e) {
+                showMessage('Failed to load runs: ' + e.message, 'error');
+            }
+        }
+
+        async function viewRun(id) {
+            try {
+                const response = await fetch(`/api/scheduled-jobs/runs/${id}`);
+                const run = await response.json();
+                const job = jobs.find(j => j.id === run.job_id);
+                document.getElementById('runDetails').innerHTML = `
+                    <p><strong>Job:</strong> ${job ? escapeHtml(job.name) : 'Job #' + run.job_id}</p>
+                    <p><strong>Status:</strong> <span class="badge badge-${run.status}">${run.status}</span></p>
+                    <p><strong>Trigger:</strong> ${run.trigger_type}</p>
+                    <p><strong>Started:</strong> ${run.started_at ? new Date(run.started_at).toLocaleString() : '-'}</p>
+                    <p><strong>Duration:</strong> ${run.duration_seconds ? run.duration_seconds.toFixed(2) + ' seconds' : '-'}</p>
+                    <p><strong>Tokens:</strong> ${run.input_tokens} in / ${run.output_tokens} out (${run.total_tokens} total)</p>
+                    <p><strong>Thread ID:</strong> <code>${run.thread_id}</code></p>
+                    ${run.error_message ? `<p><strong>Error:</strong></p><div class="output-box" style="color:#e57373">${escapeHtml(run.error_message)}</div>` : ''}
+                    ${run.output_summary ? `<p><strong>Output:</strong></p><div class="output-box">${escapeHtml(run.output_summary)}</div>` : ''}
+                `;
+                document.getElementById('runModal').classList.add('active');
+            } catch (e) {
+                showMessage('Failed to load run details: ' + e.message, 'error');
+            }
+        }
+
+        document.getElementById('jobForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const id = document.getElementById('jobId').value;
+            const data = {
+                name: document.getElementById('jobName').value,
+                description: document.getElementById('jobDescription').value || null,
+                agent_name: document.getElementById('jobAgent').value,
+                llm_model: document.getElementById('jobModel').value,
+                prompt: document.getElementById('jobPrompt').value,
+                cron_expression: document.getElementById('jobCron').value,
+                timezone: document.getElementById('jobTimezone').value,
+                max_duration_seconds: parseInt(document.getElementById('jobTimeout').value),
+                recursion_limit: parseInt(document.getElementById('jobRecursion').value),
+            };
+            try {
+                if (id) {
+                    await fetch(`/api/scheduled-jobs/${id}`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(data)
+                    });
+                    showMessage('Job updated!', 'success');
+                } else {
+                    await fetch('/api/scheduled-jobs', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(data)
+                    });
+                    showMessage('Job created!', 'success');
+                }
+                closeModal();
+                loadJobs();
+            } catch (e) {
+                showMessage('Failed to save job: ' + e.message, 'error');
+            }
+        });
+
+        function showMessage(text, type) {
+            const msg = document.getElementById('message');
+            msg.textContent = text;
+            msg.className = 'message ' + type;
+            setTimeout(() => { msg.className = 'message'; }, 4000);
+        }
+
+        function formatDate(isoString) {
+            const d = new Date(isoString);
+            const now = new Date();
+            const diff = now - d;
+            if (diff < 60000) return 'just now';
+            if (diff < 3600000) return Math.floor(diff / 60000) + 'm ago';
+            if (diff < 86400000) return Math.floor(diff / 3600000) + 'h ago';
+            return d.toLocaleDateString();
+        }
+
+        function escapeHtml(text) {
+            if (!text) return '';
+            return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
+        function setCron(expression) {
+            document.getElementById('jobCron').value = expression;
+        }
+
+        // Load data on page load
+        loadJobs();
+    </script>
+</body>
+</html>
+"""
+    return HTMLResponse(content=html)

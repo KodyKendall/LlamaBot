@@ -111,6 +111,86 @@ async def api_get_version():
     return {"version": version}
 
 
+def get_version_notes(version: str) -> list[str]:
+    """
+    Get release notes for a specific version from docs/dev_logs.
+
+    Args:
+        version: Full version string like "0.3.6h"
+
+    Returns:
+        List of note strings for that version, or empty list if not found
+    """
+    if not version or version == "dev":
+        return []
+
+    # Parse version to get base (e.g., "0.3.6" from "0.3.6h")
+    # Version format: X.Y.Z or X.Y.Za where 'a' is optional letter suffix
+    match = re.match(r'^(\d+\.\d+\.\d+)', version)
+    if not match:
+        return []
+
+    base_version = match.group(1)
+
+    # Try to read the dev_log file
+    dev_log_paths = [
+        f"/app/docs/dev_logs/{base_version}",
+        f"/app/app/docs/dev_logs/{base_version}",  # Alternative path in container
+    ]
+
+    content = None
+    for path in dev_log_paths:
+        try:
+            with open(path, 'r') as f:
+                content = f.read()
+            break
+        except FileNotFoundError:
+            continue
+        except Exception as e:
+            logger.debug(f"Could not read dev_log {path}: {e}")
+            continue
+
+    if not content:
+        return []
+
+    # Find the section for this version (e.g., "0.3.6h:" or "0.3.6ec:")
+    # Pattern: version at start of line followed by colon
+    lines = content.split('\n')
+    notes = []
+    in_section = False
+
+    for line in lines:
+        stripped = line.strip()
+
+        # Check if this is a version header (e.g., "0.3.6h:" or "0.3.6ec:")
+        if re.match(r'^\d+\.\d+\.\d+[a-z]*:', stripped):
+            if in_section:
+                # We've reached the next version, stop collecting
+                break
+            # Check if this is our version
+            if stripped.startswith(f"{version}:"):
+                in_section = True
+            continue
+
+        # Collect bullet points while in our section
+        if in_section and stripped.startswith('- '):
+            # Clean up the note: remove "- [x] " or "- [ ] " prefix
+            note = re.sub(r'^- \[[x ]\] ', '', stripped)
+            note = re.sub(r'^- ', '', note)  # Also handle plain "- " prefix
+            if note:
+                notes.append(note)
+
+    return notes
+
+
+@router.get("/api/version-notes", response_class=JSONResponse)
+async def api_get_version_notes():
+    """Get the current version and its release notes from docs/dev_logs."""
+    version = get_container_version()
+    notes = get_version_notes(version)
+    return {"version": version, "notes": notes}
+
+
 # ============== WebSocket Authentication API ==============
 
 @router.get("/api/ws-token", response_class=JSONResponse)
@@ -688,3 +768,56 @@ async def update_leonardo_md(
     except Exception as e:
         logger.error(f"Error writing LEONARDO.md: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to write file: {e}")
+
+
+# ============== Visible Agents Configuration ==============
+
+# Default visible agents for users without a custom configuration
+DEFAULT_VISIBLE_AGENTS = ["ticket", "engineer", "testing", "feedback", "user"]
+
+# All valid agent mode keys (must match config.js agentModes)
+VALID_AGENT_MODES = ["ticket", "engineer", "feedback", "prototype", "ai_builder", "testing", "architect", "user"]
+
+
+class UpdateVisibleAgentsRequest(BaseModel):
+    visible_agents: list[str]
+
+
+@router.get("/api/user/visible-agents", response_class=JSONResponse)
+async def get_visible_agents(
+    current_user: User = Depends(get_current_user)
+):
+    """Get current user's visible agents list."""
+    if current_user.visible_agents:
+        try:
+            agents = json.loads(current_user.visible_agents)
+            return {"visible_agents": agents}
+        except json.JSONDecodeError:
+            pass
+    return {"visible_agents": DEFAULT_VISIBLE_AGENTS}
+
+
+@router.put("/api/user/visible-agents", response_class=JSONResponse)
+async def set_visible_agents(
+    request: UpdateVisibleAgentsRequest,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_db_session)
+):
+    """Set current user's visible agents list."""
+    from datetime import datetime, timezone
+
+    # Validate agent keys
+    invalid = [a for a in request.visible_agents if a not in VALID_AGENT_MODES]
+    if invalid:
+        raise HTTPException(status_code=400, detail=f"Invalid agent modes: {invalid}")
+
+    if len(request.visible_agents) == 0:
+        raise HTTPException(status_code=400, detail="Must have at least one visible agent")
+
+    current_user.visible_agents = json.dumps(request.visible_agents)
+    current_user.updated_at = datetime.now(timezone.utc)
+    session.add(current_user)
+    session.commit()
+
+    logger.info(f"User '{current_user.username}' updated visible_agents to {request.visible_agents}")
+    return {"visible_agents": request.visible_agents, "message": "Visible agents updated"}

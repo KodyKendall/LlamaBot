@@ -1145,11 +1145,62 @@ body {
     margin: 0;
 }
 
+.version-badge-container {
+    position: relative;
+    display: inline-block;
+}
+
 .drawer-header .version-badge {
     font-size: 0.55rem;
     color: #666;
     font-weight: 400;
     margin-top: 1px;
+    cursor: default;
+}
+
+.version-badge-container:has(.version-tooltip.has-notes) .version-badge {
+    cursor: help;
+}
+
+.version-tooltip {
+    display: none;
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 0;
+    min-width: 200px;
+    max-width: 320px;
+    background: rgba(30, 24, 45, 0.98);
+    border: 1px solid rgba(139, 92, 246, 0.3);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 0.75rem;
+    line-height: 1.5;
+    color: #e0e0e0;
+    white-space: pre-wrap;
+    z-index: 1000;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+}
+
+.version-tooltip::before {
+    content: '';
+    position: absolute;
+    bottom: 100%;
+    left: 12px;
+    border: 6px solid transparent;
+    border-bottom-color: rgba(139, 92, 246, 0.3);
+}
+
+.version-tooltip::after {
+    content: '';
+    position: absolute;
+    bottom: 100%;
+    left: 13px;
+    border: 5px solid transparent;
+    border-bottom-color: rgba(30, 24, 45, 0.98);
+}
+
+.version-badge-container:hover .version-tooltip.has-notes {
+    display: block;
 }
 
 .new-thread-btn {
@@ -4968,6 +5019,79 @@ body {
 .btn-discard-changes:hover {
     background: #ef4444;
     color: #fff;
+}
+
+.uncommitted-changes-info {
+    cursor: pointer;
+}
+
+.uncommitted-changes-info:hover {
+    opacity: 0.8;
+}
+
+.uncommitted-expand-icon {
+    font-size: 0.7rem;
+    margin-left: 4px;
+    transition: transform 0.2s ease;
+}
+
+/* Uncommitted file list */
+.uncommitted-file-list {
+    background: rgba(251, 191, 36, 0.08);
+    border-bottom: 1px solid rgba(251, 191, 36, 0.2);
+    padding: 8px 16px;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.uncommitted-file-list.hidden {
+    display: none;
+}
+
+.uncommitted-file-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+    font-size: 0.8rem;
+}
+
+.uncommitted-file-item i {
+    width: 14px;
+    font-size: 0.7rem;
+}
+
+.uncommitted-file-item.modified i {
+    color: #fbbf24;
+}
+
+.uncommitted-file-item.new i {
+    color: #22c55e;
+}
+
+.uncommitted-file-name {
+    flex: 1;
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.75rem;
+    color: var(--text-primary, #fff);
+    word-break: break-all;
+}
+
+.uncommitted-file-type {
+    font-size: 0.7rem;
+    padding: 1px 6px;
+    border-radius: 3px;
+    text-transform: uppercase;
+}
+
+.uncommitted-file-item.modified .uncommitted-file-type {
+    background: rgba(251, 191, 36, 0.2);
+    color: #fbbf24;
+}
+
+.uncommitted-file-item.new .uncommitted-file-type {
+    background: rgba(34, 197, 94, 0.2);
+    color: #22c55e;
 }
 
 .checkpoint-panel-content {

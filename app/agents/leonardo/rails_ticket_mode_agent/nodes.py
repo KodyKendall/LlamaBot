@@ -43,6 +43,7 @@ from app.agents.leonardo.rails_ticket_mode_agent.middleware import (
 )
 from app.agents.utils.token_counter import gemini_multimodal_token_counter, SUMMARIZATION_TOKEN_THRESHOLD
 from app.agents.leonardo.rails_ticket_mode_agent.sub_agents import delegate_task
+from app.agents.leonardo.rails_agent.sub_agents import delegate_research
 
 import logging
 logger = logging.getLogger(__name__)
@@ -212,7 +213,8 @@ ticket = LlamaBotRails::Ticket.create!(
   ticket_type: "{ticket_type}",
   research_notes: Base64.decode64("{research_notes_b64}").force_encoding("UTF-8"),
   notes: Base64.decode64("{notes_b64}").force_encoding("UTF-8"),
-  status: "{status}"
+  status: "{status}",
+  project_id: LlamaBotRails::Project.order(created_at: :desc).first&.id
 )
 puts "TICKET_CREATED:" + ticket.id.to_s
 '''
@@ -246,7 +248,8 @@ default_tools = [
     write_todos,
     ls, read_file, write_file, edit_file, search_file,
     bash_command,
-    delegate_task,  # Sub-agent delegation for focused research tasks
+    delegate_task,       # Sub-agent delegation for focused research tasks
+    delegate_research,   # Read-only sub-agent for codebase investigation
     write_final_ticket,  # Creates ticket directly in Rails database
 ]
 

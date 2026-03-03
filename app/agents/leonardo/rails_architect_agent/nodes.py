@@ -24,6 +24,7 @@ from app.agents.leonardo.rails_agent.tools import (
     write_todos, write_file, read_file, ls, edit_file, search_file,
     # Note: bash_command is NOT included - no code execution allowed
 )
+from app.agents.leonardo.rails_agent.sub_agents import delegate_research
 from app.agents.leonardo.rails_architect_agent.prompts import ARCHITECT_AGENT_PROMPT
 from app.agents.leonardo.project_context import build_system_prompt_with_project_context
 
@@ -61,6 +62,7 @@ default_tools = [
     search_file,
     write_file,  # Restricted via system message to rails/architecture/ only
     edit_file,   # Restricted via system message to rails/architecture/ only
+    delegate_research,  # Read-only sub-agent for codebase investigation
     # NO bash_command - no code execution allowed
 ]
 
@@ -90,7 +92,7 @@ def get_llm(model_name: str):
         )
     elif model_name == "gemini-3-pro":
         return ChatGoogleGenerativeAI(
-            model="gemini-3-pro-preview",
+            model="gemini-3.1-pro-preview",
             include_thoughts=True
         )
     # Default to Claude 4.5 Haiku
@@ -124,6 +126,7 @@ def leonardo_architect(state: RailsAgentState) -> Command[Literal["tools"]]:
         search_file,
         write_file,
         edit_file,
+        delegate_research,  # Read-only sub-agent for codebase investigation
     ]
 
     # Handle failed tool calls - stop after 3 failures
