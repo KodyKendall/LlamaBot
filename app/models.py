@@ -147,6 +147,8 @@ class ScheduledJobRun(ActiveRecordMixin, SQLModel, table=True):
     # Output
     output_summary: Optional[str] = Field(default=None, max_length=5000)  # AI's final response
     error_message: Optional[str] = Field(default=None, max_length=2000)
+    error_type: Optional[str] = Field(default=None, max_length=100)  # e.g., "TimeoutError", "AgentNotFoundError"
+    error_traceback: Optional[str] = Field(default=None, max_length=5000)  # Full stack trace for debugging
 
     # Token usage (from LangGraph usage_metadata)
     input_tokens: int = Field(default=0)
@@ -156,3 +158,31 @@ class ScheduledJobRun(ActiveRecordMixin, SQLModel, table=True):
     # Audit
     triggered_by_user_id: Optional[int] = Field(default=None, foreign_key="user.id")
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class SchedulerInvocationLog(SQLModel, table=True):
+    """Log entry for each cron invocation of /api/scheduled-jobs/invoke.
+
+    Tracks every call to the invoke endpoint, whether jobs were due or not,
+    to help debug cron setup issues and monitor scheduler health.
+    """
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    invoked_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), index=True)
+
+    # Request info
+    source_ip: Optional[str] = Field(default=None, max_length=50)
+    auth_method: str = Field(default="scheduler_token", max_length=20)  # "scheduler_token" | "user_auth"
+    auth_user_id: Optional[int] = Field(default=None)
+
+    # Result
+    status: str = Field(default="success", max_length=20)  # "success" | "error" | "no_jobs_due"
+    jobs_checked: int = Field(default=0)
+    jobs_executed: int = Field(default=0)
+
+    # Error details (if any)
+    error_type: Optional[str] = Field(default=None, max_length=100)  # Exception class name
+    error_message: Optional[str] = Field(default=None, max_length=2000)
+
+    # Duration
+    duration_ms: Optional[int] = Field(default=None)

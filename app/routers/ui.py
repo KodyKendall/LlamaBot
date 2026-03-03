@@ -1715,6 +1715,7 @@ async def scheduled_jobs_page(user: User = Depends(engineer_or_admin_required)):
         <div class="tabs">
             <button class="tab active" onclick="showTab('jobs')">Jobs</button>
             <button class="tab" onclick="showTab('runs')">Recent Runs</button>
+            <button class="tab" onclick="showTab('logs')">Logs</button>
         </div>
 
         <div id="jobs-tab" class="tab-content active">
@@ -1758,6 +1759,30 @@ async def scheduled_jobs_page(user: User = Depends(engineer_or_admin_required)):
                     </thead>
                     <tbody id="runsTable">
                         <tr><td colspan="7">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div id="logs-tab" class="tab-content">
+            <div class="card">
+                <div class="card-header">Cron Invocation Logs</div>
+                <p style="font-size: 12px; color: #888; margin-bottom: 16px;">
+                    Every cron ping to /api/scheduled-jobs/invoke is logged here, even when no jobs are due.
+                </p>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Status</th>
+                            <th>Jobs Checked</th>
+                            <th>Jobs Run</th>
+                            <th>Duration</th>
+                            <th>Error</th>
+                        </tr>
+                    </thead>
+                    <tbody id="logsTable">
+                        <tr><td colspan="6">Loading...</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -1925,7 +1950,7 @@ async def scheduled_jobs_page(user: User = Depends(engineer_or_admin_required)):
                         <td>${job ? escapeHtml(job.name) : 'Job #' + run.job_id}</td>
                         <td><span class="badge badge-${run.status}">${run.status}</span></td>
                         <td>${run.trigger_type}</td>
-                        <td>${run.started_at ? formatDate(run.started_at) : '-'}</td>
+                        <td>${run.started_at ? formatTimestamp(run.started_at) : '-'}</td>
                         <td>${run.duration_seconds ? run.duration_seconds.toFixed(1) + 's' : '-'}</td>
                         <td>${run.total_tokens > 0 ? run.total_tokens.toLocaleString() : '-'}</td>
                         <td class="actions">
@@ -1939,9 +1964,41 @@ async def scheduled_jobs_page(user: User = Depends(engineer_or_admin_required)):
         function showTab(tab) {
             document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
             document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-            document.querySelector(`.tab:nth-child(${tab === 'jobs' ? 1 : 2})`).classList.add('active');
+            const tabIndex = tab === 'jobs' ? 1 : (tab === 'runs' ? 2 : 3);
+            document.querySelector(`.tab:nth-child(${tabIndex})`).classList.add('active');
             document.getElementById(tab + '-tab').classList.add('active');
             if (tab === 'runs') loadRuns();
+            if (tab === 'logs') loadLogs();
+        }
+
+        let invocationLogs = [];
+
+        async function loadLogs() {
+            try {
+                const response = await fetch('/api/scheduled-jobs/invocations?limit=100');
+                invocationLogs = await response.json();
+                renderLogs();
+            } catch (e) {
+                showMessage('Failed to load logs: ' + e.message, 'error');
+            }
+        }
+
+        function renderLogs() {
+            const tbody = document.getElementById('logsTable');
+            if (invocationLogs.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6"><div class="empty-state"><i class="fa-solid fa-file-lines"></i><p>No invocation logs yet. The cron will log each ping here.</p></div></td></tr>';
+                return;
+            }
+            tbody.innerHTML = invocationLogs.map(log => `
+                <tr>
+                    <td>${log.invoked_at ? formatTimestamp(log.invoked_at) : '-'}</td>
+                    <td><span class="badge badge-${log.status === 'success' ? 'completed' : (log.status === 'no_jobs_due' ? 'pending' : 'failed')}">${log.status}</span></td>
+                    <td>${log.jobs_checked}</td>
+                    <td>${log.jobs_executed}</td>
+                    <td>${log.duration_ms !== null ? log.duration_ms + 'ms' : '-'}</td>
+                    <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${log.error_message ? escapeHtml(log.error_message) : ''}">${log.error_message ? escapeHtml(log.error_message.substring(0, 50)) + (log.error_message.length > 50 ? '...' : '') : '-'}</td>
+                </tr>
+            `).join('');
         }
 
         function openCreateModal() {
@@ -2019,11 +2076,18 @@ async def scheduled_jobs_page(user: User = Depends(engineer_or_admin_required)):
                     <p><strong>Job:</strong> ${job ? escapeHtml(job.name) : 'Job #' + run.job_id}</p>
                     <p><strong>Status:</strong> <span class="badge badge-${run.status}">${run.status}</span></p>
                     <p><strong>Trigger:</strong> ${run.trigger_type}</p>
-                    <p><strong>Started:</strong> ${run.started_at ? new Date(run.started_at).toLocaleString() : '-'}</p>
+                    <p><strong>Started:</strong> ${run.started_at ? formatTimestamp(run.started_at) : '-'}</p>
                     <p><strong>Duration:</strong> ${run.duration_seconds ? run.duration_seconds.toFixed(2) + ' seconds' : '-'}</p>
                     <p><strong>Tokens:</strong> ${run.input_tokens} in / ${run.output_tokens} out (${run.total_tokens} total)</p>
                     <p><strong>Thread ID:</strong> <code>${run.thread_id}</code></p>
-                    ${run.error_message ? `<p><strong>Error:</strong></p><div class="output-box" style="color:#e57373">${escapeHtml(run.error_message)}</div>` : ''}
+                    ${run.error_type ? `<p><strong>Error Type:</strong> <code style="color:#e57373">${escapeHtml(run.error_type)}</code></p>` : ''}
+                    ${run.error_message ? `<p><strong>Error Message:</strong></p><div class="output-box" style="color:#e57373">${escapeHtml(run.error_message)}</div>` : ''}
+                    ${run.error_traceback ? `
+                        <details style="margin-top: 12px;">
+                            <summary style="cursor: pointer; color: #e57373;"><strong>Stack Trace</strong> (click to expand)</summary>
+                            <div class="output-box" style="color:#e57373; margin-top: 8px; max-height: 300px;">${escapeHtml(run.error_traceback)}</div>
+                        </details>
+                    ` : ''}
                     ${run.output_summary ? `<p><strong>Output:</strong></p><div class="output-box">${escapeHtml(run.output_summary)}</div>` : ''}
                 `;
                 document.getElementById('runModal').classList.add('active');
@@ -2084,6 +2148,20 @@ async def scheduled_jobs_page(user: User = Depends(engineer_or_admin_required)):
             if (diff < 3600000) return Math.floor(diff / 60000) + 'm ago';
             if (diff < 86400000) return Math.floor(diff / 3600000) + 'h ago';
             return d.toLocaleDateString();
+        }
+
+        function formatTimestamp(isoString) {
+            if (!isoString) return '-';
+            const d = new Date(isoString);
+            return d.toLocaleString('en-US', {
+                month: 'short',
+                day: 'numeric',
+                year: 'numeric',
+                hour: 'numeric',
+                minute: '2-digit',
+                hour12: true,
+                timeZoneName: 'short'
+            });
         }
 
         function escapeHtml(text) {

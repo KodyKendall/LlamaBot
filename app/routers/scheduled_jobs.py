@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
-from app.models import User, ScheduledJob, ScheduledJobRun
+from app.models import User, ScheduledJob, ScheduledJobRun, SchedulerInvocationLog
 from app.dependencies import get_db_session, admin_required, engineer_or_admin_required
 
 logger = logging.getLogger(__name__)
@@ -82,11 +82,30 @@ def _run_to_dict(run: ScheduledJobRun) -> dict:
         "duration_seconds": run.duration_seconds,
         "output_summary": run.output_summary,
         "error_message": run.error_message,
+        "error_type": run.error_type,
+        "error_traceback": run.error_traceback,
         "input_tokens": run.input_tokens,
         "output_tokens": run.output_tokens,
         "total_tokens": run.total_tokens,
         "triggered_by_user_id": run.triggered_by_user_id,
         "created_at": run.created_at.isoformat() if run.created_at else None,
+    }
+
+
+def _invocation_to_dict(log: SchedulerInvocationLog) -> dict:
+    """Convert SchedulerInvocationLog to JSON-serializable dict."""
+    return {
+        "id": log.id,
+        "invoked_at": log.invoked_at.isoformat() if log.invoked_at else None,
+        "source_ip": log.source_ip,
+        "auth_method": log.auth_method,
+        "auth_user_id": log.auth_user_id,
+        "status": log.status,
+        "jobs_checked": log.jobs_checked,
+        "jobs_executed": log.jobs_executed,
+        "error_type": log.error_type,
+        "error_message": log.error_message,
+        "duration_ms": log.duration_ms,
     }
 
 
@@ -365,65 +384,98 @@ async def invoke_due_jobs(
     Cron invocation endpoint - check and run all due jobs.
 
     Called by host crontab every minute via:
-    curl -X POST http://localhost:8000/api/scheduled-jobs/invoke -H "X-Scheduler-Token: $TOKEN"
+    curl -X POST http://localhost:8080/api/scheduled-jobs/invoke -H "X-Scheduler-Token: $TOKEN"
     """
-    now = datetime.now(timezone.utc)
+    start_time = datetime.now(timezone.utc)
 
-    # Find enabled jobs where next_run_at <= now
-    stmt = select(ScheduledJob).where(
-        ScheduledJob.is_enabled == True,
-        ScheduledJob.next_run_at <= now
+    # Create invocation log entry
+    invocation_log = SchedulerInvocationLog(
+        invoked_at=start_time,
+        source_ip=request.client.host if request.client else None,
+        auth_method="user_auth" if user else "scheduler_token",
+        auth_user_id=user.id if user else None,
     )
-    due_jobs = session.exec(stmt).all()
 
-    if not due_jobs:
-        return {"jobs_executed": 0, "message": "No jobs due"}
+    try:
+        now = start_time
 
-    from app.services.headless_agent_executor import execute_agent_headless
+        # Find enabled jobs where next_run_at <= now
+        stmt = select(ScheduledJob).where(
+            ScheduledJob.is_enabled == True,
+            ScheduledJob.next_run_at <= now
+        )
+        due_jobs = session.exec(stmt).all()
+        invocation_log.jobs_checked = len(due_jobs)
 
-    results = []
-    for job in due_jobs:
-        try:
-            logger.info(f"Cron triggering job: {job.name} (id={job.id})")
+        if not due_jobs:
+            invocation_log.status = "no_jobs_due"
+            invocation_log.jobs_executed = 0
+            invocation_log.duration_ms = int((datetime.now(timezone.utc) - start_time).total_seconds() * 1000)
+            session.add(invocation_log)
+            session.commit()
+            return {"jobs_executed": 0, "message": "No jobs due"}
 
-            run = await execute_agent_headless(
-                agent_name=job.agent_name,
-                prompt=job.prompt,
-                llm_model=job.llm_model,
-                job_id=job.id,
-                trigger_type="cron",
-                max_duration_seconds=job.max_duration_seconds,
-                recursion_limit=job.recursion_limit,
-                app=request.app,
-                triggered_by_user_id=None  # Cron has no user context
-            )
+        from app.services.headless_agent_executor import execute_agent_headless
 
-            # Update job timing
-            job.last_run_at = datetime.now(timezone.utc)
-            job.next_run_at = _calculate_next_run(job.cron_expression, job.timezone)
-            session.add(job)
+        results = []
+        for job in due_jobs:
+            try:
+                logger.info(f"Cron triggering job: {job.name} (id={job.id})")
 
-            results.append({
-                "job_id": job.id,
-                "job_name": job.name,
-                "status": run.status if run else "unknown",
-                "run_id": run.id if run else None
-            })
-        except Exception as e:
-            logger.error(f"Cron job {job.id} failed: {e}", exc_info=True)
-            results.append({
-                "job_id": job.id,
-                "job_name": job.name,
-                "status": "error",
-                "error": str(e)[:200]
-            })
+                run = await execute_agent_headless(
+                    agent_name=job.agent_name,
+                    prompt=job.prompt,
+                    llm_model=job.llm_model,
+                    job_id=job.id,
+                    trigger_type="cron",
+                    max_duration_seconds=job.max_duration_seconds,
+                    recursion_limit=job.recursion_limit,
+                    app=request.app,
+                    triggered_by_user_id=None  # Cron has no user context
+                )
 
-    session.commit()
+                # Update job timing
+                job.last_run_at = datetime.now(timezone.utc)
+                job.next_run_at = _calculate_next_run(job.cron_expression, job.timezone)
+                session.add(job)
 
-    return {
-        "jobs_executed": len(results),
-        "results": results
-    }
+                results.append({
+                    "job_id": job.id,
+                    "job_name": job.name,
+                    "status": run.status if run else "unknown",
+                    "run_id": run.id if run else None
+                })
+            except Exception as e:
+                logger.error(f"Cron job {job.id} failed: {e}", exc_info=True)
+                results.append({
+                    "job_id": job.id,
+                    "job_name": job.name,
+                    "status": "error",
+                    "error": str(e)[:200]
+                })
+
+        invocation_log.status = "success"
+        invocation_log.jobs_executed = len(results)
+        invocation_log.duration_ms = int((datetime.now(timezone.utc) - start_time).total_seconds() * 1000)
+        session.add(invocation_log)
+        session.commit()
+
+        return {
+            "jobs_executed": len(results),
+            "results": results
+        }
+
+    except Exception as e:
+        # Log the error in the invocation log
+        invocation_log.status = "error"
+        invocation_log.error_type = type(e).__name__
+        invocation_log.error_message = str(e)[:2000]
+        invocation_log.duration_ms = int((datetime.now(timezone.utc) - start_time).total_seconds() * 1000)
+        session.add(invocation_log)
+        session.commit()
+
+        logger.error(f"Invoke endpoint failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ============== Run History Endpoints ==============
@@ -477,3 +529,25 @@ async def get_run_details(
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
     return _run_to_dict(run)
+
+
+# ============== Invocation Log Endpoints ==============
+
+@router.get("/invocations", response_class=JSONResponse)
+async def get_invocation_logs(
+    limit: int = 100,
+    user: User = Depends(engineer_or_admin_required),
+    session: Session = Depends(get_db_session)
+):
+    """Get recent cron invocation logs.
+
+    Returns a list of all /invoke calls, including when no jobs were due.
+    Useful for debugging cron setup issues.
+    """
+    stmt = (
+        select(SchedulerInvocationLog)
+        .order_by(SchedulerInvocationLog.invoked_at.desc())
+        .limit(limit)
+    )
+    logs = session.exec(stmt).all()
+    return [_invocation_to_dict(log) for log in logs]

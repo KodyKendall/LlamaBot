@@ -7,6 +7,7 @@ results for storage in ScheduledJobRun records.
 
 import asyncio
 import logging
+import traceback
 import uuid
 from datetime import datetime, timezone
 from typing import Optional, TYPE_CHECKING
@@ -167,10 +168,20 @@ async def execute_agent_headless(
 
     except asyncio.TimeoutError:
         logger.warning(f"Headless execution timeout: job_id={job_id}, timeout={max_duration_seconds}s")
-        return _mark_run_failed(run_id, f"Execution timeout after {max_duration_seconds}s", status="timeout")
+        return _mark_run_failed(
+            run_id,
+            f"Execution timeout after {max_duration_seconds}s",
+            status="timeout",
+            error_type="TimeoutError"
+        )
     except Exception as e:
         logger.error(f"Headless execution failed: job_id={job_id}, error={e}", exc_info=True)
-        return _mark_run_failed(run_id, str(e)[:2000])
+        return _mark_run_failed(
+            run_id,
+            str(e)[:2000],
+            error_type=type(e).__name__,
+            error_traceback=traceback.format_exc()[:5000]
+        )
 
 
 def _mark_run_completed(run_id: int, output_summary: str, input_tokens: int, output_tokens: int):
@@ -203,7 +214,13 @@ def _mark_run_completed(run_id: int, output_summary: str, input_tokens: int, out
     return None
 
 
-def _mark_run_failed(run_id: int, error_message: str, status: str = "failed"):
+def _mark_run_failed(
+    run_id: int,
+    error_message: str,
+    status: str = "failed",
+    error_type: Optional[str] = None,
+    error_traceback: Optional[str] = None
+):
     """Update run record as failed."""
     from sqlmodel import Session
     from app.db import engine
@@ -223,6 +240,8 @@ def _mark_run_failed(run_id: int, error_message: str, status: str = "failed"):
             else:
                 run.duration_seconds = 0
             run.error_message = error_message
+            run.error_type = error_type
+            run.error_traceback = error_traceback
             session.add(run)
             session.commit()
             session.refresh(run)
