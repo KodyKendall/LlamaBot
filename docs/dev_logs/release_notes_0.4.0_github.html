@@ -1,0 +1,185 @@
+<h1>🦙 LlamaBot v0.4.0 - Scheduled Jobs, Git UI Integration, and New Agent Modes</h1>
+
+<p><strong>Release Date:</strong> February 22, 2026</p>
+
+<hr>
+
+<h2>🚀 What's New</h2>
+
+<h3>📅 Scheduled Jobs System ⭐</h3>
+<p>Automate agent tasks with cron-based scheduling directly from the UI.</p>
+<ul>
+  <li><strong>Cron-based automation</strong> - Schedule agents to run on any cron schedule</li>
+  <li><strong>Full UI support</strong> - Create, view, and manage scheduled jobs from the interface</li>
+  <li><strong>Easy installation</strong> - Install scheduler via <code>/install-scheduler-cron</code> slash command</li>
+  <li><strong>Comprehensive logging</strong> - Background job execution with detailed logs</li>
+</ul>
+
+<h3>🤖 New Agent Modes ⭐</h3>
+<p>Specialized agents for database operations and research tasks.</p>
+<ul>
+  <li><strong>Database Mode Agent</strong> - Direct ActiveRecord operations from chat using <code>rails_user_mode_agent</code></li>
+  <li><strong>Delegate Research Agent</strong> - Read-only sub-agent for investigation tasks without modifying code</li>
+  <li><strong>User Feedback Agent v2</strong> - Enhanced feedback mode that can now write feedback directly</li>
+</ul>
+
+<h3>🔗 Git & GitHub Integration (UI) ⭐</h3>
+<p>Manage Git directly from the Leonardo interface without needing VSCode.</p>
+<ul>
+  <li><strong>Git checkpoints in UI</strong> - View commit history and save/discard changes directly</li>
+  <li><strong>GitHub authentication</strong> - <code>/gh auth login</code> with automatic code copy to clipboard</li>
+  <li><strong>SSH setup command</strong> - Streamlined developer onboarding with <code>/ssh-setup</code></li>
+  <li><strong>Push to GitHub</strong> - New cloud push icon for pushing checkpoints to GitHub</li>
+  <li><strong>Git config wrapper</strong> - <code>/gh</code> commands for git configuration</li>
+</ul>
+
+<h3>👤 Per-User Configuration</h3>
+<p>Fine-grained control over agent visibility by user role.</p>
+<ul>
+  <li><strong>visible_agents setting</strong> - Configure which agents each user can access</li>
+  <li><strong>Role-based defaults</strong> - Different default agents based on user role</li>
+  <li><strong>Engineering role enforcement</strong> - Slash commands restricted to engineer role</li>
+</ul>
+
+<hr>
+
+<h2>🔧 Improvements</h2>
+
+<h3>LLM & Model Updates</h3>
+<ul>
+  <li><strong>Gemini 3.1 Pro default</strong> - Upgraded default Gemini model to 3.1 Pro</li>
+  <li><strong>Simplified Gemini setup</strong> - Now activates with just <code>GEMINI_API_KEY</code> (no longer requires <code>GOOGLE_API_KEY</code>)</li>
+</ul>
+
+<h3>Browser UX</h3>
+<ul>
+  <li><strong>Tab notification badges</strong> - Visual indicator when Leonardo finishes tasks (success or error)</li>
+  <li><strong>Dynamic favicon</strong> - Shows running, completed, or error states</li>
+  <li><strong>Smart refresh</strong> - Refresh button updates all iFrames (except VSCode)</li>
+</ul>
+
+<h3>Ticket Mode</h3>
+<ul>
+  <li><strong>Light research phase</strong> - Performs preliminary research before grounding user observations/stories</li>
+</ul>
+
+<h3>System Reliability</h3>
+<ul>
+  <li><strong>Bash output truncation</strong> - Prevents context overflow with intelligent truncation</li>
+  <li><strong>Critical error detection</strong> - Bash tool now detects and highlights critical errors</li>
+  <li><strong>Checkpoint storage migration</strong> - LangGraph checkpoints now save to LlamaBot DB instead of LlamaPress</li>
+  <li><strong>Automatic checkpoint cleanup</strong> - Protects disk space and DB size on Leonardo instances</li>
+  <li><strong>S3 database restore</strong> - New <code>/restore_s3.sh</code> command for database backup restoration</li>
+  <li><strong>Auto SSH key copy</strong> - Automatically copies SSH keys from host to VSCode container</li>
+</ul>
+
+<h3>Slash Commands</h3>
+<ul>
+  <li><strong>/restart improvements</strong> - Now includes <code>--follow</code> flag for easy log tailing</li>
+  <li><strong>/gh wrapper</strong> - Git config and GitHub CLI operations</li>
+</ul>
+
+<hr>
+
+<h2>🐛 Bug Fixes</h2>
+<ul>
+  <li>Fixed Ubuntu permission issues from tool calls</li>
+  <li>Fixed bash output truncation edge cases</li>
+</ul>
+
+<hr>
+
+<h2>⚠️ Migration Notes</h2>
+<ul>
+  <li><strong>Checkpointer data location</strong> - Now stored in LlamaBot database (automatically migrated)</li>
+  <li><strong>Slash command permissions</strong> - Users must have <code>engineer</code> role to execute slash commands</li>
+</ul>
+
+<hr>
+
+<h2>📋 Previous Releases</h2>
+
+<details>
+<summary><strong>v0.3.5</strong> - Screenshot & Video Capture, Slash Commands, and UX Polish ⭐</summary>
+<ul>
+  <li><strong>Screenshot & video capture</strong> - Take screenshots, record video, drag & drop files into chat</li>
+  <li><strong>Slash commands</strong> - Database/backup management, file permissions, cron installation, robust /restart</li>
+  <li><strong>Prompt library</strong> - Save and reuse frequently used prompts</li>
+  <li><strong>Feedback system</strong> - Dedicated feedback tab and form</li>
+  <li><strong>Enhanced summarization</strong> - Custom prompt preserving technical details, increased message retention</li>
+  <li><strong>UI/UX enhancements</strong> - Resizable chat panel, relative timestamps, dynamic tab title</li>
+  <li><strong>WebSocket reliability</strong> - Security layer and better error handling</li>
+</ul>
+</details>
+
+<details>
+<summary><strong>v0.3.0</strong> - Ticket Mode 2.0 & Enhanced Builder Pattern ⭐</summary>
+<ul>
+  <li>Complete redesign of Ticket Mode with single-conversation workflow</li>
+  <li>Sub-agent delegation for technical research</li>
+  <li>Builder Pattern documentation for complex UI architecture</li>
+  <li>Enhanced Git error handling</li>
+  <li>Debugging workflow with bug emoji convention</li>
+  <li>Ticket Mode middleware stack</li>
+</ul>
+</details>
+
+<details>
+<summary><strong>v0.2.22</strong> - Middleware Architecture & Ticket Mode</summary>
+<ul>
+  <li>Modern middleware architecture with LangChain 1.1+</li>
+  <li>Initial Ticket Mode with 3-stage workflow</li>
+  <li>Sub-agent task delegation</li>
+  <li>Enhanced agent configuration via langgraph.json</li>
+  <li>Modular FastAPI routes</li>
+</ul>
+</details>
+
+<details>
+<summary><strong>v0.2.21</strong> - Multi-User & Admin System</summary>
+<ul>
+  <li>Multi-user management with PostgreSQL authentication</li>
+  <li>Admin permissions and role-based access control</li>
+  <li>ActiveRecord-like console utilities</li>
+  <li>User registration and session management</li>
+</ul>
+</details>
+
+<details>
+<summary><strong>v0.2.20</strong> - User Feedback Agent</summary>
+<ul>
+  <li>New user feedback agent mode for end-users to plan future development</li>
+  <li>Improved feedback agent prompt for better scope and sprint planning</li>
+  <li>Enables direct user input into product roadmap</li>
+</ul>
+</details>
+
+<details>
+<summary><strong>v0.2.19</strong> - AI Builder & Testing Mode ⭐</summary>
+<ul>
+  <li><strong>AI Builder Mode</strong> - Leonardo helps build user-facing agents within Rails apps</li>
+  <li><strong>QA Test Builder Mode</strong> - Automated test generation with RSpec & Vite-JS</li>
+  <li>New <code>user_agents</code> folder for custom agent definitions</li>
+  <li>Prompt caching for all agents (significant cost reduction)</li>
+  <li>Capybara/Cuprite browser tool for JavaScript debugging</li>
+</ul>
+</details>
+
+<details>
+<summary><strong>v0.2.18</strong> - UI/UX Overhaul ⭐</summary>
+<ul>
+  <li>Massive UI/UX overhaul for messages and iframe</li>
+  <li>Refactored chat.html into modular JavaScript packages</li>
+  <li>Support for any LLM model - Claude, Gemini, GPT Codex, GPT series</li>
+  <li>New task/planning component for clearer agent status</li>
+  <li>Auto-refreshing iframe shows changes in real-time</li>
+</ul>
+</details>
+
+<hr>
+
+<p>🦙 <strong>LlamaBot</strong> - AI Coding Agent Framework</p>
+<p>
+  <a href="https://github.com/KodyKendall/LlamaBot">GitHub</a> ·
+  <a href="https://discord.gg/7DapkvmWKZ">Discord</a>
+</p>
