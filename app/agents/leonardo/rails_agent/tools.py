@@ -965,7 +965,18 @@ def bash_command(
 
     return Command(update=update)
 
-tavily_client = TavilyClient(api_key=os.environ.get("TAVILY_API_KEY", ""))
+# Initialize Tavily client lazily to avoid import errors when API key is not set
+_tavily_client = None
+
+def get_tavily_client():
+    global _tavily_client
+    if _tavily_client is None:
+        api_key = os.environ.get("TAVILY_API_KEY")
+        if not api_key:
+            raise ValueError("TAVILY_API_KEY environment variable is not set")
+        _tavily_client = TavilyClient(api_key=api_key)
+    return _tavily_client
+
 @tool(description=INTERNET_SEARCH_DESCRIPTION)
 # Search tool to use to do research
 def internet_search(
@@ -973,7 +984,7 @@ def internet_search(
     max_results: int = 5,
     include_raw_content: bool = False,
 ):
-    search_docs = tavily_client.search(
+    search_docs = get_tavily_client().search(
         query,
         max_results=max_results,
         include_raw_content=include_raw_content,

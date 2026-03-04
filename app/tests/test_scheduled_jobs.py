@@ -188,16 +188,16 @@ class TestScheduledJobsAPI:
         """Only admins can delete jobs."""
         mock_db_session.get.return_value = sample_job
 
-        # Engineer should be rejected
+        # Engineer should be rejected - just override get_current_user, let admin_required work naturally
         app.dependency_overrides[get_current_user] = lambda: mock_engineer_user
-        app.dependency_overrides[admin_required] = lambda: (_ for _ in ()).throw(Exception("Admin required"))
         app.dependency_overrides[get_db_session] = lambda: mock_db_session
 
         client = TestClient(app)
         response = client.delete("/api/scheduled-jobs/1")
 
-        # Should fail because engineer is not admin
-        assert response.status_code == 500  # Exception thrown
+        # Should fail with 403 because engineer is not admin
+        assert response.status_code == 403
+        assert "Admin privileges required" in response.json()["detail"]
 
         app.dependency_overrides = {}
 
