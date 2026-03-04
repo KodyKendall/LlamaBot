@@ -1,0 +1,49 @@
+02/22/2026:
+
+0.3.6a:
+- [x] Improve ticket mode prompt to do light research before grounding user observation/story.
+
+0.3.6b:
+- [x] Add git commit checkpoints & history into UI to easily save & discard chagnes without needing to use VSCode interface
+
+0.3.6c:
+- [x] Change octocat icon to be cloud push icon instead (for pushing checkpoints to github)
+
+0.3.6d:
+- [x] Change langgraph checkpoints to save to llamabot database instead of llamapress database
+- [x] Add /restore_s3.sh command so we can restore from database backups
+- [x] Add a bin script where it's able to copy the ssh key from host into the vs code container instance automatically
+- [x] Add a way to sign into Github and authenticate from the Leonardo UI/UX.. ? Maybe like a /gh auth login command, that then gives us the URL and copies the code automatically to our keyboard?
+- [x] Add ssh setup slash command
+- [x] Only allow users with engineering role to run slash commands
+- [x] User Feedback Agent Mode v2 (can write feedback directly)
+- [x] Add checkpointing auto clean up to protect disk space & DB size on Leonardo instances
+
+0.3.6ec:
+- [x] Add gh copy and git config wrapper 
+
+0.3.6f: 
+- [x] Add --follow on /restart command for user ot easily copy/paste.
+- [x] Enable Gemini if GEMINI_API_KEY is set, not requiring GOOGLE_API_KEY
+- [x] Add notification badges on tab icon when Leonardo finishes tasks (on both error and success)
+
+0.3.6g: 
+- [x] Add truncation to bash outputs, and add bash critical error detections
+
+0.3.6h:
+- [x] Improve favicon tab icon for browsers for running, or completed, or error.
+
+0.3.6i:
+- [x] Bumped to Gemini 3.1 Pro as default Gemini Pro Model
+- [x] Add scheduled jobs system (cron-based agent automation with UI)
+- [x] Add Database Mode agent (rails_user_mode_agent) for ActiveRecord operations
+- [x] Add `delegate_research` read-only sub-agent for investigation tasks
+- [x] Add per-user `visible_agents` configuration with role-based defaults
+
+0.3.6g: 
+- [x] Improve scheduled background jobs implementation with full logging
+
+0.3.6j: 
+- [x] Improve truncation issue in Bash tool calls.
+- [x] Refresh all iFrames (except VSCode) on button Refresh
+- [x] Fix permission issues on Ubuntu from tool calls

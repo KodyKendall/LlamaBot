@@ -25,6 +25,9 @@ import { PanelResizeManager } from './ui/PanelResizeManager.js';
 import { ThreadManager } from './threads/ThreadManager.js';
 import { LoadingVerbs } from './utils/LoadingVerbs.js';
 import { ClipboardFormatter } from './utils/ClipboardFormatter.js';
+import { CheckpointManager } from './checkpoints/CheckpointManager.js';
+import { DiffViewer } from './checkpoints/DiffViewer.js';
+import { FaviconBadgeManager } from './ui/FaviconBadgeManager.js';
 
 /**
  * Main application class - LlamaBot Client
@@ -62,6 +65,8 @@ class ChatApp {
     this.screenshotAnnotator = null;
     this.slashCommandManager = null;
     this.panelResizeManager = null;
+    this.checkpointManager = null;
+    this.faviconBadgeManager = null;
     this.loadingVerbs = new LoadingVerbs();
 
     // Initialize WebSocket components
@@ -145,6 +150,14 @@ class ChatApp {
     this.clipboardFormatter = new ClipboardFormatter(this.elements.messageHistory);
     this.clipboardFormatter.init();
 
+    // Initialize favicon badge manager for tab notifications
+    this.faviconBadgeManager = new FaviconBadgeManager();
+
+    // Wire up scroll manager to update favicon unread count
+    this.scrollManager.setUnreadCountCallback((count) => {
+      this.faviconBadgeManager.updateUnreadCount(count);
+    });
+
     // Initialize message renderer with iframe manager, debug info callback, scroll manager, and loading verbs
     this.messageRenderer = new MessageRenderer(
       this.elements.messageHistory,
@@ -154,7 +167,8 @@ class ChatApp {
       this.loadingVerbs,
       this.config,
       this.container,
-      this.elements
+      this.elements,
+      this.faviconBadgeManager
     );
 
     // Initialize thread manager
@@ -163,6 +177,9 @@ class ChatApp {
       this.menuManager,
       this.scrollManager
     );
+
+    // Initialize checkpoint manager for code rollback
+    this.checkpointManager = new CheckpointManager(this);
 
     // Initialize message handler
     this.messageHandler = new MessageHandler(
@@ -416,6 +433,8 @@ class ChatApp {
     window.addEventListener('iframeRefreshRequested', () => {
       // Refresh Rails app to show latest changes
       this.iframeManager.refreshRailsApp((callback) => this.getRailsDebugInfo(callback));
+      this.iframeManager.refreshTicketsFrame();
+      this.iframeManager.refreshFeedbackFrame();
     });
 
     // Listen for thread change
@@ -424,6 +443,10 @@ class ChatApp {
       // Reset token indicator when switching threads (we don't have historical token counts)
       if (this.tokenIndicator) {
         this.tokenIndicator.reset();
+      }
+      // Notify checkpoint manager of thread change
+      if (this.checkpointManager) {
+        this.checkpointManager.onThreadChange(e.detail.threadId);
       }
     });
 
@@ -588,6 +611,11 @@ class ChatApp {
           this.loadingVerbs.startCycling(thinkingDiv);
         }
       }
+    }
+
+    // Start favicon thinking indicator
+    if (this.faviconBadgeManager) {
+      this.faviconBadgeManager.startThinking();
     }
 
     // Change placeholder text while thinking

@@ -6,6 +6,9 @@ import os
 import time
 from bs4 import BeautifulSoup
 
+# Import checkpoint service for auto-checkpointing before file edits
+from app.services.checkpoint_service import checkpoint_service
+
 from app.agents.leonardo.rails_agent.prompts import (
     WRITE_TODOS_DESCRIPTION,
     EDIT_DESCRIPTION,
@@ -36,10 +39,103 @@ import difflib
 from jinja2 import Environment, FileSystemLoader
 
 
+# ============================================================================
+# Bash Output Configuration
+# ============================================================================
+
+# Maximum characters for bash command output before truncation
+BASH_OUTPUT_MAX_CHARS = 12000
+
+# Moderate error detection - permission errors + common Rails errors
+# (excludes test failure patterns like "FAILED" to avoid false positives on intentional test runs)
+BASH_ERROR_PATTERNS = [
+    # Permission errors (critical)
+    "Permission denied",
+    "EACCES",
+    "Operation not permitted",
+    "Read-only file system",
+    # File system errors
+    "No such file or directory",
+    # Ruby/Rails errors
+    "LoadError",
+    "SyntaxError",
+    "NameError",
+    "NoMethodError",
+    "ArgumentError",
+    # Database errors
+    "ActiveRecord::StatementInvalid",
+    "PG::Error",
+    "Mysql2::Error",
+    # Process errors
+    "command not found",
+    "Killed",
+    "Segmentation fault",
+]
+
+# Critical errors that indicate infrastructure issues that CANNOT be fixed from inside container
+BASH_CRITICAL_ERROR_PATTERNS = [
+    "Permission denied",
+    "EACCES",
+    "Operation not permitted",
+    "Read-only file system",
+]
+
+
+def detect_bash_errors(output: str) -> tuple[bool, bool, list[str]]:
+    """Detect semantic errors in bash command output.
+
+    Returns:
+        tuple of (has_error, is_critical, matched_patterns)
+        - has_error: True if any error pattern was found
+        - is_critical: True if a critical/unrecoverable error was found
+        - matched_patterns: List of matched error pattern strings
+    """
+    matched = [p for p in BASH_ERROR_PATTERNS if p in output]
+    is_critical = any(p in output for p in BASH_CRITICAL_ERROR_PATTERNS)
+    return (len(matched) > 0, is_critical, matched)
+
+
+def truncate_output(output: str, max_chars: int = BASH_OUTPUT_MAX_CHARS) -> str:
+    """Truncate output if it exceeds max_chars, preserving beginning and end.
+
+    Strategy: Keep first 50% and last 50% of allowed characters to preserve
+    both the command start context and the final output/errors/summaries.
+    """
+    if len(output) <= max_chars:
+        return output
+
+    head_chars = int(max_chars * 0.5)
+    tail_chars = int(max_chars * 0.5)
+
+    truncation_msg = f"\n\n[...OUTPUT TRUNCATED - {len(output) - max_chars} characters removed...]\n\n"
+
+    return output[:head_chars] + truncation_msg + output[-tail_chars:]
+
+
 # Define base paths relative to project root
 SCRIPT_DIR = Path(__file__).parent.resolve()
 PROJECT_ROOT = SCRIPT_DIR.parent.parent.parent.parent  # Go up to LlamaBot root
 APP_DIR = PROJECT_ROOT / 'app'
+
+# Ubuntu user compatibility: chown files to UID 1000 after writing
+# LlamaBot container runs as root, but host ubuntu user is UID 1000
+# Without this, the ubuntu user can't edit files created by the agent
+UBUNTU_UID = 1000
+UBUNTU_GID = 1000
+
+
+def chown_for_ubuntu(path: Path) -> None:
+    """Change file ownership to UID 1000:1000 for ubuntu user compatibility.
+
+    The LlamaBot container runs as root, but the host ubuntu user is UID 1000.
+    This ensures the ubuntu user can edit files created by the agent.
+    Silently ignores errors (e.g., if chown not available or fails).
+    """
+    try:
+        os.chown(path, UBUNTU_UID, UBUNTU_GID)
+    except (OSError, PermissionError):
+        # Silently ignore - this is a best-effort operation
+        pass
 
 @tool(description=WRITE_TODOS_DESCRIPTION)
 def write_todos(
@@ -94,6 +190,18 @@ def normalize_whitespace(s: str) -> str:
     # Collapse multiple newlines to single newline
     s = re.sub(r'\n\n+', '\n\n', s)
     return s.strip()
+
+
+# NOTE: Auto-checkpoint functionality has been disabled.
+# Users now manually create checkpoints via the History panel UI.
+# The checkpoint_service is still used by the /api/checkpoints endpoint for manual creation.
+#
+# def maybe_create_checkpoint(runtime: ToolRuntime, description: str):
+#     """Create a git checkpoint before file modifications if not already created this turn.
+#     ...
+#     """
+#     pass
+
 
 @tool(description=LIST_DIRECTORY_DESCRIPTION)
 def ls(directory: str = "") -> list[str]:
@@ -175,9 +283,12 @@ def write_file(
     file_path = guard_against_beginning_slash_argument(file_path)
     full_path = APP_DIR / "rails" / file_path
 
+    # NOTE: Auto-checkpoint disabled. Users create checkpoints manually via History panel.
+
     try:
         full_path.parent.mkdir(parents=True, exist_ok=True)
         full_path.write_text(content)
+        chown_for_ubuntu(full_path)  # Fix permissions for ubuntu user
     except Exception as e:
         error_message = f"Error writing file {file_path}: {e}"
         tool_output = {
@@ -223,6 +334,8 @@ def edit_file(
     tool_call_id = runtime.tool_call_id
     file_path = guard_against_beginning_slash_argument(file_path)
     full_path = APP_DIR / "rails" / file_path
+
+    # NOTE: Auto-checkpoint disabled. Users create checkpoints manually via History panel.
 
     if not full_path.exists():
         error_message = f"Error: File '{file_path}' not found"
@@ -362,6 +475,7 @@ def edit_file(
 
     try:
         full_path.write_text(new_content)
+        chown_for_ubuntu(full_path)  # Fix permissions for ubuntu user
     except Exception as e:
         error_message = f"Error writing to file '{file_path}': {e}"
         tool_output = {
@@ -623,61 +737,74 @@ def list_all_files_recursive(directory: Path):
 WORKDIR = "/rails"  # path that contains bin/rails inside the Rails container
 
 def get_rails_container_name():
-    """Dynamically get the Rails container name by looking for containers ending with 'llamapress-1'."""
+    """Dynamically get the Rails container name by looking for containers with 'llamapress' in the name.
+
+    This function is called on each rails_api_sh invocation to handle container restarts.
+    Container names vary by environment:
+    - Production: llamapress-1
+    - Development: leonardo-llamapress-1 (or similar, based on docker-compose directory name)
+    """
     try:
         # List all running containers using Docker API
         cmd = [
             "curl", "--silent", "--unix-socket", "/var/run/docker.sock",
             "http://localhost/containers/json"
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+
         if result.returncode == 0:
             containers = json.loads(result.stdout)
             for container in containers:
                 # Container names are in the 'Names' array with leading '/'
                 names = container.get('Names', [])
                 for name in names:
-                    # Remove leading '/' and check if it ends with 'llamapress-1'
+                    # Remove leading '/' and check if it contains 'llamapress'
                     clean_name = name.lstrip('/')
-                    if clean_name.endswith('llamapress-1'):
+                    # Match any container with 'llamapress' in the name (handles various prefixes)
+                    if 'llamapress' in clean_name.lower() and 'llamabot' not in clean_name.lower():
                         return clean_name
-        
-        # Fallback to environment-specific defaults
-        # Check if we're in production (you might have an env var or other indicator)
+
+        # Fallback to common names
         import os
         if os.environ.get('ENV') == 'production':
             return "llamapress-1"
-        
-        # Default to development container name
-        return "rails-agent-llamapress-1"
-        
-    except Exception:
-        # If anything goes wrong, return a sensible default
-        return "rails-agent-llamapress-1"
 
-# Get the container name dynamically
-RAILS_CONT = get_rails_container_name()
+        # Default to leonardo prefix (most common dev setup)
+        return "leonardo-llamapress-1"
+
+    except Exception as e:
+        # If anything goes wrong, return a sensible default
+        import logging
+        logging.getLogger(__name__).warning(f"Failed to detect Rails container: {e}")
+        return "leonardo-llamapress-1"
+
+
+# NOTE: Container name is now fetched dynamically in rails_api_sh() to handle restarts
+_cached_rails_container = None
 
 def rails_api_sh(snippet: str, workdir: str = WORKDIR) -> str:
     """Execute a command in the Rails Docker container via Docker API."""
     try:
+        # Get container name dynamically (handles restarts and varying prefixes)
+        container_name = get_rails_container_name()
+
         # Create the exec payload
         payload = {
             "AttachStdout": True,
             "AttachStderr": True,
             "Tty": True,
             "Cmd": ["/bin/sh", "-lc", snippet],
-            "WorkingDir": workdir
+            "WorkingDir": workdir,
+            "User": "1000:1000"  # Run as UID 1000 to match host user and prevent permission issues
         }
-        
+
         # Create exec instance using curl
         create_cmd = [
             "curl", "--silent", "--show-error", "--fail-with-body",
             "--unix-socket", "/var/run/docker.sock",
             "-H", "Content-Type: application/json",
             "--data-binary", json.dumps(payload),
-            f"http://localhost/containers/{RAILS_CONT}/exec"
+            f"http://localhost/containers/{container_name}/exec"
         ]
         
         create_result = subprocess.run(create_cmd, capture_output=True, text=True, timeout=30)
@@ -772,6 +899,7 @@ def capture_rails_logs(duration: int = 10, output_file: str = None) -> str:
     full_path = APP_DIR / "rails" / output_file
     full_path.parent.mkdir(parents=True, exist_ok=True)
     full_path.write_text(logs)
+    chown_for_ubuntu(full_path)  # Fix permissions for ubuntu user
 
     return str(full_path)
 
@@ -797,17 +925,58 @@ def bash_command(
                 }
             )
 
-    result = rails_api_sh(command, workdir)
+    raw_result = rails_api_sh(command, workdir)
 
-    return Command(
-        update={
-            "messages": [
-                ToolMessage(f"Command output:\n{result}", tool_call_id=tool_call_id)
-            ],
-        }
-    )
+    # Truncate large outputs to prevent context window explosion
+    result = truncate_output(raw_result, BASH_OUTPUT_MAX_CHARS)
 
-tavily_client = TavilyClient(api_key=os.environ.get("TAVILY_API_KEY", ""))
+    # Detect semantic errors in output
+    has_error, is_critical, matched_patterns = detect_bash_errors(result)
+
+    # Build the message content
+    if is_critical:
+        # Add strong guidance for critical errors (permission issues)
+        error_guidance = (
+            "\n\n<CRITICAL_ERROR>\n"
+            f"Detected critical error patterns: {', '.join(matched_patterns[:3])}\n"
+            "This error likely CANNOT be fixed from inside the container.\n"
+            "STOP trying to fix this with chmod/chown - these won't work on mounted volumes.\n"
+            "Tell the user this is a host permission issue and ask them to contact a LlamaPress admin.\n"
+            "</CRITICAL_ERROR>"
+        )
+        message_content = f"Command output:\n{result}{error_guidance}"
+    elif has_error:
+        # Add warning for non-critical errors
+        error_warning = f"\n\n[Warning: Detected potential errors: {', '.join(matched_patterns[:3])}]"
+        message_content = f"Command output:\n{result}{error_warning}"
+    else:
+        message_content = f"Command output:\n{result}"
+
+    # Build the update dict
+    update = {
+        "messages": [
+            ToolMessage(message_content, tool_call_id=tool_call_id)
+        ],
+    }
+
+    # Increment failure counter for errors (this triggers circuit breaker after 3 failures)
+    if has_error:
+        update["failed_tool_calls_count"] = 1
+
+    return Command(update=update)
+
+# Initialize Tavily client lazily to avoid import errors when API key is not set
+_tavily_client = None
+
+def get_tavily_client():
+    global _tavily_client
+    if _tavily_client is None:
+        api_key = os.environ.get("TAVILY_API_KEY")
+        if not api_key:
+            raise ValueError("TAVILY_API_KEY environment variable is not set")
+        _tavily_client = TavilyClient(api_key=api_key)
+    return _tavily_client
+
 @tool(description=INTERNET_SEARCH_DESCRIPTION)
 # Search tool to use to do research
 def internet_search(
@@ -815,7 +984,7 @@ def internet_search(
     max_results: int = 5,
     include_raw_content: bool = False,
 ):
-    search_docs = tavily_client.search(
+    search_docs = get_tavily_client().search(
         query,
         max_results=max_results,
         include_raw_content=include_raw_content,
@@ -1270,6 +1439,7 @@ def write_agent_file(
 
         # Write the file
         full_path.write_text(file_content)
+        chown_for_ubuntu(full_path)  # Fix permissions for ubuntu user
 
     except Exception as e:
         error_message = f"Error writing agent file {agent_name}/nodes.py: {e}"
@@ -1411,6 +1581,7 @@ def edit_agent_file(
     # Write the new content
     try:
         full_path.write_text(new_content)
+        chown_for_ubuntu(full_path)  # Fix permissions for ubuntu user
     except Exception as e:
         error_message = f"Error writing agent file: {e}"
         tool_output = {
@@ -1543,6 +1714,7 @@ def edit_langgraph_json(
     # Write the new content
     try:
         full_path.write_text(new_content)
+        chown_for_ubuntu(full_path)  # Fix permissions for ubuntu user
     except Exception as e:
         error_message = f"Error writing langgraph.json: {e}"
         tool_output = {

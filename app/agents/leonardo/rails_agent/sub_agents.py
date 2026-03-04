@@ -1,23 +1,28 @@
 """
 Sub-Agent Spawning for Rails Agent.
 
-This module provides the `delegate_task` tool that allows the main Rails agent
-to spawn sub-agents for focused work with isolated context.
+This module provides TWO delegation tools:
 
-Sub-agents are NOT specialized - they use the same prompt and tools as the main
-agent. The purpose is context isolation: keeping the main agent's tool call
+1. `delegate_task` - Full-capability sub-agent for implementation work
+   - Has all tools (write, edit, bash, git)
+   - Same prompt as main agent
+   - Use for: implementing features, making changes in isolation
+
+2. `delegate_research` - Research-only sub-agent for investigation
+   - Read-only tools (ls, read_file, grep, glob, bash for queries)
+   - Special research-focused prompt
+   - Use for: exploring codebase, understanding patterns, root cause analysis
+   - CANNOT write files, edit code, or make commits
+
+The purpose is context isolation: keeping the main agent's tool call
 history clean while delegating specific tasks to a fresh agent instance.
-
-Use cases:
-- Research tasks that would pollute the main conversation
-- Implementing a specific feature in isolation
-- Any focused work where you want fresh context
 """
 
 from langchain.agents import create_agent
 from langchain.tools import tool, ToolRuntime
 from langchain_core.messages import ToolMessage, SystemMessage
 from langgraph.types import Command
+from datetime import date
 import logging
 
 # Import the same tools, state, and prompt used by the main agent
@@ -33,6 +38,92 @@ from app.agents.leonardo.rails_agent.tools import (
 from app.agents.leonardo.rails_agent.middleware import DynamicModelMiddleware
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Research-Only Prompt for delegate_research
+# =============================================================================
+
+RESEARCH_ONLY_PROMPT = """You are a specialized RESEARCH agent for Rails codebases.
+
+## YOUR ROLE
+You are delegated focused research tasks by the main Rails agent.
+Your job is to investigate the codebase and RETURN your findings.
+The main agent will use your findings to decide what changes to make.
+
+## CRITICAL CONSTRAINTS
+- **DO NOT write files** - You are READ-ONLY
+- **DO NOT edit files** - You cannot modify code
+- **DO NOT make commits** - You have no git write access
+- **DO NOT execute destructive commands** - Only read-only bash queries
+- **RETURN findings** - The main agent uses your research to decide next steps
+
+## RESEARCH TOOLS AVAILABLE
+- `ls` - List directory contents
+- `read_file` - Read file contents
+- `glob_files` - Find files by pattern (e.g., "**/*.rb")
+- `grep_files` - Search file contents by regex
+- `bash_command` - Run read-only Rails commands (e.g., `rails runner "puts User.count"`)
+- `write_todos` - Track your research progress
+
+## RESEARCH METHODOLOGY
+
+### For Bug Investigation:
+1. **Root Cause Layer Classification** - Is it DB, Model, Controller, or View?
+2. **Five Whys Analysis** - Trace the symptom back to root cause
+3. **Evidence Gathering** - File paths, line numbers, code snippets
+
+### For Feature Research:
+1. **Existing Patterns** - How is similar functionality implemented?
+2. **Data Model** - What tables/columns are involved?
+3. **Code Flow** - Controller → Model → View flow
+
+### For General Exploration:
+1. **File Structure** - Where are the relevant files?
+2. **Associations** - How do models relate?
+3. **Routes** - What endpoints exist?
+
+## OUTPUT FORMAT
+
+Return findings in clear, structured format:
+
+### Summary
+[1-2 sentence overview of what you found]
+
+### Key Files
+| File | Purpose | Key Lines |
+|------|---------|-----------|
+| path/to/file.rb | What it does | Lines X-Y |
+
+### Technical Details
+[Detailed findings with code references]
+
+### Code Snippets
+```ruby
+# Relevant code with file:line references
+```
+
+### Gotchas / Edge Cases
+[Any issues or considerations the main agent should know]
+
+---
+**Remember: You are READ-ONLY. Return your findings so the main agent can act on them.**
+"""
+
+
+def get_research_system_prompt():
+    """Build system message for research-only sub-agent with prompt caching."""
+    current_date = date.today().strftime("%Y-%m-%d")
+    prompt_with_date = f"{RESEARCH_ONLY_PROMPT}\n\n---\n**Today's Date:** {current_date}"
+    return SystemMessage(
+        content=[
+            {
+                "type": "text",
+                "text": prompt_with_date,
+                "cache_control": {"type": "ephemeral"}  # Enable Anthropic prompt caching
+            }
+        ]
+    )
 
 # System message with Anthropic prompt caching enabled (same as main agent)
 # This caches the system prompt for 5 minutes, reducing input token costs by ~90%
@@ -166,6 +257,157 @@ def delegate_task(
             "messages": [
                 ToolMessage(
                     content=f"[DELEGATED TASK FAILED]\n\nError: {str(e)}",
+                    tool_call_id=tool_call_id
+                )
+            ],
+            "failed_tool_calls_count": 1  # Increment failure counter
+        })
+
+
+# =============================================================================
+# Research-Only Sub-Agent Factory
+# =============================================================================
+
+def create_research_sub_agent(llm_model: str = None):
+    """Create a RESEARCH-ONLY sub-agent instance.
+
+    The research sub-agent uses:
+    - Research-only system prompt (NOT the full Rails agent prompt)
+    - Read-only tools (no write_file, edit_file, git tools)
+    - Same LLM model as the main agent (passed from state.llm_model)
+
+    IMPORTANT: Research sub-agents CANNOT modify the codebase.
+    They only investigate and return findings.
+
+    Args:
+        llm_model: The model name from state.llm_model (e.g., 'claude-4.5-haiku', 'gemini-3-flash').
+                   If None, defaults to 'gemini-3-flash'.
+
+    Returns:
+        A compiled LangGraph research agent with read-only capabilities
+    """
+    # RESEARCH-ONLY tools - strictly read-only
+    research_tools = [
+        write_todos,  # Track research progress
+        ls,           # List directories
+        read_file,    # Read file contents
+        glob_files,   # Find files by pattern
+        grep_files,   # Search file contents
+        bash_command, # For read-only Rails queries (e.g., rails runner)
+        # NO write_file - cannot write files
+        # NO edit_file - cannot edit files
+        # NO git tools - cannot make commits
+        # NO delegate_task/delegate_research - prevent recursion
+    ]
+
+    # Use the same model as the main agent
+    model_middleware = DynamicModelMiddleware()
+    model = model_middleware._get_llm(llm_model or 'gemini-3-flash')
+
+    return create_agent(
+        model=model,
+        tools=research_tools,
+        system_prompt=get_research_system_prompt(),  # Research-only prompt
+        state_schema=RailsAgentState,
+    )
+
+
+# =============================================================================
+# Delegate Research Tool (Read-Only)
+# =============================================================================
+
+@tool("delegate_research")
+def delegate_research(
+    task_description: str,
+    runtime: ToolRuntime,
+) -> Command:
+    """Delegate a RESEARCH-ONLY task to a specialized sub-agent.
+
+    Use this tool when you need to investigate the codebase without making changes.
+    The research sub-agent has READ-ONLY access and will return structured findings.
+
+    IMPORTANT: The research sub-agent CANNOT:
+    - Write or edit files
+    - Make git commits
+    - Execute destructive commands
+
+    It CAN:
+    - Read files and directories
+    - Search with grep/glob
+    - Run read-only Rails queries (rails runner)
+    - Return structured research findings
+
+    When to use delegate_research:
+    - Finding where code is defined across multiple files
+    - Understanding how a feature works (tracing data flow)
+    - Analyzing database schema, models, controllers, views
+    - Root cause analysis for bugs
+    - Exploring existing patterns before making changes
+    - Any investigation that would pollute your main context
+
+    When NOT to use (use delegate_task instead):
+    - You need to implement a feature
+    - You need to make code changes
+    - You need full tool access
+
+    When NOT to use (just read directly):
+    - You know the exact file to read (just use read_file)
+    - You need to read 1-2 specific files
+
+    Args:
+        task_description: Clear description of what to research, including:
+            - What you're looking for
+            - Why it matters (context for the research)
+            - Any file hints or starting points
+
+    Returns:
+        Structured research findings with file locations and code references.
+
+    Examples:
+        delegate_research(
+            task_description="Find where user_id assignments happen for Jobs. "
+            "I need to understand why jobs are being assigned to the wrong user. "
+            "Check the Job model, any import tasks, and seeds."
+        )
+
+        delegate_research(
+            task_description="Research how Turbo Streams are used in the tenders views. "
+            "I need to add a new broadcast and want to follow existing patterns. "
+            "Look at app/views/tenders/ and the Tender model callbacks."
+        )
+    """
+    tool_call_id = runtime.tool_call_id
+    llm_model = runtime.state.get('llm_model')
+    logger.info(f"Delegating RESEARCH to sub-agent (model: {llm_model}): {task_description[:100]}...")
+
+    try:
+        sub_agent = create_research_sub_agent(llm_model=llm_model)
+
+        # Invoke with fresh context - sub-agent only sees the task description
+        result = sub_agent.invoke({
+            "messages": [{"role": "user", "content": task_description}]
+        })
+
+        # Extract the final response from the sub-agent
+        final_message = result["messages"][-1].content if result["messages"] else "No response from research sub-agent"
+
+        logger.info("Research sub-agent completed task successfully")
+
+        return Command(update={
+            "messages": [
+                ToolMessage(
+                    content=f"[RESEARCH COMPLETED]\n\n{final_message}",
+                    tool_call_id=tool_call_id
+                )
+            ]
+        })
+
+    except Exception as e:
+        logger.error(f"Research sub-agent failed: {str(e)}")
+        return Command(update={
+            "messages": [
+                ToolMessage(
+                    content=f"[RESEARCH FAILED]\n\nError: {str(e)}",
                     tool_call_id=tool_call_id
                 )
             ],

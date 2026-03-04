@@ -285,6 +285,21 @@ class RequestHandler:
                 # Update thread metadata after successful message processing
                 await self._update_thread_metadata(incoming_message)
 
+                # Clean up intermediate checkpoints for THIS thread only after successful run
+                # This bounds storage while preserving "continue" functionality for other threads
+                if hasattr(self.app.state, 'checkpointer_pool') and self.app.state.checkpointer_pool is not None:
+                    try:
+                        from app.services.checkpoint_cleanup import cleanup_thread_checkpoints_except_latest
+                        thread_id = incoming_message.get('thread_id')
+                        if thread_id:
+                            await cleanup_thread_checkpoints_except_latest(
+                                self.app.state.checkpointer_pool,
+                                thread_id
+                            )
+                    except Exception as e:
+                        # Non-fatal - don't fail the request if cleanup fails
+                        logger.warning(f"Post-run checkpoint cleanup failed (non-fatal): {e}")
+
                 if self._is_websocket_open(websocket):
                     await websocket.send_json({
                         "type": "end"
@@ -323,26 +338,37 @@ class RequestHandler:
             return None
 
     # 08/21/2025: Duplicated code from main.py. Is this getting used?
+    # 02/24/2026: Fixed to use same fallback chain as main.py (AUTH_DB_URI > DB_URI)
     def get_or_create_checkpointer(self):
-        """Get persistent checkpointer, creating once if needed"""
+        """Get persistent checkpointer, creating once if needed.
 
+        IMPORTANT: This should return the checkpointer from app.state that was
+        created in main.py startup. Only creates a new one if app.state doesn't have one.
+        """
         if self.app.state.async_checkpointer is not None:
             return self.app.state.async_checkpointer
-        
-        db_uri = os.getenv("DB_URI")
-        self.app.state.async_checkpointer = MemorySaver() # save in RAM if postgres is not available
-        if db_uri:
+
+        # Use same fallback chain as main.py (defaults to llamabot_production)
+        db_uri = (
+            os.getenv("CHECKPOINTER_DB_URI") or
+            os.getenv("LEONARDO_DB_URI") or
+            os.getenv("AUTH_DB_URI") or
+            os.getenv("DB_URI")  # Legacy fallback
+        )
+        self.app.state.async_checkpointer = MemorySaver()  # save in RAM if postgres is not available
+        if db_uri and db_uri.strip():
             try:
                 # Create connection pool and PostgresSaver directly
                 pool = AsyncConnectionPool(db_uri)
                 self.app.state.async_checkpointer = AsyncPostgresSaver(pool)
-                self.app.state.async_checkpointer.setup()  # Make this async
-                logger.info("✅✅✅ Using PostgreSQL persistence!")
+                self.app.state.checkpointer_pool = pool  # Store pool for checkpoint cleanup service
+                # NOTE: Don't call setup() here - tables are created by init_pg_checkpointer.py at startup
+                logger.info(f"✅✅✅ Using PostgreSQL persistence (fallback creation)")
             except Exception as e:
                 logger.warning(f"Failed to connect to PostgreSQL: {e}. Using MemorySaver.")
         else:
             logger.info("❌❌❌ No DB_URI found. Using MemorySaver for session-based persistence.")
-        
+
         return self.app.state.async_checkpointer
 
     def cleanup_connection(self, websocket: WebSocket):

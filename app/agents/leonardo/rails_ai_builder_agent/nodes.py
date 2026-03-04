@@ -30,6 +30,7 @@ from app.agents.leonardo.rails_agent.tools import (
     ls_agents, read_agent_file, write_agent_file, edit_agent_file,
     read_langgraph_json, edit_langgraph_json
 )
+from app.agents.leonardo.rails_agent.sub_agents import delegate_research
 from app.agents.leonardo.rails_ai_builder_agent.prompts import RAILS_AI_BUILDER_AGENT_PROMPT
 from app.agents.leonardo.project_context import build_system_prompt_with_project_context
 
@@ -64,6 +65,7 @@ def get_sys_msg():
 default_tools = [
     write_todos,
     ls, read_file, write_file, edit_file, search_file, bash_command,
+    delegate_research,  # Read-only sub-agent for codebase investigation
     # Agent file tools
     ls_agents, read_agent_file, write_agent_file, edit_agent_file,
     read_langgraph_json, edit_langgraph_json
@@ -95,7 +97,7 @@ def get_llm(model_name: str):
       )
    elif model_name == "gemini-3-pro":
       return ChatGoogleGenerativeAI(
-         model="gemini-3-pro-preview",
+         model="gemini-3.1-pro-preview",
          include_thoughts=True
       )
    else:
@@ -122,6 +124,7 @@ def leonardo_ai_builder(state: RailsAgentState) -> Command[Literal["tools"]]:
    tools = [
       write_todos,
       ls, read_file, write_file, edit_file, search_file, bash_command,
+      delegate_research,  # Read-only sub-agent for codebase investigation
       # Agent file tools
       ls_agents, read_agent_file, write_agent_file, edit_agent_file,
       read_langgraph_json, edit_langgraph_json

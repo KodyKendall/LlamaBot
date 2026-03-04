@@ -125,6 +125,7 @@ body {
 /* Hide elements in collapsed mode */
 .chat-section.collapsed .chat-header h1,
 .chat-section.collapsed .chat-header .settings-btn,
+.chat-section.collapsed .chat-header .checkpoint-btn,
 .chat-section.collapsed .chat-header .mobile-view-toggle,
 .chat-section.collapsed .chat-header .hamburger-menu,
 .chat-section.collapsed .menu-drawer,
@@ -1144,11 +1145,62 @@ body {
     margin: 0;
 }
 
+.version-badge-container {
+    position: relative;
+    display: inline-block;
+}
+
 .drawer-header .version-badge {
     font-size: 0.55rem;
     color: #666;
     font-weight: 400;
     margin-top: 1px;
+    cursor: default;
+}
+
+.version-badge-container:has(.version-tooltip.has-notes) .version-badge {
+    cursor: help;
+}
+
+.version-tooltip {
+    display: none;
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 0;
+    min-width: 200px;
+    max-width: 320px;
+    background: rgba(30, 24, 45, 0.98);
+    border: 1px solid rgba(139, 92, 246, 0.3);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 0.75rem;
+    line-height: 1.5;
+    color: #e0e0e0;
+    white-space: pre-wrap;
+    z-index: 1000;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+}
+
+.version-tooltip::before {
+    content: '';
+    position: absolute;
+    bottom: 100%;
+    left: 12px;
+    border: 6px solid transparent;
+    border-bottom-color: rgba(139, 92, 246, 0.3);
+}
+
+.version-tooltip::after {
+    content: '';
+    position: absolute;
+    bottom: 100%;
+    left: 13px;
+    border: 5px solid transparent;
+    border-bottom-color: rgba(30, 24, 45, 0.98);
+}
+
+.version-badge-container:hover .version-tooltip.has-notes {
+    display: block;
 }
 
 .new-thread-btn {
@@ -4722,5 +4774,758 @@ body {
         right: 16px;
         bottom: 16px;
         max-width: none;
+    }
+}
+
+/* ============================================
+   CHECKPOINT & ROLLBACK UI STYLES
+   ============================================ */
+
+/* Checkpoint button in header */
+.checkpoint-btn {
+    position: relative;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: none;
+    color: var(--text-color);
+    opacity: 0.7;
+    cursor: pointer;
+    transition: opacity 0.2s;
+}
+
+.checkpoint-btn:hover {
+    opacity: 1;
+}
+
+.checkpoint-btn i {
+    font-size: 18px;
+}
+
+/* Unsaved changes badge (red dot) */
+.unsaved-badge {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 8px;
+    height: 8px;
+    background: #ef4444;
+    border-radius: 50%;
+    border: 1px solid var(--bg-color, #1a1a1a);
+}
+
+.unsaved-badge.hidden {
+    display: none;
+}
+
+/* Checkpoint panel */
+.checkpoint-panel {
+    position: fixed;
+    right: 0;
+    top: 60px;
+    width: 350px;
+    height: calc(100vh - 60px);
+    background: var(--background-secondary, #1e1e1e);
+    border-left: 1px solid var(--border-color, #333);
+    box-shadow: -2px 0 10px rgba(0, 0, 0, 0.3);
+    z-index: 1000;
+    transform: translateX(0);
+    transition: transform 0.3s ease;
+    display: flex;
+    flex-direction: column;
+}
+
+.checkpoint-panel.hidden {
+    transform: translateX(100%);
+}
+
+.checkpoint-panel-header {
+    display: flex;
+    align-items: center;
+    padding: 16px;
+    border-bottom: 1px solid var(--border-color, #333);
+    gap: 8px;
+}
+
+.checkpoint-panel-header h3 {
+    margin: 0;
+    font-size: 1.1rem;
+    color: var(--text-primary, #fff);
+    flex: 1;
+}
+
+.save-checkpoint-btn {
+    background: none;
+    border: none;
+    color: #8b5cf6;
+    font-size: 1.1rem;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+}
+
+.save-checkpoint-btn:hover {
+    background-color: rgba(139, 92, 246, 0.2);
+    color: #a78bfa;
+}
+
+.sync-github-btn {
+    background: none;
+    border: none;
+    color: var(--text-secondary, #aaa);
+    font-size: 1.1rem;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+}
+
+.sync-github-btn:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+    color: var(--text-primary, #fff);
+}
+
+.sync-github-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.close-checkpoint-panel {
+    background: none;
+    border: none;
+    color: var(--text-secondary, #aaa);
+    font-size: 1.5rem;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+}
+
+.close-checkpoint-panel:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+    color: var(--text-primary, #fff);
+}
+
+/* Save checkpoint form */
+.save-checkpoint-form {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border-color, #333);
+    background: rgba(139, 92, 246, 0.05);
+}
+
+.save-checkpoint-form.hidden {
+    display: none;
+}
+
+.checkpoint-message-input {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--border-color, #333);
+    border-radius: 6px;
+    background: var(--background-tertiary, #2a2a2a);
+    color: var(--text-primary, #fff);
+    font-size: 0.9rem;
+    margin-bottom: 10px;
+}
+
+.checkpoint-message-input:focus {
+    outline: none;
+    border-color: #8b5cf6;
+    box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.2);
+}
+
+.checkpoint-message-input::placeholder {
+    color: var(--text-secondary, #aaa);
+}
+
+.save-checkpoint-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.btn-save-checkpoint {
+    flex: 1;
+    padding: 8px 12px;
+    border: none;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    background: #8b5cf6;
+    color: #fff;
+    transition: all 0.2s ease;
+}
+
+.btn-save-checkpoint:hover {
+    background: #7c3aed;
+}
+
+.btn-cancel-checkpoint {
+    padding: 8px 12px;
+    border: 1px solid var(--border-color, #333);
+    border-radius: 4px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    background: transparent;
+    color: var(--text-secondary, #aaa);
+    transition: all 0.2s ease;
+}
+
+.btn-cancel-checkpoint:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-primary, #fff);
+}
+
+/* Uncommitted changes banner */
+.uncommitted-changes-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 16px;
+    background: rgba(251, 191, 36, 0.15);
+    border-bottom: 1px solid rgba(251, 191, 36, 0.3);
+}
+
+.uncommitted-changes-banner.hidden {
+    display: none;
+}
+
+.uncommitted-changes-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #fbbf24;
+    font-size: 0.85rem;
+}
+
+.uncommitted-changes-info i {
+    font-size: 1rem;
+}
+
+.btn-discard-changes {
+    padding: 5px 10px;
+    border: 1px solid #ef4444;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    background: rgba(239, 68, 68, 0.2);
+    color: #ef4444;
+    transition: all 0.2s ease;
+}
+
+.btn-discard-changes:hover {
+    background: #ef4444;
+    color: #fff;
+}
+
+.uncommitted-changes-info {
+    cursor: pointer;
+}
+
+.uncommitted-changes-info:hover {
+    opacity: 0.8;
+}
+
+.uncommitted-expand-icon {
+    font-size: 0.7rem;
+    margin-left: 4px;
+    transition: transform 0.2s ease;
+}
+
+/* Uncommitted file list */
+.uncommitted-file-list {
+    background: rgba(251, 191, 36, 0.08);
+    border-bottom: 1px solid rgba(251, 191, 36, 0.2);
+    padding: 8px 16px;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.uncommitted-file-list.hidden {
+    display: none;
+}
+
+.uncommitted-file-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+    font-size: 0.8rem;
+}
+
+.uncommitted-file-item i {
+    width: 14px;
+    font-size: 0.7rem;
+}
+
+.uncommitted-file-item.modified i {
+    color: #fbbf24;
+}
+
+.uncommitted-file-item.new i {
+    color: #22c55e;
+}
+
+.uncommitted-file-name {
+    flex: 1;
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.75rem;
+    color: var(--text-primary, #fff);
+    word-break: break-all;
+}
+
+.uncommitted-file-type {
+    font-size: 0.7rem;
+    padding: 1px 6px;
+    border-radius: 3px;
+    text-transform: uppercase;
+}
+
+.uncommitted-file-item.modified .uncommitted-file-type {
+    background: rgba(251, 191, 36, 0.2);
+    color: #fbbf24;
+}
+
+.uncommitted-file-item.new .uncommitted-file-type {
+    background: rgba(34, 197, 94, 0.2);
+    color: #22c55e;
+}
+
+.checkpoint-panel-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+}
+
+/* Checkpoint list */
+.checkpoint-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.checkpoint-item {
+    background: var(--background-tertiary, #2a2a2a);
+    border: 1px solid var(--border-color, #333);
+    border-radius: 8px;
+    padding: 12px;
+    transition: all 0.2s ease;
+}
+
+.checkpoint-item:hover {
+    border-color: var(--primary-color, #4a9eff);
+    box-shadow: 0 2px 8px rgba(74, 158, 255, 0.2);
+}
+
+.checkpoint-item.current-checkpoint {
+    border-color: #8b5cf6;
+    background: rgba(139, 92, 246, 0.1);
+    box-shadow: 0 2px 8px rgba(139, 92, 246, 0.3);
+}
+
+.checkpoint-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.checkpoint-status {
+    font-size: 1.2rem;
+    flex-shrink: 0;
+}
+
+.checkpoint-description {
+    flex: 1;
+    color: var(--text-primary, #fff);
+    font-size: 0.95rem;
+    line-height: 1.4;
+}
+
+.checkpoint-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+    font-size: 0.85rem;
+    color: var(--text-secondary, #aaa);
+}
+
+.checkpoint-time {
+    font-style: italic;
+}
+
+.checkpoint-files-toggle {
+    background: rgba(74, 158, 255, 0.2);
+    padding: 2px 8px;
+    border-radius: 4px;
+    color: var(--primary-color, #4a9eff);
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.checkpoint-files-toggle:hover {
+    background: rgba(74, 158, 255, 0.3);
+}
+
+.checkpoint-files-toggle .expand-icon {
+    font-size: 0.7rem;
+    margin-left: 4px;
+    transition: transform 0.2s ease;
+}
+
+/* File list (expandable) */
+.checkpoint-file-list {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 4px;
+    padding: 8px;
+    margin-bottom: 8px;
+    max-height: 150px;
+    overflow-y: auto;
+}
+
+.checkpoint-file-list.hidden {
+    display: none;
+}
+
+.checkpoint-file-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 6px;
+    font-size: 0.8rem;
+    color: var(--text-secondary, #aaa);
+    border-radius: 3px;
+}
+
+.checkpoint-file-item:hover {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.checkpoint-file-item i {
+    color: #8b5cf6;
+    font-size: 0.75rem;
+}
+
+.checkpoint-file-name {
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.75rem;
+    word-break: break-all;
+}
+
+.checkpoint-file-item.no-files,
+.checkpoint-file-item.error {
+    color: var(--text-secondary, #888);
+    font-style: italic;
+}
+
+.checkpoint-file-item.error {
+    color: #ef4444;
+}
+
+.checkpoint-file-list-loading {
+    color: var(--text-secondary, #aaa);
+    font-size: 0.8rem;
+    font-style: italic;
+    padding: 4px;
+}
+
+.checkpoint-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.checkpoint-actions button {
+    flex: 1;
+    padding: 6px 12px;
+    border: none;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.btn-view-diff {
+    background: var(--background-secondary, #1e1e1e);
+    color: var(--primary-color, #4a9eff);
+    border: 1px solid var(--primary-color, #4a9eff);
+}
+
+.btn-view-diff:hover {
+    background: var(--primary-color, #4a9eff);
+    color: #fff;
+}
+
+.btn-rollback {
+    background: rgba(139, 92, 246, 0.2);
+    color: #8b5cf6;
+    border: 1px solid #8b5cf6;
+}
+
+.btn-rollback:hover {
+    background: #8b5cf6;
+    color: #fff;
+}
+
+.btn-rollback:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    background: rgba(139, 92, 246, 0.1);
+}
+
+.btn-rollback:disabled:hover {
+    background: rgba(139, 92, 246, 0.1);
+    color: #8b5cf6;
+}
+
+.checkpoint-empty-state {
+    text-align: center;
+    padding: 40px 20px;
+    color: var(--text-secondary, #aaa);
+}
+
+.checkpoint-empty-state p {
+    margin: 0 0 8px 0;
+    font-size: 1.1rem;
+}
+
+.checkpoint-empty-state small {
+    font-size: 0.9rem;
+    opacity: 0.7;
+}
+
+/* Diff Viewer Modal */
+.diff-viewer-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 2000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.diff-viewer-modal.hidden {
+    display: none;
+}
+
+.diff-viewer-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.7);
+    cursor: pointer;
+}
+
+.diff-viewer-content {
+    position: relative;
+    background: var(--background-secondary, #1e1e1e);
+    border-radius: 12px;
+    width: 90%;
+    max-width: 1000px;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+}
+
+.diff-viewer-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px;
+    border-bottom: 1px solid var(--border-color, #333);
+}
+
+.diff-viewer-header h3 {
+    margin: 0;
+    color: var(--text-primary, #fff);
+}
+
+.close-diff-viewer {
+    background: none;
+    border: none;
+    color: var(--text-secondary, #aaa);
+    font-size: 1.5rem;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+}
+
+.close-diff-viewer:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+    color: var(--text-primary, #fff);
+}
+
+.diff-viewer-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+}
+
+.diff-summary {
+    margin-bottom: 16px;
+    padding: 12px;
+    background: var(--background-tertiary, #2a2a2a);
+    border-radius: 6px;
+}
+
+.diff-stats {
+    display: flex;
+    gap: 16px;
+}
+
+.stat-item {
+    color: var(--text-secondary, #aaa);
+}
+
+.stat-item strong {
+    color: var(--text-primary, #fff);
+}
+
+.diff-files-header {
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: var(--text-primary, #fff);
+}
+
+.diff-files {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 20px;
+}
+
+.diff-file-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    background: var(--background-tertiary, #2a2a2a);
+    border-radius: 4px;
+    font-size: 0.9rem;
+}
+
+.file-icon {
+    font-size: 1.1rem;
+}
+
+.file-path {
+    color: var(--text-primary, #fff);
+    font-family: monospace;
+}
+
+.diff-code-header {
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: var(--text-primary, #fff);
+}
+
+.diff-code {
+    background: #0d1117;
+    border: 1px solid var(--border-color, #333);
+    border-radius: 6px;
+    padding: 16px;
+    overflow-x: auto;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 0.85rem;
+    line-height: 1.5;
+}
+
+.diff-code code {
+    white-space: pre;
+    display: block;
+}
+
+/* Diff syntax highlighting */
+.diff-file-marker {
+    color: #8b949e;
+    font-weight: 600;
+}
+
+.diff-addition {
+    background: rgba(46, 160, 67, 0.15);
+    color: #3fb950;
+}
+
+.diff-deletion {
+    background: rgba(248, 81, 73, 0.15);
+    color: #f85149;
+}
+
+.diff-hunk-header {
+    color: #58a6ff;
+    font-weight: 600;
+}
+
+.diff-header {
+    color: #8b949e;
+    font-weight: 600;
+}
+
+.diff-metadata {
+    color: #8b949e;
+    font-style: italic;
+}
+
+.diff-context {
+    color: #c9d1d9;
+}
+
+.diff-viewer-footer {
+    padding: 16px 20px;
+    border-top: 1px solid var(--border-color, #333);
+    display: flex;
+    justify-content: flex-end;
+}
+
+.btn-close-diff {
+    padding: 8px 20px;
+    border: none;
+    border-radius: 6px;
+    background: var(--primary-color, #4a9eff);
+    color: #fff;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.btn-close-diff:hover {
+    background: #3a8eef;
+}
+
+.no-files,
+.no-diff {
+    text-align: center;
+    padding: 20px;
+    color: var(--text-secondary, #aaa);
+    font-style: italic;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .checkpoint-panel {
+        width: 100%;
+    }
+
+    .diff-viewer-content {
+        width: 95%;
+        max-height: 95vh;
+    }
+
+    .diff-viewer-body {
+        padding: 16px;
+    }
+
+    .diff-code {
+        font-size: 0.75rem;
     }
 }

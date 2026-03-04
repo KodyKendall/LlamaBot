@@ -202,13 +202,19 @@ export class ToolMessageRenderer {
   }
 
   /**
-   * Truncate output if too long
+   * Truncate output if too long, preserving beginning and end
    */
-  _truncateOutput(output, maxLength = 2000) {
+  _truncateOutput(output, maxLength = 6000) {
     if (!output) return '(no output)';
     const str = String(output);
     if (str.length > maxLength) {
-      return str.substring(0, maxLength) + '\n\n... (truncated)';
+      // Keep 50% from beginning and 50% from end to preserve both context and results
+      const headChars = Math.floor(maxLength * 0.5);
+      const tailChars = Math.floor(maxLength * 0.5);
+      const removed = str.length - maxLength;
+      return str.substring(0, headChars) +
+             `\n\n... (${removed} characters truncated) ...\n\n` +
+             str.substring(str.length - tailChars);
     }
     return str;
   }

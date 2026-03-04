@@ -37,37 +37,41 @@ class TestApplicationIntegration:
         assert "react_agent" in data["agents"]
         assert "write_html_agent" in data["agents"]
 
-    @pytest.mark.asyncio
-    @patch("app.routers.ui.authenticate_user")
-    @patch("app.routers.ui.security", new_callable=AsyncMock)
-    @patch("app.routers.ui.has_any_users")
-    @patch("builtins.open")
-    async def test_html_endpoints_integration(self, mock_open, mock_has_users, mock_security, mock_auth, async_client):
+    def test_html_endpoints_integration(self, auth_headers):
         """Test HTML-serving endpoints that exist."""
-        # Mock auth for endpoints that require it
-        mock_has_users.return_value = True
-        # Mock security to return credentials
-        mock_credentials = MagicMock()
-        mock_credentials.username = "testuser"
-        mock_credentials.password = "testpass"
-        mock_security.return_value = mock_credentials
-        # Mock authenticate_user to return a user
-        mock_user = MagicMock()
-        mock_user.role = "engineer"
-        mock_auth.return_value = mock_user
+        from main import app
+        from app.models import User
+        from app.dependencies import auth
+        from unittest.mock import mock_open
 
-        # Only test endpoints that actually exist in the current API
-        html_endpoints = [
-            ("/", "chat.html"),
-            ("/conversations", "conversations.html"),
-        ]
+        # Create a mock user that authenticate_user will return
+        mock_user = User(id=1, username="testuser", role="engineer", is_admin=False, password_hash="test")
 
-        for endpoint, filename in html_endpoints:
-            mock_open.return_value.__enter__.return_value.read.return_value = f"<html><body><h1>Mock {filename}</h1></body></html>"
-            response = await async_client.get(endpoint)
+        # Use dependency override for auth (used by /conversations)
+        app.dependency_overrides[auth] = lambda: "testuser"
 
-            # Root may redirect to /register if no users exist
-            assert response.status_code in [200, 302]
+        try:
+            # Mock file open to return mock HTML content
+            mock_html = "<html><body><h1>Mock Page</h1></body></html>"
+            with patch("app.routers.ui.has_any_users", return_value=True), \
+                 patch("app.routers.ui.authenticate_user", return_value=mock_user), \
+                 patch("builtins.open", mock_open(read_data=mock_html)):
+
+                client = TestClient(app)
+
+                # Only test endpoints that actually exist in the current API
+                html_endpoints = [
+                    ("/", "chat.html"),
+                    ("/conversations", "conversations.html"),
+                ]
+
+                for endpoint, filename in html_endpoints:
+                    response = client.get(endpoint, headers=auth_headers)
+                    # Should return 200 with HTML content
+                    assert response.status_code == 200
+                    assert "text/html" in response.headers.get("content-type", "")
+        finally:
+            app.dependency_overrides = {}
 
 
 @pytest.mark.integration

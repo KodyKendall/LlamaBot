@@ -12,6 +12,7 @@ export class ScrollManager {
     this.scrollButton = null;
     this.unreadCount = 0;
     this.unreadBadge = null;
+    this.onUnreadCountChange = null; // Callback for favicon badge
 
     this.init();
   }
@@ -147,5 +148,18 @@ export class ScrollManager {
     } else {
       this.unreadBadge.style.display = 'none';
     }
+
+    // Notify favicon badge manager of count change
+    if (this.onUnreadCountChange) {
+      this.onUnreadCountChange(this.unreadCount);
+    }
+  }
+
+  /**
+   * Set callback for unread count changes (for favicon badge)
+   * @param {Function} callback - Function to call with new count
+   */
+  setUnreadCountCallback(callback) {
+    this.onUnreadCountChange = callback;
   }
 }

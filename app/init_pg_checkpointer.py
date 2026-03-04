@@ -9,7 +9,14 @@ from psycopg import Connection
 
 load_dotenv()
 
-db_uri = os.getenv("DB_URI")
+# Checkpointer DB: defaults to llamabot_production (same as auth DB) for consolidated storage
+# Falls back through multiple env vars for backwards compatibility
+checkpointer_db_uri = (
+    os.getenv("CHECKPOINTER_DB_URI") or
+    os.getenv("LEONARDO_DB_URI") or
+    os.getenv("AUTH_DB_URI") or
+    os.getenv("DB_URI")  # Legacy fallback
+)
 llamabot_db_uri = os.getenv("LLAMABOT_DB_URI") or os.getenv("LEONARDO_DB_URI") or os.getenv("AUTH_DB_URI")  # Backwards compat
 
 
@@ -151,20 +158,20 @@ else:
         else:
             print("⚠️ Skipping migrations - SQLAlchemy cannot connect")
 
-# Initialize LangGraph checkpointer if DB_URI is set
-if db_uri is None:
-    print("DB_URI is not set, we'll use InMemoryCheckpointer instead!")
+# Initialize LangGraph checkpointer if checkpointer_db_uri is set
+if checkpointer_db_uri is None:
+    print("CHECKPOINTER_DB_URI/LEONARDO_DB_URI/AUTH_DB_URI/DB_URI is not set, we'll use InMemoryCheckpointer instead!")
 else:
-    print("DB_URI is set, we'll use PostgresSaver instead!")
-    print("DB_URI: ", db_uri)
+    print("Checkpointer DB URI is set, we'll use PostgresSaver instead!")
+    print("Checkpointer DB URI: ", checkpointer_db_uri)
 
     # Ensure the database exists before connecting
-    if not ensure_database_exists(db_uri):
-        print("⚠️ Could not ensure DB_URI database exists, continuing anyway...")
+    if not ensure_database_exists(checkpointer_db_uri):
+        print("⚠️ Could not ensure checkpointer database exists, continuing anyway...")
 
     # Create connection pool
-    # pool = ConnectionPool(db_uri)
-    conn = Connection.connect(db_uri, autocommit=True)
+    # pool = ConnectionPool(checkpointer_db_uri)
+    conn = Connection.connect(checkpointer_db_uri, autocommit=True)
 
     checkpointer_already_initialized = False
     with conn.cursor() as cursor:

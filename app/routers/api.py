@@ -111,6 +111,86 @@ async def api_get_version():
     return {"version": version}
 
 
+def get_version_notes(version: str) -> list[str]:
+    """
+    Get release notes for a specific version from docs/dev_logs.
+
+    Args:
+        version: Full version string like "0.3.6h"
+
+    Returns:
+        List of note strings for that version, or empty list if not found
+    """
+    if not version or version == "dev":
+        return []
+
+    # Parse version to get base (e.g., "0.3.6" from "0.3.6h")
+    # Version format: X.Y.Z or X.Y.Za where 'a' is optional letter suffix
+    match = re.match(r'^(\d+\.\d+\.\d+)', version)
+    if not match:
+        return []
+
+    base_version = match.group(1)
+
+    # Try to read the dev_log file
+    dev_log_paths = [
+        f"/app/docs/dev_logs/{base_version}",
+        f"/app/app/docs/dev_logs/{base_version}",  # Alternative path in container
+    ]
+
+    content = None
+    for path in dev_log_paths:
+        try:
+            with open(path, 'r') as f:
+                content = f.read()
+            break
+        except FileNotFoundError:
+            continue
+        except Exception as e:
+            logger.debug(f"Could not read dev_log {path}: {e}")
+            continue
+
+    if not content:
+        return []
+
+    # Find the section for this version (e.g., "0.3.6h:" or "0.3.6ec:")
+    # Pattern: version at start of line followed by colon
+    lines = content.split('\n')
+    notes = []
+    in_section = False
+
+    for line in lines:
+        stripped = line.strip()
+
+        # Check if this is a version header (e.g., "0.3.6h:" or "0.3.6ec:")
+        if re.match(r'^\d+\.\d+\.\d+[a-z]*:', stripped):
+            if in_section:
+                # We've reached the next version, stop collecting
+                break
+            # Check if this is our version
+            if stripped.startswith(f"{version}:"):
+                in_section = True
+            continue
+
+        # Collect bullet points while in our section
+        if in_section and stripped.startswith('- '):
+            # Clean up the note: remove "- [x] " or "- [ ] " prefix
+            note = re.sub(r'^- \[[x ]\] ', '', stripped)
+            note = re.sub(r'^- ', '', note)  # Also handle plain "- " prefix
+            if note:
+                notes.append(note)
+
+    return notes
+
+
+@router.get("/api/version-notes", response_class=JSONResponse)
+async def api_get_version_notes():
+    """Get the current version and its release notes from docs/dev_logs."""
+    version = get_container_version()
+    notes = get_version_notes(version)
+    return {"version": version, "notes": notes}
+
+
 # ============== WebSocket Authentication API ==============
 
 @router.get("/api/ws-token", response_class=JSONResponse)
@@ -278,8 +358,8 @@ async def threads(
                 {
                     "thread_id": t.thread_id,
                     "title": t.title,
-                    "created_at": t.created_at.isoformat(),
-                    "updated_at": t.updated_at.isoformat(),
+                    "created_at": t.created_at.isoformat() + "Z",
+                    "updated_at": t.updated_at.isoformat() + "Z",
                     "message_count": t.message_count,
                     "agent_name": t.agent_name
                 }
@@ -327,26 +407,37 @@ async def available_models():
     Frontend uses this to disable unavailable models in the dropdown.
     """
     # Map of model frontend values to their required API key env vars
+    # Values can be a single string or tuple of strings (checked in order, first found wins)
     model_api_keys = {
         "claude-4.5-haiku": "ANTHROPIC_API_KEY",
         "claude-4.5-sonnet": "ANTHROPIC_API_KEY",
         "gpt-5-mini": "OPENAI_API_KEY",
         "gpt-5-codex": "OPENAI_API_KEY",
-        "gemini-3-flash": "GOOGLE_API_KEY",
-        "gemini-3-pro": "GOOGLE_API_KEY",
+        "gemini-3-flash": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
+        "gemini-3-pro": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
         "deepseek-chat": "DEEPSEEK_API_KEY",
         "deepseek-reasoner": "DEEPSEEK_API_KEY",
     }
 
     models = []
-    for model_value, env_var in model_api_keys.items():
-        api_key = os.environ.get(env_var, "")
-        has_key = bool(api_key and api_key.strip())
+    for model_value, env_vars in model_api_keys.items():
+        # Support both single string and tuple of env vars
+        if isinstance(env_vars, str):
+            env_vars = (env_vars,)
+
+        # Check each env var in order, use first one that has a value
+        has_key = False
+        checked_var = env_vars[0]  # For error message
+        for env_var in env_vars:
+            api_key = os.environ.get(env_var, "")
+            if api_key and api_key.strip():
+                has_key = True
+                break
 
         models.append({
             "value": model_value,
             "available": has_key,
-            "reason": None if has_key else f"{env_var} not configured in .env"
+            "reason": None if has_key else f"{checked_var} not configured in .env"
         })
 
     return {"models": models}
@@ -677,3 +768,56 @@ async def update_leonardo_md(
     except Exception as e:
         logger.error(f"Error writing LEONARDO.md: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to write file: {e}")
+
+
+# ============== Visible Agents Configuration ==============
+
+# Default visible agents for users without a custom configuration
+DEFAULT_VISIBLE_AGENTS = ["ticket", "engineer", "testing", "feedback", "user"]
+
+# All valid agent mode keys (must match config.js agentModes)
+VALID_AGENT_MODES = ["ticket", "engineer", "feedback", "prototype", "ai_builder", "testing", "architect", "user"]
+
+
+class UpdateVisibleAgentsRequest(BaseModel):
+    visible_agents: list[str]
+
+
+@router.get("/api/user/visible-agents", response_class=JSONResponse)
+async def get_visible_agents(
+    current_user: User = Depends(get_current_user)
+):
+    """Get current user's visible agents list."""
+    if current_user.visible_agents:
+        try:
+            agents = json.loads(current_user.visible_agents)
+            return {"visible_agents": agents}
+        except json.JSONDecodeError:
+            pass
+    return {"visible_agents": DEFAULT_VISIBLE_AGENTS}
+
+
+@router.put("/api/user/visible-agents", response_class=JSONResponse)
+async def set_visible_agents(
+    request: UpdateVisibleAgentsRequest,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_db_session)
+):
+    """Set current user's visible agents list."""
+    from datetime import datetime, timezone
+
+    # Validate agent keys
+    invalid = [a for a in request.visible_agents if a not in VALID_AGENT_MODES]
+    if invalid:
+        raise HTTPException(status_code=400, detail=f"Invalid agent modes: {invalid}")
+
+    if len(request.visible_agents) == 0:
+        raise HTTPException(status_code=400, detail="Must have at least one visible agent")
+
+    current_user.visible_agents = json.dumps(request.visible_agents)
+    current_user.updated_at = datetime.now(timezone.utc)
+    session.add(current_user)
+    session.commit()
+
+    logger.info(f"User '{current_user.username}' updated visible_agents to {request.visible_agents}")
+    return {"visible_agents": request.visible_agents, "message": "Visible agents updated"}

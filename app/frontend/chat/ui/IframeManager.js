@@ -303,6 +303,24 @@ export class IframeManager {
   }
 
   /**
+   * Refresh the Tickets iframe
+   */
+  refreshTicketsFrame() {
+    if (this.ticketsFrame && this.ticketsFrame.src) {
+      this.ticketsFrame.src = this.ticketsFrame.src;
+    }
+  }
+
+  /**
+   * Refresh the Feedback iframe
+   */
+  refreshFeedbackFrame() {
+    if (this.feedbackFrame && this.feedbackFrame.src) {
+      this.feedbackFrame.src = this.feedbackFrame.src;
+    }
+  }
+
+  /**
    * Simple iframe refresh (legacy - for streaming preview)
    * @deprecated Use flushToStreamingPreview instead
    */

@@ -102,3 +102,26 @@ def verify_rails_token(token: str) -> Optional[dict]:
         "type": "rails_auth",
         "source": "llama_bot_rails"
     }
+
+
+# Scheduler token for cron-based job invocation
+SCHEDULER_TOKEN = os.getenv("SCHEDULER_TOKEN")
+
+
+def verify_scheduler_token(token: str) -> bool:
+    """
+    Verify the static scheduler token for cron invocations.
+
+    The scheduler token is a simple static token stored in environment variables.
+    It's used by cron jobs to authenticate when triggering scheduled agent runs.
+
+    Args:
+        token: Token string from X-Scheduler-Token header
+
+    Returns:
+        True if token matches SCHEDULER_TOKEN env var, False otherwise
+    """
+    if not SCHEDULER_TOKEN:
+        logger.warning("SCHEDULER_TOKEN not configured - scheduler auth disabled")
+        return False
+    return token == SCHEDULER_TOKEN

@@ -29,16 +29,19 @@ from app.websocket.web_socket_connection_manager import WebSocketConnectionManag
 from app.websocket.request_handler import RequestHandler
 
 # Import routers
-from app.routers import ui, api, websocket, slash_commands
+from app.routers import ui, api, websocket, slash_commands, checkpoints, scheduled_jobs
 
 # Configure logging to write info-level events to both chat_app.log and stdout
+log_handlers = [logging.StreamHandler()]
+try:
+    log_handlers.append(logging.FileHandler('chat_app.log'))
+except PermissionError:
+    pass  # Skip file logging in environments without write permissions (e.g., CI)
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('chat_app.log'),
-        logging.StreamHandler()
-    ]
+    handlers=log_handlers
 )
 logger = logging.getLogger(__name__)
 
@@ -81,7 +84,13 @@ psycopg_logger.setLevel(logging.ERROR)
 def get_or_create_checkpointer():
     """Get persistent checkpointer, creating once if needed"""
     if app.state.checkpointer is None:
-        db_uri = os.getenv("DB_URI")
+        # Use llamabot_production by default (consolidated with auth DB)
+        db_uri = (
+            os.getenv("CHECKPOINTER_DB_URI") or
+            os.getenv("LEONARDO_DB_URI") or
+            os.getenv("AUTH_DB_URI") or
+            os.getenv("DB_URI")  # Legacy fallback
+        )
         if db_uri and db_uri.strip():
             try:
                 # Create connection pool with limited retries and timeout
@@ -112,7 +121,13 @@ def get_or_create_checkpointer():
 def get_or_create_async_checkpointer():
     """Get async persistent checkpointer, creating once if needed"""
     if app.state.async_checkpointer is None:
-        db_uri = os.getenv("DB_URI")
+        # Use llamabot_production by default (consolidated with auth DB)
+        db_uri = (
+            os.getenv("CHECKPOINTER_DB_URI") or
+            os.getenv("LEONARDO_DB_URI") or
+            os.getenv("AUTH_DB_URI") or
+            os.getenv("DB_URI")  # Legacy fallback
+        )
         if db_uri and db_uri.strip():
             try:
                 # Create async connection pool with limited retries and timeout
@@ -127,6 +142,7 @@ def get_or_create_async_checkpointer():
                     reconnect_failed=lambda pool: logger.warning("PostgreSQL async connection failed, using MemorySaver for persistence")
                 )
                 app.state.async_checkpointer = AsyncPostgresSaver(pool)
+                app.state.checkpointer_pool = pool  # Store pool for checkpoint cleanup service
                 # app.state.async_checkpointer.setup()
                 logger.info("Connected to PostgreSQL (async) for persistence")
             except Exception as e:
@@ -163,6 +179,8 @@ app.include_router(ui.router)
 app.include_router(api.router)
 app.include_router(websocket.router)
 app.include_router(slash_commands.router)
+app.include_router(checkpoints.router)
+app.include_router(scheduled_jobs.router)
 
 
 async def graceful_shutdown(sig):
@@ -241,11 +259,33 @@ async def startup_event():
         except ImportError:
             logger.info("rails_testing_agent not found, skipping")
 
+        try:
+            from app.agents.leonardo.rails_user_mode_agent.nodes import build_workflow as build_rails_user_mode
+            app.state.compiled_graphs["rails_user_mode_agent"] = build_rails_user_mode(checkpointer=checkpointer)
+        except ImportError:
+            logger.info("rails_user_mode_agent not found, skipping")
+
         logger.info(f"Compiled {len(app.state.compiled_graphs)} LangGraph workflows: {list(app.state.compiled_graphs.keys())}")
     except Exception as e:
         logger.error(f"Error compiling LangGraph workflows: {e}", exc_info=True)
         # Don't fail startup - fall back to per-request compilation
         app.state.compiled_graphs = {}
+
+    # Start checkpoint cleanup background task (if using PostgresSaver)
+    if hasattr(app.state, 'checkpointer_pool') and app.state.checkpointer_pool is not None:
+        try:
+            from app.services.checkpoint_cleanup import periodic_cleanup
+            stale_minutes = int(os.getenv("CHECKPOINT_STALE_MINUTES", "30"))
+            app.state.cleanup_task = asyncio.create_task(
+                periodic_cleanup(
+                    app.state.checkpointer_pool,
+                    interval_hours=24,
+                    stale_minutes=stale_minutes
+                )
+            )
+            logger.info(f"Checkpoint cleanup enabled (post-run + periodic every 24h, stale threshold: {stale_minutes}min)")
+        except Exception as e:
+            logger.warning(f"Failed to start checkpoint cleanup task: {e}")
 
     # Log streaming disabled for now
     pass

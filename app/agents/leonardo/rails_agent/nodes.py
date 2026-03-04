@@ -36,7 +36,7 @@ from app.agents.leonardo.rails_agent.middleware import (
     deepseek_reasoning_fix,
 )
 from app.agents.utils.token_counter import gemini_multimodal_token_counter, SUMMARIZATION_TOKEN_THRESHOLD
-from app.agents.leonardo.rails_agent.sub_agents import delegate_task
+from app.agents.leonardo.rails_agent.sub_agents import delegate_task, delegate_research
 
 import logging
 logger = logging.getLogger(__name__)
@@ -157,15 +157,16 @@ When summarizing the conversation, focus on Ruby on Rails code changes including
 # Tool list - all tools available to the Rails agent
 default_tools = [
     write_todos,
-    ls, read_file, write_file, edit_file, 
+    ls, read_file, write_file, edit_file,
     # search_file,
     glob_files, grep_files,
     bash_command,
-    # git_status, git_commit, 
-    # git_command, 
+    # git_status, git_commit,
+    # git_command,
     # github_cli_command,
     internet_search,
-    delegate_task,  # Sub-agent delegation for specialized tasks
+    delegate_task,      # Full-capability sub-agent for implementation work
+    delegate_research,  # Read-only sub-agent for codebase investigation
 ]
 
 def build_workflow(checkpointer=None):
@@ -196,7 +197,7 @@ def build_workflow(checkpointer=None):
         SummarizationMiddleware(
             model=summarization_model,
             trigger=("tokens", SUMMARIZATION_TOKEN_THRESHOLD),
-            keep=("messages", 20),  # Match Claude Code's default
+            keep=("messages", 15),  # Reduced from 20 for faster context recovery
             token_counter=gemini_multimodal_token_counter,
             trim_tokens_to_summarize=None,  # KEY FIX: Disable trimming, let Gemini see everything
             summary_prompt=SUMMARIZATION_PROMPT,

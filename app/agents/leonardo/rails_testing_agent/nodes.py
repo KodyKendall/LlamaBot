@@ -44,6 +44,7 @@ from app.agents.leonardo.rails_testing_agent.middleware import (
     DynamicModelMiddleware,
 )
 from app.agents.utils.token_counter import gemini_multimodal_token_counter, SUMMARIZATION_TOKEN_THRESHOLD
+from app.agents.leonardo.rails_agent.sub_agents import delegate_research
 
 import logging
 logger = logging.getLogger(__name__)
@@ -174,6 +175,7 @@ default_tools = [
     write_todos,
     ls, read_file, write_file, edit_file, search_file,
     bash_command,  # For running rspec tests
+    delegate_research,  # Read-only sub-agent for codebase investigation
     # Agent file tools (for reference/reading patterns)
     ls_agents, read_agent_file, write_agent_file, edit_agent_file,
     read_langgraph_json, edit_langgraph_json

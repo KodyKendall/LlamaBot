@@ -1,0 +1,27 @@
+02/22/2026:
+
+0.4.0:
+- [x] Scheduled jobs system (cron-based agent automation with UI and full logging)
+- [x] Database Mode agent (rails_user_mode_agent) for ActiveRecord operations
+- [x] Delegate Research read-only sub-agent for investigation tasks
+- [x] User Feedback Agent v2 (can write feedback directly)
+- [x] Per-user `visible_agents` configuration with role-based defaults
+- [x] Git commit checkpoints & history in UI (save/discard changes without VSCode)
+- [x] GitHub authentication via `/gh auth login` with automatic code copy
+- [x] SSH setup slash command for developer onboarding
+- [x] Cloud push icon for pushing checkpoints to GitHub
+- [x] `/gh` wrapper for git config and GitHub CLI operations
+- [x] Engineering role required to run slash commands
+- [x] Gemini 3.1 Pro as default Gemini model
+- [x] Gemini activates with just `GEMINI_API_KEY` (no longer requires `GOOGLE_API_KEY`)
+- [x] Browser tab notification badges when tasks complete (success or error)
+- [x] Dynamic favicon showing running/completed/error states
+- [x] Refresh button updates all iFrames (except VSCode)
+- [x] Ticket mode light research before grounding user observations/stories
+- [x] Bash output truncation with critical error detection
+- [x] LangGraph checkpoints save to LlamaBot DB (instead of LlamaPress)
+- [x] Automatic checkpoint cleanup to protect disk space & DB size
+- [x] `/restore_s3.sh` command for database backup restoration
+- [x] Auto-copy SSH keys from host to VSCode container
+- [x] `/restart` includes `--follow` flag for easy log tailing
+- [x] Fix permission issues on Ubuntu from tool calls

@@ -6,7 +6,7 @@ import { MarkdownParser } from './MarkdownParser.js';
 import { ToolMessageRenderer } from './ToolMessageRenderer.js';
 
 export class MessageRenderer {
-  constructor(messageHistoryElement, iframeManager = null, getRailsDebugInfoCallback = null, scrollManager = null, loadingVerbs = null, config = {}, container = null, elements = {}) {
+  constructor(messageHistoryElement, iframeManager = null, getRailsDebugInfoCallback = null, scrollManager = null, loadingVerbs = null, config = {}, container = null, elements = {}, faviconBadgeManager = null) {
     this.messageHistory = messageHistoryElement;
     this.markdownParser = new MarkdownParser();
     this.toolRenderer = new ToolMessageRenderer(iframeManager, getRailsDebugInfoCallback);
@@ -15,6 +15,7 @@ export class MessageRenderer {
     this.config = config;
     this.container = container;
     this.elements = elements;
+    this.faviconBadgeManager = faviconBadgeManager;
   }
 
   /**
@@ -330,6 +331,11 @@ export class MessageRenderer {
       });
     }
 
+    // Show error badge on favicon (red)
+    if (this.faviconBadgeManager) {
+      this.faviconBadgeManager.showError();
+    }
+
     return messageDiv;
   }
 
@@ -353,6 +359,11 @@ export class MessageRenderer {
     const messageInput = this.elements?.messageInput || document.getElementById('messageInput');
     if (messageInput) {
       messageInput.placeholder = 'Ask Leonardo...';
+    }
+
+    // Stop favicon thinking indicator (as safety net - showError/showComplete also stop it)
+    if (this.faviconBadgeManager) {
+      this.faviconBadgeManager.stopThinking();
     }
   }
 
@@ -389,6 +400,11 @@ export class MessageRenderer {
       taskCompletedSound.play().catch(() => {
         // Sound playback failed (likely due to autoplay restrictions)
       });
+    }
+
+    // Show completion badge on favicon (green)
+    if (this.faviconBadgeManager) {
+      this.faviconBadgeManager.showComplete();
     }
 
     // Emit custom event for other components to handle

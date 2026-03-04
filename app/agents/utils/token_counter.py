@@ -6,7 +6,7 @@ LangChain's default counter massively overcounts base64 images.
 
 # Summarization threshold configuration
 # This value is used by both backend (SummarizationMiddleware) and frontend (TokenIndicator)
-SUMMARIZATION_TOKEN_THRESHOLD = 80000
+SUMMARIZATION_TOKEN_THRESHOLD = 100000
 
 from google import genai
 from google.genai import types
