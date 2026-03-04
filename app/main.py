@@ -32,13 +32,16 @@ from app.websocket.request_handler import RequestHandler
 from app.routers import ui, api, websocket, slash_commands, checkpoints, scheduled_jobs
 
 # Configure logging to write info-level events to both chat_app.log and stdout
+log_handlers = [logging.StreamHandler()]
+try:
+    log_handlers.append(logging.FileHandler('chat_app.log'))
+except PermissionError:
+    pass  # Skip file logging in environments without write permissions (e.g., CI)
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('chat_app.log'),
-        logging.StreamHandler()
-    ]
+    handlers=log_handlers
 )
 logger = logging.getLogger(__name__)
 
