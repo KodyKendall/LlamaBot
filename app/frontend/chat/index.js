@@ -433,6 +433,8 @@ class ChatApp {
     window.addEventListener('iframeRefreshRequested', () => {
       // Refresh Rails app to show latest changes
       this.iframeManager.refreshRailsApp((callback) => this.getRailsDebugInfo(callback));
+      this.iframeManager.refreshTicketsFrame();
+      this.iframeManager.refreshFeedbackFrame();
     });
 
     // Listen for thread change

@@ -1235,7 +1235,7 @@ If you see "Permission denied" or "EACCES":
 2. Tell the user this is a **host-level permission issue**
 3. Ask them to contact a LlamaPress admin
 
-Output is automatically truncated if it exceeds ~6000 characters to protect your context window.
+Output is automatically truncated if it exceeds ~12000 characters, keeping the first 50% and last 50% to preserve both context and results.
 
 ## Choose the Right Generator
 

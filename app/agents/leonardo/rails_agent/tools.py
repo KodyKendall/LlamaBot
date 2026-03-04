@@ -117,6 +117,26 @@ SCRIPT_DIR = Path(__file__).parent.resolve()
 PROJECT_ROOT = SCRIPT_DIR.parent.parent.parent.parent  # Go up to LlamaBot root
 APP_DIR = PROJECT_ROOT / 'app'
 
+# Ubuntu user compatibility: chown files to UID 1000 after writing
+# LlamaBot container runs as root, but host ubuntu user is UID 1000
+# Without this, the ubuntu user can't edit files created by the agent
+UBUNTU_UID = 1000
+UBUNTU_GID = 1000
+
+
+def chown_for_ubuntu(path: Path) -> None:
+    """Change file ownership to UID 1000:1000 for ubuntu user compatibility.
+
+    The LlamaBot container runs as root, but the host ubuntu user is UID 1000.
+    This ensures the ubuntu user can edit files created by the agent.
+    Silently ignores errors (e.g., if chown not available or fails).
+    """
+    try:
+        os.chown(path, UBUNTU_UID, UBUNTU_GID)
+    except (OSError, PermissionError):
+        # Silently ignore - this is a best-effort operation
+        pass
+
 @tool(description=WRITE_TODOS_DESCRIPTION)
 def write_todos(
     todos: list[Todo],
@@ -268,6 +288,7 @@ def write_file(
     try:
         full_path.parent.mkdir(parents=True, exist_ok=True)
         full_path.write_text(content)
+        chown_for_ubuntu(full_path)  # Fix permissions for ubuntu user
     except Exception as e:
         error_message = f"Error writing file {file_path}: {e}"
         tool_output = {
@@ -454,6 +475,7 @@ def edit_file(
 
     try:
         full_path.write_text(new_content)
+        chown_for_ubuntu(full_path)  # Fix permissions for ubuntu user
     except Exception as e:
         error_message = f"Error writing to file '{file_path}': {e}"
         tool_output = {
@@ -877,6 +899,7 @@ def capture_rails_logs(duration: int = 10, output_file: str = None) -> str:
     full_path = APP_DIR / "rails" / output_file
     full_path.parent.mkdir(parents=True, exist_ok=True)
     full_path.write_text(logs)
+    chown_for_ubuntu(full_path)  # Fix permissions for ubuntu user
 
     return str(full_path)
 
@@ -1405,6 +1428,7 @@ def write_agent_file(
 
         # Write the file
         full_path.write_text(file_content)
+        chown_for_ubuntu(full_path)  # Fix permissions for ubuntu user
 
     except Exception as e:
         error_message = f"Error writing agent file {agent_name}/nodes.py: {e}"
@@ -1546,6 +1570,7 @@ def edit_agent_file(
     # Write the new content
     try:
         full_path.write_text(new_content)
+        chown_for_ubuntu(full_path)  # Fix permissions for ubuntu user
     except Exception as e:
         error_message = f"Error writing agent file: {e}"
         tool_output = {
@@ -1678,6 +1703,7 @@ def edit_langgraph_json(
     # Write the new content
     try:
         full_path.write_text(new_content)
+        chown_for_ubuntu(full_path)  # Fix permissions for ubuntu user
     except Exception as e:
         error_message = f"Error writing langgraph.json: {e}"
         tool_output = {
