@@ -44,4 +44,4 @@ EXPOSE 8000
 CMD ["bash", "-c", "if [ ! -z \"$DB_URI\" ]; then python init_pg_checkpointer.py; fi && uvicorn main:app --host 0.0.0.0 --port 8000 --ws-max-size 157286400"]
 
 # These commands document how to build the Docker image quickly and deploy to dockerhub
-# docker buildx build --file Dockerfile --platform linux/amd64,linux/arm64 --tag kody06/llamabot:0.4.0 --push .
+# docker buildx build --file Dockerfile --platform linux/amd64,linux/arm64 --tag kody06/llamabot:0.4.0a --push .

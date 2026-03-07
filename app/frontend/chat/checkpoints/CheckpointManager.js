@@ -9,6 +9,7 @@
  */
 
 import { DiffViewer } from './DiffViewer.js';
+import { GitGraphRenderer } from './GitGraphRenderer.js';
 
 export class CheckpointManager {
   constructor(chatApp) {
@@ -19,6 +20,9 @@ export class CheckpointManager {
     this.isVisible = false;
     this.diffViewer = null;
     this.badgeCheckInterval = null;
+    this.gitGraphRenderer = new GitGraphRenderer(this);
+    this.selectedCommit = null;
+    this.graphData = null;
 
     this.initializeUI();
   }
@@ -116,6 +120,9 @@ export class CheckpointManager {
         <button class="sync-github-btn" title="Push to remote">
           <i class="fa-solid fa-cloud-arrow-up"></i>
         </button>
+        <button class="expand-history-btn" title="Open full git history">
+          <i class="fa-solid fa-up-right-and-down-left-from-center"></i>
+        </button>
         <button class="close-checkpoint-panel" title="Close">✕</button>
       </div>
       <div class="uncommitted-changes-banner hidden">
@@ -143,6 +150,32 @@ export class CheckpointManager {
           <small>Click + to save a checkpoint</small>
         </div>
       </div>
+      <div class="checkpoint-detail-panel hidden">
+        <div class="checkpoint-detail-header">
+          <span class="checkpoint-detail-sha" title="Click to copy"></span>
+          <button class="checkpoint-detail-close" title="Close">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </div>
+        <div class="checkpoint-detail-body">
+          <div class="checkpoint-detail-message"></div>
+          <div class="checkpoint-detail-meta"></div>
+          <div class="checkpoint-detail-files">
+            <div class="checkpoint-detail-files-header">
+              <i class="fa-regular fa-file-code"></i> Changed Files
+            </div>
+            <div class="checkpoint-detail-files-list"></div>
+          </div>
+        </div>
+        <div class="checkpoint-detail-actions">
+          <button class="btn-detail-rollback">
+            <i class="fa-solid fa-rotate-left"></i> Rollback to this commit
+          </button>
+          <button class="btn-detail-diff">
+            <i class="fa-solid fa-code-compare"></i> View Full Diff
+          </button>
+        </div>
+      </div>
     `;
 
     // Add close button handler
@@ -156,6 +189,10 @@ export class CheckpointManager {
     // Add sync to GitHub button handler
     const syncBtn = panel.querySelector('.sync-github-btn');
     syncBtn.onclick = () => this.syncToGitHub();
+
+    // Add expand to full page button handler
+    const expandBtn = panel.querySelector('.expand-history-btn');
+    expandBtn.onclick = () => this.openFullHistoryPage();
 
     // Add discard changes button handler
     const discardBtn = panel.querySelector('.btn-discard-changes');
@@ -180,6 +217,33 @@ export class CheckpointManager {
         this.saveCheckpoint();
       } else if (e.key === 'Escape') {
         this.hideSaveCheckpointForm();
+      }
+    };
+
+    // Add detail panel handlers
+    const detailCloseBtn = panel.querySelector('.checkpoint-detail-close');
+    detailCloseBtn.onclick = () => this.hideCommitDetail();
+
+    const detailSha = panel.querySelector('.checkpoint-detail-sha');
+    detailSha.onclick = () => {
+      if (this.selectedCommit) {
+        navigator.clipboard.writeText(this.selectedCommit.sha).then(() => {
+          this.showSuccess('SHA copied to clipboard');
+        });
+      }
+    };
+
+    const detailRollbackBtn = panel.querySelector('.btn-detail-rollback');
+    detailRollbackBtn.onclick = () => {
+      if (this.selectedCommit) {
+        this.confirmRollback(this.selectedCommit.sha);
+      }
+    };
+
+    const detailDiffBtn = panel.querySelector('.btn-detail-diff');
+    detailDiffBtn.onclick = () => {
+      if (this.selectedCommit) {
+        this.showDiff(this.selectedCommit.sha);
       }
     };
 
@@ -428,16 +492,19 @@ export class CheckpointManager {
    */
   async fetchCheckpoints() {
     try {
-      const response = await fetch('/api/checkpoints', {
-        credentials: 'same-origin'  // Include cookies for session auth
-      });
+      // Fetch both checkpoints and git graph data in parallel
+      const [checkpointsResponse, graphData] = await Promise.all([
+        fetch('/api/checkpoints', { credentials: 'same-origin' }),
+        this.gitGraphRenderer.fetchGraphData()
+      ]);
 
-      if (!response.ok) {
-        throw new Error(`Failed to fetch checkpoints: ${response.statusText}`);
+      if (!checkpointsResponse.ok) {
+        throw new Error(`Failed to fetch checkpoints: ${checkpointsResponse.statusText}`);
       }
 
-      const data = await response.json();
+      const data = await checkpointsResponse.json();
       this.checkpoints = data.checkpoints || [];
+      this.graphData = graphData;
 
       // Get current HEAD commit to mark which checkpoint we're on
       await this.fetchCurrentHead();
@@ -476,7 +543,27 @@ export class CheckpointManager {
     const listContainer = this.checkpointPanel.querySelector('.checkpoint-list');
     const emptyState = this.checkpointPanel.querySelector('.checkpoint-empty-state');
 
-    if (this.checkpoints.length === 0) {
+    // Check for errors in graph data
+    if (this.graphData?.error) {
+      listContainer.innerHTML = `
+        <div class="checkpoint-error-state">
+          <i class="fa-solid fa-circle-exclamation"></i>
+          <p>Failed to load git history</p>
+          <pre class="error-detail">${this.escapeHtml(this.graphData.error)}</pre>
+          <button class="btn-retry-fetch" onclick="window.checkpointManager?.fetchCheckpoints()">
+            <i class="fa-solid fa-rotate-right"></i> Retry
+          </button>
+        </div>
+      `;
+      emptyState.classList.add('hidden');
+      return;
+    }
+
+    // Use graph data commits if available, otherwise fall back to checkpoints
+    const commits = this.graphData?.commits || [];
+    const totalCommits = commits.length;
+
+    if (totalCommits === 0 && this.checkpoints.length === 0) {
       listContainer.innerHTML = '';
       emptyState.classList.remove('hidden');
       return;
@@ -484,16 +571,29 @@ export class CheckpointManager {
 
     emptyState.classList.add('hidden');
 
-    listContainer.innerHTML = this.checkpoints.map(checkpoint => {
-      return this.renderCheckpointItem(checkpoint);
-    }).join('');
+    // Render using graph data for visualization
+    if (totalCommits > 0) {
+      listContainer.innerHTML = commits.map((commit, index) => {
+        const nextCommit = index < totalCommits - 1 ? commits[index + 1] : null;
+        const prevCommit = index > 0 ? commits[index - 1] : null;
+        return this.renderGraphCommitItem(commit, index, totalCommits, nextCommit, prevCommit);
+      }).join('');
+    } else {
+      // Fallback to old checkpoint rendering
+      listContainer.innerHTML = this.checkpoints.map(checkpoint => {
+        return this.renderCheckpointItem(checkpoint);
+      }).join('');
+    }
 
     // Add event listeners to buttons
     this.attachCheckpointEventListeners();
+
+    // Attach git hash copy handlers
+    this.gitGraphRenderer.attachCopyHandlers(listContainer);
   }
 
   /**
-   * Render a single checkpoint item
+   * Render a single checkpoint item (legacy fallback)
    */
   renderCheckpointItem(checkpoint) {
     const timestamp = this.formatTimestamp(checkpoint.created_at);
@@ -529,10 +629,54 @@ export class CheckpointManager {
   }
 
   /**
+   * Render a commit item as a simple linear list (no branch visualization)
+   */
+  renderGraphCommitItem(commit, index, totalCommits, nextCommit, prevCommit) {
+    const timestamp = this.gitGraphRenderer.formatTimestamp(commit.timestamp);
+    const fileCount = commit.changed_files_count || 0;
+    const isCurrent = this.currentHead && commit.sha.startsWith(this.currentHead);
+
+    // Truncate commit message
+    const truncatedMessage = commit.subject.length > 50
+      ? commit.subject.substring(0, 47) + '...'
+      : commit.subject;
+
+    // Render refs (branch/tag badges)
+    const refsHtml = commit.refs && commit.refs.length > 0
+      ? commit.refs.slice(0, 3).map(ref => `<span class="git-ref-badge">${this.escapeHtml(ref)}</span>`).join('')
+      : '';
+
+    return `
+      <div class="checkpoint-item git-commit-item ${isCurrent ? 'current-checkpoint' : ''}"
+           data-checkpoint-id="${commit.sha}"
+           data-commit-index="${index}">
+        <div class="checkpoint-content">
+          <div class="checkpoint-header">
+            ${isCurrent ? '<i class="fa-solid fa-location-dot current-indicator"></i>' : ''}
+            <span class="checkpoint-description" title="${this.escapeHtml(commit.subject)}">
+              ${this.escapeHtml(truncatedMessage)}
+            </span>
+          </div>
+          <div class="git-commit-refs-row">${refsHtml}</div>
+          <div class="checkpoint-meta">
+            <span class="checkpoint-time"><i class="fa-regular fa-clock"></i> ${timestamp}</span>
+            <span class="git-commit-sha-badge" data-sha="${commit.sha}" title="Click to copy">
+              ${commit.short_sha}
+            </span>
+            <span class="checkpoint-files-count">
+              <i class="fa-regular fa-file-code"></i> ${fileCount}
+            </span>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  /**
    * Attach event listeners to checkpoint action buttons
    */
   attachCheckpointEventListeners() {
-    // File list toggle
+    // File list toggle (for legacy items)
     this.checkpointPanel.querySelectorAll('.checkpoint-files-toggle').forEach(toggle => {
       toggle.onclick = () => {
         const checkpointId = toggle.dataset.checkpointId;
@@ -554,6 +698,124 @@ export class CheckpointManager {
         const checkpointId = btn.dataset.checkpointId;
         this.confirmRollback(checkpointId);
       };
+    });
+
+    // Git commit items - click to show detail panel
+    this.checkpointPanel.querySelectorAll('.git-commit-item').forEach(item => {
+      item.onclick = (e) => {
+        // Don't trigger if clicking on the graph node (which copies SHA)
+        if (e.target.closest('.git-graph-node') || e.target.closest('.git-commit-sha-badge')) {
+          return;
+        }
+        const commitIndex = parseInt(item.dataset.commitIndex, 10);
+        if (this.graphData?.commits && this.graphData.commits[commitIndex]) {
+          this.showCommitDetail(this.graphData.commits[commitIndex]);
+        }
+      };
+    });
+
+    // SHA badge click to copy
+    this.checkpointPanel.querySelectorAll('.git-commit-sha-badge').forEach(badge => {
+      badge.onclick = (e) => {
+        e.stopPropagation();
+        const sha = badge.dataset.sha;
+        if (sha) {
+          navigator.clipboard.writeText(sha).then(() => {
+            this.showSuccess('SHA copied to clipboard');
+          });
+        }
+      };
+    });
+  }
+
+  /**
+   * Show commit detail panel with full message and file list
+   */
+  async showCommitDetail(commit) {
+    this.selectedCommit = commit;
+
+    const detailPanel = this.checkpointPanel.querySelector('.checkpoint-detail-panel');
+    const shaEl = detailPanel.querySelector('.checkpoint-detail-sha');
+    const messageEl = detailPanel.querySelector('.checkpoint-detail-message');
+    const metaEl = detailPanel.querySelector('.checkpoint-detail-meta');
+    const filesListEl = detailPanel.querySelector('.checkpoint-detail-files-list');
+
+    // Populate SHA
+    shaEl.textContent = commit.short_sha;
+    shaEl.dataset.sha = commit.sha;
+
+    // Populate message
+    messageEl.textContent = commit.subject;
+
+    // Populate meta
+    const timestamp = this.gitGraphRenderer.formatTimestamp(commit.timestamp);
+    metaEl.innerHTML = `
+      <div class="detail-meta-row">
+        <i class="fa-regular fa-user"></i> ${this.escapeHtml(commit.author)}
+      </div>
+      <div class="detail-meta-row">
+        <i class="fa-regular fa-clock"></i> ${timestamp}
+      </div>
+    `;
+
+    // Show loading state for files
+    filesListEl.innerHTML = '<div class="loading-files">Loading files...</div>';
+
+    // Show the panel
+    detailPanel.classList.remove('hidden');
+    detailPanel.classList.add('visible');
+
+    // Highlight selected item
+    this.checkpointPanel.querySelectorAll('.checkpoint-item').forEach(item => {
+      item.classList.remove('selected');
+    });
+    const selectedItem = this.checkpointPanel.querySelector(`[data-checkpoint-id="${commit.sha}"]`);
+    if (selectedItem) {
+      selectedItem.classList.add('selected');
+    }
+
+    // Fetch and display changed files
+    try {
+      const response = await fetch(`/api/checkpoints/${commit.sha}/diff`, {
+        credentials: 'same-origin'
+      });
+
+      if (response.ok) {
+        const diffData = await response.json();
+        const files = diffData.changed_files || [];
+
+        if (files.length === 0) {
+          filesListEl.innerHTML = '<div class="no-files">No files changed</div>';
+        } else {
+          filesListEl.innerHTML = files.map(file => `
+            <div class="detail-file-item">
+              <i class="fa-regular fa-file-code"></i>
+              <span class="detail-file-name">${this.escapeHtml(file)}</span>
+            </div>
+          `).join('');
+        }
+      } else {
+        filesListEl.innerHTML = '<div class="error-files">Failed to load files</div>';
+      }
+    } catch (error) {
+      console.error('Error loading commit files:', error);
+      filesListEl.innerHTML = '<div class="error-files">Failed to load files</div>';
+    }
+  }
+
+  /**
+   * Hide commit detail panel
+   */
+  hideCommitDetail() {
+    this.selectedCommit = null;
+
+    const detailPanel = this.checkpointPanel.querySelector('.checkpoint-detail-panel');
+    detailPanel.classList.remove('visible');
+    detailPanel.classList.add('hidden');
+
+    // Remove selection highlight
+    this.checkpointPanel.querySelectorAll('.checkpoint-item').forEach(item => {
+      item.classList.remove('selected');
     });
   }
 
@@ -798,5 +1060,12 @@ export class CheckpointManager {
    */
   refresh() {
     this.fetchCheckpoints();
+  }
+
+  /**
+   * Open full-page git history view in a new tab
+   */
+  openFullHistoryPage() {
+    window.open('/git-history', '_blank');
   }
 }

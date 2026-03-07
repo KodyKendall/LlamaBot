@@ -182,6 +182,28 @@ def get_current_head():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/api/checkpoints/git-graph")
+def get_git_graph(limit: int = 50):
+    """Get commit history with branch topology for visualization.
+
+    Returns commit data with lane assignments for rendering a git graph
+    similar to SourceTree/GitKraken.
+
+    Args:
+        limit: Maximum number of commits to return (default 50)
+
+    Returns:
+        Dictionary with commits, branches, and max_branch_index
+    """
+    try:
+        graph_data = checkpoint_service.get_git_graph(limit=limit)
+        return JSONResponse(content=graph_data)
+
+    except Exception as e:
+        logger.error(f"Failed to get git graph: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/api/checkpoints/uncommitted")
 def get_uncommitted_changes():
     """Check for uncommitted changes in the working directory.

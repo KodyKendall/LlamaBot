@@ -4894,6 +4894,22 @@ body {
     cursor: not-allowed;
 }
 
+.expand-history-btn {
+    background: none;
+    border: none;
+    color: var(--text-secondary, #aaa);
+    font-size: 1rem;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+}
+
+.expand-history-btn:hover {
+    background-color: rgba(139, 92, 246, 0.2);
+    color: #8b5cf6;
+}
+
 .close-checkpoint-panel {
     background: none;
     border: none;
@@ -5295,6 +5311,437 @@ body {
 .checkpoint-empty-state small {
     font-size: 0.9rem;
     opacity: 0.7;
+}
+
+/* ============================================
+   GIT GRAPH VISUALIZATION
+   ============================================ */
+
+/* Git commit item with graph rail */
+.git-commit-item {
+    display: flex;
+    align-items: stretch;
+    padding: 0;
+    cursor: pointer;
+    min-height: 60px;
+}
+
+.git-commit-item .checkpoint-content {
+    flex: 1;
+    padding: 10px 12px;
+    min-width: 0;
+}
+
+.git-commit-item.selected {
+    background: rgba(139, 92, 246, 0.15);
+    border-color: #8b5cf6;
+}
+
+/* Graph rail container */
+.git-graph-rail {
+    position: relative;
+    flex-shrink: 0;
+    min-width: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Vertical line connecting commits */
+.git-graph-line {
+    position: absolute;
+    width: 2px;
+    transform: translateX(-50%);
+}
+
+/* Commit node bubble */
+.git-graph-node {
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    border: 2px solid var(--background-secondary, #1e1e1e);
+    border-radius: 50%;
+    cursor: pointer;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+    z-index: 2;
+    transform: translateX(-50%);
+    top: 50%;
+    margin-top: -5px;
+}
+
+.git-graph-node:hover {
+    transform: translateX(-50%) scale(1.4);
+    box-shadow: 0 0 0 4px rgba(139, 92, 246, 0.3);
+}
+
+/* Merge commit node (larger circle) */
+.git-graph-node.merge-node {
+    width: 12px;
+    height: 12px;
+    margin-top: -6px;
+}
+
+/* Merge connector line */
+.git-graph-merge-line {
+    position: absolute;
+    height: 2px;
+    border-width: 0 0 2px 0;
+    border-style: solid;
+    z-index: 1;
+}
+
+/* Current HEAD indicator */
+.current-indicator {
+    color: #8b5cf6;
+    font-size: 0.75rem;
+    margin-right: 4px;
+}
+
+/* Ref badges (branch/tag names) */
+.git-commit-refs-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 4px;
+    min-height: 0;
+}
+
+.git-ref-badge {
+    display: inline-block;
+    font-size: 0.65rem;
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: rgba(139, 92, 246, 0.2);
+    color: #8b5cf6;
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.git-ref-badge:first-child {
+    background: rgba(34, 197, 94, 0.2);
+    color: #22c55e;
+}
+
+/* SHA badge in commit row */
+.git-commit-sha-badge {
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.7rem;
+    color: var(--text-secondary, #888);
+    background: rgba(139, 92, 246, 0.1);
+    padding: 2px 6px;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.git-commit-sha-badge:hover {
+    background: rgba(139, 92, 246, 0.3);
+    color: #8b5cf6;
+}
+
+/* Files count badge */
+.checkpoint-files-count {
+    font-size: 0.8rem;
+    color: var(--text-secondary, #888);
+}
+
+.checkpoint-files-count i {
+    margin-right: 2px;
+}
+
+/* Copied feedback tooltip */
+.git-copied-feedback {
+    position: absolute;
+    top: -28px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #22c55e;
+    color: #fff;
+    font-size: 0.7rem;
+    padding: 3px 8px;
+    border-radius: 4px;
+    white-space: nowrap;
+    animation: gitCopiedFade 1.5s ease forwards;
+    pointer-events: none;
+    z-index: 100;
+}
+
+@keyframes gitCopiedFade {
+    0% { opacity: 0; transform: translateX(-50%) translateY(5px); }
+    15% { opacity: 1; transform: translateX(-50%) translateY(0); }
+    85% { opacity: 1; transform: translateX(-50%) translateY(0); }
+    100% { opacity: 0; transform: translateX(-50%) translateY(-5px); }
+}
+
+/* Error state for git history */
+.checkpoint-error-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 24px 16px;
+    text-align: center;
+    color: var(--text-secondary, #888);
+}
+
+.checkpoint-error-state i {
+    font-size: 2rem;
+    color: #ef4444;
+    margin-bottom: 12px;
+}
+
+.checkpoint-error-state p {
+    margin: 0 0 12px 0;
+    font-size: 0.95rem;
+    color: var(--text-primary, #ddd);
+}
+
+.checkpoint-error-state .error-detail {
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.75rem;
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    border-radius: 6px;
+    padding: 12px;
+    margin: 0 0 16px 0;
+    max-width: 100%;
+    max-height: 150px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    text-align: left;
+    color: #f87171;
+}
+
+.checkpoint-error-state .btn-retry-fetch {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(139, 92, 246, 0.2);
+    border: 1px solid rgba(139, 92, 246, 0.4);
+    color: #8b5cf6;
+    padding: 8px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    transition: all 0.2s ease;
+}
+
+.checkpoint-error-state .btn-retry-fetch:hover {
+    background: rgba(139, 92, 246, 0.3);
+    border-color: #8b5cf6;
+}
+
+/* ============================================
+   COMMIT DETAIL PANEL (Side Panel)
+   ============================================ */
+
+.checkpoint-detail-panel {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 100%;
+    height: 100%;
+    background: var(--background-secondary, #1e1e1e);
+    border-left: 1px solid var(--border-color, #333);
+    display: flex;
+    flex-direction: column;
+    z-index: 10;
+    transform: translateX(100%);
+    transition: transform 0.25s ease;
+}
+
+.checkpoint-detail-panel.visible {
+    transform: translateX(0);
+}
+
+.checkpoint-detail-panel.hidden {
+    transform: translateX(100%);
+}
+
+.checkpoint-detail-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border-color, #333);
+    background: var(--background-tertiary, #2a2a2a);
+}
+
+.checkpoint-detail-sha {
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.85rem;
+    background: rgba(139, 92, 246, 0.2);
+    color: #8b5cf6;
+    padding: 4px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.checkpoint-detail-sha:hover {
+    background: rgba(139, 92, 246, 0.4);
+}
+
+.checkpoint-detail-close {
+    background: none;
+    border: none;
+    color: var(--text-secondary, #aaa);
+    font-size: 1rem;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+}
+
+.checkpoint-detail-close:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-primary, #fff);
+}
+
+.checkpoint-detail-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+}
+
+.checkpoint-detail-message {
+    font-size: 1rem;
+    color: var(--text-primary, #fff);
+    line-height: 1.5;
+    margin-bottom: 16px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border-color, #333);
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.checkpoint-detail-meta {
+    margin-bottom: 16px;
+}
+
+.detail-meta-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.85rem;
+    color: var(--text-secondary, #aaa);
+    margin-bottom: 6px;
+}
+
+.detail-meta-row i {
+    width: 14px;
+    color: #8b5cf6;
+}
+
+.checkpoint-detail-files {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 6px;
+    padding: 12px;
+}
+
+.checkpoint-detail-files-header {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-primary, #fff);
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.checkpoint-detail-files-header i {
+    color: #8b5cf6;
+}
+
+.checkpoint-detail-files-list {
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.detail-file-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    font-size: 0.8rem;
+    color: var(--text-secondary, #aaa);
+    border-radius: 4px;
+    transition: background 0.2s ease;
+}
+
+.detail-file-item:hover {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.detail-file-item i {
+    color: #8b5cf6;
+    font-size: 0.75rem;
+    flex-shrink: 0;
+}
+
+.detail-file-name {
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.75rem;
+    word-break: break-all;
+}
+
+.loading-files,
+.no-files,
+.error-files {
+    font-size: 0.85rem;
+    color: var(--text-secondary, #888);
+    font-style: italic;
+    padding: 8px;
+}
+
+.error-files {
+    color: #ef4444;
+}
+
+.checkpoint-detail-actions {
+    padding: 12px 16px;
+    border-top: 1px solid var(--border-color, #333);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.btn-detail-rollback,
+.btn-detail-diff {
+    width: 100%;
+    padding: 10px 16px;
+    border: none;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.btn-detail-rollback {
+    background: rgba(139, 92, 246, 0.2);
+    color: #8b5cf6;
+    border: 1px solid #8b5cf6;
+}
+
+.btn-detail-rollback:hover {
+    background: #8b5cf6;
+    color: #fff;
+}
+
+.btn-detail-diff {
+    background: var(--background-tertiary, #2a2a2a);
+    color: var(--primary-color, #4a9eff);
+    border: 1px solid var(--primary-color, #4a9eff);
+}
+
+.btn-detail-diff:hover {
+    background: var(--primary-color, #4a9eff);
+    color: #fff;
 }
 
 /* Diff Viewer Modal */

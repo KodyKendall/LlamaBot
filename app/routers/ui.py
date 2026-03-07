@@ -1455,6 +1455,950 @@ async def conversations(username: str = Depends(auth)):
         return f.read()
 
 
+@router.get("/git-history", response_class=HTMLResponse)
+async def git_history_page(current_user: User = Depends(get_current_user)):
+    """Serve the full-page git history visualization."""
+    html = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Git History - LlamaBot</title>
+    <link rel="icon" type="image/png" href="https://llamapress-ai-image-uploads.s3.us-west-2.amazonaws.com/4bmqe5iolvp84ceyk9ttz8vylrym">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        :root {
+            --bg-color: #1a1a1a;
+            --panel-bg: #2d2d2d;
+            --text-color: #e0e0e0;
+            --text-secondary: #888;
+            --border-color: #404040;
+            --accent-color: #8b5cf6;
+            --accent-hover: #7c3aed;
+        }
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 0;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        .header {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 16px 24px;
+            background: var(--panel-bg);
+            border-bottom: 1px solid var(--border-color);
+        }
+        .back-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 40px;
+            height: 40px;
+            background: var(--bg-color);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            color: var(--text-color);
+            text-decoration: none;
+            transition: all 0.2s;
+        }
+        .back-btn:hover { background: var(--border-color); }
+        h1 { font-size: 1.3rem; margin: 0; flex: 1; }
+        .header-actions { display: flex; gap: 8px; }
+        .btn {
+            padding: 8px 16px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            background: transparent;
+            color: var(--text-color);
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .btn:hover { background: var(--border-color); }
+        .btn-primary {
+            background: var(--accent-color);
+            border-color: var(--accent-color);
+            color: white;
+        }
+        .btn-primary:hover { background: var(--accent-hover); }
+
+        .main-content {
+            flex: 1;
+            display: flex;
+            overflow: hidden;
+            position: relative;
+        }
+
+        /* Branch legend - left sidebar */
+        .branch-legend {
+            width: 180px;
+            flex-shrink: 0;
+            background: var(--panel-bg);
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            height: calc(100vh - 73px);
+        }
+
+        .legend-header {
+            padding: 12px 16px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--text-color);
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .legend-header i { color: var(--accent-color); }
+
+        .legend-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 8px 0;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 16px;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+        .legend-item:hover { background: rgba(139, 92, 246, 0.1); }
+
+        .legend-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+
+        .legend-name {
+            font-size: 0.8rem;
+            color: var(--text-color);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .legend-name.head {
+            font-weight: 600;
+            color: var(--accent-color);
+        }
+
+        /* Graph panel - left side, scrollable */
+        .graph-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            min-width: 0;
+            height: calc(100vh - 73px); /* Full height minus header */
+        }
+
+        .graph-toolbar {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 20px;
+            background: var(--panel-bg);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .search-box {
+            flex: 1;
+            max-width: 300px;
+            padding: 8px 12px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            background: var(--bg-color);
+            color: var(--text-color);
+            font-size: 0.9rem;
+        }
+        .search-box:focus {
+            outline: none;
+            border-color: var(--accent-color);
+        }
+
+        .branch-filter {
+            padding: 8px 12px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            background: var(--bg-color);
+            color: var(--text-color);
+            font-size: 0.9rem;
+            min-width: 150px;
+        }
+
+        .commit-count {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+        }
+
+        .graph-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 0;
+        }
+
+        /* Commit list with SVG graph overlay */
+        .commit-list-wrapper {
+            display: flex;
+            position: relative;
+        }
+
+        .git-graph-container {
+            flex-shrink: 0;
+            position: sticky;
+            left: 0;
+            z-index: 1;
+            background: var(--panel-bg);
+        }
+
+        .git-graph-svg {
+            display: block;
+        }
+
+        .git-graph-svg .svg-commit-node {
+            cursor: pointer;
+            transition: r 0.15s ease;
+        }
+
+        .git-graph-svg .svg-commit-node:hover {
+            r: 8;
+        }
+
+        .commit-list {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .commit-row {
+            display: flex;
+            align-items: stretch;
+            border-bottom: 1px solid var(--border-color);
+            cursor: pointer;
+            transition: background 0.15s;
+            min-height: 52px;
+            height: 52px; /* Fixed height to match SVG rowHeight */
+        }
+        .commit-row:hover { background: rgba(139, 92, 246, 0.1); }
+        .commit-row.selected { background: rgba(139, 92, 246, 0.2); }
+        .commit-row.current { background: rgba(139, 92, 246, 0.15); }
+
+        .commit-info {
+            flex: 1;
+            padding: 8px 12px;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        .commit-message {
+            font-size: 0.9rem;
+            color: var(--text-color);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            margin-bottom: 4px;
+        }
+
+        .commit-meta {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+
+        .commit-sha {
+            font-family: 'Monaco', 'Menlo', monospace;
+            background: rgba(139, 92, 246, 0.15);
+            color: var(--accent-color);
+            padding: 2px 6px;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        .commit-sha:hover { background: rgba(139, 92, 246, 0.3); }
+
+        .commit-refs {
+            display: flex;
+            gap: 4px;
+            flex-wrap: wrap;
+        }
+
+        .ref-badge {
+            font-size: 0.65rem;
+            padding: 2px 6px;
+            border-radius: 3px;
+            background: rgba(34, 197, 94, 0.2);
+            color: #22c55e;
+            white-space: nowrap;
+        }
+        .ref-badge.head { background: rgba(139, 92, 246, 0.2); color: #8b5cf6; }
+
+        .commit-date {
+            min-width: 100px;
+            text-align: right;
+            padding-right: 16px;
+        }
+
+        .commit-author {
+            min-width: 120px;
+        }
+
+        /* Detail panel - right side, fixed position */
+        .detail-panel {
+            width: 340px;
+            flex-shrink: 0;
+            background: var(--panel-bg);
+            border-left: 1px solid var(--border-color);
+            position: sticky;
+            top: 0;
+            height: calc(100vh - 73px); /* Subtract header height */
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .detail-panel.hidden { display: none; }
+
+        .detail-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border-color);
+            flex-shrink: 0;
+        }
+
+        .detail-sha {
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 0.85rem;
+            background: rgba(139, 92, 246, 0.2);
+            color: var(--accent-color);
+            padding: 4px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .detail-sha:hover { background: rgba(139, 92, 246, 0.4); }
+
+        .detail-close {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 1.1rem;
+            cursor: pointer;
+            padding: 4px 8px;
+        }
+        .detail-close:hover { color: var(--text-color); }
+
+        /* Actions right below header for easy access */
+        .detail-actions {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            flex-shrink: 0;
+        }
+
+        .detail-actions .btn {
+            width: 100%;
+            justify-content: center;
+            padding: 6px 12px;
+            font-size: 0.8rem;
+        }
+
+        .detail-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px 16px;
+        }
+
+        .detail-message {
+            font-size: 0.9rem;
+            line-height: 1.5;
+            color: var(--text-color);
+            margin-bottom: 12px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--border-color);
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        .detail-meta {
+            margin-bottom: 12px;
+        }
+
+        .detail-meta-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            margin-bottom: 6px;
+        }
+        .detail-meta-row i { width: 14px; color: var(--accent-color); font-size: 0.75rem; }
+
+        .detail-files {
+            background: var(--bg-color);
+            border-radius: 6px;
+            padding: 12px;
+        }
+
+        .detail-files-header {
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: var(--text-color);
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .detail-files-header i { color: var(--accent-color); font-size: 0.75rem; }
+
+        .detail-files-list {
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .file-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 6px;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            border-radius: 3px;
+        }
+        .file-item:hover { background: rgba(255,255,255,0.05); }
+        .file-item i { color: var(--accent-color); font-size: 0.65rem; }
+        .file-name {
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 0.7rem;
+            word-break: break-all;
+        }
+
+        /* Empty state */
+        .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 60px 20px;
+            color: var(--text-secondary);
+        }
+        .empty-state i { font-size: 48px; margin-bottom: 16px; opacity: 0.5; }
+
+        /* Loading state */
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 40px;
+            color: var(--text-secondary);
+        }
+        .loading i { margin-right: 8px; }
+
+        /* Toast notification */
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: #22c55e;
+            color: white;
+            padding: 12px 20px;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            opacity: 0;
+            transform: translateY(20px);
+            transition: all 0.3s;
+            z-index: 1000;
+        }
+        .toast.show { opacity: 1; transform: translateY(0); }
+
+        /* Branch colors */
+        .branch-0 { --branch-color: #8b5cf6; }
+        .branch-1 { --branch-color: #22c55e; }
+        .branch-2 { --branch-color: #eab308; }
+        .branch-3 { --branch-color: #3b82f6; }
+        .branch-4 { --branch-color: #ef4444; }
+        .branch-5 { --branch-color: #ec4899; }
+        .branch-6 { --branch-color: #14b8a6; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <a href="/" class="back-btn"><i class="fa-solid fa-arrow-left"></i></a>
+        <h1><i class="fa-solid fa-code-branch"></i> Git History</h1>
+        <div class="header-actions">
+            <button class="btn" onclick="refreshData()">
+                <i class="fa-solid fa-refresh"></i> Refresh
+            </button>
+            <button class="btn btn-primary" onclick="pushToRemote()">
+                <i class="fa-solid fa-cloud-arrow-up"></i> Push
+            </button>
+        </div>
+    </div>
+
+    <div class="main-content">
+        <div class="branch-legend" id="branchLegend">
+            <div class="legend-header"><i class="fa-solid fa-code-branch"></i> Branches</div>
+            <div class="legend-list" id="legendList"></div>
+        </div>
+        <div class="graph-panel">
+            <div class="graph-toolbar">
+                <input type="text" class="search-box" placeholder="Search commits..." id="searchInput">
+                <select class="branch-filter" id="branchFilter">
+                    <option value="">All branches</option>
+                </select>
+                <span class="commit-count" id="commitCount">Loading...</span>
+            </div>
+            <div class="graph-container" id="graphContainer">
+                <div class="loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading commits...</div>
+            </div>
+        </div>
+
+        <div class="detail-panel hidden" id="detailPanel">
+            <div class="detail-header">
+                <span class="detail-sha" id="detailSha" onclick="copySha()"></span>
+                <button class="detail-close" onclick="closeDetail()"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="detail-actions">
+                <button class="btn btn-primary" onclick="rollbackTo()"><i class="fa-solid fa-rotate-left"></i> Rollback to this commit</button>
+                <button class="btn" onclick="viewDiff()"><i class="fa-solid fa-code-compare"></i> View Full Diff</button>
+            </div>
+            <div class="detail-body">
+                <div class="detail-message" id="detailMessage"></div>
+                <div class="detail-meta" id="detailMeta"></div>
+                <div class="detail-files">
+                    <div class="detail-files-header"><i class="fa-regular fa-file-code"></i> Changed Files</div>
+                    <div class="detail-files-list" id="detailFiles"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script>
+        let commits = [];
+        let branches = [];
+        let maxBranchIndex = 0;
+        let selectedCommit = null;
+        let currentHead = null;
+        const branchColors = ['#8b5cf6', '#22c55e', '#eab308', '#3b82f6', '#ef4444', '#ec4899', '#14b8a6'];
+        const laneWidth = 20;
+
+        async function loadData() {
+            try {
+                const [graphRes, headRes] = await Promise.all([
+                    fetch('/api/checkpoints/git-graph?limit=100', { credentials: 'same-origin' }),
+                    fetch('/api/checkpoints/current-head', { credentials: 'same-origin' })
+                ]);
+
+                const graphData = await graphRes.json();
+                commits = graphData.commits || [];
+                branches = graphData.branches || [];
+                maxBranchIndex = graphData.max_branch_index || 0;
+
+                const headData = await headRes.json();
+                currentHead = headData.head_sha;
+
+                renderBranchFilter();
+                renderBranchLegend();
+                renderCommits();
+                document.getElementById('commitCount').textContent = commits.length + ' commits';
+            } catch (e) {
+                document.getElementById('graphContainer').innerHTML =
+                    '<div class="empty-state"><i class="fa-solid fa-exclamation-triangle"></i><p>Failed to load commits</p></div>';
+            }
+        }
+
+        function renderBranchFilter() {
+            const select = document.getElementById('branchFilter');
+            select.innerHTML = '<option value="">All branches</option>';
+            branches.forEach(b => {
+                select.innerHTML += '<option value="' + escapeHtml(b.name) + '">' + escapeHtml(b.name) + '</option>';
+            });
+        }
+
+        function renderBranchLegend() {
+            const legendList = document.getElementById('legendList');
+
+            // Collect unique branches with their lane colors
+            const branchMap = new Map();
+            commits.forEach(c => {
+                c.refs.forEach(ref => {
+                    if (!ref.startsWith('origin/') && ref !== 'HEAD' && !branchMap.has(ref)) {
+                        branchMap.set(ref, c.branch_index);
+                    }
+                });
+            });
+
+            // Also add HEAD if present
+            const headCommit = commits.find(c => c.refs.includes('HEAD'));
+            if (headCommit) {
+                branchMap.set('HEAD', headCommit.branch_index);
+            }
+
+            if (branchMap.size === 0) {
+                legendList.innerHTML = '<div style="padding:16px;color:var(--text-secondary);font-size:0.8rem;">No branches found</div>';
+                return;
+            }
+
+            legendList.innerHTML = Array.from(branchMap.entries()).map(([name, laneIdx]) => {
+                const color = branchColors[laneIdx % branchColors.length];
+                const isHead = name === 'HEAD';
+                return '<div class="legend-item" onclick="filterByBranch(\\'' + escapeHtml(name) + '\\')">' +
+                    '<div class="legend-dot" style="background:' + color + ';"></div>' +
+                    '<span class="legend-name' + (isHead ? ' head' : '') + '">' + escapeHtml(name) + '</span>' +
+                '</div>';
+            }).join('');
+        }
+
+        function filterByBranch(branchName) {
+            const select = document.getElementById('branchFilter');
+            // Find and select the branch, or search for it
+            document.getElementById('searchInput').value = branchName;
+            renderCommits();
+        }
+
+        // Build column segments for SVG rendering (DoltHub algorithm)
+        // Each segment represents a continuous vertical line from start row to end row
+        function buildSegments(commits) {
+            const commitMap = new Map();
+            commits.forEach((c, i) => commitMap.set(c.sha, { ...c, row: i }));
+            const columns = [];
+
+            commits.forEach((commit, row) => {
+                const col = commit.branch_index;
+                while (columns.length <= col) columns.push([]);
+
+                // Does this commit's first parent live in the same column?
+                const firstParent = commit.parent_shas && commit.parent_shas[0];
+                const parentData = firstParent ? commitMap.get(firstParent) : null;
+                const continuesSameColumn = parentData && parentData.branch_index === col;
+
+                // Find an existing segment in this column that ends at this row
+                const existing = columns[col].find(s => s.end === row);
+
+                if (existing) {
+                    // Extend to first parent if same column
+                    if (continuesSameColumn) existing.end = parentData.row;
+                } else {
+                    // New segment: extends to parent if same column, else just this row
+                    const end = continuesSameColumn ? parentData.row : row;
+                    columns[col].push({ start: row, end });
+                }
+            });
+
+            // Debug: log segments to verify algorithm
+            console.log('Segments:', columns.map((segs, col) =>
+                'Column ' + col + ': ' + segs.map(s => '[' + s.start + '→' + s.end + ']').join(', ')
+            ));
+
+            return columns;
+        }
+
+        // Render graph as a single SVG element
+        function renderGraphSVG(commits, columns, rowHeight, laneWidth) {
+            if (commits.length === 0) return '';
+
+            const width = Math.max(80, (columns.length + 1) * laneWidth + 20);
+            const height = commits.length * rowHeight;
+
+            let paths = '';
+
+            // Draw vertical lines from segments
+            columns.forEach((segs, col) => {
+                const x = col * laneWidth + 20;
+                const color = branchColors[col % branchColors.length];
+
+                segs.forEach(seg => {
+                    const y1 = seg.start * rowHeight + rowHeight / 2;
+                    const y2 = seg.end * rowHeight + rowHeight / 2;
+                    paths += '<line x1="' + x + '" y1="' + y1 + '" x2="' + x + '" y2="' + y2 + '" stroke="' + color + '" stroke-width="2"/>';
+                });
+            });
+
+            // Build commit index map for curve rendering
+            const commitMap = new Map();
+            commits.forEach((c, i) => commitMap.set(c.sha, { ...c, row: i }));
+
+            // Helper: create right-angle path with rounded corners (SourceTree style)
+            function crossColumnPath(x1, y1, x2, y2, radius) {
+                radius = radius || 6;
+                // Midpoint Y: horizontal segment runs close below the child (0.25 = tight, 0.5 = halfway)
+                var midY = y1 + (y2 - y1) * 0.25;
+                var dx = x2 > x1 ? 1 : -1;  // direction: right (+1) or left (-1)
+
+                // Clamp radius so it doesn't exceed available space
+                var r = Math.min(radius, Math.abs(x2 - x1), Math.abs(midY - y1), Math.abs(y2 - midY));
+
+                // Path: vertical down, arc, horizontal, arc, vertical down
+                return 'M ' + x1 + ' ' + y1 +
+                    ' L ' + x1 + ' ' + (midY - r) +
+                    ' A ' + r + ' ' + r + ' 0 0 ' + (dx > 0 ? 1 : 0) + ' ' + (x1 + r * dx) + ' ' + midY +
+                    ' L ' + (x2 - r * dx) + ' ' + midY +
+                    ' A ' + r + ' ' + r + ' 0 0 ' + (dx > 0 ? 0 : 1) + ' ' + x2 + ' ' + (midY + r) +
+                    ' L ' + x2 + ' ' + y2;
+            }
+
+            // Draw cross-column connectors with 90-degree angles (SourceTree style)
+            commits.forEach((commit, row) => {
+                if (!commit.parent_shas) return;
+
+                commit.parent_shas.forEach(parentSha => {
+                    const parentData = commitMap.get(parentSha);
+                    if (!parentData) return;
+
+                    // Only draw connector if cross-column; same-column handled by vertical segments
+                    if (parentData.branch_index === commit.branch_index) return;
+
+                    const x1 = commit.branch_index * laneWidth + 20;
+                    const y1 = row * rowHeight + rowHeight / 2;
+                    const x2 = parentData.branch_index * laneWidth + 20;
+                    const y2 = parentData.row * rowHeight + rowHeight / 2;
+
+                    const color = branchColors[parentData.branch_index % branchColors.length];
+                    paths += '<path d="' + crossColumnPath(x1, y1, x2, y2, 6) + '" stroke="' + color + '" stroke-width="2" fill="none"/>';
+                });
+            });
+
+            // Draw commit nodes
+            commits.forEach((commit, row) => {
+                const x = commit.branch_index * laneWidth + 20;
+                const y = row * rowHeight + rowHeight / 2;
+                const color = branchColors[commit.branch_index % branchColors.length];
+                const r = commit.is_merge ? 6 : 5;
+
+                paths += '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="' + color + '" class="svg-commit-node" data-sha="' + commit.sha + '" data-short-sha="' + commit.short_sha + '"/>';
+            });
+
+            return '<svg width="' + width + '" height="' + height + '" class="git-graph-svg">' + paths + '</svg>';
+        }
+
+        // Render a single commit row (without graph - graph is handled by SVG overlay)
+        function renderCommitRow(commit, idx) {
+            const isCurrent = currentHead && commit.sha.startsWith(currentHead);
+            const isSelected = selectedCommit && selectedCommit.sha === commit.sha;
+
+            const refsHtml = commit.refs.slice(0, 3).map(ref => {
+                const cls = ref === 'HEAD' || ref.includes('HEAD') ? 'ref-badge head' : 'ref-badge';
+                return '<span class="' + cls + '">' + escapeHtml(ref) + '</span>';
+            }).join('');
+
+            return '<div class="commit-row' + (isCurrent ? ' current' : '') + (isSelected ? ' selected' : '') + '" data-sha="' + commit.sha + '" onclick="selectCommit(\\'' + commit.sha + '\\')">' +
+                '<div class="commit-info">' +
+                    '<div class="commit-message">' + escapeHtml(commit.subject) + '</div>' +
+                    '<div class="commit-meta">' +
+                        '<span class="commit-sha" onclick="event.stopPropagation(); copyShaQuick(\\'' + commit.short_sha + '\\')">' + commit.short_sha + '</span>' +
+                        '<div class="commit-refs">' + refsHtml + '</div>' +
+                        '<span class="commit-author"><i class="fa-regular fa-user"></i> ' + escapeHtml(commit.author) + '</span>' +
+                        '<span class="commit-date">' + formatTime(commit.timestamp) + '</span>' +
+                    '</div>' +
+                '</div>' +
+            '</div>';
+        }
+
+        function renderCommits() {
+            const container = document.getElementById('graphContainer');
+            const search = document.getElementById('searchInput').value.toLowerCase();
+            const branchFilter = document.getElementById('branchFilter').value;
+
+            let filtered = commits;
+            if (search) {
+                filtered = filtered.filter(c =>
+                    c.subject.toLowerCase().includes(search) ||
+                    c.sha.includes(search) ||
+                    c.author.toLowerCase().includes(search)
+                );
+            }
+
+            if (filtered.length === 0) {
+                container.innerHTML = '<div class="empty-state"><i class="fa-solid fa-code-branch"></i><p>No commits found</p></div>';
+                return;
+            }
+
+            const rowHeight = 52; // Must match CSS .commit-row min-height
+            const columns = buildSegments(filtered);
+            const graphSVG = renderGraphSVG(filtered, columns, rowHeight, laneWidth);
+            const graphWidth = Math.max(80, (columns.length + 1) * laneWidth + 20);
+
+            container.innerHTML = '<div class="commit-list-wrapper">' +
+                '<div class="git-graph-container" style="width:' + graphWidth + 'px;">' + graphSVG + '</div>' +
+                '<div class="commit-list">' +
+                    filtered.map((commit, idx) => renderCommitRow(commit, idx)).join('') +
+                '</div>' +
+            '</div>';
+
+            // Attach click handlers to SVG nodes
+            container.querySelectorAll('.svg-commit-node').forEach(node => {
+                node.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    copyShaQuick(node.dataset.shortSha);
+                });
+            });
+        }
+
+        async function selectCommit(sha) {
+            selectedCommit = commits.find(c => c.sha === sha);
+            if (!selectedCommit) return;
+
+            // Update selection in list
+            document.querySelectorAll('.commit-row').forEach(row => {
+                row.classList.toggle('selected', row.dataset.sha === sha);
+            });
+
+            // Show detail panel
+            const panel = document.getElementById('detailPanel');
+            panel.classList.remove('hidden');
+
+            document.getElementById('detailSha').textContent = selectedCommit.short_sha;
+            document.getElementById('detailMessage').textContent = selectedCommit.subject;
+            document.getElementById('detailMeta').innerHTML =
+                '<div class="detail-meta-row"><i class="fa-regular fa-user"></i> ' + escapeHtml(selectedCommit.author) + '</div>' +
+                '<div class="detail-meta-row"><i class="fa-regular fa-clock"></i> ' + formatTimeFull(selectedCommit.timestamp) + '</div>' +
+                '<div class="detail-meta-row"><i class="fa-solid fa-code-branch"></i> ' + selectedCommit.parent_shas.length + ' parent(s)</div>';
+
+            // Load files
+            document.getElementById('detailFiles').innerHTML = '<div class="loading"><i class="fa-solid fa-spinner fa-spin"></i></div>';
+            try {
+                const res = await fetch('/api/checkpoints/' + sha + '/diff', { credentials: 'same-origin' });
+                const data = await res.json();
+                const files = data.changed_files || [];
+                if (files.length === 0) {
+                    document.getElementById('detailFiles').innerHTML = '<div style="color:#888; font-style:italic;">No files changed</div>';
+                } else {
+                    document.getElementById('detailFiles').innerHTML = files.map(f =>
+                        '<div class="file-item"><i class="fa-regular fa-file-code"></i><span class="file-name">' + escapeHtml(f) + '</span></div>'
+                    ).join('');
+                }
+            } catch (e) {
+                document.getElementById('detailFiles').innerHTML = '<div style="color:#e57373;">Failed to load files</div>';
+            }
+        }
+
+        function closeDetail() {
+            document.getElementById('detailPanel').classList.add('hidden');
+            document.querySelectorAll('.commit-row').forEach(row => row.classList.remove('selected'));
+            selectedCommit = null;
+        }
+
+        function copySha() {
+            if (selectedCommit) {
+                navigator.clipboard.writeText(selectedCommit.sha);
+                showToast('Full SHA copied!');
+            }
+        }
+
+        function copyShaQuick(sha) {
+            navigator.clipboard.writeText(sha);
+            showToast('Copied: ' + sha);
+        }
+
+        async function viewDiff() {
+            if (!selectedCommit) return;
+            // Open diff in new window (or could show modal)
+            window.open('/api/checkpoints/' + selectedCommit.sha + '/diff', '_blank');
+        }
+
+        async function rollbackTo() {
+            if (!selectedCommit) return;
+            if (!confirm('Rollback to commit ' + selectedCommit.short_sha + '?\\n\\nThis will discard all changes after this commit.')) return;
+
+            try {
+                const res = await fetch('/api/checkpoints/' + selectedCommit.sha + '/rollback', {
+                    method: 'POST',
+                    credentials: 'same-origin'
+                });
+                if (res.ok) {
+                    showToast('Rolled back successfully!');
+                    loadData();
+                } else {
+                    showToast('Rollback failed');
+                }
+            } catch (e) {
+                showToast('Rollback failed: ' + e.message);
+            }
+        }
+
+        async function pushToRemote() {
+            if (!confirm('Push all commits to remote?')) return;
+            try {
+                const res = await fetch('/api/git/push', { method: 'POST', credentials: 'same-origin' });
+                const data = await res.json();
+                showToast(data.message || (data.success ? 'Pushed!' : 'Push failed'));
+            } catch (e) {
+                showToast('Push failed: ' + e.message);
+            }
+        }
+
+        function refreshData() {
+            loadData();
+            showToast('Refreshed!');
+        }
+
+        function showToast(msg) {
+            const toast = document.getElementById('toast');
+            toast.textContent = msg;
+            toast.classList.add('show');
+            setTimeout(() => toast.classList.remove('show'), 2500);
+        }
+
+        function formatTime(iso) {
+            const d = new Date(iso);
+            const now = new Date();
+            const diff = now - d;
+            if (diff < 60000) return 'just now';
+            if (diff < 3600000) return Math.floor(diff / 60000) + 'm ago';
+            if (diff < 86400000) return Math.floor(diff / 3600000) + 'h ago';
+            if (diff < 604800000) return Math.floor(diff / 86400000) + 'd ago';
+            return d.toLocaleDateString();
+        }
+
+        function formatTimeFull(iso) {
+            return new Date(iso).toLocaleString();
+        }
+
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Event listeners
+        document.getElementById('searchInput').addEventListener('input', () => {
+            clearTimeout(window.searchTimeout);
+            window.searchTimeout = setTimeout(renderCommits, 300);
+        });
+        document.getElementById('branchFilter').addEventListener('change', renderCommits);
+
+        // Initial load
+        loadData();
+    </script>
+</body>
+</html>
+"""
+    return HTMLResponse(content=html)
+
+
 @router.get("/scheduled-jobs", response_class=HTMLResponse)
 async def scheduled_jobs_page(user: User = Depends(engineer_or_admin_required)):
     """Serve the scheduled jobs management page."""

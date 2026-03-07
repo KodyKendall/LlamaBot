@@ -14,6 +14,27 @@ from sqlmodel import Session
 LEONARDO_PATH = Path("/app/leonardo")
 
 
+def _configure_git_safe_directory():
+    """Configure git to trust the mounted leonardo directory.
+
+    This is needed because the repo owner (host user) differs from
+    the container user (root), triggering git's "dubious ownership" check.
+    """
+    try:
+        subprocess.run(
+            ["git", "config", "--global", "--add", "safe.directory", str(LEONARDO_PATH)],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+    except Exception:
+        pass  # Non-fatal, will fail on git commands if needed
+
+
+# Configure safe directory on module load
+_configure_git_safe_directory()
+
+
 class CheckpointService:
     """Service for managing git-based checkpoints for code rollback."""
 
@@ -455,6 +476,169 @@ Timestamp: {timestamp}
             raise Exception("Git operation timed out")
         except Exception as e:
             raise Exception(f"Failed to discard changes: {str(e)}")
+
+    @staticmethod
+    def get_git_graph(limit: int = 50) -> Dict[str, Any]:
+        """Get commit history with branch topology for visualization.
+
+        Returns commit data with lane assignments for rendering a git graph
+        similar to SourceTree/GitKraken.
+
+        Args:
+            limit: Maximum number of commits to return
+
+        Returns:
+            Dictionary with:
+                - commits: List of commit objects with topology info
+                - branches: List of branch metadata with colors
+                - max_branch_index: Maximum lane index used
+        """
+        try:
+            # Get commit history with parent info for topology
+            # Format: SHA|short_sha|parent_shas|subject|author|timestamp|refs
+            result = subprocess.run(
+                [
+                    "git", "-C", str(LEONARDO_PATH), "log",
+                    f"--max-count={limit}",
+                    "--format=%H|%h|%P|%s|%an|%aI|%D",
+                    "--topo-order",
+                    "--all"
+                ],
+                capture_output=True,
+                text=True,
+                timeout=15
+            )
+
+            if result.returncode != 0:
+                raise Exception(f"Git log failed: {result.stderr}")
+
+            commits = []
+            commit_to_lane = {}  # SHA -> lane index
+            lane_heads = []  # Current commit SHA at each lane (None if lane is free)
+            branch_colors = ["#8b5cf6", "#22c55e", "#eab308", "#3b82f6", "#ef4444", "#ec4899", "#14b8a6"]
+
+            lines = [line for line in result.stdout.strip().split('\n') if line]
+
+            for line in lines:
+                parts = line.split('|')
+                if len(parts) < 6:
+                    continue
+
+                sha = parts[0]
+                short_sha = parts[1]
+                parent_shas = parts[2].split() if parts[2] else []
+                subject = parts[3]
+                author = parts[4]
+                timestamp = parts[5]
+                refs = parts[6] if len(parts) > 6 else ""
+
+                # Parse refs (e.g., "HEAD -> main, origin/main")
+                ref_list = []
+                if refs:
+                    for ref in refs.split(', '):
+                        ref = ref.strip()
+                        if ref:
+                            # Clean up refs like "HEAD -> main"
+                            if ' -> ' in ref:
+                                ref_list.extend(ref.split(' -> '))
+                            else:
+                                ref_list.append(ref)
+
+                # Determine lane for this commit
+                # First check if any child commit assigned us a lane
+                if sha in commit_to_lane:
+                    lane_index = commit_to_lane[sha]
+                else:
+                    # Find first free lane or create new one
+                    lane_index = None
+                    for i, head in enumerate(lane_heads):
+                        if head is None or head == sha:
+                            lane_index = i
+                            break
+                    if lane_index is None:
+                        lane_index = len(lane_heads)
+                        lane_heads.append(None)
+
+                # Update lane head
+                if lane_index < len(lane_heads):
+                    lane_heads[lane_index] = sha
+                else:
+                    lane_heads.append(sha)
+
+                # Assign parent commits to lanes
+                merge_lines = []
+                for i, parent_sha in enumerate(parent_shas):
+                    if i == 0:
+                        # First parent stays in same lane
+                        commit_to_lane[parent_sha] = lane_index
+                        if lane_index < len(lane_heads):
+                            lane_heads[lane_index] = parent_sha
+                    else:
+                        # Additional parents (merge) - find or create lane
+                        if parent_sha in commit_to_lane:
+                            parent_lane = commit_to_lane[parent_sha]
+                        else:
+                            # Find free lane for this parent
+                            parent_lane = None
+                            for j, head in enumerate(lane_heads):
+                                if head is None and j != lane_index:
+                                    parent_lane = j
+                                    break
+                            if parent_lane is None:
+                                parent_lane = len(lane_heads)
+                                lane_heads.append(None)
+                            commit_to_lane[parent_sha] = parent_lane
+                            lane_heads[parent_lane] = parent_sha
+
+                        merge_lines.append({
+                            "from_lane": lane_index,
+                            "to_lane": parent_lane,
+                            "parent_sha": parent_sha
+                        })
+
+                # Get changed files count for this commit
+                changed_files_count = len(CheckpointService._get_changed_files_internal(sha))
+
+                commits.append({
+                    "sha": sha,
+                    "short_sha": short_sha,
+                    "subject": subject,
+                    "author": author,
+                    "timestamp": timestamp,
+                    "parent_shas": parent_shas,
+                    "branch_index": lane_index,
+                    "is_merge": len(parent_shas) > 1,
+                    "refs": ref_list,
+                    "changed_files_count": changed_files_count,
+                    "merge_lines": merge_lines
+                })
+
+            # Calculate max branch index
+            max_branch_index = max((c["branch_index"] for c in commits), default=0)
+
+            # Build branch info
+            branches = []
+            seen_refs = set()
+            for commit in commits:
+                for ref in commit["refs"]:
+                    if ref not in seen_refs and not ref.startswith("origin/"):
+                        seen_refs.add(ref)
+                        branches.append({
+                            "name": ref,
+                            "color": branch_colors[len(branches) % len(branch_colors)],
+                            "index": commit["branch_index"]
+                        })
+
+            return {
+                "commits": commits,
+                "branches": branches,
+                "max_branch_index": max_branch_index
+            }
+
+        except subprocess.TimeoutExpired:
+            raise Exception("Git operation timed out")
+        except Exception as e:
+            raise Exception(f"Failed to get git graph: {str(e)}")
 
 
 # Singleton instance
