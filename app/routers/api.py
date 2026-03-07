@@ -561,10 +561,15 @@ async def capture_rails_logs_endpoint(request: Request, username: str = Depends(
     from pathlib import Path
     from app.agents.leonardo.rails_agent.tools import capture_rails_logs
 
-    file_path = capture_rails_logs(duration=10)
-    logs = Path(file_path).read_text()
-
-    return {"logs": logs, "file_path": file_path}
+    try:
+        file_path = capture_rails_logs(duration=10)
+        logs = Path(file_path).read_text()
+        return {"logs": logs, "file_path": file_path}
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e), "detail": f"Failed to capture logs: {str(e)}"}
+        )
 
 
 # ============== Prompt Library API ==============

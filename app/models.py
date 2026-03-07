@@ -48,7 +48,7 @@ class Prompt(ActiveRecordMixin, SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str = Field(max_length=100, index=True)
-    content: str = Field(max_length=10000)
+    content: str = Field(max_length=50000)  # Increased to allow larger prompts with complex markdown
     description: Optional[str] = Field(default=None, max_length=500)
     group: str = Field(max_length=50, default="General", index=True)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

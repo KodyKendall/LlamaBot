@@ -779,8 +779,8 @@ def get_rails_container_name():
         return "leonardo-llamapress-1"
 
 
-# NOTE: Container name is now fetched dynamically in rails_api_sh() to handle restarts
-_cached_rails_container = None
+# Initialize container name at module load (used by capture_rails_logs)
+RAILS_CONT = get_rails_container_name()
 
 def rails_api_sh(snippet: str, workdir: str = WORKDIR) -> str:
     """Execute a command in the Rails Docker container via Docker API."""

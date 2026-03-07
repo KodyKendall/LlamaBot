@@ -501,10 +501,17 @@ class ChatApp {
           this.clearJsConsoleLogs();
 
           // Wait for Rails logs (10 seconds) - JS logs accumulate during this time
-          const railsLogsRes = await fetch('/api/capture-rails-logs', {
+          const response = await fetch('/api/capture-rails-logs', {
             method: 'POST',
             signal: this.captureLogsAbortController.signal
-          }).then(r => r.json());
+          });
+
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.error || errorData.detail || `Server error: ${response.status}`);
+          }
+
+          const railsLogsRes = await response.json();
 
           // Now fetch JS logs that accumulated during the 10s recording period
           const jsLogs = await this.getJsConsoleLogs();
@@ -528,6 +535,10 @@ class ChatApp {
             console.log('Log capture was cancelled');
           } else {
             console.error('Failed to capture logs:', err);
+            // Show error to user via toast
+            if (this.slashCommandManager) {
+              this.slashCommandManager.showToast(`Failed to capture logs: ${err.message}`, 'error');
+            }
           }
         } finally {
           this.elements.captureLogsBtn.classList.remove('recording');

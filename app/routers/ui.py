@@ -735,8 +735,8 @@ async def prompt_library_page(current_user: User = Depends(get_current_user)):
                     <input type="text" id="promptDescription" placeholder="Brief description of when to use this prompt">
                 </div>
                 <div class="form-group">
-                    <label>Content *</label>
-                    <textarea id="promptContent" required placeholder="Enter your prompt template..."></textarea>
+                    <label>Content * <span id="charCount" style="float: right; font-weight: normal; color: #666;">0 / 50,000</span></label>
+                    <textarea id="promptContent" required placeholder="Enter your prompt template..." oninput="updateCharCount()"></textarea>
                 </div>
                 <div style="display: flex; gap: 12px; justify-content: flex-end;">
                     <button type="button" class="btn btn-danger" id="deleteBtn" onclick="deletePrompt()" style="display: none; margin-right: auto;">Delete</button>
@@ -825,6 +825,14 @@ async def prompt_library_page(current_user: User = Depends(get_current_user)):
             setTimeout(() => msg.className = 'message', 3000);
         }
 
+        function updateCharCount() {
+            const content = document.getElementById('promptContent').value;
+            const count = content.length;
+            const charCount = document.getElementById('charCount');
+            charCount.textContent = count.toLocaleString() + ' / 50,000';
+            charCount.style.color = count > 50000 ? '#e57373' : (count > 40000 ? '#ffb74d' : '#666');
+        }
+
         function showCreateModal() {
             currentPromptId = null;
             document.getElementById('modalTitle').textContent = 'New Prompt';
@@ -835,6 +843,7 @@ async def prompt_library_page(current_user: User = Depends(get_current_user)):
             document.getElementById('promptContent').value = '';
             document.getElementById('deleteBtn').style.display = 'none';
             document.getElementById('promptModal').classList.add('active');
+            updateCharCount();
         }
 
         function editPrompt(id) {
@@ -850,6 +859,7 @@ async def prompt_library_page(current_user: User = Depends(get_current_user)):
             document.getElementById('promptContent').value = prompt.content;
             document.getElementById('deleteBtn').style.display = 'block';
             document.getElementById('promptModal').classList.add('active');
+            updateCharCount();
         }
 
         function closeModal() {
@@ -881,11 +891,19 @@ async def prompt_library_page(current_user: User = Depends(get_current_user)):
             e.preventDefault();
 
             const id = document.getElementById('promptId').value;
+            const content = document.getElementById('promptContent').value;
+
+            // Client-side validation for content length
+            if (content.length > 50000) {
+                showMessage('Content is too long (' + content.length + ' chars). Max: 50,000 characters.', 'error');
+                return;
+            }
+
             const data = {
                 name: document.getElementById('promptName').value,
                 group: document.getElementById('promptGroup').value,
                 description: document.getElementById('promptDescription').value,
-                content: document.getElementById('promptContent').value
+                content: content
             };
 
             const url = id ? '/api/prompts/' + id : '/api/prompts';
@@ -904,8 +922,21 @@ async def prompt_library_page(current_user: User = Depends(get_current_user)):
                     loadPrompts();
                     loadGroups();
                 } else {
-                    const error = await response.json();
-                    showMessage(error.detail || 'Error saving prompt', 'error');
+                    // Handle both JSON and non-JSON error responses
+                    let errorMsg = 'Error saving prompt';
+                    const contentType = response.headers.get('content-type');
+                    if (contentType && contentType.includes('application/json')) {
+                        const error = await response.json();
+                        errorMsg = error.detail || errorMsg;
+                    } else {
+                        const text = await response.text();
+                        if (response.status === 422) {
+                            errorMsg = 'Validation error: Check content length (max 50,000 chars) and required fields';
+                        } else {
+                            errorMsg = 'Server error (' + response.status + '): ' + (text.substring(0, 100) || 'Unknown error');
+                        }
+                    }
+                    showMessage(errorMsg, 'error');
                 }
             } catch (error) {
                 showMessage('Error: ' + error.message, 'error');

@@ -25,3 +25,11 @@
 - [x] Auto-copy SSH keys from host to VSCode container
 - [x] `/restart` includes `--follow` flag for easy log tailing
 - [x] Fix permission issues on Ubuntu from tool calls
+
+
+- 0.4.0a: 
+- [x] Fix Prompt manager UI not being able to save to due JSON parse error
+- [x] Fix broken Rails logs tool to show errors and attempt fix so it works properly again.
+- [x] Add clear instructions in Rails agent prompt to discourage using primitive bash commands like awk, sed, cat, etc., and to instead rely on our other tools
+- [x] Add a way to test ws_auth is enabled on specific Leonardo instances.
+
