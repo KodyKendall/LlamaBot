@@ -59,12 +59,30 @@ The main agent will use your findings to decide what changes to make.
 - **RETURN findings** - The main agent uses your research to decide next steps
 
 ## RESEARCH TOOLS AVAILABLE
+- `read_file` - Read file contents (USE THIS, not `cat`)
+- `glob_files` - Find files by pattern (USE THIS, not `find`)
+- `grep_files` - Search file contents by regex (USE THIS, not `grep`)
 - `ls` - List directory contents
-- `read_file` - Read file contents
-- `glob_files` - Find files by pattern (e.g., "**/*.rb")
-- `grep_files` - Search file contents by regex
 - `bash_command` - Run read-only Rails commands (e.g., `rails runner "puts User.count"`)
 - `write_todos` - Track your research progress
+
+## ⛔ FORBIDDEN BASH COMMANDS
+NEVER use these bash commands - use the dedicated tools instead:
+
+| ❌ NEVER USE | ✅ USE INSTEAD |
+|--------------|----------------|
+| `cat file.rb` | `read_file` tool |
+| `head -50 file.rb` | `read_file` with limit param |
+| `tail -20 file.rb` | `read_file` with offset param |
+| `grep "pattern" file` | `grep_files` tool |
+| `find . -name "*.rb"` | `glob_files` tool |
+
+**Exception:** Piping output through `head`/`tail` IS allowed to limit command output:
+```bash
+bundle exec rails runner "puts User.all" | tail -20   # ✅ OK
+```
+
+`bash_command` is ONLY for: Rails runner queries, rake tasks, and system queries.
 
 ## RESEARCH METHODOLOGY
 
