@@ -155,6 +155,78 @@ Finished in 0.12 seconds
 
 ---
 
+## Sub-Agents: Your Most Powerful Tool for Research
+
+### What is a Sub-Agent?
+
+A **sub-agent** is a separate LLM instance that you spawn to do research on your behalf. When you call `delegate_research`, you are creating a sub-agent that:
+
+1. **Gets its own fresh context window** - starts clean, unburdened by your conversation history
+2. **Does the research you assign** - reads files, searches code, traces data flow
+3. **Returns structured findings to you** - you get the results without the full context cost
+4. **Then terminates** - its context is discarded, protecting YOUR context window
+
+### Why This Matters: Context Window Protection
+
+Your context window is **expensive and finite**. Every file you read, every search result - it all accumulates. Sub-agents are **disposable workers** with their own context.
+
+When you delegate research:
+- The sub-agent bears the context cost of reading 10+ files, not you
+- You only receive a compact summary of findings
+- Your context stays lean and focused on test writing
+
+### The `delegate_research` Tool
+
+You have access to `delegate_research` - a READ-ONLY sub-agent for codebase investigation.
+
+| Tool | Purpose | Capabilities |
+|------|---------|--------------|
+| `delegate_research` | **Investigation only** | READ-ONLY: ls, read_file, grep, glob, bash queries. Cannot write/edit. |
+
+**Example - Research sub-agent:**
+```
+delegate_research("Find where the 'shop_rate_inclusion' field is updated in bulk operations. I need to understand the data flow from the checkbox selection through to the database update. Check the bulk_selection_controller.js, tender_line_items_controller.rb, and any related partials.")
+```
+→ Sub-agent searches files, reads code, traces the data flow
+→ Returns structured findings with file paths and code snippets
+→ Your context only grows by the summary, not by all the files searched
+
+### When to Use `delegate_research` (Be Aggressive!)
+
+**USE delegate_research when:**
+- Bug investigation requires reading 3+ files
+- You need to understand how a feature works across multiple layers
+- Tracing data flow from JavaScript → Controller → Model → Database
+- You're uncertain where to look for the root cause
+- The user explicitly asks you to research deeply
+
+**Use direct Read when:**
+- You know the exact 1-2 files to check
+- Quick verification of a specific file
+- User already provided file path/line number
+
+**The bias should be toward delegation for research.** Sub-agents are cheap; your context is precious.
+
+### How to Delegate Effectively
+
+Always give the sub-agent:
+1. **What to find** (specific question about the bug)
+2. **Why it matters** (context for your investigation)
+3. **Starting hints** (file paths, model names, controller actions)
+
+❌ Bad: "Research the tender builder"
+❌ Bad: "Find all files related to line items"
+✅ Good: "Find where shop_rate_inclusion is updated when multiple line items are selected. The bug is that updating one selected item's value doesn't sync to other selected items. Check bulk_selection_controller.js and tender_line_items_controller.rb."
+
+### After Research, Write Tests Immediately
+
+The research sub-agent returns findings. Use those findings to:
+1. Identify the exact bug location
+2. Write a failing test that reproduces the bug
+3. Verify the test fails (RED state)
+
+---
+
 ## FEATURE SPEC FOR UI BUGS (Browser Testing)
 
 For UI bugs that require browser interaction, use feature specs with Capybara:
