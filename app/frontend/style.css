@@ -3745,7 +3745,8 @@ body {
     white-space: nowrap;
     color: #a78bfa;
     font-weight: 500;
-    cursor: help;
+    cursor: pointer;
+    transition: color 0.2s ease;
 }
 
 .prompt-selected-badge .badge-tooltip {
@@ -3791,6 +3792,91 @@ body {
 
 .prompt-selected-badge .badge-close:hover {
     opacity: 1;
+}
+
+/* Expanded prompt popup - click to view full prompt */
+.prompt-expanded-popup {
+    display: none;
+    position: absolute;
+    bottom: calc(100% + 12px);
+    left: 0;
+    right: 0;
+    background: rgba(30, 24, 45, 0.98);
+    border: 2px solid rgba(139, 92, 246, 0.5);
+    border-radius: 12px;
+    z-index: 1000;
+    box-shadow: 0 8px 32px rgba(139, 92, 246, 0.3), 0 4px 16px rgba(0, 0, 0, 0.5);
+    max-height: 400px;
+    overflow: hidden;
+    display: none;
+    flex-direction: column;
+}
+
+.prompt-expanded-popup.open {
+    display: flex;
+}
+
+.prompt-expanded-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    background: rgba(139, 92, 246, 0.15);
+    border-bottom: 1px solid rgba(139, 92, 246, 0.3);
+}
+
+.prompt-expanded-title {
+    font-weight: 600;
+    color: #a78bfa;
+    font-size: 0.95rem;
+}
+
+.prompt-expanded-close {
+    background: rgba(239, 68, 68, 0.2);
+    border: 1px solid rgba(239, 68, 68, 0.4);
+    color: #ef4444;
+    font-size: 1.3rem;
+    cursor: pointer;
+    padding: 0;
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 6px;
+    transition: all 0.2s ease;
+    font-weight: bold;
+}
+
+.prompt-expanded-close:hover {
+    background: rgba(239, 68, 68, 0.4);
+    border-color: rgba(239, 68, 68, 0.6);
+    color: #f87171;
+}
+
+.prompt-expanded-content {
+    padding: 16px;
+    font-size: 0.9rem;
+    color: rgba(255, 255, 255, 0.9);
+    white-space: pre-wrap;
+    line-height: 1.6;
+    overflow-y: auto;
+    max-height: 340px;
+}
+
+/* Make badge text and icon look clickable */
+.prompt-selected-badge .badge-text:hover {
+    color: #c4b5fd;
+    text-decoration: underline;
+}
+
+.prompt-selected-badge .badge-icon {
+    cursor: pointer;
+    transition: color 0.2s ease;
+}
+
+.prompt-selected-badge .badge-icon:hover {
+    color: #c4b5fd;
 }
 
 /* Mobile responsive for prompt library */

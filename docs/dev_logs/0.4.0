@@ -34,4 +34,8 @@
 - [x] Add a way to test ws_auth is enabled on specific Leonardo instances.
 
 0.4.0b: 
-- [] Add git timeline view in History Tab.
+- [x] Add git timeline view in History Tab with rollbacks.
+
+0.4.0c: 
+- [x] Improve prompt to explain sub-agent delegation concept
+- [x] Supress Ruby/Rails env info on the bash tool

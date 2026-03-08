@@ -268,10 +268,50 @@ export class PromptManager {
     badge.className = 'prompt-selected-badge';
     badge.innerHTML = `
       <span class="badge-icon"><i class="fa-solid fa-book"></i></span>
-      <span class="badge-text">${this.escapeHtml(prompt.name)}</span>
+      <span class="badge-text" title="Click to view full prompt">${this.escapeHtml(prompt.name)}</span>
       <div class="badge-tooltip">${this.escapeHtml(prompt.content)}</div>
       <button class="badge-close" title="Remove prompt">&times;</button>
     `;
+
+    // Expanded popup element (created once, shown/hidden on click)
+    const expandedPopup = document.createElement('div');
+    expandedPopup.className = 'prompt-expanded-popup';
+    expandedPopup.innerHTML = `
+      <div class="prompt-expanded-header">
+        <span class="prompt-expanded-title">${this.escapeHtml(prompt.name)}</span>
+        <button class="prompt-expanded-close" title="Close">&times;</button>
+      </div>
+      <div class="prompt-expanded-content">${this.escapeHtml(prompt.content)}</div>
+    `;
+    badge.appendChild(expandedPopup);
+
+    // Close expanded popup
+    expandedPopup.querySelector('.prompt-expanded-close').addEventListener('click', (e) => {
+      e.stopPropagation();
+      expandedPopup.classList.remove('open');
+    });
+
+    // Click on badge text to toggle expanded popup
+    badge.querySelector('.badge-text').addEventListener('click', (e) => {
+      e.stopPropagation();
+      expandedPopup.classList.toggle('open');
+    });
+
+    // Click on badge icon also toggles expanded popup
+    badge.querySelector('.badge-icon').addEventListener('click', (e) => {
+      e.stopPropagation();
+      expandedPopup.classList.toggle('open');
+    });
+
+    // Close popup when clicking outside
+    document.addEventListener('click', (e) => {
+      if (expandedPopup.classList.contains('open') &&
+          !expandedPopup.contains(e.target) &&
+          !badge.querySelector('.badge-text').contains(e.target) &&
+          !badge.querySelector('.badge-icon').contains(e.target)) {
+        expandedPopup.classList.remove('open');
+      }
+    });
 
     badge.querySelector('.badge-close').addEventListener('click', (e) => {
       e.stopPropagation();

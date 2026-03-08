@@ -795,7 +795,8 @@ def rails_api_sh(snippet: str, workdir: str = WORKDIR) -> str:
             "Tty": True,
             "Cmd": ["/bin/sh", "-lc", snippet],
             "WorkingDir": workdir,
-            "User": "1000:1000"  # Run as UID 1000 to match host user and prevent permission issues
+            "User": "1000:1000",  # Run as UID 1000 to match host user and prevent permission issues
+            "Env": ["RUBYOPT=-W0"]  # Suppress Ruby warnings (e.g., gem deprecation notices)
         }
 
         # Create exec instance using curl
