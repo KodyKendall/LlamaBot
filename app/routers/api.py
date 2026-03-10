@@ -54,6 +54,21 @@ class UpdatePromptRequest(BaseModel):
     is_active: bool | None = None
 
 
+class CreateSkillRequest(BaseModel):
+    name: str
+    content: str
+    group: str = "General"
+    description: str | None = None
+
+
+class UpdateSkillRequest(BaseModel):
+    name: str | None = None
+    content: str | None = None
+    group: str | None = None
+    description: str | None = None
+    is_active: bool | None = None
+
+
 # ============== Version API ==============
 
 def get_container_version() -> str:
@@ -826,3 +841,160 @@ async def set_visible_agents(
 
     logger.info(f"User '{current_user.username}' updated visible_agents to {request.visible_agents}")
     return {"visible_agents": request.visible_agents, "message": "Visible agents updated"}
+
+
+# ============== Skills Library API ==============
+
+@router.get("/api/skills", response_class=JSONResponse)
+async def api_get_skills(
+    username: str = Depends(auth),
+    session: Session = Depends(get_db_session),
+    group: Optional[str] = Query(None, description="Filter by group"),
+    search: Optional[str] = Query(None, description="Search term")
+):
+    """Get all skills, optionally filtered by group or search term."""
+    from app.services.skill_service import (
+        get_all_skills, get_skills_by_group, search_skills
+    )
+
+    if search:
+        skills = search_skills(session, search)
+    elif group:
+        skills = get_skills_by_group(session, group)
+    else:
+        skills = get_all_skills(session)
+
+    return [
+        {
+            "id": s.id,
+            "name": s.name,
+            "content": s.content,
+            "description": s.description,
+            "group": s.group,
+            "usage_count": s.usage_count,
+            "created_at": s.created_at.isoformat() if s.created_at else None,
+            "updated_at": s.updated_at.isoformat() if s.updated_at else None,
+        }
+        for s in skills
+    ]
+
+
+@router.get("/api/skills/groups", response_class=JSONResponse)
+async def api_get_skill_groups(
+    username: str = Depends(auth),
+    session: Session = Depends(get_db_session)
+):
+    """Get list of unique skill groups."""
+    from app.services.skill_service import get_skill_groups
+    groups = get_skill_groups(session)
+    return {"groups": groups}
+
+
+@router.get("/api/skills/{skill_id}", response_class=JSONResponse)
+async def api_get_skill(
+    skill_id: int,
+    username: str = Depends(auth),
+    session: Session = Depends(get_db_session)
+):
+    """Get a specific skill by ID."""
+    from app.services.skill_service import get_skill_by_id
+    skill = get_skill_by_id(session, skill_id)
+    if not skill:
+        raise HTTPException(status_code=404, detail="Skill not found")
+
+    return {
+        "id": skill.id,
+        "name": skill.name,
+        "content": skill.content,
+        "description": skill.description,
+        "group": skill.group,
+        "usage_count": skill.usage_count,
+        "created_at": skill.created_at.isoformat() if skill.created_at else None,
+        "updated_at": skill.updated_at.isoformat() if skill.updated_at else None,
+    }
+
+
+@router.post("/api/skills", response_class=JSONResponse)
+async def api_create_skill(
+    request: CreateSkillRequest,
+    username: str = Depends(auth),
+    session: Session = Depends(get_db_session)
+):
+    """Create a new skill."""
+    from app.services.skill_service import create_skill
+
+    if not request.name or not request.name.strip():
+        raise HTTPException(status_code=400, detail="Name is required")
+    if not request.content or not request.content.strip():
+        raise HTTPException(status_code=400, detail="Content is required")
+
+    skill = create_skill(
+        session,
+        name=request.name,
+        content=request.content,
+        group=request.group,
+        description=request.description
+    )
+
+    return {
+        "id": skill.id,
+        "name": skill.name,
+        "message": "Skill created successfully"
+    }
+
+
+@router.patch("/api/skills/{skill_id}", response_class=JSONResponse)
+async def api_update_skill(
+    skill_id: int,
+    request: UpdateSkillRequest,
+    username: str = Depends(auth),
+    session: Session = Depends(get_db_session)
+):
+    """Update an existing skill."""
+    from app.services.skill_service import update_skill
+
+    skill = update_skill(
+        session, skill_id,
+        name=request.name,
+        content=request.content,
+        group=request.group,
+        description=request.description,
+        is_active=request.is_active
+    )
+
+    if not skill:
+        raise HTTPException(status_code=404, detail="Skill not found")
+
+    return {"message": "Skill updated successfully"}
+
+
+@router.delete("/api/skills/{skill_id}", response_class=JSONResponse)
+async def api_delete_skill(
+    skill_id: int,
+    username: str = Depends(auth),
+    session: Session = Depends(get_db_session),
+    hard_delete: bool = Query(False, description="Permanently delete")
+):
+    """Delete a skill (soft delete by default)."""
+    from app.services.skill_service import delete_skill
+
+    if not delete_skill(session, skill_id, hard_delete=hard_delete):
+        raise HTTPException(status_code=404, detail="Skill not found")
+
+    return {"message": "Skill deleted successfully"}
+
+
+@router.post("/api/skills/{skill_id}/use", response_class=JSONResponse)
+async def api_use_skill(
+    skill_id: int,
+    username: str = Depends(auth),
+    session: Session = Depends(get_db_session)
+):
+    """Increment usage count when a skill is selected."""
+    from app.services.skill_service import increment_usage
+
+    skill = increment_usage(session, skill_id)
+    if not skill:
+        raise HTTPException(status_code=404, detail="Skill not found")
+
+    return {"usage_count": skill.usage_count}

@@ -21,6 +21,13 @@ export class AppState {
       name: DEFAULT_CONFIG.agent.name,
       type: DEFAULT_CONFIG.agent.type
     };
+
+    // Task duration timer state
+    this.taskStartTime = null;
+    this.taskTimerInterval = null;
+
+    // Sub-agent depth tracking
+    this.currentAgentDepth = 0;
   }
 
   /**
@@ -112,5 +119,78 @@ export class AppState {
    */
   getAgentConfig() {
     return this.agentConfig;
+  }
+
+  // ==========================================
+  // Task Duration Timer Methods
+  // ==========================================
+
+  /**
+   * Start the task duration timer
+   */
+  startTaskTimer() {
+    this.taskStartTime = Date.now();
+  }
+
+  /**
+   * Stop and reset the task duration timer
+   */
+  stopTaskTimer() {
+    this.taskStartTime = null;
+    if (this.taskTimerInterval) {
+      clearInterval(this.taskTimerInterval);
+      this.taskTimerInterval = null;
+    }
+  }
+
+  /**
+   * Get elapsed time in milliseconds since task started
+   */
+  getElapsedTime() {
+    if (!this.taskStartTime) return 0;
+    return Date.now() - this.taskStartTime;
+  }
+
+  /**
+   * Get formatted elapsed time as MM:SS
+   */
+  getFormattedElapsedTime() {
+    if (!this.taskStartTime) return '00:00';
+    const elapsed = Date.now() - this.taskStartTime;
+    const seconds = Math.floor(elapsed / 1000) % 60;
+    const minutes = Math.floor(elapsed / 60000);
+    return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+  }
+
+  /**
+   * Check if timer is currently running
+   */
+  isTimerRunning() {
+    return this.taskStartTime !== null;
+  }
+
+  // ==========================================
+  // Agent Depth Tracking Methods
+  // ==========================================
+
+  /**
+   * Update the current agent depth
+   */
+  setAgentDepth(depth) {
+    this.currentAgentDepth = depth;
+  }
+
+  /**
+   * Get the current agent depth
+   */
+  getAgentDepth() {
+    return this.currentAgentDepth;
+  }
+
+  /**
+   * Reset depth tracking (called when task ends)
+   */
+  resetDepthTracking() {
+    this.currentAgentDepth = 0;
   }
 }

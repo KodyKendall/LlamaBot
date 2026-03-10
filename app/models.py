@@ -58,6 +58,25 @@ class Prompt(ActiveRecordMixin, SQLModel, table=True):
     usage_count: int = Field(default=0)
 
 
+class Skill(ActiveRecordMixin, SQLModel, table=True):
+    """A reusable skill prompt that can be stacked with other prompts.
+
+    Skills are injected after the selected prompt in the message chain.
+    Multiple skills can be selected at once (multi-select).
+    All users share the same skill library.
+    """
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(max_length=100, index=True)
+    content: str = Field(sa_type=sa.Text)  # TEXT type for unlimited length
+    description: Optional[str] = Field(default=None, max_length=500)
+    group: str = Field(max_length=50, default="General", index=True)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: Optional[datetime] = Field(default=None)
+    is_active: bool = Field(default=True)
+    usage_count: int = Field(default=0)
+
+
 class CommandHistory(ActiveRecordMixin, SQLModel, table=True):
     """Stores slash command execution history."""
 

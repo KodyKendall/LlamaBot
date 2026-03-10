@@ -7,7 +7,7 @@ import { PlanMessageRenderer } from './PlanMessageRenderer.js';
 import { ToolIcons } from '../utils/icons.js';
 
 // Tools that should be expandable to show args and output
-const EXPANDABLE_TOOLS = ['grep_files', 'glob_files', 'bash_command', 'delegate_task'];
+const EXPANDABLE_TOOLS = ['grep_files', 'glob_files', 'bash_command', 'delegate_task', 'delegate_research'];
 
 // Tools that should be expandable but only show input args (no output)
 const INPUT_ONLY_EXPANDABLE_TOOLS = ['read_file', 'edit_file', 'write_file'];
@@ -23,27 +23,52 @@ export class ToolMessageRenderer {
 
   /**
    * Create collapsible tool message HTML
+   * @param {string} toolName - Name of the tool
+   * @param {string} firstArgument - First argument for display
+   * @param {string} toolArgs - Tool arguments as JSON string
+   * @param {string} toolResult - Tool result (optional)
+   * @param {number} agentDepth - Depth of the agent (0 = main, 1+ = sub-agent)
    */
-  createCollapsibleToolMessage(toolName, firstArgument, toolArgs, toolResult) {
+  createCollapsibleToolMessage(toolName, firstArgument, toolArgs, toolResult, agentDepth = 0) {
     const uniqueId = generateUniqueId('tool');
 
     // Special rendering for different tool types
     if (toolName === 'write_todos') {
-      return this.renderTodoList(uniqueId, toolArgs);
+      return this.renderTodoList(uniqueId, toolArgs, agentDepth);
     }
 
     if (INPUT_ONLY_EXPANDABLE_TOOLS.includes(toolName)) {
-      return this.renderInputOnlyExpandable(uniqueId, toolName, firstArgument, toolArgs);
+      return this.renderInputOnlyExpandable(uniqueId, toolName, firstArgument, toolArgs, agentDepth);
     }
 
     // Default tool rendering
-    return this.renderDefaultTool(uniqueId, toolName, firstArgument, toolArgs, toolResult);
+    return this.renderDefaultTool(uniqueId, toolName, firstArgument, toolArgs, toolResult, agentDepth);
+  }
+
+  /**
+   * Render sub-agent badge HTML
+   * @param {number} depth - Agent depth (0 = main agent, 1+ = sub-agent)
+   * @returns {string} HTML for the badge, or empty string if main agent
+   */
+  _renderSubagentBadge(depth) {
+    if (depth === 0) return '';
+
+    // Show depth number only for depth > 1 (nested sub-agents)
+    const depthIndicator = depth > 1 ? `<span class="depth-num">${depth}</span>` : '';
+
+    return `
+      <span class="subagent-badge" data-depth="${depth}" title="Sub-agent depth ${depth}">
+        <svg width="8" height="8" viewBox="0 0 8 8"><circle cx="4" cy="4" r="3" fill="currentColor"/></svg>
+        ${depthIndicator}
+      </span>
+    `;
   }
 
   /**
    * Render todo list tool using new plan-based renderer
+   * @param {number} agentDepth - Depth of the agent (0 = main, 1+ = sub-agent)
    */
-  renderTodoList(uniqueId, toolArgs) {
+  renderTodoList(uniqueId, toolArgs, agentDepth = 0) {
     const todos = JSON.parse(toolArgs)['todos'];
 
     // Use the new plan-based renderer for a sleeker UI
@@ -52,25 +77,30 @@ export class ToolMessageRenderer {
     return this.planRenderer.createPlanMessage(
       'Task Plan',
       todos,
-      { collapsible: true, showHeader: true }
+      { collapsible: true, showHeader: true, agentDepth }
     );
   }
 
   /**
    * Render tools that only show file path when expanded (no output)
    * Used for read_file, edit_file, etc.
+   * @param {number} agentDepth - Depth of the agent (0 = main, 1+ = sub-agent)
    */
-  renderInputOnlyExpandable(uniqueId, toolName, _firstArgument, toolArgs) {
+  renderInputOnlyExpandable(uniqueId, toolName, _firstArgument, toolArgs, agentDepth = 0) {
     const icon = ToolIcons.getIcon(toolName);
-    const displayName = this._formatToolName(toolName);
+    const baseName = this._formatToolName(toolName);
+    // Add emoji prefix for sub-agent tools
+    const displayName = agentDepth > 0 ? `🔹 ${baseName}` : baseName;
+    const subagentBadge = this._renderSubagentBadge(agentDepth);
 
     // Extract the file_path from args (more reliable than firstArgument for edit_file)
     const filePath = this._extractFilePath(toolArgs);
     const displayTarget = filePath ? this._extractFilename(filePath) : '';
 
     return `
-      <div data-llamabot="tool-expandable" data-tool-id="${uniqueId}" data-input-only="true" onclick="toggleToolExpand('${uniqueId}')">
-        <div data-llamabot="tool-compact" data-expandable="true">
+      <div data-llamabot="tool-expandable" data-tool-id="${uniqueId}" data-input-only="true" data-agent-depth="${agentDepth}" onclick="toggleToolExpand('${uniqueId}')">
+        <div data-llamabot="tool-compact" data-expandable="true" data-agent-depth="${agentDepth}">
+          ${subagentBadge}
           ${icon}
           <span data-llamabot="tool-compact-name">${displayName}</span>
           ${displayTarget ? `<span data-llamabot="tool-compact-target">${this._escapeHtml(displayTarget)}</span>` : ''}
@@ -101,24 +131,30 @@ export class ToolMessageRenderer {
   /**
    * Render default tool - minimal compact version
    * For expandable tools (Grep, Glob, Bash), make them clickable to show args/output
+   * @param {number} agentDepth - Depth of the agent (0 = main, 1+ = sub-agent)
    */
-  renderDefaultTool(uniqueId, toolName, firstArgument, toolArgs, toolResult) {
+  renderDefaultTool(uniqueId, toolName, firstArgument, toolArgs, toolResult, agentDepth = 0) {
     const icon = ToolIcons.getIcon(toolName);
-    const displayName = this._formatToolName(toolName);
-    const displayTarget = firstArgument ? this._extractFilename(firstArgument) : '';
+    const baseName = this._formatToolName(toolName);
+    // Add emoji prefix for sub-agent tools
+    const displayName = agentDepth > 0 ? `🔹 ${baseName}` : baseName;
+    const displayTarget = this._extractDisplayTarget(toolName, firstArgument);
     const isExpandable = EXPANDABLE_TOOLS.includes(toolName);
+    const subagentBadge = this._renderSubagentBadge(agentDepth);
 
     if (isExpandable) {
       // Store the tool data for later retrieval
       this.toolDataStore.set(uniqueId, {
         toolName,
         toolArgs,
-        toolResult: toolResult || ''
+        toolResult: toolResult || '',
+        agentDepth
       });
 
       return `
-        <div data-llamabot="tool-expandable" data-tool-id="${uniqueId}" onclick="toggleToolExpand('${uniqueId}')">
-          <div data-llamabot="tool-compact" data-expandable="true">
+        <div data-llamabot="tool-expandable" data-tool-id="${uniqueId}" data-agent-depth="${agentDepth}" onclick="toggleToolExpand('${uniqueId}')">
+          <div data-llamabot="tool-compact" data-expandable="true" data-agent-depth="${agentDepth}">
+            ${subagentBadge}
             ${icon}
             <span data-llamabot="tool-compact-name">${displayName}</span>
             ${displayTarget ? `<span data-llamabot="tool-compact-target">${this._escapeHtml(displayTarget)}</span>` : ''}
@@ -139,7 +175,8 @@ export class ToolMessageRenderer {
     }
 
     return `
-      <div data-llamabot="tool-compact">
+      <div data-llamabot="tool-compact" data-agent-depth="${agentDepth}">
+        ${subagentBadge}
         ${icon}
         <span data-llamabot="tool-compact-name">${displayName}</span>
         ${displayTarget ? `<span data-llamabot="tool-compact-target">${this._escapeHtml(displayTarget)}</span>` : ''}
@@ -177,6 +214,28 @@ export class ToolMessageRenderer {
     // Handle both forward and backward slashes
     const parts = path.replace(/\\/g, '/').split('/');
     return parts[parts.length - 1];
+  }
+
+  /**
+   * Extract display target based on tool type
+   * For delegate tools, show truncated task description
+   * For file tools, show filename
+   * For bash, clean up command
+   */
+  _extractDisplayTarget(toolName, firstArgument) {
+    if (!firstArgument) return '';
+
+    // For delegate tools, truncate the task description
+    if (toolName === 'delegate_task' || toolName === 'delegate_research') {
+      const maxLength = 60;
+      if (firstArgument.length > maxLength) {
+        return firstArgument.substring(0, maxLength) + '...';
+      }
+      return firstArgument;
+    }
+
+    // For other tools, use existing filename extraction
+    return this._extractFilename(firstArgument);
   }
 
   /**

@@ -47,4 +47,9 @@
 - [x] Add prompt improvements surrounding the bash tool call
 
 0.4.0f: 
-- [] Fix prompt for test mode
+- [x] Fix prompt for test mode
+
+0.4.0g:
+- [x] Add skills into prompt
+- [x] Add timer for tasks 
+- [x] Add sub-agent visual indicator to tool calls

@@ -166,13 +166,22 @@ export class MessageRenderer {
       const toolCall = baseMessage.tool_calls[0];
       let firstArgument = toolCall.args[Object.keys(toolCall.args)[0]] || '';
 
+      // Extract agent depth for sub-agent badge display
+      const agentDepth = baseMessage.agent_depth || 0;
+
       messageDiv.innerHTML = this.toolRenderer.createCollapsibleToolMessage(
         toolCall.name,
         firstArgument,
         JSON.stringify(toolCall.args),
-        ''
+        '',
+        agentDepth
       );
       messageDiv.id = baseMessage.tool_calls[0].id;
+
+      // Add agent depth data attribute to the message div for CSS styling
+      if (agentDepth > 0) {
+        messageDiv.setAttribute('data-agent-depth', agentDepth);
+      }
     } else {
       // Apply custom CSS classes if configured (only for regular AI messages, not tool messages)
       if (this.config.cssClasses?.aiMessage) {
