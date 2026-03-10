@@ -124,6 +124,12 @@ class RequestHandler:
                     is_this_chunk_an_update_stream_type = isinstance(chunk, tuple) and len(chunk) == 3 and chunk[1] == 'updates'
                     logger.info(f"🍅🍅🍅 Chunk: {chunk}")
                     
+                    # Extract agent depth from subgraph tuple
+                    # chunk[0] is a tuple like () for main agent or ('tools:xxx',) for sub-agent
+                    subgraph_tuple = chunk[0] if isinstance(chunk, tuple) and len(chunk) >= 1 else ()
+                    agent_depth = len(subgraph_tuple)  # 0 = main agent, 1 = sub-agent, 2 = nested sub-agent
+                    is_subagent = agent_depth > 0
+
                     if is_this_chunk_an_llm_message:
                         message_chunk_from_llm = chunk[2][0] #AIMessageChunk object -> https://python.langchain.com/api_reference/core/messages/langchain_core.messages.ai.AIMessageChunk.html
                         data_type = "AIMessageChunk"
@@ -192,7 +198,9 @@ class RequestHandler:
                                 "content": text_content,  # Text content only (thinking separated)
                                 "thinking": thinking_content,  # Thinking/reasoning content (may be None)
                                 "tool_calls": [],
-                                "base_message": base_message_as_dict
+                                "base_message": base_message_as_dict,
+                                "agent_depth": agent_depth,  # 0 = main agent, 1+ = sub-agent depth
+                                "is_subagent": is_subagent,  # True if this is from a delegated sub-agent
                             }
                             if token_usage:
                                 ws_message["token_usage"] = token_usage
@@ -266,7 +274,9 @@ class RequestHandler:
                                             "type": message.type if hasattr(message, 'type') else "ai",
                                             "content": messages_as_string[-1] if messages_as_string else "",
                                             "tool_calls": tool_calls,
-                                            "base_message": base_message_as_dict
+                                            "base_message": base_message_as_dict,
+                                            "agent_depth": agent_depth,  # 0 = main agent, 1+ = sub-agent depth
+                                            "is_subagent": is_subagent,  # True if this is from a delegated sub-agent
                                         }
                                         if token_usage:
                                             llamapress_user_interface_json["token_usage"] = token_usage

@@ -782,8 +782,17 @@ def get_rails_container_name():
 # Initialize container name at module load (used by capture_rails_logs)
 RAILS_CONT = get_rails_container_name()
 
-def rails_api_sh(snippet: str, workdir: str = WORKDIR) -> str:
-    """Execute a command in the Rails Docker container via Docker API."""
+def rails_api_sh(snippet: str, workdir: str = WORKDIR, timeout_seconds: int = 60) -> str:
+    """Execute a command in the Rails Docker container via Docker API.
+
+    Args:
+        snippet: The bash command to execute
+        workdir: Working directory inside the container
+        timeout_seconds: Maximum time to wait for command completion (default 60, max 600)
+    """
+    # Clamp timeout to reasonable bounds (30 seconds minimum to 10 minutes max)
+    timeout_seconds = max(30, min(timeout_seconds, 600))
+
     try:
         # Get container name dynamically (handles restarts and varying prefixes)
         container_name = get_rails_container_name()
@@ -832,7 +841,7 @@ def rails_api_sh(snippet: str, workdir: str = WORKDIR) -> str:
             f"http://localhost/exec/{exec_id}/start"
         ]
         
-        start_result = subprocess.run(start_cmd, capture_output=True, text=True, timeout=60)
+        start_result = subprocess.run(start_cmd, capture_output=True, text=True, timeout=timeout_seconds)
         if start_result.returncode != 0:
             return f"START-EXEC ERROR: {start_result.stderr or start_result.stdout}"
         
@@ -910,6 +919,7 @@ def bash_command(
     command: str,
     runtime: ToolRuntime,
     workdir: str = WORKDIR,
+    timeout_seconds: int = 60,
 ) -> Command:
     """Execute a bash command in the Rails container."""
     tool_call_id = runtime.tool_call_id
@@ -926,7 +936,7 @@ def bash_command(
                 }
             )
 
-    raw_result = rails_api_sh(command, workdir)
+    raw_result = rails_api_sh(command, workdir, timeout_seconds)
 
     # Truncate large outputs to prevent context window explosion
     result = truncate_output(raw_result, BASH_OUTPUT_MAX_CHARS)

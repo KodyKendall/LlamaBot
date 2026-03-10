@@ -2718,6 +2718,117 @@ body {
     visibility: visible;
 }
 
+/* ============================================
+   DURATION TIMER (inline with thinking indicator)
+   Shows elapsed time while agent is working
+   Styled to match the silver shimmer of thinking text
+   ============================================ */
+
+.duration-timer-inline {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    margin-left: auto;  /* Push to the right side of the thinking area */
+    font-size: 0.7rem;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    /* Match the silver/gray color of the thinking indicator text */
+    color: #999;
+    opacity: 0.8;
+}
+
+.duration-timer-inline .timer-icon {
+    width: 10px;
+    height: 10px;
+    color: #888;
+}
+
+.duration-timer-inline .timer-text {
+    color: #999;
+    min-width: 30px;
+    font-weight: 400;
+    letter-spacing: 0.3px;
+}
+
+/* ============================================
+   SUB-AGENT BADGE ON TOOL CALLS
+   Visual indicator for sub-agent tool calls
+   ============================================ */
+
+.subagent-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 1px 5px;
+    background: rgba(59, 130, 246, 0.15);
+    border-radius: 4px;
+    font-size: 0.6rem;
+    color: rgba(59, 130, 246, 0.9);
+    margin-right: 4px;
+    flex-shrink: 0;
+}
+
+.subagent-badge svg {
+    color: rgba(59, 130, 246, 0.8);
+    flex-shrink: 0;
+}
+
+.subagent-badge .depth-num {
+    font-weight: 600;
+    font-size: 0.55rem;
+    margin-left: 1px;
+}
+
+/* Depth 2+ uses pink/magenta for visual distinction */
+[data-agent-depth="2"] .subagent-badge,
+.subagent-badge[data-depth="2"] {
+    background: rgba(236, 72, 153, 0.12);
+    color: rgba(236, 72, 153, 0.9);
+}
+
+[data-agent-depth="2"] .subagent-badge svg,
+.subagent-badge[data-depth="2"] svg {
+    color: rgba(236, 72, 153, 0.8);
+}
+
+/* Depth 3+ uses orange for even deeper nesting */
+[data-agent-depth="3"] .subagent-badge,
+.subagent-badge[data-depth="3"] {
+    background: rgba(251, 146, 60, 0.12);
+    color: rgba(251, 146, 60, 0.9);
+}
+
+[data-agent-depth="3"] .subagent-badge svg,
+.subagent-badge[data-depth="3"] svg {
+    color: rgba(251, 146, 60, 0.8);
+}
+
+/* Left border accent for sub-agent tools */
+[data-llamabot="tool-compact"][data-agent-depth]:not([data-agent-depth="0"]) {
+    border-left: 2px solid rgba(59, 130, 246, 0.4);
+    padding-left: 10px;
+}
+
+[data-llamabot="tool-compact"][data-agent-depth="2"] {
+    border-left-color: rgba(236, 72, 153, 0.4);
+}
+
+[data-llamabot="tool-compact"][data-agent-depth="3"] {
+    border-left-color: rgba(251, 146, 60, 0.4);
+}
+
+/* Subtle indent for sub-agent tool expandables */
+[data-llamabot="tool-expandable"][data-agent-depth]:not([data-agent-depth="0"]) {
+    margin-left: 8px;
+}
+
+[data-llamabot="tool-expandable"][data-agent-depth="2"] {
+    margin-left: 16px;
+}
+
+[data-llamabot="tool-expandable"][data-agent-depth="3"] {
+    margin-left: 24px;
+}
+
 /* Unread badge */
 .unread-badge {
     position: absolute;
@@ -3327,6 +3438,15 @@ body {
     gap: 4px;
 }
 
+/* Elapsed time shown on completed plan badges */
+.plan-elapsed-time {
+    font-size: 0.8em;
+    font-weight: 400;
+    color: #999;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    margin-left: 4px;
+}
+
 .plan-expand-hint {
     color: rgba(255, 255, 255, 0.3);
     font-size: 0.8em;
@@ -3879,6 +3999,499 @@ body {
     color: #c4b5fd;
 }
 
+/* ============== Prompt/Skill Panel Tabs ============== */
+.prompt-panel-tabs {
+    display: flex;
+    gap: 0;
+    flex: 1;
+}
+
+.prompt-panel-tab {
+    padding: 6px 16px;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: rgba(255, 255, 255, 0.5);
+    cursor: pointer;
+    font-size: 0.85rem;
+    font-weight: 500;
+    transition: all 0.2s;
+}
+
+.prompt-panel-tab:hover {
+    color: rgba(255, 255, 255, 0.8);
+}
+
+.prompt-panel-tab.active {
+    color: #8b5cf6;
+    border-bottom-color: #8b5cf6;
+}
+
+.prompt-panel-tab[data-tab="skills"].active {
+    color: #3b82f6;
+    border-bottom-color: #3b82f6;
+}
+
+/* ============== Skill Items ============== */
+.skill-item {
+    padding: 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+    margin-bottom: 6px;
+    background: rgba(0, 0, 0, 0.1);
+    border: 1px solid transparent;
+}
+
+.skill-item:hover {
+    background: rgba(59, 130, 246, 0.1);
+    border-color: rgba(59, 130, 246, 0.3);
+}
+
+.skill-item.selected {
+    background: rgba(59, 130, 246, 0.15);
+    border-color: rgba(59, 130, 246, 0.4);
+}
+
+.skill-item:last-child {
+    margin-bottom: 0;
+}
+
+.skill-item-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+
+.skill-item-checkbox {
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 0.9rem;
+    width: 16px;
+}
+
+.skill-item.selected .skill-item-checkbox {
+    color: #3b82f6;
+}
+
+.skill-item-name {
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 0.9rem;
+    flex: 1;
+}
+
+.skill-item-group {
+    font-size: 0.7rem;
+    background: rgba(59, 130, 246, 0.2);
+    color: #3b82f6;
+    padding: 2px 8px;
+    border-radius: 4px;
+}
+
+.skill-item-description {
+    font-size: 0.75rem;
+    color: rgba(255, 255, 255, 0.4);
+    margin-bottom: 4px;
+    margin-left: 24px;
+    font-style: italic;
+}
+
+.skill-item-preview {
+    font-size: 0.8rem;
+    color: rgba(255, 255, 255, 0.5);
+    line-height: 1.4;
+    margin-left: 24px;
+}
+
+/* ============== Skills Badges Container ============== */
+.skills-selected-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+    align-items: center;
+}
+
+.skill-badge {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.4rem 0.6rem;
+    background: rgba(59, 130, 246, 0.15);
+    border: 1px solid rgba(59, 130, 246, 0.3);
+    border-radius: 6px;
+    font-size: 0.8rem;
+    color: var(--text-color);
+    position: relative;
+}
+
+.skill-badge-icon {
+    color: #3b82f6;
+    font-size: 0.8rem;
+}
+
+.skill-badge-text {
+    color: #60a5fa;
+    font-weight: 500;
+    cursor: pointer;
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    transition: color 0.2s ease;
+}
+
+.skill-badge-text:hover {
+    color: #93c5fd;
+    text-decoration: underline;
+}
+
+.skill-badge-close {
+    background: none;
+    border: none;
+    color: var(--text-color);
+    font-size: 1rem;
+    cursor: pointer;
+    padding: 0;
+    width: 16px;
+    height: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.6;
+    transition: opacity 0.2s ease;
+}
+
+.skill-badge-close:hover {
+    opacity: 1;
+}
+
+/* ============== Add/Edit Buttons in Panel ============== */
+.prompt-panel-add {
+    background: rgba(139, 92, 246, 0.2);
+    border: 1px solid rgba(139, 92, 246, 0.3);
+    color: #8b5cf6;
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+}
+
+.prompt-panel-add:hover {
+    background: rgba(139, 92, 246, 0.3);
+    border-color: rgba(139, 92, 246, 0.5);
+}
+
+.prompt-panel-add.skill {
+    background: rgba(59, 130, 246, 0.2);
+    border-color: rgba(59, 130, 246, 0.3);
+    color: #3b82f6;
+}
+
+.prompt-panel-add.skill:hover {
+    background: rgba(59, 130, 246, 0.3);
+    border-color: rgba(59, 130, 246, 0.5);
+}
+
+.prompt-item-edit,
+.skill-item-edit {
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.4);
+    cursor: pointer;
+    padding: 4px 6px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    transition: all 0.2s;
+    opacity: 0;
+}
+
+.prompt-item:hover .prompt-item-edit,
+.skill-item:hover .skill-item-edit {
+    opacity: 1;
+}
+
+.prompt-item-edit:hover {
+    background: rgba(139, 92, 246, 0.2);
+    color: #8b5cf6;
+}
+
+.skill-item-edit:hover {
+    background: rgba(59, 130, 246, 0.2);
+    color: #3b82f6;
+}
+
+.prompt-create-btn {
+    background: rgba(139, 92, 246, 0.2);
+    border: 1px solid rgba(139, 92, 246, 0.3);
+    color: #8b5cf6;
+    padding: 8px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    transition: all 0.2s;
+}
+
+.prompt-create-btn:hover {
+    background: rgba(139, 92, 246, 0.3);
+}
+
+.prompt-create-btn.skill {
+    background: rgba(59, 130, 246, 0.2);
+    border-color: rgba(59, 130, 246, 0.3);
+    color: #3b82f6;
+}
+
+.prompt-create-btn.skill:hover {
+    background: rgba(59, 130, 246, 0.3);
+}
+
+/* ============== Edit Modal ============== */
+.prompt-edit-modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.7);
+    z-index: 2000;
+    justify-content: center;
+    align-items: center;
+    backdrop-filter: blur(4px);
+}
+
+.prompt-edit-modal.open {
+    display: flex;
+}
+
+.prompt-edit-modal-content {
+    background: #2d2d2d;
+    border: 1px solid rgba(139, 92, 246, 0.3);
+    border-radius: 12px;
+    width: 90%;
+    max-width: 500px;
+    max-height: 80vh;
+    overflow-y: auto;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+.prompt-edit-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.prompt-edit-modal-title {
+    margin: 0;
+    font-size: 1.1rem;
+    color: var(--text-color);
+}
+
+.prompt-edit-modal-close {
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 1.5rem;
+    cursor: pointer;
+    padding: 0;
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    transition: all 0.2s;
+}
+
+.prompt-edit-modal-close:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-color);
+}
+
+.prompt-edit-form {
+    padding: 20px;
+}
+
+.prompt-edit-field {
+    margin-bottom: 16px;
+}
+
+.prompt-edit-field label {
+    display: block;
+    margin-bottom: 6px;
+    font-size: 0.85rem;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.prompt-edit-field input,
+.prompt-edit-field textarea {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.2);
+    color: var(--text-color);
+    font-family: inherit;
+    font-size: 0.9rem;
+    box-sizing: border-box;
+}
+
+.prompt-edit-field input:focus,
+.prompt-edit-field textarea:focus {
+    outline: none;
+    border-color: rgba(139, 92, 246, 0.5);
+}
+
+.prompt-edit-field textarea {
+    min-height: 150px;
+    resize: vertical;
+}
+
+.prompt-edit-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin-top: 20px;
+}
+
+.prompt-edit-actions-right {
+    display: flex;
+    gap: 12px;
+}
+
+.prompt-edit-cancel {
+    padding: 8px 16px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-color);
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: all 0.2s;
+}
+
+.prompt-edit-cancel:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.prompt-edit-save {
+    padding: 8px 16px;
+    border: none;
+    border-radius: 6px;
+    background: #8b5cf6;
+    color: white;
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: all 0.2s;
+}
+
+.prompt-edit-save:hover {
+    background: #7c3aed;
+}
+
+.prompt-edit-save.skill {
+    background: #3b82f6;
+}
+
+.prompt-edit-save.skill:hover {
+    background: #2563eb;
+}
+
+.prompt-edit-delete {
+    padding: 8px 16px;
+    border: 1px solid rgba(239, 68, 68, 0.4);
+    border-radius: 6px;
+    background: rgba(239, 68, 68, 0.1);
+    color: #ef4444;
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: all 0.2s;
+}
+
+.prompt-edit-delete:hover {
+    background: rgba(239, 68, 68, 0.2);
+    border-color: rgba(239, 68, 68, 0.6);
+}
+
+/* ============== Skill Expanded Popup ============== */
+.skill-expanded-popup {
+    display: none;
+    position: absolute;
+    bottom: calc(100% + 12px);
+    left: 0;
+    right: 0;
+    min-width: 300px;
+    background: rgba(30, 24, 45, 0.98);
+    border: 2px solid rgba(59, 130, 246, 0.5);
+    border-radius: 12px;
+    z-index: 1000;
+    box-shadow: 0 8px 32px rgba(59, 130, 246, 0.3), 0 4px 16px rgba(0, 0, 0, 0.5);
+    max-height: 400px;
+    overflow: hidden;
+    flex-direction: column;
+}
+
+.skill-expanded-popup.open {
+    display: flex;
+}
+
+.skill-expanded-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    background: rgba(59, 130, 246, 0.15);
+    border-bottom: 1px solid rgba(59, 130, 246, 0.3);
+}
+
+.skill-expanded-title {
+    font-weight: 600;
+    color: #60a5fa;
+    font-size: 0.95rem;
+}
+
+.skill-expanded-close {
+    background: rgba(239, 68, 68, 0.2);
+    border: 1px solid rgba(239, 68, 68, 0.4);
+    color: #ef4444;
+    font-size: 1.3rem;
+    cursor: pointer;
+    padding: 0;
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 6px;
+    transition: all 0.2s ease;
+    font-weight: bold;
+}
+
+.skill-expanded-close:hover {
+    background: rgba(239, 68, 68, 0.4);
+    border-color: rgba(239, 68, 68, 0.6);
+    color: #f87171;
+}
+
+.skill-expanded-content {
+    padding: 16px;
+    font-size: 0.9rem;
+    color: rgba(255, 255, 255, 0.9);
+    white-space: pre-wrap;
+    line-height: 1.6;
+    overflow-y: auto;
+    max-height: 340px;
+}
+
 /* Mobile responsive for prompt library */
 @media screen and (max-width: 768px) {
     .prompt-library-panel {
@@ -3895,6 +4508,20 @@ body {
 
     .prompt-panel-list {
         max-height: 180px;
+    }
+
+    .skills-selected-badges {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .skill-badge {
+        justify-content: space-between;
+    }
+
+    .skill-badge-text {
+        max-width: none;
+        flex: 1;
     }
 }
 

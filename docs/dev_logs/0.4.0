@@ -39,3 +39,17 @@
 0.4.0c: 
 - [x] Improve prompt to explain sub-agent delegation concept
 - [x] Supress Ruby/Rails env info on the bash tool
+
+0.4.0d:
+- [x] Fix error with prompt library to save prompts over 10,000 characters
+
+0.4.0e:
+- [x] Add prompt improvements surrounding the bash tool call
+
+0.4.0f: 
+- [x] Fix prompt for test mode
+
+0.4.0g:
+- [x] Add skills into prompt
+- [x] Add timer for tasks 
+- [x] Add sub-agent visual indicator to tool calls

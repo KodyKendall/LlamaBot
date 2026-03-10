@@ -462,7 +462,7 @@ async def users_page(admin: User = Depends(admin_required)):
 
 @router.get("/prompt-library", response_class=HTMLResponse)
 async def prompt_library_page(current_user: User = Depends(get_current_user)):
-    """Serve the prompt library management page."""
+    """Serve the prompt library management page with tabs for Prompts and Skills."""
     html = """
 <!DOCTYPE html>
 <html>
@@ -478,6 +478,8 @@ async def prompt_library_page(current_user: User = Depends(get_current_user)):
             --border-color: #404040;
             --accent-color: #8b5cf6;
             --accent-hover: #7c3aed;
+            --skill-color: #3b82f6;
+            --skill-hover: #2563eb;
         }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -496,7 +498,7 @@ async def prompt_library_page(current_user: User = Depends(get_current_user)):
             display: flex;
             align-items: center;
             gap: 15px;
-            margin-bottom: 30px;
+            margin-bottom: 20px;
         }
         .back-btn {
             display: flex;
@@ -513,6 +515,37 @@ async def prompt_library_page(current_user: User = Depends(get_current_user)):
         }
         .back-btn:hover { background: var(--border-color); }
         h1 { font-size: 1.5rem; margin: 0; flex: 1; }
+        /* Tab styles */
+        .tab-container {
+            display: flex;
+            gap: 0;
+            margin-bottom: 20px;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .tab-btn {
+            padding: 12px 24px;
+            background: transparent;
+            border: none;
+            border-bottom: 3px solid transparent;
+            color: rgba(255,255,255,0.6);
+            cursor: pointer;
+            font-size: 0.95rem;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+        .tab-btn:hover {
+            color: var(--text-color);
+            background: rgba(255,255,255,0.05);
+        }
+        .tab-btn.active {
+            color: var(--accent-color);
+            border-bottom-color: var(--accent-color);
+        }
+        .tab-btn.active.skill-tab {
+            color: var(--skill-color);
+            border-bottom-color: var(--skill-color);
+        }
+        .tab-btn i { margin-right: 8px; }
         .card {
             background: var(--chat-bg);
             border: 1px solid var(--border-color);
@@ -684,40 +717,85 @@ async def prompt_library_page(current_user: User = Depends(get_current_user)):
         }
         .message.success { background: rgba(139, 92, 246, 0.2); color: #a78bfa; display: block; }
         .message.error { background: rgba(244, 67, 54, 0.2); color: #e57373; display: block; }
+        /* Skill-specific styles */
+        .skill-card { border-left: 3px solid var(--skill-color); }
+        .skill-card:hover { border-color: var(--skill-hover); }
+        .skill-group-badge {
+            background: rgba(59, 130, 246, 0.2);
+            color: var(--skill-color);
+        }
+        .btn-skill {
+            background: var(--skill-color);
+            border-color: var(--skill-color);
+        }
+        .btn-skill:hover { background: var(--skill-hover); }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
             <a href="/" class="back-btn"><i class="fa-solid fa-arrow-left"></i></a>
-            <h1>Prompt Library</h1>
-            <button class="btn btn-primary" onclick="showCreateModal()">
-                <i class="fa-solid fa-plus"></i> New Prompt
+            <h1>Prompt & Skill Library</h1>
+        </div>
+
+        <div class="tab-container">
+            <button class="tab-btn active" data-tab="prompts" onclick="switchTab('prompts')">
+                <i class="fa-solid fa-book"></i> Prompts
+            </button>
+            <button class="tab-btn skill-tab" data-tab="skills" onclick="switchTab('skills')">
+                <i class="fa-solid fa-bolt"></i> Skills
             </button>
         </div>
 
         <div id="message" class="message"></div>
 
-        <div class="filter-bar">
-            <input type="text" class="search-input" placeholder="Search prompts..." id="searchInput">
-            <select class="group-select" id="groupFilter">
-                <option value="">All Groups</option>
-            </select>
+        <!-- Prompts Tab -->
+        <div class="tab-content active" id="promptsTab">
+            <div class="filter-bar">
+                <input type="text" class="search-input" placeholder="Search prompts..." id="promptSearchInput">
+                <select class="group-select" id="promptGroupFilter">
+                    <option value="">All Groups</option>
+                </select>
+                <button class="btn btn-primary" onclick="showCreatePromptModal()">
+                    <i class="fa-solid fa-plus"></i> New Prompt
+                </button>
+            </div>
+            <div class="prompt-grid" id="promptGrid">
+                <div class="empty-state">
+                    <i class="fa-solid fa-book"></i>
+                    <p>Loading prompts...</p>
+                </div>
+            </div>
         </div>
 
-        <div class="prompt-grid" id="promptGrid">
-            <div class="empty-state">
-                <i class="fa-solid fa-book"></i>
-                <p>Loading prompts...</p>
+        <!-- Skills Tab -->
+        <div class="tab-content" id="skillsTab">
+            <div class="filter-bar">
+                <input type="text" class="search-input" placeholder="Search skills..." id="skillSearchInput">
+                <select class="group-select" id="skillGroupFilter">
+                    <option value="">All Groups</option>
+                </select>
+                <button class="btn btn-skill" onclick="showCreateSkillModal()">
+                    <i class="fa-solid fa-plus"></i> New Skill
+                </button>
+            </div>
+            <div class="prompt-grid" id="skillGrid">
+                <div class="empty-state">
+                    <i class="fa-solid fa-bolt"></i>
+                    <p>Loading skills...</p>
+                </div>
             </div>
         </div>
     </div>
 
+    <!-- Prompt Modal -->
     <div class="modal" id="promptModal">
         <div class="modal-content">
             <div class="modal-header">
-                <h2 id="modalTitle">New Prompt</h2>
-                <button class="modal-close" onclick="closeModal()">&times;</button>
+                <h2 id="promptModalTitle">New Prompt</h2>
+                <button class="modal-close" onclick="closePromptModal()">&times;</button>
             </div>
             <form id="promptForm">
                 <input type="hidden" id="promptId">
@@ -727,34 +805,102 @@ async def prompt_library_page(current_user: User = Depends(get_current_user)):
                 </div>
                 <div class="form-group">
                     <label>Group</label>
-                    <input type="text" id="promptGroup" value="General" list="groupSuggestions" placeholder="e.g., Code Review, Writing, Analysis">
-                    <datalist id="groupSuggestions"></datalist>
+                    <input type="text" id="promptGroup" value="General" list="promptGroupSuggestions" placeholder="e.g., Code Review, Writing, Analysis">
+                    <datalist id="promptGroupSuggestions"></datalist>
                 </div>
                 <div class="form-group">
                     <label>Description (optional)</label>
                     <input type="text" id="promptDescription" placeholder="Brief description of when to use this prompt">
                 </div>
                 <div class="form-group">
-                    <label>Content * <span id="charCount" style="float: right; font-weight: normal; color: #666;">0 / 50,000</span></label>
-                    <textarea id="promptContent" required placeholder="Enter your prompt template..." oninput="updateCharCount()"></textarea>
+                    <label>Content * <span id="promptCharCount" style="float: right; font-weight: normal; color: #666;">0 / 50,000</span></label>
+                    <textarea id="promptContent" required placeholder="Enter your prompt template..." oninput="updatePromptCharCount()"></textarea>
                 </div>
                 <div style="display: flex; gap: 12px; justify-content: flex-end;">
-                    <button type="button" class="btn btn-danger" id="deleteBtn" onclick="deletePrompt()" style="display: none; margin-right: auto;">Delete</button>
-                    <button type="button" class="btn" onclick="closeModal()">Cancel</button>
+                    <button type="button" class="btn btn-danger" id="promptDeleteBtn" onclick="deletePrompt()" style="display: none; margin-right: auto;">Delete</button>
+                    <button type="button" class="btn" onclick="closePromptModal()">Cancel</button>
                     <button type="submit" class="btn btn-primary">Save</button>
                 </div>
             </form>
         </div>
     </div>
 
+    <!-- Skill Modal -->
+    <div class="modal" id="skillModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="skillModalTitle">New Skill</h2>
+                <button class="modal-close" onclick="closeSkillModal()">&times;</button>
+            </div>
+            <form id="skillForm">
+                <input type="hidden" id="skillId">
+                <div class="form-group">
+                    <label>Name *</label>
+                    <input type="text" id="skillName" required placeholder="e.g., Code Review Focus">
+                </div>
+                <div class="form-group">
+                    <label>Group</label>
+                    <input type="text" id="skillGroup" value="General" list="skillGroupSuggestions" placeholder="e.g., Engineering, Communication">
+                    <datalist id="skillGroupSuggestions"></datalist>
+                </div>
+                <div class="form-group">
+                    <label>Description (optional)</label>
+                    <input type="text" id="skillDescription" placeholder="Brief description of what this skill adds">
+                </div>
+                <div class="form-group">
+                    <label>Content * <span id="skillCharCount" style="float: right; font-weight: normal; color: #666;">0 / 50,000</span></label>
+                    <textarea id="skillContent" required placeholder="Enter your skill content..." oninput="updateSkillCharCount()"></textarea>
+                </div>
+                <div style="display: flex; gap: 12px; justify-content: flex-end;">
+                    <button type="button" class="btn btn-danger" id="skillDeleteBtn" onclick="deleteSkill()" style="display: none; margin-right: auto;">Delete</button>
+                    <button type="button" class="btn" onclick="closeSkillModal()">Cancel</button>
+                    <button type="submit" class="btn btn-skill">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <script>
+        // State
+        let activeTab = 'prompts';
         let prompts = [];
-        let groups = [];
+        let promptGroups = [];
         let currentPromptId = null;
+        let skills = [];
+        let skillGroups = [];
+        let currentSkillId = null;
+
+        // Tab switching
+        function switchTab(tab) {
+            activeTab = tab;
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.tab === tab);
+            });
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.toggle('active', content.id === tab + 'Tab');
+            });
+
+            // Load data for the tab if not already loaded
+            if (tab === 'prompts' && prompts.length === 0) {
+                loadPrompts();
+                loadPromptGroups();
+            } else if (tab === 'skills' && skills.length === 0) {
+                loadSkills();
+                loadSkillGroups();
+            }
+        }
+
+        // Check URL for tab parameter
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('tab') === 'skills') {
+            switchTab('skills');
+        }
+
+        // ============== PROMPTS ==============
 
         async function loadPrompts() {
-            const search = document.getElementById('searchInput').value;
-            const group = document.getElementById('groupFilter').value;
+            const search = document.getElementById('promptSearchInput').value;
+            const group = document.getElementById('promptGroupFilter').value;
 
             let url = '/api/prompts';
             const params = new URLSearchParams();
@@ -771,24 +917,24 @@ async def prompt_library_page(current_user: User = Depends(get_current_user)):
             }
         }
 
-        async function loadGroups() {
+        async function loadPromptGroups() {
             try {
                 const response = await fetch('/api/prompts/groups');
                 const data = await response.json();
-                groups = data.groups;
+                promptGroups = data.groups;
 
-                const select = document.getElementById('groupFilter');
-                const datalist = document.getElementById('groupSuggestions');
+                const select = document.getElementById('promptGroupFilter');
+                const datalist = document.getElementById('promptGroupSuggestions');
 
                 select.innerHTML = '<option value="">All Groups</option>';
                 datalist.innerHTML = '';
 
-                groups.forEach(g => {
+                promptGroups.forEach(g => {
                     select.innerHTML += '<option value="' + escapeHtml(g) + '">' + escapeHtml(g) + '</option>';
                     datalist.innerHTML += '<option value="' + escapeHtml(g) + '">';
                 });
             } catch (error) {
-                console.error('Error loading groups:', error);
+                console.error('Error loading prompt groups:', error);
             }
         }
 
@@ -812,38 +958,25 @@ async def prompt_library_page(current_user: User = Depends(get_current_user)):
             `).join('');
         }
 
-        function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
-        }
-
-        function showMessage(text, type) {
-            const msg = document.getElementById('message');
-            msg.textContent = text;
-            msg.className = 'message ' + type;
-            setTimeout(() => msg.className = 'message', 3000);
-        }
-
-        function updateCharCount() {
+        function updatePromptCharCount() {
             const content = document.getElementById('promptContent').value;
             const count = content.length;
-            const charCount = document.getElementById('charCount');
+            const charCount = document.getElementById('promptCharCount');
             charCount.textContent = count.toLocaleString() + ' / 50,000';
             charCount.style.color = count > 50000 ? '#e57373' : (count > 40000 ? '#ffb74d' : '#666');
         }
 
-        function showCreateModal() {
+        function showCreatePromptModal() {
             currentPromptId = null;
-            document.getElementById('modalTitle').textContent = 'New Prompt';
+            document.getElementById('promptModalTitle').textContent = 'New Prompt';
             document.getElementById('promptId').value = '';
             document.getElementById('promptName').value = '';
             document.getElementById('promptGroup').value = 'General';
             document.getElementById('promptDescription').value = '';
             document.getElementById('promptContent').value = '';
-            document.getElementById('deleteBtn').style.display = 'none';
+            document.getElementById('promptDeleteBtn').style.display = 'none';
             document.getElementById('promptModal').classList.add('active');
-            updateCharCount();
+            updatePromptCharCount();
         }
 
         function editPrompt(id) {
@@ -851,18 +984,18 @@ async def prompt_library_page(current_user: User = Depends(get_current_user)):
             if (!prompt) return;
 
             currentPromptId = id;
-            document.getElementById('modalTitle').textContent = 'Edit Prompt';
+            document.getElementById('promptModalTitle').textContent = 'Edit Prompt';
             document.getElementById('promptId').value = prompt.id;
             document.getElementById('promptName').value = prompt.name;
             document.getElementById('promptGroup').value = prompt.group;
             document.getElementById('promptDescription').value = prompt.description || '';
             document.getElementById('promptContent').value = prompt.content;
-            document.getElementById('deleteBtn').style.display = 'block';
+            document.getElementById('promptDeleteBtn').style.display = 'block';
             document.getElementById('promptModal').classList.add('active');
-            updateCharCount();
+            updatePromptCharCount();
         }
 
-        function closeModal() {
+        function closePromptModal() {
             document.getElementById('promptModal').classList.remove('active');
             currentPromptId = null;
         }
@@ -875,9 +1008,9 @@ async def prompt_library_page(current_user: User = Depends(get_current_user)):
                 const response = await fetch('/api/prompts/' + currentPromptId, { method: 'DELETE' });
                 if (response.ok) {
                     showMessage('Prompt deleted', 'success');
-                    closeModal();
+                    closePromptModal();
                     loadPrompts();
-                    loadGroups();
+                    loadPromptGroups();
                 } else {
                     const error = await response.json();
                     showMessage(error.detail || 'Error deleting prompt', 'error');
@@ -893,7 +1026,6 @@ async def prompt_library_page(current_user: User = Depends(get_current_user)):
             const id = document.getElementById('promptId').value;
             const content = document.getElementById('promptContent').value;
 
-            // Client-side validation for content length
             if (content.length > 50000) {
                 showMessage('Content is too long (' + content.length + ' chars). Max: 50,000 characters.', 'error');
                 return;
@@ -918,23 +1050,15 @@ async def prompt_library_page(current_user: User = Depends(get_current_user)):
 
                 if (response.ok) {
                     showMessage(id ? 'Prompt updated' : 'Prompt created', 'success');
-                    closeModal();
+                    closePromptModal();
                     loadPrompts();
-                    loadGroups();
+                    loadPromptGroups();
                 } else {
-                    // Handle both JSON and non-JSON error responses
                     let errorMsg = 'Error saving prompt';
                     const contentType = response.headers.get('content-type');
                     if (contentType && contentType.includes('application/json')) {
                         const error = await response.json();
                         errorMsg = error.detail || errorMsg;
-                    } else {
-                        const text = await response.text();
-                        if (response.status === 422) {
-                            errorMsg = 'Validation error: Check content length (max 50,000 chars) and required fields';
-                        } else {
-                            errorMsg = 'Server error (' + response.status + '): ' + (text.substring(0, 100) || 'Unknown error');
-                        }
                     }
                     showMessage(errorMsg, 'error');
                 }
@@ -943,22 +1067,218 @@ async def prompt_library_page(current_user: User = Depends(get_current_user)):
             }
         });
 
-        let searchTimeout;
-        document.getElementById('searchInput').addEventListener('input', () => {
-            clearTimeout(searchTimeout);
-            searchTimeout = setTimeout(loadPrompts, 300);
+        // ============== SKILLS ==============
+
+        async function loadSkills() {
+            const search = document.getElementById('skillSearchInput').value;
+            const group = document.getElementById('skillGroupFilter').value;
+
+            let url = '/api/skills';
+            const params = new URLSearchParams();
+            if (search) params.set('search', search);
+            if (group) params.set('group', group);
+            if (params.toString()) url += '?' + params.toString();
+
+            try {
+                const response = await fetch(url);
+                skills = await response.json();
+                renderSkills();
+            } catch (error) {
+                showMessage('Error loading skills: ' + error.message, 'error');
+            }
+        }
+
+        async function loadSkillGroups() {
+            try {
+                const response = await fetch('/api/skills/groups');
+                const data = await response.json();
+                skillGroups = data.groups;
+
+                const select = document.getElementById('skillGroupFilter');
+                const datalist = document.getElementById('skillGroupSuggestions');
+
+                select.innerHTML = '<option value="">All Groups</option>';
+                datalist.innerHTML = '';
+
+                skillGroups.forEach(g => {
+                    select.innerHTML += '<option value="' + escapeHtml(g) + '">' + escapeHtml(g) + '</option>';
+                    datalist.innerHTML += '<option value="' + escapeHtml(g) + '">';
+                });
+            } catch (error) {
+                console.error('Error loading skill groups:', error);
+            }
+        }
+
+        function renderSkills() {
+            const grid = document.getElementById('skillGrid');
+            if (skills.length === 0) {
+                grid.innerHTML = '<div class="empty-state"><i class="fa-solid fa-bolt"></i><p>No skills found. Create your first skill!</p></div>';
+                return;
+            }
+
+            grid.innerHTML = skills.map(s => `
+                <div class="prompt-card skill-card" onclick="editSkill(${s.id})">
+                    <div class="prompt-name">${escapeHtml(s.name)}</div>
+                    ${s.description ? '<div class="prompt-description">' + escapeHtml(s.description) + '</div>' : ''}
+                    <div class="prompt-content">${escapeHtml(s.content)}</div>
+                    <div class="prompt-meta">
+                        <span class="prompt-group-badge skill-group-badge">${escapeHtml(s.group)}</span>
+                        <span>Used ${s.usage_count} times</span>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function updateSkillCharCount() {
+            const content = document.getElementById('skillContent').value;
+            const count = content.length;
+            const charCount = document.getElementById('skillCharCount');
+            charCount.textContent = count.toLocaleString() + ' / 50,000';
+            charCount.style.color = count > 50000 ? '#e57373' : (count > 40000 ? '#ffb74d' : '#666');
+        }
+
+        function showCreateSkillModal() {
+            currentSkillId = null;
+            document.getElementById('skillModalTitle').textContent = 'New Skill';
+            document.getElementById('skillId').value = '';
+            document.getElementById('skillName').value = '';
+            document.getElementById('skillGroup').value = 'General';
+            document.getElementById('skillDescription').value = '';
+            document.getElementById('skillContent').value = '';
+            document.getElementById('skillDeleteBtn').style.display = 'none';
+            document.getElementById('skillModal').classList.add('active');
+            updateSkillCharCount();
+        }
+
+        function editSkill(id) {
+            const skill = skills.find(s => s.id === id);
+            if (!skill) return;
+
+            currentSkillId = id;
+            document.getElementById('skillModalTitle').textContent = 'Edit Skill';
+            document.getElementById('skillId').value = skill.id;
+            document.getElementById('skillName').value = skill.name;
+            document.getElementById('skillGroup').value = skill.group;
+            document.getElementById('skillDescription').value = skill.description || '';
+            document.getElementById('skillContent').value = skill.content;
+            document.getElementById('skillDeleteBtn').style.display = 'block';
+            document.getElementById('skillModal').classList.add('active');
+            updateSkillCharCount();
+        }
+
+        function closeSkillModal() {
+            document.getElementById('skillModal').classList.remove('active');
+            currentSkillId = null;
+        }
+
+        async function deleteSkill() {
+            if (!currentSkillId) return;
+            if (!confirm('Delete this skill?')) return;
+
+            try {
+                const response = await fetch('/api/skills/' + currentSkillId, { method: 'DELETE' });
+                if (response.ok) {
+                    showMessage('Skill deleted', 'success');
+                    closeSkillModal();
+                    loadSkills();
+                    loadSkillGroups();
+                } else {
+                    const error = await response.json();
+                    showMessage(error.detail || 'Error deleting skill', 'error');
+                }
+            } catch (error) {
+                showMessage('Error: ' + error.message, 'error');
+            }
+        }
+
+        document.getElementById('skillForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const id = document.getElementById('skillId').value;
+            const content = document.getElementById('skillContent').value;
+
+            if (content.length > 50000) {
+                showMessage('Content is too long (' + content.length + ' chars). Max: 50,000 characters.', 'error');
+                return;
+            }
+
+            const data = {
+                name: document.getElementById('skillName').value,
+                group: document.getElementById('skillGroup').value,
+                description: document.getElementById('skillDescription').value,
+                content: content
+            };
+
+            const url = id ? '/api/skills/' + id : '/api/skills';
+            const method = id ? 'PATCH' : 'POST';
+
+            try {
+                const response = await fetch(url, {
+                    method,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+
+                if (response.ok) {
+                    showMessage(id ? 'Skill updated' : 'Skill created', 'success');
+                    closeSkillModal();
+                    loadSkills();
+                    loadSkillGroups();
+                } else {
+                    let errorMsg = 'Error saving skill';
+                    const contentType = response.headers.get('content-type');
+                    if (contentType && contentType.includes('application/json')) {
+                        const error = await response.json();
+                        errorMsg = error.detail || errorMsg;
+                    }
+                    showMessage(errorMsg, 'error');
+                }
+            } catch (error) {
+                showMessage('Error: ' + error.message, 'error');
+            }
         });
 
-        document.getElementById('groupFilter').addEventListener('change', loadPrompts);
+        // ============== COMMON ==============
 
-        // Close modal on outside click
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function showMessage(text, type) {
+            const msg = document.getElementById('message');
+            msg.textContent = text;
+            msg.className = 'message ' + type;
+            setTimeout(() => msg.className = 'message', 3000);
+        }
+
+        // Search handlers
+        let promptSearchTimeout;
+        document.getElementById('promptSearchInput').addEventListener('input', () => {
+            clearTimeout(promptSearchTimeout);
+            promptSearchTimeout = setTimeout(loadPrompts, 300);
+        });
+        document.getElementById('promptGroupFilter').addEventListener('change', loadPrompts);
+
+        let skillSearchTimeout;
+        document.getElementById('skillSearchInput').addEventListener('input', () => {
+            clearTimeout(skillSearchTimeout);
+            skillSearchTimeout = setTimeout(loadSkills, 300);
+        });
+        document.getElementById('skillGroupFilter').addEventListener('change', loadSkills);
+
+        // Close modals on outside click
         document.getElementById('promptModal').addEventListener('click', (e) => {
-            if (e.target.id === 'promptModal') closeModal();
+            if (e.target.id === 'promptModal') closePromptModal();
+        });
+        document.getElementById('skillModal').addEventListener('click', (e) => {
+            if (e.target.id === 'skillModal') closeSkillModal();
         });
 
         // Initial load
         loadPrompts();
-        loadGroups();
+        loadPromptGroups();
     </script>
 </body>
 </html>

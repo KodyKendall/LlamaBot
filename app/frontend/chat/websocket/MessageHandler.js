@@ -295,6 +295,15 @@ export class MessageHandler {
    * Handle complete AI message
    */
   handleAIMessage(data) {
+    // Extract agent depth for sub-agent badge display
+    const agentDepth = data.agent_depth || 0;
+    const isSubagent = data.is_subagent || false;
+
+    // Update depth tracking in app state
+    if (agentDepth !== undefined) {
+      this.appState.setAgentDepth(agentDepth);
+    }
+
     // Only process tool calls if present
     if (data.base_message?.tool_calls?.length > 0) {
       // Finalize any current thinking block before tool calls
@@ -312,13 +321,21 @@ export class MessageHandler {
       if (!hasContent) {
         // OpenAI style: Content is empty, create the tool call message with the tool calls
         // This will render as a tool call message (not a content message)
-        this.messageRenderer.addMessage('', 'ai', data.base_message);
+        // Add agent depth info to base_message for tool rendering
+        const baseMessageWithDepth = {
+          ...data.base_message,
+          agent_depth: agentDepth,
+          is_subagent: isSubagent
+        };
+        this.messageRenderer.addMessage('', 'ai', baseMessageWithDepth);
       } else {
         // Claude/Gemini style: Content was already streamed
         // Just create the tool call placeholders for each tool call
         for (const toolCall of data.base_message.tool_calls) {
           const toolCallMessage = {
-            tool_calls: [toolCall]
+            tool_calls: [toolCall],
+            agent_depth: agentDepth,
+            is_subagent: isSubagent
           };
           // Empty content since this is just the tool call placeholder
           this.messageRenderer.addMessage('', 'ai', toolCallMessage);
@@ -400,6 +417,13 @@ export class MessageHandler {
       this.currentThinkingId = null;
       this.currentThinkingBuffer = '';
       this.hasNonThinkingMessageSinceLastThinking = false;
+
+      // Dispatch event to notify ChatApp to stop duration timer
+      // Include elapsed time for display on completion badges
+      const elapsedTime = this.appState.getFormattedElapsedTime();
+      window.dispatchEvent(new CustomEvent('agentTaskCompleted', {
+        detail: { elapsedTime }
+      }));
     } else {
       // Finalize thinking before tool messages so they appear interspersed
       if (data.type === 'tool') {

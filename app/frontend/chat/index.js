@@ -202,6 +202,17 @@ class ChatApp {
       this.hideThinkingIndicator();
     });
 
+    // Listen for agent task completion to stop duration timer and show elapsed time
+    window.addEventListener('agentTaskCompleted', (event) => {
+      const elapsedTime = event.detail?.elapsedTime;
+      this.stopDurationTimerDisplay();
+
+      // Update any completed plan badges with the elapsed time
+      if (elapsedTime) {
+        this.updateCompletedPlanBadges(elapsedTime);
+      }
+    });
+
     // Initialize event listeners
     this.initEventListeners();
 
@@ -576,6 +587,23 @@ class ChatApp {
       message = `${promptContent}\n\n${message}`;
     }
 
+    // Append skill contents after prompt, before user message
+    const skillsContent = this.promptManager?.getSelectedSkillsContent();
+    if (skillsContent && skillsContent.length > 0) {
+      const skillsText = skillsContent.join('\n\n---\n\n');
+      // Insert skills between prompt and user's typed message
+      // If prompt was prepended, skills go after it but before the original message
+      if (promptContent) {
+        // message is currently: promptContent + "\n\n" + originalMessage
+        // We want: promptContent + "\n\n" + skillsText + "\n\n" + originalMessage
+        const originalMessage = message.substring(promptContent.length + 2);
+        message = `${promptContent}\n\n${skillsText}\n\n${originalMessage}`;
+      } else {
+        // No prompt, just prepend skills before the user message
+        message = `${skillsText}\n\n${message}`;
+      }
+    }
+
     // Check if there's a selected element and append it to the message
     const selectedHTML = this.elementSelector?.getSelectedElementHTML();
     if (selectedHTML) {
@@ -628,6 +656,9 @@ class ChatApp {
     if (this.faviconBadgeManager) {
       this.faviconBadgeManager.startThinking();
     }
+
+    // Start the duration timer
+    this.startDurationTimerDisplay();
 
     // Change placeholder text while thinking
     input.placeholder = 'Queue another message...';
@@ -1047,6 +1078,94 @@ class ChatApp {
         this.messageRenderer.renderErrorMessage('Lost connection');
       }
     }
+
+    // Also stop the duration timer on disconnect
+    this.stopDurationTimerDisplay();
+  }
+
+  // ==========================================
+  // Duration Timer Display Methods
+  // ==========================================
+
+  /**
+   * Start the duration timer display
+   * Timer is shown inline with the thinking indicator text
+   */
+  startDurationTimerDisplay() {
+    // Start the timer in app state
+    this.appState.startTaskTimer();
+
+    // Update every second - the timer text is injected into the thinking area
+    this.appState.taskTimerInterval = setInterval(() => {
+      this.updateTimerInThinkingArea();
+    }, 1000);
+  }
+
+  /**
+   * Update the timer display in the thinking area
+   * Appends/updates the timer text next to the thinking indicator
+   */
+  updateTimerInThinkingArea() {
+    if (!this.elements.thinkingArea) return;
+
+    const elapsedTime = this.appState.getFormattedElapsedTime();
+    let timerSpan = this.elements.thinkingArea.querySelector('.duration-timer-inline');
+
+    if (!timerSpan) {
+      // Create the timer span if it doesn't exist
+      timerSpan = document.createElement('span');
+      timerSpan.className = 'duration-timer-inline';
+      timerSpan.innerHTML = `
+        <svg class="timer-icon" viewBox="0 0 24 24" width="12" height="12">
+          <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2"/>
+          <path d="M12 6v6l4 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        <span class="timer-text">${elapsedTime}</span>
+      `;
+      this.elements.thinkingArea.appendChild(timerSpan);
+    } else {
+      // Update existing timer
+      const timerText = timerSpan.querySelector('.timer-text');
+      if (timerText) {
+        timerText.textContent = elapsedTime;
+      }
+    }
+  }
+
+  /**
+   * Stop the duration timer display
+   * Called when task completes or on disconnect
+   */
+  stopDurationTimerDisplay() {
+    // Stop the timer in app state
+    this.appState.stopTaskTimer();
+
+    // Remove timer from thinking area if it exists
+    if (this.elements.thinkingArea) {
+      const timerSpan = this.elements.thinkingArea.querySelector('.duration-timer-inline');
+      if (timerSpan) {
+        timerSpan.remove();
+      }
+    }
+
+    // Reset depth tracking
+    this.appState.resetDepthTracking();
+  }
+
+  /**
+   * Update completed plan badges with the elapsed time
+   * Finds plan badges that show "✓ Complete" and appends the elapsed time
+   */
+  updateCompletedPlanBadges(elapsedTime) {
+    // Find all plan done badges that don't already have a time
+    const doneBadges = this.container.querySelectorAll('.plan-done-badge:not([data-has-time])');
+
+    doneBadges.forEach(badge => {
+      // Mark as having time so we don't add it twice
+      badge.setAttribute('data-has-time', 'true');
+      // Append the elapsed time
+      badge.innerHTML = `✓ Complete <span class="plan-elapsed-time">${elapsedTime}</span>`;
+    });
   }
 
   /**
