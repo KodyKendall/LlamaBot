@@ -1011,6 +1011,23 @@ RAILS_ENV=test bundle exec rspec --format documentation    # Verbose output
 - System/feature specs (`spec/system/`, `spec/features/`) — skip by default
 - Controller specs — skip entirely (use request specs if user asks for integration tests)
 
+### Request Specs: Use Path Helpers (CI Compatibility)
+
+When writing request specs, **always use path helpers** instead of hardcoded URL strings:
+
+```ruby
+# ❌ Bad - hardcoded URL fails in CI (localhost vs www.example.com)
+expect(response).to redirect_to("http://localhost:3000/tenders/#{tender.id}")
+
+# ✅ Good - path helper is host-agnostic
+expect(response).to redirect_to(tender_path(tender))
+
+# ✅ Good - with query params
+expect(response).to redirect_to(builder_tender_path(tender, open_breakdown: line_item.id))
+```
+
+**Why:** Local tests use `localhost:3000` but CI uses Rails default `www.example.com`. Path helpers (`*_path`) are host-agnostic and work in both environments.
+
 ---
 
 ## Communication Style

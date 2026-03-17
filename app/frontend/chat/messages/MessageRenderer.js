@@ -16,6 +16,9 @@ export class MessageRenderer {
     this.container = container;
     this.elements = elements;
     this.faviconBadgeManager = faviconBadgeManager;
+
+    // Set up event delegation for code block copy buttons
+    this.setupCodeBlockCopyHandler();
   }
 
   /**
@@ -218,6 +221,35 @@ export class MessageRenderer {
       });
     };
     messageDiv.appendChild(copyBtn);
+  }
+
+  /**
+   * Set up event delegation for code block copy buttons
+   */
+  setupCodeBlockCopyHandler() {
+    this.messageHistory.addEventListener('click', (e) => {
+      const copyBtn = e.target.closest('[data-llamabot="code-copy-btn"]');
+      if (!copyBtn) return;
+
+      e.stopPropagation();
+
+      // Find the code element within the same container
+      const container = copyBtn.closest('.code-block-container');
+      const codeElement = container?.querySelector('pre code');
+
+      if (codeElement) {
+        const codeText = codeElement.textContent;
+        navigator.clipboard.writeText(codeText).then(() => {
+          // Visual feedback
+          copyBtn.innerHTML = '<i class="fa-solid fa-check"></i>';
+          copyBtn.classList.add('copied');
+          setTimeout(() => {
+            copyBtn.innerHTML = '<i class="fa-regular fa-copy"></i>';
+            copyBtn.classList.remove('copied');
+          }, 1500);
+        });
+      }
+    });
   }
 
   /**

@@ -393,17 +393,27 @@ DO NOT WRITE ANY CODE - research only!
 
 ## STEP 2.5: Test Plan Preparation
 
-Identify what tests are appropriate for this ticket. Be light-touch — don't overdo it.
+Research existing tests and identify what tests need to be written or updated. Focus on model and request specs only — NO system/feature specs.
+
+**IMPORTANT:** We run ONLY relevant specs, not the full test suite. Identify the specific spec files that touch the affected models/controllers.
 
 **Model specs (`spec/models/`)** — Primary line of defense:
 - Which models are touched by this change?
-- What validations, callbacks, or scopes should be tested?
-- Are there existing specs in `spec/models/` for these models? (check with `ls spec/models/`)
+- **READ the existing spec file** (e.g., `spec/models/line_item_spec.rb`) to understand:
+  - What's already tested (validations, callbacks, scopes, methods)?
+  - What test patterns/factories are used?
+  - Will any existing tests break due to behavior changes?
+- What NEW validations, callbacks, scopes, or methods need tests?
+- What EXISTING tests need updating to reflect changed behavior?
 
 **Request specs (`spec/requests/`)** — For controller/API changes:
 - Does this ticket change controller actions or API endpoints?
-- Are there existing specs in `spec/requests/` for this resource? (check with `ls spec/requests/`)
-- What request/response behavior needs verification?
+- **READ the existing spec file** (e.g., `spec/requests/line_items_spec.rb`) to understand:
+  - What endpoints are already tested?
+  - What authentication/authorization patterns are used?
+  - Will any existing tests break due to behavior changes?
+- What NEW endpoint behavior needs tests?
+- What EXISTING tests need updating?
 
 **Choose the appropriate test type(s):**
 - Model logic changes → Model spec (primary)
@@ -411,7 +421,24 @@ Identify what tests are appropriate for this ticket. Be light-touch — don't ov
 - Full-stack feature → Model spec + Request spec
 - UI-only (copy/layout) → No new tests needed
 
+**AVOID:** System specs, feature specs, or any heavy browser-based tests. Stick to fast model + request specs.
+
 **What assertion would prove the desired behavior works?** (derived from Verification Criteria)
+
+**Test naming convention:** Derive the `describe` and `it` blocks from the User Story and Desired Behavior. The test name should read like the user's expectation in plain language.
+
+Example — if the User Story is "As a user, I want to see the correct rate so I can verify pricing" and Desired Behavior is "Rate column shows the calculated rate":
+```ruby
+describe "line item rate display" do
+  it "shows the calculated rate from buildup instead of 0" do
+    # ...
+  end
+end
+```
+
+**List the specific spec files to run** (not the full suite):
+- e.g., `spec/models/line_item_spec.rb`
+- e.g., `spec/requests/line_items_spec.rb`
 
 If this is a UI-only change with no model/controller logic, note: "No tests needed — UI/copy only."
 
@@ -1090,35 +1117,55 @@ Example: ## 2025-01-15 - BUG: Line Item Rate Shows 0 Instead of Final Buildup Ra
 
 ### Test Plan (RSpec Tests)
 
+**IMPORTANT:** Run ONLY relevant specs — NOT the full test suite. We use fast model and request specs only. NO system/feature specs.
+
 **Models changed:** [list models touched by this ticket]
 
 **Test Strategy:**
-Choose the appropriate test type(s) based on what the ticket changes. Be light-touch — don't overdo it.
+Choose the appropriate test type(s) based on what the ticket changes.
 
 - **Model specs (`spec/models/`)** — Primary line of defense. Use for validations, callbacks, scopes, business logic in models.
 - **Request specs (`spec/requests/`)** — Use when the ticket involves API endpoints, controller actions, or end-to-end request/response behavior.
+- **AVOID:** System specs, feature specs, or any heavy browser-based tests.
 
 | Ticket Type | Primary Test | Secondary Test |
 |-------------|--------------|----------------|
 | Model logic (validations, callbacks, scopes) | Model spec | — |
 | Controller/API endpoint changes | Request spec | Model spec if new logic |
-| UI-only (copy, layout, styling) | None needed | Run existing suites |
+| UI-only (copy, layout, styling) | None needed | — |
 | Full-stack feature (model + controller + view) | Model spec | Request spec |
 
-**New/Updated Specs to Write:**
-- [ ] `spec/models/[model]_spec.rb` — [specific behavior to test: validation, callback, scope, etc.]
-- [ ] `spec/requests/[resource]_spec.rb` — [specific endpoint behavior if applicable]
+**Test Naming Convention:**
+Derive `describe` and `it` blocks from the User Story and Desired Behavior. Test names should read like the user's expectation in plain language.
 
-**Regression Check (existing specs to run):**
+Example — User Story: "As a user, I want to see the correct rate so I can verify pricing"
+```ruby
+describe "line item rate display" do
+  it "shows the calculated rate from buildup instead of 0" do
+    # ...
+  end
+end
+```
+
+**Existing Specs to Update:**
+- [ ] `spec/models/[model]_spec.rb` — [what existing tests need updating due to behavior changes]
+- [ ] `spec/requests/[resource]_spec.rb` — [what existing tests need updating]
+
+**New Specs to Write:**
+- [ ] `spec/models/[model]_spec.rb` — [specific NEW behavior to test: validation, callback, scope, etc.]
+- [ ] `spec/requests/[resource]_spec.rb` — [specific NEW endpoint behavior if applicable]
+
+**Run These Specific Specs (not the full suite):**
 ```bash
-RAILS_ENV=test bundle exec rspec spec/models/
-RAILS_ENV=test bundle exec rspec spec/requests/
+# Only run specs for affected models/controllers
+RAILS_ENV=test bundle exec rspec spec/models/[model]_spec.rb
+RAILS_ENV=test bundle exec rspec spec/requests/[resource]_spec.rb
 ```
 
 **What proves this works:**
 - [ ] [Specific assertion derived from Verification Criteria — e.g., "expect(model.rate).to eq(calculated_value)"]
 
-*(If no model/controller logic changes: "No tests needed — UI/copy only. Run full test suite as sanity check.")*
+*(If no model/controller logic changes: "No tests needed — UI/copy only.")*
 
 ---
 

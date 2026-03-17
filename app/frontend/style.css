@@ -2513,6 +2513,56 @@ body {
     font-size: 0.85em;
 }
 
+/* Code block container with copy button */
+.code-block-container {
+    position: relative;
+    margin: 0.5em 0;
+}
+
+.code-block-container pre {
+    margin: 0;
+}
+
+.code-block-lang {
+    position: absolute;
+    top: 4px;
+    left: 10px;
+    font-size: 0.7em;
+    color: rgba(255, 255, 255, 0.4);
+    text-transform: uppercase;
+    font-family: inherit;
+    pointer-events: none;
+}
+
+.code-block-copy-btn {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 4px;
+    padding: 4px 8px;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.2s, background 0.2s;
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 0.8em;
+    z-index: 1;
+}
+
+.code-block-container:hover .code-block-copy-btn {
+    opacity: 1;
+}
+
+.code-block-copy-btn:hover {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.code-block-copy-btn.copied {
+    background: rgba(34, 197, 94, 0.3);
+    color: #22c55e;
+}
+
 [data-llamabot="ai-message"] strong,
 [data-llamabot="ai-message"] b,
 [data-llamabot="human-message"] strong,

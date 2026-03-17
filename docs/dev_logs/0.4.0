@@ -53,3 +53,7 @@
 - [x] Add skills into prompt
 - [x] Add timer for tasks 
 - [x] Add sub-agent visual indicator to tool calls
+
+0.4.0h: 
+- [x] Add copy button for code blocks in Leonardo messages
+- [x] Improve testing ability with prompts by specifying how to handle tests in ticket mode and engineering mode
