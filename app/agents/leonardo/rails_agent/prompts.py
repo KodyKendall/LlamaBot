@@ -864,6 +864,24 @@ Key points:
 - The controller caches any associations needed for the turbo stream response before calling destroy!
 - status: :see_other (303) is required for HTML redirects after DELETE
 
+**Active Storage (`has_many_attached`) Mistakes:**
+- ❌ Multi-file forms that lose existing attachments on edit (Rails 7.1+ replace behavior)
+
+In Rails 7.1+, `has_many_attached` **replaces** existing attachments on assignment — it does NOT append. An empty multi-file field submits `[""]`, which Rails compacts to `[]`, **deleting all existing attachments**.
+
+**Solution - Hidden fields with signed_id:**
+```erb
+<%# Preserve existing attachments via signed_id %>
+<% @post.images.each do |image| %>
+  <%= f.hidden_field :images, multiple: true, value: image.signed_id %>
+<% end %>
+<%= f.file_field :images, multiple: true %>
+```
+
+Key points:
+- `attach()` appends; assignment replaces — use `attach()` for additive operations
+- For `has_one_attached`, preserve on validation failure: `<%= f.hidden_field :avatar, value: @user.avatar.signed_id if @user.avatar.attached? %>`
+
 **DB Layer (Seeds & Migrations):**
 - ❌ `Date.today`, `Time.current`, or `rand` inside `find_or_create_by!` lookup keys (breaks idempotency)
 - ❌ `create!` in seeds without uniqueness guard (e.g., no `find_or_create_by!`)

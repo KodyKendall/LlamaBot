@@ -57,3 +57,7 @@
 0.4.0h: 
 - [x] Add copy button for code blocks in Leonardo messages
 - [x] Improve testing ability with prompts by specifying how to handle tests in ticket mode and engineering mode
+
+0.4.0i: 
+- [x] Add instructions for handling multi-image attachments in engineer mode for Rails 7.1 active storage attachments, (not clearing out existing files upon form submission)
+- [x] Fix agent mode UI sync bug (race condition), where it can sometimes run in a different agent mode from what the UI is showing

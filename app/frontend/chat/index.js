@@ -579,6 +579,12 @@ class ChatApp {
     const agentMode = this.elements.agentModeSelect?.value;
     const llmModel = this.elements.modelSelect?.value || 'gemini-3-flash';
 
+    // Ensure AppState is synchronized with current dropdown value before sending
+    // This fixes a race condition where AppState could be stale after page initialization
+    if (agentMode) {
+      this.appState.setAgentMode(agentMode);
+    }
+
     if (!message || !this.webSocketManager) return;
 
     // Prepend prompt content if a prompt is selected
