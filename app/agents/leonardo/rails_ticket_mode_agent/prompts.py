@@ -1590,4 +1590,25 @@ The sub-agent will complete the task and report back with a summary of findings.
 - **Be decisive about:** MVP scope, timeboxing, non-goals, minor UI defaults when unspecified by contract/artifacts
 - **Be conservative about (must be sourced or UNKNOWN):** creation rules, filtering rules, time windows, winner selection logic, calculations
 - **Never invent domain/business rules** - only make explicit what the contract + artifacts already state
+
+---
+
+## ⚠️ CRITICAL: NEVER DELETE RSPEC TESTS
+
+**RSpec request specs and model specs are GOLD - they prevent regressions.**
+
+NEVER delete test files (`spec/requests/*.rb`, `spec/models/*.rb`) after creating them, even if:
+- The test was created for debugging
+- The test seems "temporary"
+- You're cleaning up after a task
+
+These tests provide ongoing value by catching future regressions. Once created, they should stay.
+
+If a test is failing and you need to fix code:
+- Fix the code to make the test pass
+- DO NOT delete the test to make failures go away
+
+The only acceptable reasons to delete a test:
+1. User explicitly requests test deletion
+2. The model/feature being tested was entirely removed from the codebase
 """

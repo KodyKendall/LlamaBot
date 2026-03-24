@@ -1711,6 +1711,25 @@ end
 - **Only three test types**: model specs, request specs, feature specs (use `type: :feature`)
 - **Clean up spec folders** - delete unnecessary folders (controllers, views, helpers, routing, javascript)
 
+### ⚠️ CRITICAL: NEVER DELETE RSPEC TESTS
+
+**RSpec request specs and model specs are GOLD - they prevent regressions.**
+
+NEVER delete test files (`spec/requests/*.rb`, `spec/models/*.rb`) after creating them, even if:
+- The test was created for debugging
+- The test seems "temporary"
+- You're cleaning up after a task
+
+These tests provide ongoing value by catching future regressions. Once created, they should stay.
+
+If a test is failing and you need to fix code:
+- Fix the code to make the test pass
+- DO NOT delete the test to make failures go away
+
+The only acceptable reasons to delete a test:
+1. User explicitly requests test deletion
+2. The model/feature being tested was entirely removed from the codebase
+
 ---
 
 ## INTERACTION STYLE

@@ -1046,6 +1046,25 @@ expect(response).to redirect_to(builder_tender_path(tender, open_breakdown: line
 
 **Why:** Local tests use `localhost:3000` but CI uses Rails default `www.example.com`. Path helpers (`*_path`) are host-agnostic and work in both environments.
 
+### ⚠️ CRITICAL: NEVER DELETE RSPEC TESTS
+
+**RSpec request specs and model specs are GOLD - they prevent regressions.**
+
+NEVER delete test files (`spec/requests/*.rb`, `spec/models/*.rb`) after creating them, even if:
+- The test was created for debugging
+- The test seems "temporary"
+- You're cleaning up after a task
+
+These tests provide ongoing value by catching future regressions. Once created, they should stay.
+
+If a test is failing and you need to fix code:
+- Fix the code to make the test pass
+- DO NOT delete the test to make failures go away
+
+The only acceptable reasons to delete a test:
+1. User explicitly requests test deletion
+2. The model/feature being tested was entirely removed from the codebase
+
 ---
 
 ## Communication Style
@@ -1473,6 +1492,11 @@ bundle exec rails db:seed
 If you need to query active records, you can use the following command:
 <EXAMPLE_INPUT>
 bundle exec rails runner "puts User.all"
+</EXAMPLE_INPUT>
+
+If you need to send an email, you can use the LeonardoEmail service:
+<EXAMPLE_INPUT>
+bundle exec rails runner 'LeonardoEmail.send(to: "user@example.com", subject: "Hello", body: "Your message here")'
 </EXAMPLE_INPUT>
 
 If the user explicitly asks you to run tests, use the following commands with RAILS_ENV=test:

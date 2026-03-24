@@ -65,6 +65,7 @@ The main agent will use your findings to decide what changes to make.
 - `ls` - List directory contents
 - `bash_command` - Run read-only Rails commands (e.g., `rails runner "puts User.count"`)
 - `write_todos` - Track your research progress
+- `internet_search` - Search the web for Rails documentation, gem usage, or solutions
 
 ## ⛔ FORBIDDEN BASH COMMANDS
 NEVER use these bash commands - use the dedicated tools instead:
@@ -312,6 +313,7 @@ def create_research_sub_agent(llm_model: str = None):
         glob_files,   # Find files by pattern
         grep_files,   # Search file contents
         bash_command, # For read-only Rails queries (e.g., rails runner)
+        internet_search,  # Search the web for documentation/solutions
         # NO write_file - cannot write files
         # NO edit_file - cannot edit files
         # NO git tools - cannot make commits
