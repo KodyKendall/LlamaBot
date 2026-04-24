@@ -112,6 +112,8 @@ export class MessageHandler {
       this.handleAIMessageChunk(data);
     } else if (data.type === 'ai') {
       this.handleAIMessage(data);
+    } else if (data.type === 'approval_request') {
+      this.handleApprovalRequest(data);
     } else {
       this.handleGenericMessage(data);
     }
@@ -404,10 +406,82 @@ export class MessageHandler {
   }
 
   /**
+   * Handle approval request (HITL - agent wants to execute a destructive tool)
+   */
+  handleApprovalRequest(data) {
+    this.finalizeCurrentThinking();
+
+    const actionRequests = data.action_requests || [];
+    const threadId = data.thread_id;
+    const agentName = data.agent_name;
+
+    for (const action of actionRequests) {
+      const approvalId = `approval-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
+      const toolName = action.name;
+      const argsStr = JSON.stringify(action.args, null, 2);
+      // Truncate args display for readability
+      const argsDisplay = argsStr.length > 300 ? argsStr.substring(0, 300) + '...' : argsStr;
+
+      const html = `
+        <div class="approval-card" data-approval-id="${approvalId}">
+          <div class="approval-header">
+            <span class="approval-icon">⚠️</span>
+            <span>Leonardo wants to: <strong>${this._escapeHtml(toolName)}</strong></span>
+          </div>
+          <div class="approval-args"><pre>${this._escapeHtml(argsDisplay)}</pre></div>
+          <div class="approval-actions">
+            <button class="approval-btn approve-btn" data-action="approve">Approve</button>
+            <button class="approval-btn reject-btn" data-action="reject">Reject</button>
+          </div>
+        </div>
+      `;
+
+      this.messageRenderer.addMessage(html, 'approval_request', null);
+
+      // Attach event listeners to the buttons
+      setTimeout(() => {
+        const card = document.querySelector(`[data-approval-id="${approvalId}"]`);
+        if (!card) return;
+        card.querySelectorAll('.approval-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const decision = btn.dataset.action;
+            // Disable buttons
+            card.querySelectorAll('.approval-btn').forEach(b => b.disabled = true);
+            card.classList.add(decision === 'approve' ? 'approved' : 'rejected');
+            btn.classList.add('selected');
+
+            if (decision === 'reject') {
+              // Cancel the run and tell Leonardo
+              window.dispatchEvent(new CustomEvent('approvalRejected', {
+                detail: { thread_id: threadId, agent_name: agentName, toolName }
+              }));
+            } else {
+              // Approve — resume the graph
+              window.dispatchEvent(new CustomEvent('approvalDecision', {
+                detail: {
+                  decisions: [{ type: 'approve' }],
+                  thread_id: threadId,
+                  agent_name: agentName,
+                }
+              }));
+            }
+          });
+        });
+      }, 0);
+    }
+  }
+
+  _escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  /**
    * Handle generic messages (tool, error, end, etc.)
    */
   handleGenericMessage(data) {
-    if (data.type === 'end') {
+    if (data.type === 'end' || data.type === 'system_message' || data.type === 'error') {
       this.messageRenderer.handleEndMessage();
       // Clear plan tracking when conversation ends
       this.activePlanId = null;
@@ -424,6 +498,11 @@ export class MessageHandler {
       window.dispatchEvent(new CustomEvent('agentTaskCompleted', {
         detail: { elapsedTime }
       }));
+
+      // For system_message or error, also render the message content
+      if ((data.type === 'system_message' || data.type === 'error') && data.content) {
+        this.messageRenderer.addMessage(data.content, data.type, data.base_message);
+      }
     } else {
       // Finalize thinking before tool messages so they appear interspersed
       if (data.type === 'tool') {

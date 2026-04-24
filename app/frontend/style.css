@@ -1700,6 +1700,197 @@ body {
     border-color: rgba(139, 92, 246, 0.1);
 }
 
+.send-icon-button.stop-mode {
+    background: rgba(239, 68, 68, 0.12);
+    border-color: rgba(239, 68, 68, 0.3);
+    color: #ef4444;
+}
+
+.send-icon-button.stop-mode:hover:not(:disabled) {
+    background: rgba(239, 68, 68, 0.2);
+    border-color: rgba(239, 68, 68, 0.4);
+}
+
+/* Execution mode selector (dropdown with descriptions) */
+.execution-mode-selector {
+    position: relative;
+    flex-shrink: 0;
+}
+
+.execution-mode-trigger {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    font-size: 7px;
+    font-weight: 500;
+    border: 1px solid rgba(139, 92, 246, 0.2);
+    background: rgba(139, 92, 246, 0.08);
+    color: #8b5cf6;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    line-height: 1.2;
+    white-space: nowrap;
+}
+
+.execution-mode-trigger:hover {
+    background: rgba(139, 92, 246, 0.15);
+    border-color: rgba(139, 92, 246, 0.3);
+}
+
+.execution-mode-icon {
+    font-size: 12px;
+    line-height: 1;
+}
+
+.execution-mode-menu {
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 0;
+    min-width: 280px;
+    background: #1e1e2e;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 10px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    padding: 6px;
+    z-index: 1000;
+}
+
+.execution-mode-option {
+    padding: 10px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.1s ease;
+}
+
+.execution-mode-option:hover {
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.execution-mode-option.selected {
+    background: rgba(139, 92, 246, 0.08);
+}
+
+.execution-mode-option-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.9);
+    margin-bottom: 2px;
+}
+
+.execution-mode-check {
+    margin-right: 6px;
+    color: #8b5cf6;
+}
+
+.execution-mode-option-desc {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.45);
+    line-height: 1.3;
+}
+
+/* Approval card */
+.approval-card {
+    background: rgba(251, 191, 36, 0.08);
+    border: 1px solid rgba(251, 191, 36, 0.25);
+    border-radius: 8px;
+    padding: 12px;
+    margin: 8px 0;
+}
+
+.approval-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    margin-bottom: 8px;
+}
+
+.approval-icon {
+    font-size: 16px;
+}
+
+.approval-args {
+    background: rgba(0, 0, 0, 0.15);
+    border-radius: 4px;
+    padding: 8px;
+    margin-bottom: 10px;
+    overflow-x: auto;
+}
+
+.approval-args pre {
+    margin: 0;
+    font-size: 12px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: rgba(255, 255, 255, 0.8);
+}
+
+.approval-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.approval-btn {
+    padding: 6px 16px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: all 0.15s ease;
+}
+
+.approve-btn {
+    background: rgba(34, 197, 94, 0.15);
+    border-color: rgba(34, 197, 94, 0.3);
+    color: #22c55e;
+}
+
+.approve-btn:hover:not(:disabled) {
+    background: rgba(34, 197, 94, 0.25);
+}
+
+.reject-btn {
+    background: rgba(239, 68, 68, 0.1);
+    border-color: rgba(239, 68, 68, 0.25);
+    color: #ef4444;
+}
+
+.reject-btn:hover:not(:disabled) {
+    background: rgba(239, 68, 68, 0.2);
+}
+
+.approval-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.approval-btn.selected {
+    opacity: 1;
+    font-weight: 600;
+}
+
+.approval-card.approved {
+    border-color: rgba(34, 197, 94, 0.3);
+    background: rgba(34, 197, 94, 0.05);
+}
+
+.approval-card.rejected {
+    border-color: rgba(239, 68, 68, 0.2);
+    background: rgba(239, 68, 68, 0.05);
+}
+
+/* System message */
+[data-llamabot="system-message"] {
+    text-align: center;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.4);
+    padding: 6px 0;
+    font-style: italic;
+}
+
 /* Element selector active state (for overflow menu item) */
 @keyframes pulse-selector {
     0%, 100% {

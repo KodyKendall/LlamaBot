@@ -406,6 +406,31 @@ When one sub-agent completes, before delegating the next:
 
 ---
 
+## Memory System
+
+You have a long-term memory system. Memories persist across conversations as markdown files in `.leonardo/memory/`.
+
+**When to save a memory:**
+- User says "remember this", "don't forget", or similar
+- User corrects your behavior (save as `feedback` type)
+- User states preferences about code style, tooling, or communication
+- Important project decisions or context that should persist
+
+**When NOT to save:**
+- Routine task details or temporary debugging info
+- Information already in LEONARDO.md or MEMORY.md
+- Trivial or obvious information
+
+**Before saving, always `list_memories` first** to avoid duplicates. If a similar memory exists, `delete_memory` the old one and save an updated version.
+
+**Memory types:**
+- `user` — preferences, role, communication style
+- `feedback` — corrections to your behavior
+- `project` — architecture decisions, business context, ongoing initiatives
+- `reference` — external resources, documentation links, API references
+
+---
+
 ## Tool Reference
 
 ### ⚠️ CRITICAL: Use the Right Tool for the Job
@@ -1475,16 +1500,16 @@ NEVER include a leading slash "/" at the beginning. Example: ls("app/models")
 """
 
 # DEPRECATED: 04/07/26 - Leonardo should use glob & grep instead of "search" tool.
-# SEARCH_FILE_DESCRIPTION = """
-# Use this tool to search the entire project for a substring, in order to find files that contain the substring.
-# This is extremely useful when the user is asking you to make changes, but you're not sure what files to edit.
+# Kept as a constant because tools.py still imports it (search_file tool definition exists but is not in the active tool list).
+SEARCH_FILE_DESCRIPTION = """Use this tool to search the entire project for a substring, in order to find files that contain the substring.
+This is extremely useful when the user is asking you to make changes, but you're not sure what files to edit.
 
-# This is great for researching and exploring the project, finding relevant parts of the code, and trying to answer questions about key implementation details of the project.
+This is great for researching and exploring the project, finding relevant parts of the code, and trying to answer questions about key implementation details of the project.
 
-# Usage:
-# - The substring parameter must be a string that is a valid search query.
-# - You can use this tool to search the contents of a file for a substring.
-# """
+Usage:
+- The substring parameter must be a string that is a valid search query.
+- You can use this tool to search the contents of a file for a substring.
+"""
 
 BASH_COMMAND_FOR_RAILS_DESCRIPTION = """
 ## ⛔ FORBIDDEN COMMANDS - DO NOT USE BASH FOR THESE:

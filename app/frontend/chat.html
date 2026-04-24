@@ -177,6 +177,29 @@
                     <button data-llamabot="element-selector-btn" class="tools-toggle-btn" title="Select element from page">
                         <i class="fa-solid fa-mouse-pointer"></i>
                     </button>
+                    <!-- Execution mode selector (dropdown with descriptions) -->
+                    <div class="execution-mode-selector" data-llamabot="execution-mode-selector">
+                        <button class="execution-mode-trigger" data-llamabot="execution-mode-trigger">
+                            <span class="execution-mode-icon"><i class="fa-solid fa-forward"></i></span>
+                            <span class="execution-mode-label" data-llamabot="execution-mode-label">Auto</span>
+                        </button>
+                        <div class="execution-mode-menu hidden" data-llamabot="execution-mode-menu">
+                            <div class="execution-mode-option" data-mode="ask">
+                                <div class="execution-mode-option-title">Ask before edits</div>
+                                <div class="execution-mode-option-desc">Leonardo will ask for approval before making each edit</div>
+                            </div>
+                            <div class="execution-mode-option" data-mode="auto">
+                                <div class="execution-mode-option-title">
+                                    <span class="execution-mode-check">✓</span> Edit automatically
+                                </div>
+                                <div class="execution-mode-option-desc">Leonardo will edit files without asking</div>
+                            </div>
+                            <div class="execution-mode-option" data-mode="plan">
+                                <div class="execution-mode-option-title">Plan mode</div>
+                                <div class="execution-mode-option-desc">Leonardo will explore the code and present a plan before editing</div>
+                            </div>
+                        </div>
+                    </div>
                     <!-- Agent mode selector (always visible) -->
                     <div class="custom-dropdown-container">
                         <select data-llamabot="agent-mode-select" class="custom-dropdown">

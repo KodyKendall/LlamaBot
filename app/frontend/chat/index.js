@@ -76,6 +76,10 @@ class ChatApp {
     // Store element references (will be populated in initComponents)
     this.elements = {};
 
+    // Agent running state (for stop button)
+    this.isAgentRunning = false;
+    this.cancelPressCount = 0;
+
     // Activity tracking for lease management
     this.lastActivitySync = 0;
     this.ACTIVITY_SYNC_INTERVAL = 60000; // Sync to backend every 60 seconds max
@@ -200,17 +204,51 @@ class ChatApp {
     // Listen for websocket disconnection to hide thinking indicator
     window.addEventListener('websocketDisconnected', () => {
       this.hideThinkingIndicator();
+      this.setAgentRunning(false);
     });
 
     // Listen for agent task completion to stop duration timer and show elapsed time
     window.addEventListener('agentTaskCompleted', (event) => {
       const elapsedTime = event.detail?.elapsedTime;
       this.stopDurationTimerDisplay();
+      this.setAgentRunning(false);
 
       // Update any completed plan badges with the elapsed time
       if (elapsedTime) {
         this.updateCompletedPlanBadges(elapsedTime);
       }
+    });
+
+    // Listen for HITL approval decisions and send via WebSocket
+    window.addEventListener('approvalDecision', (event) => {
+      if (!this.webSocketManager) return;
+      const { decisions, thread_id, agent_name } = event.detail;
+      this.webSocketManager.send({
+        type: 'approval_response',
+        decisions,
+        thread_id,
+        agent_name,
+      });
+    });
+
+    // Listen for HITL rejection — cancel the run and tell Leonardo
+    window.addEventListener('approvalRejected', (event) => {
+      if (!this.webSocketManager) return;
+      const { thread_id, agent_name, toolName } = event.detail;
+      // Cancel the paused graph
+      this.webSocketManager.send({ type: 'cancel' });
+      // Send a follow-up message so Leonardo knows why
+      setTimeout(() => {
+        this.webSocketManager.send({
+          message: `I rejected your proposed ${toolName} edit. Please don't make that change.`,
+          thread_id,
+          agent_name,
+          agent_mode: this.elements.agentModeSelect?.value,
+          llm_model: this.elements.modelSelect?.value || 'gemini-3-flash',
+          origin: window.location.host,
+          ask_before_edits: true,
+        });
+      }, 500);
     });
 
     // Initialize event listeners
@@ -322,6 +360,10 @@ class ChatApp {
       collapsedRecordingTimer: this.container.querySelector('[data-llamabot="collapsed-recording-timer"]'),
       floatingRecordIndicator: this.container.querySelector('[data-llamabot="floating-record-indicator"]'),
       floatingRecordTimer: this.container.querySelector('[data-llamabot="floating-record-timer"]'),
+      executionModeSelector: this.container.querySelector('[data-llamabot="execution-mode-selector"]'),
+      executionModeTrigger: this.container.querySelector('[data-llamabot="execution-mode-trigger"]'),
+      executionModeLabel: this.container.querySelector('[data-llamabot="execution-mode-label"]'),
+      executionModeMenu: this.container.querySelector('[data-llamabot="execution-mode-menu"]'),
       stopRecordingBtn: this.container.querySelector('[data-llamabot="stop-recording-btn"]')
     };
   }
@@ -330,9 +372,15 @@ class ChatApp {
    * Initialize event listeners
    */
   initEventListeners() {
-    // Send button
+    // Send button (doubles as stop button when agent is running)
     if (this.elements.sendButton) {
-      this.elements.sendButton.addEventListener('click', () => this.sendMessageWithDebugInfo());
+      this.elements.sendButton.addEventListener('click', () => {
+        if (this.isAgentRunning) {
+          this.handleStopClick();
+        } else {
+          this.sendMessageWithDebugInfo();
+        }
+      });
     }
 
     // Message input
@@ -340,7 +388,12 @@ class ChatApp {
       this.elements.messageInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
           e.preventDefault();
-          this.sendMessageWithDebugInfo();
+          const hasText = this.elements.messageInput.value.trim().length > 0;
+          if (hasText) {
+            this.sendMessageWithDebugInfo();
+          } else if (this.isAgentRunning) {
+            this.handleStopClick();
+          }
         }
       });
     }
@@ -364,6 +417,31 @@ class ChatApp {
       });
       // Initialize with short label
       this.updateDropdownLabel(this.elements.modelSelect);
+    }
+
+    // Execution mode dropdown (Plan/Ask/Auto)
+    if (this.elements.executionModeTrigger && this.elements.executionModeMenu) {
+      // Toggle menu on trigger click
+      this.elements.executionModeTrigger.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.elements.executionModeMenu.classList.toggle('hidden');
+      });
+
+      // Handle option selection
+      this.elements.executionModeMenu.querySelectorAll('.execution-mode-option').forEach(option => {
+        option.addEventListener('click', () => {
+          const mode = option.dataset.mode;
+          this.setExecutionMode(mode);
+          this.elements.executionModeMenu.classList.add('hidden');
+        });
+      });
+
+      // Close menu when clicking outside
+      document.addEventListener('click', (e) => {
+        if (this.elements.executionModeSelector && !this.elements.executionModeSelector.contains(e.target)) {
+          this.elements.executionModeMenu.classList.add('hidden');
+        }
+      });
     }
 
     // Tools toolbar toggle
@@ -569,6 +647,84 @@ class ChatApp {
   }
 
   /**
+   * Handle stop button click (two-stage cancel)
+   */
+  handleStopClick() {
+    if (!this.webSocketManager) return;
+    this.webSocketManager.send({ type: 'cancel' });
+    this.cancelPressCount++;
+  }
+
+  /**
+   * Update agent running state and toggle send/stop button appearance
+   */
+  setAgentRunning(running) {
+    this.isAgentRunning = running;
+    if (!running) {
+      this.cancelPressCount = 0;
+    }
+    const btn = this.elements.sendButton;
+    if (!btn) return;
+    const icon = btn.querySelector('i');
+    if (running) {
+      btn.classList.add('stop-mode');
+      btn.disabled = false;
+      if (icon) {
+        icon.className = 'fa-solid fa-stop';
+      }
+    } else {
+      btn.classList.remove('stop-mode');
+      if (icon) {
+        icon.className = 'fa-solid fa-arrow-up';
+      }
+    }
+  }
+
+  /**
+   * Update execution mode UI and state
+   */
+  setExecutionMode(mode) {
+    const labels = { auto: 'Auto', ask: 'Ask', plan: 'Plan' };
+    const iconClasses = {
+      auto: 'fa-solid fa-forward',
+      ask: 'fa-solid fa-shield-halved',
+      plan: 'fa-solid fa-pause',
+    };
+    this.appState.setExecutionMode(mode);
+    setCookie('executionMode', mode, this.config.cookieExpiryDays);
+
+    // Update trigger label
+    if (this.elements.executionModeLabel) {
+      this.elements.executionModeLabel.textContent = labels[mode] || mode;
+    }
+    // Update trigger icon
+    const iconEl = this.elements.executionModeTrigger?.querySelector('.execution-mode-icon');
+    if (iconEl) {
+      iconEl.innerHTML = `<i class="${iconClasses[mode] || 'fa-solid fa-forward'}"></i>`;
+    }
+
+    // Update checkmark in menu
+    if (this.elements.executionModeMenu) {
+      this.elements.executionModeMenu.querySelectorAll('.execution-mode-option').forEach(opt => {
+        const check = opt.querySelector('.execution-mode-check');
+        if (opt.dataset.mode === mode) {
+          opt.classList.add('selected');
+          if (!check) {
+            const title = opt.querySelector('.execution-mode-option-title');
+            const checkSpan = document.createElement('span');
+            checkSpan.className = 'execution-mode-check';
+            checkSpan.textContent = '✓';
+            title.prepend(checkSpan);
+          }
+        } else {
+          opt.classList.remove('selected');
+          if (check) check.remove();
+        }
+      });
+    }
+  }
+
+  /**
    * Send message via WebSocket
    */
   sendMessage(debugInfo = null) {
@@ -698,19 +854,28 @@ class ChatApp {
     // Force scroll to bottom for user messages
     this.scrollManager.scrollToBottom(true);
 
+    // Determine agent name based on execution mode
+    const executionMode = this.appState.getExecutionMode();
+    let agentName = this.appState.getAgentConfig().name;
+    if (executionMode === 'plan') {
+      agentName = 'rails_ticket_mode_agent'; // Plan mode uses ticket agent
+    }
+
     // Send message
     const messageData = {
       message: message,
       thread_id: threadId,
       origin: window.location.host,
       debug_info: debugInfo,
-      agent_name: this.appState.getAgentConfig().name,
+      agent_name: agentName,
       agent_mode: agentMode,
       llm_model: llmModel,
-      attachments: attachments
+      attachments: attachments,
+      ask_before_edits: executionMode === 'ask'
     };
 
     this.webSocketManager.send(messageData);
+    this.setAgentRunning(true);
 
     // Call custom callback if provided
     if (this.config.onMessageReceived) {
@@ -809,6 +974,12 @@ class ChatApp {
         this.appState.setAgentMode(this.elements.agentModeSelect.value);
         this.updateDropdownLabel(this.elements.agentModeSelect);
       }
+    }
+
+    // Restore execution mode from cookie
+    const savedExecMode = getCookie('executionMode');
+    if (savedExecMode && ['auto', 'ask', 'plan'].includes(savedExecMode)) {
+      this.setExecutionMode(savedExecMode);
     }
 
     const savedModel = getCookie('llmModel');

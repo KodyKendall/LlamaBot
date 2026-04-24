@@ -71,3 +71,8 @@
 - [x] Improve prompts.
 - [x] Fix the gh-copy slash command not working.
 - [x] Add warning to not duplicate database columns (normalization best practices in db design) in both engineering & ticket mode
+
+0.4.0l: 
+- [x] Add memory
+- [x] Add stop button
+- [x] Add plan & ask mode

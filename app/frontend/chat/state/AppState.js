@@ -28,6 +28,9 @@ export class AppState {
 
     // Sub-agent depth tracking
     this.currentAgentDepth = 0;
+
+    // Execution mode: 'auto' | 'ask' | 'plan'
+    this.executionMode = 'auto';
   }
 
   /**
@@ -119,6 +122,20 @@ export class AppState {
    */
   getAgentConfig() {
     return this.agentConfig;
+  }
+
+  /**
+   * Set execution mode (auto/ask/plan)
+   */
+  setExecutionMode(mode) {
+    this.executionMode = mode;
+  }
+
+  /**
+   * Get execution mode
+   */
+  getExecutionMode() {
+    return this.executionMode;
   }
 
   // ==========================================

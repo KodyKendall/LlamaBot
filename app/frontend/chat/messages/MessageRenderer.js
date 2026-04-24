@@ -54,6 +54,14 @@ export class MessageRenderer {
       return this.handleEndMessage();
     }
 
+    if (type === 'approval_request') {
+      return this.renderApprovalMessage(content);
+    }
+
+    if (type === 'system_message') {
+      return this.renderSystemMessage(content);
+    }
+
     return null;
   }
 
@@ -421,6 +429,29 @@ export class MessageRenderer {
       messageDiv.className = this.config.cssClasses.queuedMessage;
     }
 
+    this.insertMessage(messageDiv);
+    return messageDiv;
+  }
+
+  /**
+   * Render approval request card (HTML content from MessageHandler)
+   */
+  renderApprovalMessage(htmlContent) {
+    const messageDiv = document.createElement('div');
+    messageDiv.setAttribute('data-llamabot', 'approval-message');
+    messageDiv.innerHTML = htmlContent;
+    this.insertMessage(messageDiv);
+    this.stopThinking();
+    return messageDiv;
+  }
+
+  /**
+   * Render system message (e.g. cancellation notice)
+   */
+  renderSystemMessage(content) {
+    const messageDiv = document.createElement('div');
+    messageDiv.setAttribute('data-llamabot', 'system-message');
+    messageDiv.textContent = content;
     this.insertMessage(messageDiv);
     return messageDiv;
   }

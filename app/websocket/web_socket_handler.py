@@ -148,6 +148,14 @@ class WebSocketHandler:
                                 }, self.websocket)
                         continue
 
+                    # Handle approval response (user approved/rejected a HITL tool call)
+                    if isinstance(json_data, dict) and json_data.get("type") == "approval_response":
+                        logger.info("APPROVAL_RESPONSE RECV")
+                        current_task = asyncio.create_task(
+                            self.request_handler.handle_approval_response(json_data, self.websocket)
+                        )
+                        continue
+
                     # For all other messages, check authentication
                     # First try to extract token from message (Rails gem pattern)
                     await self._check_auth_from_message(json_data)

@@ -292,28 +292,53 @@ class RequestHandler:
 
                 print("🎏🎏🎏 LangGraph astream is finished!")
 
-                # Update thread metadata after successful message processing
-                await self._update_thread_metadata(incoming_message)
-
-                # Clean up intermediate checkpoints for THIS thread only after successful run
-                # This bounds storage while preserving "continue" functionality for other threads
-                if hasattr(self.app.state, 'checkpointer_pool') and self.app.state.checkpointer_pool is not None:
+                # Check if graph was interrupted (HITL approval needed)
+                interrupted = False
+                if incoming_message.get("ask_before_edits"):
                     try:
-                        from app.services.checkpoint_cleanup import cleanup_thread_checkpoints_except_latest
-                        thread_id = incoming_message.get('thread_id')
-                        if thread_id:
-                            await cleanup_thread_checkpoints_except_latest(
-                                self.app.state.checkpointer_pool,
-                                thread_id
-                            )
+                        state_snapshot = await app.aget_state(config)
+                        if state_snapshot.tasks and any(t.interrupts for t in state_snapshot.tasks):
+                            interrupted = True
+                            for task in state_snapshot.tasks:
+                                for intr in task.interrupts:
+                                    hitl_request = intr.value
+                                    if self._is_websocket_open(websocket):
+                                        await websocket.send_json({
+                                            "type": "approval_request",
+                                            "action_requests": [
+                                                {"name": ar["name"], "args": ar["args"], "description": ar.get("description", "")}
+                                                for ar in hitl_request["action_requests"]
+                                            ],
+                                            "thread_id": incoming_message.get('thread_id'),
+                                            "agent_name": incoming_message.get('agent_name'),
+                                        })
+                            logger.info("Graph interrupted for HITL approval - not sending end message")
                     except Exception as e:
-                        # Non-fatal - don't fail the request if cleanup fails
-                        logger.warning(f"Post-run checkpoint cleanup failed (non-fatal): {e}")
+                        logger.warning(f"Failed to check for HITL interrupts: {e}")
 
-                if self._is_websocket_open(websocket):
-                    await websocket.send_json({
-                        "type": "end"
-                    })
+                if not interrupted:
+                    # Update thread metadata after successful message processing
+                    await self._update_thread_metadata(incoming_message)
+
+                    # Clean up intermediate checkpoints for THIS thread only after successful run
+                    # This bounds storage while preserving "continue" functionality for other threads
+                    if hasattr(self.app.state, 'checkpointer_pool') and self.app.state.checkpointer_pool is not None:
+                        try:
+                            from app.services.checkpoint_cleanup import cleanup_thread_checkpoints_except_latest
+                            thread_id = incoming_message.get('thread_id')
+                            if thread_id:
+                                await cleanup_thread_checkpoints_except_latest(
+                                    self.app.state.checkpointer_pool,
+                                    thread_id
+                                )
+                        except Exception as e:
+                            # Non-fatal - don't fail the request if cleanup fails
+                            logger.warning(f"Post-run checkpoint cleanup failed (non-fatal): {e}")
+
+                    if self._is_websocket_open(websocket):
+                        await websocket.send_json({
+                            "type": "end"
+                        })
 
             except CancelledError as e:
                 logger.info("handle_request was cancelled")
@@ -331,6 +356,156 @@ class RequestHandler:
                     await websocket.send_json({
                         "type": "error",
                         "content": f"Error processing request: {str(e)}"
+                    })
+                raise e
+
+    async def handle_approval_response(self, response_message: dict, websocket: WebSocket):
+        """Resume a graph after user approves/rejects a HITL request."""
+        from langgraph.types import Command
+
+        ws_id = id(websocket)
+        lock = self._get_lock(websocket)
+
+        async with lock:
+            try:
+                # Re-resolve the graph (same agent, with HITL)
+                app, _, agent_config = self.get_langgraph_app_and_state({
+                    "agent_name": response_message.get("agent_name"),
+                    "message": "",  # No new message, just resuming
+                    "ask_before_edits": True,
+                })
+
+                DEFAULT_RECURSION_LIMIT = 450
+                recursion_limit = agent_config.get("recursion_limit", DEFAULT_RECURSION_LIMIT)
+
+                config = {
+                    "configurable": {
+                        "thread_id": f"{response_message.get('thread_id')}",
+                        "recursion_limit": recursion_limit
+                    },
+                    "recursion_limit": recursion_limit
+                }
+
+                # Build HITLResponse from user decisions
+                decisions = response_message.get("decisions", [])
+                hitl_response = {"decisions": decisions}
+
+                # Resume the graph
+                async for chunk in app.astream(Command(resume=hitl_response), config=config, stream_mode=["updates", "messages"], subgraphs=True):
+                    is_this_chunk_an_llm_message = isinstance(chunk, tuple) and len(chunk) == 3 and chunk[1] == 'messages'
+                    is_this_chunk_an_update_stream_type = isinstance(chunk, tuple) and len(chunk) == 3 and chunk[1] == 'updates'
+
+                    subgraph_tuple = chunk[0] if isinstance(chunk, tuple) and len(chunk) >= 1 else ()
+                    agent_depth = len(subgraph_tuple)
+                    is_subagent = agent_depth > 0
+
+                    if is_this_chunk_an_llm_message:
+                        message_chunk_from_llm = chunk[2][0]
+                        base_message_as_dict = dumpd(chunk[2][0])["kwargs"]
+                        content = base_message_as_dict["content"]
+
+                        thinking_content = None
+                        text_content = content
+
+                        additional_kwargs = base_message_as_dict.get("additional_kwargs", {})
+                        deepseek_reasoning = additional_kwargs.get("reasoning_content")
+                        if deepseek_reasoning:
+                            thinking_content = [{"type": "thinking", "thinking": deepseek_reasoning}]
+
+                        if isinstance(content, list):
+                            thinking_blocks = [b for b in content if b.get("type") in ("thinking", "reasoning", "reasoning_summary")]
+                            text_blocks = [b for b in content if b.get("type") not in ("thinking", "reasoning", "reasoning_summary")]
+                            if thinking_blocks:
+                                thinking_content = thinking_blocks
+                            text_content = text_blocks if text_blocks else ""
+
+                        if self._is_websocket_open(websocket):
+                            ws_message = {
+                                "type": "AIMessageChunk",
+                                "content": text_content,
+                                "thinking": thinking_content,
+                                "tool_calls": [],
+                                "base_message": base_message_as_dict,
+                                "agent_depth": agent_depth,
+                                "is_subagent": is_subagent,
+                            }
+                            await websocket.send_json(ws_message)
+
+                    elif is_this_chunk_an_update_stream_type:
+                        state_object = chunk[2]
+                        for agent_key, agent_data in state_object.items():
+                            if isinstance(agent_data, dict) and 'messages' in agent_data:
+                                messages = agent_data['messages']
+                                tool_calls = []
+                                if messages and len(messages) > 0:
+                                    message = messages[-1]
+                                    if hasattr(message, 'additional_kwargs') and message.additional_kwargs:
+                                        tool_calls_data = message.additional_kwargs.get('tool_calls')
+                                        if tool_calls_data:
+                                            tool_calls = tool_calls_data
+
+                                    messages_as_string = [msg.content if hasattr(msg, 'content') else str(msg) for msg in messages]
+                                    try:
+                                        base_message_as_dict = dumpd(message)["kwargs"]
+                                    except Exception:
+                                        base_message_as_dict = {"content": str(message), "type": "ai"}
+
+                                    token_usage = None
+                                    usage_metadata = getattr(message, 'usage_metadata', None)
+                                    if usage_metadata:
+                                        token_usage = {
+                                            "input_tokens": usage_metadata.get("input_tokens", 0) if isinstance(usage_metadata, dict) else getattr(usage_metadata, 'input_tokens', 0),
+                                            "output_tokens": usage_metadata.get("output_tokens", 0) if isinstance(usage_metadata, dict) else getattr(usage_metadata, 'output_tokens', 0),
+                                            "total_tokens": usage_metadata.get("total_tokens", 0) if isinstance(usage_metadata, dict) else getattr(usage_metadata, 'total_tokens', 0)
+                                        }
+
+                                    if self._is_websocket_open(websocket):
+                                        ws_msg = {
+                                            "type": message.type if hasattr(message, 'type') else "ai",
+                                            "content": messages_as_string[-1] if messages_as_string else "",
+                                            "tool_calls": tool_calls,
+                                            "base_message": base_message_as_dict,
+                                            "agent_depth": agent_depth,
+                                            "is_subagent": is_subagent,
+                                        }
+                                        if token_usage:
+                                            ws_msg["token_usage"] = token_usage
+                                        await websocket.send_json(ws_msg)
+
+                # Check for another interrupt (agent may call another destructive tool)
+                interrupted = False
+                try:
+                    state_snapshot = await app.aget_state(config)
+                    if state_snapshot.tasks and any(t.interrupts for t in state_snapshot.tasks):
+                        interrupted = True
+                        for task in state_snapshot.tasks:
+                            for intr in task.interrupts:
+                                hitl_request = intr.value
+                                if self._is_websocket_open(websocket):
+                                    await websocket.send_json({
+                                        "type": "approval_request",
+                                        "action_requests": [
+                                            {"name": ar["name"], "args": ar["args"], "description": ar.get("description", "")}
+                                            for ar in hitl_request["action_requests"]
+                                        ],
+                                        "thread_id": response_message.get('thread_id'),
+                                        "agent_name": response_message.get('agent_name'),
+                                    })
+                except Exception as e:
+                    logger.warning(f"Failed to check for HITL interrupts after resume: {e}")
+
+                if not interrupted and self._is_websocket_open(websocket):
+                    await websocket.send_json({"type": "end"})
+
+            except CancelledError as e:
+                logger.info("handle_approval_response was cancelled")
+                raise e
+            except Exception as e:
+                logger.error(f"Error handling approval response: {str(e)}", exc_info=True)
+                if self._is_websocket_open(websocket):
+                    await websocket.send_json({
+                        "type": "error",
+                        "content": f"Error resuming after approval: {str(e)}"
                     })
                 raise e
 
@@ -628,7 +803,8 @@ class RequestHandler:
         if message.get("agent_name") is not None:
             langgraph_workflow, agent_config = self.get_workflow_from_langgraph_json(message)
             if langgraph_workflow is not None:
-                app = self.get_app_from_workflow_string(langgraph_workflow)
+                ask_before_edits = message.get("ask_before_edits", False)
+                app = self.get_app_from_workflow_string(langgraph_workflow, ask_before_edits=ask_before_edits)
 
                 # Create messages from the message content (with optional multimodal attachments)
                 # We removed this timestamp because we don't want to mess with prompt caching. If this date is different every time, it could cause a cache miss for the LLM provider.
@@ -662,7 +838,7 @@ class RequestHandler:
     
     # This method resolves an agent name to a workflow with the checkpointer.
     # Super important for routing to the right agent workflow for websockets requests.
-    def get_app_from_workflow_string(self, workflow_string: str):
+    def get_app_from_workflow_string(self, workflow_string: str, ask_before_edits: bool = False):
         """Get pre-compiled graph from cache (singleton pattern for memory efficiency)"""
 
         # Extract agent name from workflow_string
@@ -672,13 +848,16 @@ class RequestHandler:
         # Find the agent name (typically second-to-last component)
         agent_name = parts[-2] if len(parts) >= 2 else None
 
+        # Use separate cache key for HITL variant
+        cache_key = f"{agent_name}:hitl" if ask_before_edits else agent_name
+
         # Try to get from cache first (compiled at startup)
-        if agent_name and hasattr(self.app.state, 'compiled_graphs') and agent_name in self.app.state.compiled_graphs:
-            logger.info(f"✅ Using cached compiled graph for agent: {agent_name}")
-            return self.app.state.compiled_graphs[agent_name]
+        if cache_key and hasattr(self.app.state, 'compiled_graphs') and cache_key in self.app.state.compiled_graphs:
+            logger.info(f"✅ Using cached compiled graph for agent: {cache_key}")
+            return self.app.state.compiled_graphs[cache_key]
 
         # Fallback: compile on-demand (for backward compatibility or new agents)
-        logger.warning(f"⚠️ Compiling graph on-demand for: {agent_name} (not found in cache). Consider adding to startup compilation.")
+        logger.warning(f"⚠️ Compiling graph on-demand for: {cache_key} (not found in cache). Consider adding to startup compilation.")
 
         # Split the path into module path and function name
         module_path, function_name = workflow_string.split(':')
@@ -691,5 +870,16 @@ class RequestHandler:
         module = importlib.import_module(module_path)
         workflow_builder = getattr(module, function_name)
 
-        # Build the workflow using the imported function
-        return workflow_builder(checkpointer=self.get_or_create_checkpointer())
+        # Build the workflow, passing ask_before_edits if the builder supports it
+        import inspect
+        sig = inspect.signature(workflow_builder)
+        if 'ask_before_edits' in sig.parameters:
+            compiled = workflow_builder(checkpointer=self.get_or_create_checkpointer(), ask_before_edits=ask_before_edits)
+        else:
+            compiled = workflow_builder(checkpointer=self.get_or_create_checkpointer())
+
+        # Cache the HITL variant for reuse
+        if cache_key and hasattr(self.app.state, 'compiled_graphs'):
+            self.app.state.compiled_graphs[cache_key] = compiled
+
+        return compiled

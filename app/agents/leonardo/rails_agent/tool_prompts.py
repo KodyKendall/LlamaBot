@@ -216,6 +216,65 @@ Usage:
 # VIEW PAGE TOOL (for future reference)
 # =============================================================================
 
+# =============================================================================
+# LEONARDO.MD TOOLS
+# =============================================================================
+
+READ_LEONARDO_MD_DESCRIPTION = """Read the LEONARDO.md project context file.
+This file contains project-specific instructions, context, and configuration that guides your behavior.
+It lives at .leonardo/LEONARDO.md and is always loaded into your system prompt.
+Use this to see the current contents before making edits."""
+
+EDIT_LEONARDO_MD_DESCRIPTION = """Edit the LEONARDO.md project context file by replacing text.
+Parameters:
+- old_string: The exact text to find and replace (must be unique in the file)
+- new_string: The text to replace it with
+
+Use this when the user asks you to update project instructions, add context, or modify LEONARDO.md.
+The file is at .leonardo/LEONARDO.md and changes will take effect on the next conversation."""
+
+WRITE_LEONARDO_MD_DESCRIPTION = """Create or completely overwrite the LEONARDO.md project context file.
+Parameters:
+- content: The full content to write to LEONARDO.md
+
+Use this only when creating LEONARDO.md for the first time or when the user wants a complete rewrite.
+Prefer edit_leonardo_md for partial changes."""
+
+# =============================================================================
+# MEMORY TOOLS
+# =============================================================================
+
+SAVE_MEMORY_DESCRIPTION = """Save information to long-term memory that persists across conversations.
+
+Use this when:
+- The user explicitly says "remember this", "don't forget", or similar
+- The user corrects your behavior and you should remember the correction
+- The user states preferences about how they want things done
+- Important project context that should persist across sessions
+
+Do NOT save:
+- Routine task details or temporary debugging info
+- Information already in LEONARDO.md or MEMORY.md
+- Trivial or obvious information
+
+Parameters:
+- name: Short descriptive name (e.g., "prefers-tailwind-over-bootstrap")
+- description: One-line summary of what this memory contains
+- memory_type: One of "user", "feedback", "project", "reference"
+  - user: Role, preferences, communication style
+  - feedback: Corrections to agent behavior
+  - project: Ongoing work, architecture decisions, business context
+  - reference: External resources, API docs, links
+- content: The actual memory content (max 2000 chars)
+"""
+
+LIST_MEMORIES_DESCRIPTION = """List all saved memories with their names, types, and descriptions.
+Use this to check what has been remembered before saving duplicates.
+Also use when the user asks "what do you remember?" or similar."""
+
+DELETE_MEMORY_DESCRIPTION = """Delete a memory by filename (e.g., "prefers-tailwind.md").
+Use when the user asks to forget something, or when a memory is outdated and being replaced."""
+
 VIEW_CURRENT_PAGE_HTML_DESCRIPTION = """
 The `view_page` tool gives you what the user is seeing, and backend context, as ground truth for all UI-related/exploratory questions.
 

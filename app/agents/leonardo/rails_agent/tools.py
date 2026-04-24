@@ -26,6 +26,20 @@ from app.agents.leonardo.rails_agent.tool_prompts import (
     GIT_COMMIT_DESCRIPTION,
     GIT_COMMAND_DESCRIPTION,
     GITHUB_CLI_DESCRIPTION,
+    SAVE_MEMORY_DESCRIPTION,
+    LIST_MEMORIES_DESCRIPTION,
+    DELETE_MEMORY_DESCRIPTION,
+    READ_LEONARDO_MD_DESCRIPTION,
+    EDIT_LEONARDO_MD_DESCRIPTION,
+    WRITE_LEONARDO_MD_DESCRIPTION,
+)
+
+from app.agents.leonardo.project_context import LEONARDO_MD_PATH
+
+from app.agents.leonardo.memory import (
+    write_memory_file,
+    list_all_memories,
+    delete_memory_file,
 )
 
 from app.agents.leonardo.rails_agent.state import Todo
@@ -1625,6 +1639,217 @@ def edit_agent_file(
             "messages": [ToolMessage(success_message, artifact=tool_output, tool_call_id=tool_call_id)]
         }
     )
+
+# ============================================================================
+# MEMORY TOOLS - Persistent memory across conversations
+# ============================================================================
+
+@tool(description=SAVE_MEMORY_DESCRIPTION)
+def save_memory(
+    name: str,
+    description: str,
+    memory_type: str,
+    content: str,
+    runtime: ToolRuntime,
+) -> Command:
+    """Save information to long-term memory."""
+    tool_call_id = runtime.tool_call_id
+
+    try:
+        filename = write_memory_file(name, description, memory_type, content)
+        success_message = f"Memory saved: {filename}"
+        return Command(
+            update={
+                "messages": [ToolMessage(success_message, tool_call_id=tool_call_id)]
+            }
+        )
+    except ValueError as e:
+        error_message = f"Error saving memory: {e}"
+        return Command(
+            update={
+                "messages": [ToolMessage(error_message, tool_call_id=tool_call_id)]
+            }
+        )
+    except Exception as e:
+        error_message = f"Unexpected error saving memory: {e}"
+        return Command(
+            update={
+                "messages": [ToolMessage(error_message, tool_call_id=tool_call_id)]
+            }
+        )
+
+
+@tool(description=LIST_MEMORIES_DESCRIPTION)
+def list_memories(
+    runtime: ToolRuntime,
+) -> Command:
+    """List all saved memories."""
+    tool_call_id = runtime.tool_call_id
+
+    memories = list_all_memories()
+
+    if not memories:
+        return Command(
+            update={
+                "messages": [ToolMessage("No memories saved yet.", tool_call_id=tool_call_id)]
+            }
+        )
+
+    lines = [f"Found {len(memories)} saved memories:\n"]
+    for mem in memories:
+        lines.append(f"### {mem['name']} (type: {mem['type']}, file: {mem['filename']})")
+        lines.append(f"_{mem['description']}_")
+        lines.append(f"{mem['content']}\n")
+
+    return Command(
+        update={
+            "messages": [ToolMessage("\n".join(lines), tool_call_id=tool_call_id)]
+        }
+    )
+
+
+@tool(description=DELETE_MEMORY_DESCRIPTION)
+def delete_memory(
+    filename: str,
+    runtime: ToolRuntime,
+) -> Command:
+    """Delete a memory by filename."""
+    tool_call_id = runtime.tool_call_id
+
+    if delete_memory_file(filename):
+        return Command(
+            update={
+                "messages": [ToolMessage(f"Memory deleted: {filename}", tool_call_id=tool_call_id)]
+            }
+        )
+    else:
+        return Command(
+            update={
+                "messages": [ToolMessage(f"Memory not found: {filename}", tool_call_id=tool_call_id)]
+            }
+        )
+
+
+# ============================================================================
+# LEONARDO.MD TOOLS - Read/edit the project context file
+# ============================================================================
+
+@tool(description=READ_LEONARDO_MD_DESCRIPTION)
+def read_leonardo_md(
+    runtime: ToolRuntime,
+) -> Command:
+    """Read the LEONARDO.md project context file."""
+    tool_call_id = runtime.tool_call_id
+    filepath = Path(LEONARDO_MD_PATH)
+
+    if not filepath.exists():
+        return Command(
+            update={
+                "messages": [ToolMessage("LEONARDO.md does not exist yet. Use write_leonardo_md to create it.", tool_call_id=tool_call_id)]
+            }
+        )
+
+    try:
+        content = filepath.read_text(encoding="utf-8")
+        if not content.strip():
+            return Command(
+                update={
+                    "messages": [ToolMessage("LEONARDO.md exists but is empty.", tool_call_id=tool_call_id)]
+                }
+            )
+
+        # Add line numbers
+        lines = content.splitlines()
+        numbered = [f"{i+1:6d}\t{line}" for i, line in enumerate(lines)]
+        result = f"Contents of LEONARDO.md ({len(lines)} lines):\n\n" + "\n".join(numbered)
+
+        return Command(
+            update={
+                "messages": [ToolMessage(result, tool_call_id=tool_call_id)]
+            }
+        )
+    except Exception as e:
+        return Command(
+            update={
+                "messages": [ToolMessage(f"Error reading LEONARDO.md: {e}", tool_call_id=tool_call_id)]
+            }
+        )
+
+
+@tool(description=EDIT_LEONARDO_MD_DESCRIPTION)
+def edit_leonardo_md(
+    old_string: str,
+    new_string: str,
+    runtime: ToolRuntime,
+) -> Command:
+    """Edit the LEONARDO.md project context file by replacing text."""
+    tool_call_id = runtime.tool_call_id
+    filepath = Path(LEONARDO_MD_PATH)
+
+    if not filepath.exists():
+        return Command(
+            update={
+                "messages": [ToolMessage("Error: LEONARDO.md does not exist. Use write_leonardo_md to create it.", tool_call_id=tool_call_id)]
+            }
+        )
+
+    try:
+        content = filepath.read_text(encoding="utf-8")
+    except Exception as e:
+        return Command(
+            update={
+                "messages": [ToolMessage(f"Error reading LEONARDO.md: {e}", tool_call_id=tool_call_id)]
+            }
+        )
+
+    if old_string not in content:
+        return Command(
+            update={
+                "messages": [ToolMessage("Error: Could not find the specified text in LEONARDO.md. Read the file first to see exact contents.", tool_call_id=tool_call_id)]
+            }
+        )
+
+    if content.count(old_string) > 1:
+        return Command(
+            update={
+                "messages": [ToolMessage(f"Error: The text to replace appears {content.count(old_string)} times. Provide more context to make it unique.", tool_call_id=tool_call_id)]
+            }
+        )
+
+    new_content = content.replace(old_string, new_string, 1)
+    filepath.write_text(new_content, encoding="utf-8")
+
+    return Command(
+        update={
+            "messages": [ToolMessage("Successfully edited LEONARDO.md.", tool_call_id=tool_call_id)]
+        }
+    )
+
+
+@tool(description=WRITE_LEONARDO_MD_DESCRIPTION)
+def write_leonardo_md(
+    content: str,
+    runtime: ToolRuntime,
+) -> Command:
+    """Create or overwrite the LEONARDO.md project context file."""
+    tool_call_id = runtime.tool_call_id
+    filepath = Path(LEONARDO_MD_PATH)
+
+    try:
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+        filepath.write_text(content, encoding="utf-8")
+        return Command(
+            update={
+                "messages": [ToolMessage(f"Successfully wrote LEONARDO.md ({len(content)} chars).", tool_call_id=tool_call_id)]
+            }
+        )
+    except Exception as e:
+        return Command(
+            update={
+                "messages": [ToolMessage(f"Error writing LEONARDO.md: {e}", tool_call_id=tool_call_id)]
+            }
+        )
+
 
 @tool(description="""Read the langgraph.json configuration file.
 Returns the contents of /app/app/langgraph.json which registers all agents (built-in and custom).

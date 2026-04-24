@@ -17,6 +17,7 @@ from langchain_anthropic import ChatAnthropic
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.agents import create_agent
 from langchain.agents.middleware import SummarizationMiddleware
+from langchain.agents.middleware.human_in_the_loop import HumanInTheLoopMiddleware
 from langchain_core.messages import SystemMessage
 
 from app.agents.leonardo.rails_agent.state import RailsAgentState
@@ -25,7 +26,9 @@ from app.agents.leonardo.rails_agent.tools import (
     # search_file,
     glob_files, grep_files,
     bash_command, git_status, git_commit,
-    git_command, github_cli_command, internet_search
+    git_command, github_cli_command, internet_search,
+    save_memory, list_memories, delete_memory,
+    read_leonardo_md, edit_leonardo_md, write_leonardo_md,
 )
 from app.agents.leonardo.rails_agent.prompts import RAILS_AGENT_PROMPT
 from app.agents.leonardo.project_context import build_system_prompt_with_project_context
@@ -167,13 +170,16 @@ default_tools = [
     internet_search,
     delegate_task,      # Full-capability sub-agent for implementation work
     delegate_research,  # Read-only sub-agent for codebase investigation
+    save_memory, list_memories, delete_memory,  # Long-term memory
+    read_leonardo_md, edit_leonardo_md, write_leonardo_md,  # Project context file
 ]
 
-def build_workflow(checkpointer=None):
+def build_workflow(checkpointer=None, ask_before_edits=False):
     """Build the Rails agent workflow with create_agent.
 
     Args:
         checkpointer: Optional checkpointer for state persistence (e.g., PostgresSaver)
+        ask_before_edits: If True, adds HumanInTheLoopMiddleware for destructive tools
 
     Returns:
         A compiled LangGraph agent
@@ -211,6 +217,13 @@ def build_workflow(checkpointer=None):
         # 5. Circuit breaker - stop tool calls after 3 failures
         check_failure_limit,
     ]
+
+    # 6. Optional: Human-in-the-loop approval for destructive tools
+    if ask_before_edits:
+        DESTRUCTIVE_TOOLS = ['edit_file', 'write_file', 'bash_command']
+        middleware.append(HumanInTheLoopMiddleware(
+            interrupt_on={t: {"allowed_decisions": ["approve", "reject"]} for t in DESTRUCTIVE_TOOLS}
+        ))
 
     # Create and return the agent
     return create_agent(
