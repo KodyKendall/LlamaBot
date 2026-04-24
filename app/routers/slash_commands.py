@@ -121,11 +121,12 @@ SLASH_COMMANDS = {
     },
     "gh": {
         "script": None,
-        "command": "timeout 3 gh auth login -p https -h github.com -w 2>&1 || true",
+        "command": "gh auth login -p https -h github.com -w",
         "description": "Authenticate with GitHub (opens browser)",
         "dangerous": False,
-        "confirm_message": "This will start GitHub authentication. A browser tab will open and the code will be copied to your clipboard. Continue?",
-        "special_handler": "gh_auth"  # Frontend handles code copy + URL open
+        "confirm_message": "This will start GitHub authentication. A browser tab will open and the code will be copied to your clipboard. After authorizing in browser, wait ~30 seconds for completion. Continue?",
+        "special_handler": "gh_auth",  # Frontend handles code copy + URL open
+        "timeout": 120  # Give user 2 minutes to complete device flow
     },
     "gh-copy": {
         "script": None,
@@ -244,7 +245,8 @@ def execute_host_command(cmd_config: dict, args: Optional[str] = None) -> dict:
         elif cmd_config.get("command"):
             # Execute a predefined direct command
             command = cmd_config["command"]
-            result = execute_command(command, timeout=60)
+            timeout = cmd_config.get("timeout", 60)  # Use custom timeout if specified
+            result = execute_command(command, timeout=timeout)
 
         else:
             return {

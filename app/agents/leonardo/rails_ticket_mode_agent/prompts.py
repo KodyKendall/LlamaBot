@@ -541,6 +541,7 @@ This ensures:
 - ❌ `after_save` instead of `after_update_commit` for broadcasts
 - ❌ Callbacks that silently create related records without idempotency checks (e.g., `after_create` that spawns child records)
 - ❌ Non-deterministic `find_by` without ordering (returns arbitrary record when multiple exist)
+- ❌ Redundant fields across associated models (e.g., `fee` on both parent and child) — pick single source of truth, use delegation if needed
 
 **DB Layer (Seeds & Migrations):**
 - ❌ `Date.today`, `Time.current`, or `rand` inside `find_or_create_by!` lookup keys (breaks idempotency)
@@ -548,6 +549,7 @@ This ensures:
 - ❌ Missing unique database constraints for logical uniqueness (e.g., size + ownership_type should have unique index)
 - ❌ Migrations that backfill data without checking for existing records
 - ❌ Seeds that produce different results on different dates/runs (non-idempotent)
+- ❌ Redundant columns on related models (e.g., `sub_fee` on both `Job` and `Invoice`) — pick ONE source of truth
 
 **Seed Idempotence Rule:** Seeds SHOULD be idempotent unless explicitly documented otherwise. Running `db:seed` twice should produce the same database state.
 
@@ -662,6 +664,7 @@ Return observations as structured data:
 - `security` - auth gaps, injection risks, exposed secrets
 - `n+1` - N+1 queries in hot paths
 - `data-integrity` - missing constraints, non-idempotent seeds, orphan risks
+- `data-redundancy` - same field stored on related models (e.g., `sub_fee` on both Job and Invoice), causing drift
 - `architecture` - wrong layer, callback hell, god objects
 - `coupling` - tight coupling, hidden dependencies
 - `rails-convention` - naming mismatches (controller/model/views), non-RESTful actions, non-standard patterns
@@ -1344,6 +1347,12 @@ For each layer that needs a ticket, define the red-green cycle:
 13. **Test Plan is mandatory** - Every ticket includes a Test Plan section. For model/logic changes: list specs to write + regression commands. For UI-only changes: state "No model tests needed — UI/copy only" + run full model suite as sanity check.
 14. **8-point tickets = parent tickets with sub-ticket recommendations** - An 8-point ticket is always created, but it must include a "Recommended Split" section proposing 2-3 layer-by-layer sub-tickets with red-green test cycles. The engineer uses the parent for context and works the sub-tickets sequentially.
 15. **Layer-based complexity, not model/screen count** - Assess complexity by layers touched (Model/Controller/View-Stimulus/DB), not by counting models or screens. Cross-stack features (all three of: new model logic + new controller logic + new Stimulus) are always 8 points with mandatory split.
+
+---
+
+## ENVIRONMENT ASSUMPTION
+
+- **Default to the development environment** (`config/environments/development.rb`) unless the user explicitly tells you otherwise. When writing tickets, assume the app is running in development mode unless the user specifies production or another environment.
 
 ---
 

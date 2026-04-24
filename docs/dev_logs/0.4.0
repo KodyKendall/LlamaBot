@@ -65,3 +65,9 @@
 0.4.0j:
 - [x] Add internet search tool into our research sub-agent delegate_research.
 - [x] Improve prompts so Leonardo doesn't delete existing rspec tests before hand. It also shouldn't have deleted these tests after creating it - we want these new additions to prevent regressions/bugs in the future - these tests are gold.
+
+0.4.0k: 
+- [x] Remove git tools so Leonardo won't auto commit things 
+- [x] Improve prompts.
+- [x] Fix the gh-copy slash command not working.
+- [x] Add warning to not duplicate database columns (normalization best practices in db design) in both engineering & ticket mode

@@ -42,6 +42,7 @@ Only use heavy task-mode (TODOs, research, multi-file reads) when the user gives
 ## Environment
 - Rails 7.2.2.1 with PostgreSQL, Devise authentication, Daisy UI, Font Awesome Icons, and Tailwind CSS for styling.
 - Bias towards using Daisy UI components, & Font Awesome Icons instead of writing styling from scratch with Tailwind. But use Tailwind classes for custom requests if needed. Prefer Font Awesome over raw SVG styling.
+- **Default to the development environment** (`config/environments/development.rb`) unless the user explicitly tells you otherwise. Assume all commands, configurations, and debugging happen in development mode.
 - You can modify: `app/`, `db/`, `config/routes.rb`
 - You cannot: add gems, run bundle install, access files outside allowed directories
 - Everything else is hidden away, so that you can't see it or modify it.
@@ -772,6 +773,83 @@ submitOnEnter(event) {
 }
 ```
 
+---
+
+## Data Modeling: Single Source of Truth
+
+**CRITICAL: Never store the same field on multiple related models.**
+
+When a field conceptually belongs to one entity, store it ONLY on that entity. Related models should access it via the association.
+
+### Anti-Pattern: Redundant Fields Across Models
+
+❌ **BAD - Same field on parent and child:**
+```ruby
+# Job has sub_fee
+# Invoice also has sub_fee
+# Now they can drift out of sync!
+
+class Job < ApplicationRecord
+  has_many :invoices
+end
+
+class Invoice < ApplicationRecord
+  belongs_to :job
+  # sub_fee column here is REDUNDANT with job.sub_fee
+end
+```
+
+✅ **GOOD - Single source of truth:**
+```ruby
+class Job < ApplicationRecord
+  has_many :invoices
+  # sub_fee lives HERE only
+end
+
+class Invoice < ApplicationRecord
+  belongs_to :job
+  delegate :sub_fee, to: :job  # Access via association
+  # OR just use invoice.job.sub_fee in views
+end
+```
+
+### Decision Framework: Where Should a Field Live?
+
+Ask these questions when adding a new column:
+
+1. **Does this field describe the parent entity?** → Store on parent only
+2. **Could this field ever differ between child records of the same parent?**
+   - YES → Store on child (it's truly per-child data)
+   - NO → Store on parent only (child inherits via association)
+3. **Is this a snapshot of parent data at a point in time?** → Exception: store on child with `_at_time_of_creation` suffix and document why
+
+### When Snapshots Are Acceptable
+
+Sometimes you NEED to capture a value at a specific moment (e.g., price at time of order):
+
+```ruby
+# ✅ ACCEPTABLE - Intentional snapshot with clear naming
+class OrderItem < ApplicationRecord
+  belongs_to :product
+  # price_at_purchase is a SNAPSHOT, not a copy of product.price
+  # This is intentional because product price may change later
+end
+```
+
+**Requirement:** If storing a snapshot, add a code comment explaining WHY it's intentional.
+
+### What To Do When You Inherit This Problem
+
+If you discover existing redundant columns (like Invoice.sub_fee duplicating Job.sub_fee):
+
+1. **Don't sync them** - syncing perpetuates the bad design
+2. **Pick one as source of truth** - usually the parent (Job.sub_fee)
+3. **Create migration to remove the redundant column** from the child
+4. **Update views** to use the association (invoice.job.sub_fee)
+5. **Add delegation** if access pattern is common
+
+---
+
 ### Anti-Patterns (AVOID THESE)
 
 **Turbo Stream Mistakes:**
@@ -888,6 +966,7 @@ Key points:
 - ❌ Missing unique database constraints for logical uniqueness (e.g., size + ownership_type should have unique index)
 - ❌ Migrations that backfill data without checking for existing records
 - ❌ Seeds that produce different results on different dates/runs (non-idempotent)
+- ❌ Redundant columns on related models (e.g., `sub_fee` on both `Job` and `Invoice`) — pick ONE source of truth, use delegation or association access
 
 **Seed Idempotence Rule:** Seeds SHOULD be idempotent unless explicitly documented otherwise. Running `db:seed` twice should produce the same database state.
 
@@ -1395,16 +1474,17 @@ If you create files in lib/tasks/ via bash_command, they exist in the container 
 NEVER include a leading slash "/" at the beginning. Example: ls("app/models")
 """
 
-SEARCH_FILE_DESCRIPTION = """
-Use this tool to search the entire project for a substring, in order to find files that contain the substring.
-This is extremely useful when the user is asking you to make changes, but you're not sure what files to edit.
+# DEPRECATED: 04/07/26 - Leonardo should use glob & grep instead of "search" tool.
+# SEARCH_FILE_DESCRIPTION = """
+# Use this tool to search the entire project for a substring, in order to find files that contain the substring.
+# This is extremely useful when the user is asking you to make changes, but you're not sure what files to edit.
 
-This is great for researching and exploring the project, finding relevant parts of the code, and trying to answer questions about key implementation details of the project.
+# This is great for researching and exploring the project, finding relevant parts of the code, and trying to answer questions about key implementation details of the project.
 
-Usage:
-- The substring parameter must be a string that is a valid search query.
-- You can use this tool to search the contents of a file for a substring.
-"""
+# Usage:
+# - The substring parameter must be a string that is a valid search query.
+# - You can use this tool to search the contents of a file for a substring.
+# """
 
 BASH_COMMAND_FOR_RAILS_DESCRIPTION = """
 ## ⛔ FORBIDDEN COMMANDS - DO NOT USE BASH FOR THESE:

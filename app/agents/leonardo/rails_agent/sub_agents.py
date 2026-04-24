@@ -187,7 +187,7 @@ def create_sub_agent(llm_model: str = None):
         #search_file,
         grep_files, glob_files,
         bash_command,
-        git_status, git_commit, git_command, github_cli_command,
+        # git_status, git_commit, git_command, github_cli_command,  # Disabled to prevent auto-commits
         internet_search,
         # Note: delegate_task is NOT included to prevent infinite recursion
     ]
