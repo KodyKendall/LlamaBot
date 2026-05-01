@@ -76,3 +76,8 @@
 - [x] Add memory
 - [x] Add stop button
 - [x] Add plan & ask mode
+
+0.4.0m: 
+- [x] Update DeepSeek to v4 Flash 
+- [x] Auto remove the broken messages in between the tool calls to fix the 400 error - tool calls must be followed by tool messages (Non Gemini models threads lock in this state if this happens)
+- [x] Improve Database Mode and make the memory more proactive for database mode

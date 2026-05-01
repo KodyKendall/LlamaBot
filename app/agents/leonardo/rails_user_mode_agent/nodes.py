@@ -23,7 +23,11 @@ from langchain_core.messages import SystemMessage
 from datetime import date
 
 from app.agents.leonardo.rails_agent.state import RailsAgentState
-from app.agents.leonardo.rails_agent.tools import bash_command
+from app.agents.leonardo.rails_agent.tools import (
+    bash_command,
+    save_memory, list_memories, delete_memory,
+    read_leonardo_md, edit_leonardo_md, write_leonardo_md,
+)
 from app.agents.leonardo.rails_agent.sub_agents import delegate_research
 from app.agents.leonardo.rails_user_mode_agent.prompts import USER_MODE_AGENT_PROMPT
 from app.agents.leonardo.project_context import build_system_prompt_with_project_context
@@ -112,10 +116,12 @@ def get_cached_system_prompt():
 # Tool List - ONLY bash_command for database access
 # =============================================================================
 
-# Tools for database mode: bash_command + research delegation
+# Tools for database mode: bash_command + research + memory + project context
 default_tools = [
     bash_command,       # Rails console/runner for ActiveRecord operations
     delegate_research,  # Read-only sub-agent for codebase investigation
+    save_memory, list_memories, delete_memory,  # Long-term memory
+    read_leonardo_md, edit_leonardo_md, write_leonardo_md,  # Project context file
 ]
 
 

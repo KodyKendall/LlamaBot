@@ -290,7 +290,7 @@ class DeepSeekReasoningMiddleware(AgentMiddleware):
 
     def _inject_reasoning_content(self, messages, model_name: str):
         """Inject reasoning_content into AIMessages for DeepSeek reasoner."""
-        if model_name != "deepseek-reasoner":
+        if model_name != "deepseek-v4-flash":
             return messages
 
         modified_messages = []
@@ -318,7 +318,7 @@ class DeepSeekReasoningMiddleware(AgentMiddleware):
     def wrap_model_call(self, request, handler):
         """Sync version: Inject reasoning_content for DeepSeek."""
         model_name = request.state.get('llm_model', '')
-        if model_name == "deepseek-reasoner":
+        if model_name == "deepseek-v4-flash":
             messages = self._inject_reasoning_content(list(request.messages), model_name)
             return handler(request.override(messages=messages))
         return handler(request)
@@ -326,7 +326,7 @@ class DeepSeekReasoningMiddleware(AgentMiddleware):
     async def awrap_model_call(self, request, handler):
         """Async version: Inject reasoning_content for DeepSeek."""
         model_name = request.state.get('llm_model', '')
-        if model_name == "deepseek-reasoner":
+        if model_name == "deepseek-v4-flash":
             messages = self._inject_reasoning_content(list(request.messages), model_name)
             return await handler(request.override(messages=messages))
         return await handler(request)
@@ -358,19 +358,11 @@ class DynamicModelMiddleware(AgentMiddleware):
         # --- DeepSeek Integration ---
         # Using custom ChatDeepSeekWithReasoning for proper reasoning_content handling
         # in multi-turn tool-calling conversations
-        if model_name == "deepseek-chat":
-            # DeepSeek V3 non-thinking mode - good for general chat
-            return ChatDeepSeek(
-                model="deepseek-chat",
-                max_tokens=8192,
-                timeout=120,  # 2 minute timeout
-            )
-        elif model_name == "deepseek-reasoner":
-            # DeepSeek V3 reasoning mode - shows chain-of-thought
+        if model_name == "deepseek-v4-flash":
+            # DeepSeek V4 Flash reasoning mode - shows chain-of-thought
             # ChatDeepSeekWithReasoning injects reasoning_content into API requests
             return ChatDeepSeekWithReasoning(
-                model="deepseek-reasoner",
-                max_tokens=8192,
+                model="deepseek-v4-flash",
                 timeout=180,  # 3 minute timeout for reasoning model
             )
         elif model_name == "gpt-5-codex":

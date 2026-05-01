@@ -49,8 +49,7 @@ MODEL_CAPABILITIES = {
     'gpt-5-codex': {'images': True, 'video': False, 'pdf': False},
 
     # DeepSeek - primarily text focused
-    'deepseek-chat': {'images': False, 'video': False, 'pdf': False},
-    'deepseek-reasoner': {'images': False, 'video': False, 'pdf': False},
+    'deepseek-v4-flash': {'images': False, 'video': False, 'pdf': False},
 }
 
 def get_model_capabilities(model_name: str) -> dict:
@@ -83,6 +82,89 @@ class RequestHandler:
         """Check if the WebSocket connection is still open"""
         return websocket.client_state == WebSocketState.CONNECTED
 
+    async def _repair_thread_state_if_needed(self, app, config):
+        """
+        Detect and repair corrupted thread state where an AIMessage has
+        tool_calls not followed by corresponding ToolMessages.
+
+        This happens when a task is cancelled mid-tool-execution. The
+        checkpointer persists the AIMessage with tool_calls, but the
+        ToolMessages never get added. This breaks the LLM API contract.
+
+        Scans the FULL message history (not just the last message) because
+        additional HumanMessages may have been appended after the corruption.
+
+        Repair strategy: remove all messages after the corrupted AIMessage
+        and inject synthetic ToolMessages, so the LLM can continue cleanly.
+        """
+        from langchain_core.messages import AIMessage, ToolMessage as LCToolMessage, HumanMessage
+        from langchain_core.messages import RemoveMessage
+
+        try:
+            state_snapshot = await app.aget_state(config)
+            if not state_snapshot or not state_snapshot.values:
+                return
+
+            messages = state_snapshot.values.get("messages", [])
+            if not messages:
+                return
+
+            # Scan for any AIMessage with tool_calls not followed by ToolMessages
+            corrupted_index = None
+            for i, msg in enumerate(messages):
+                if not isinstance(msg, AIMessage):
+                    continue
+                tool_calls = getattr(msg, 'tool_calls', [])
+                if not tool_calls:
+                    continue
+
+                # Check if all tool_calls have corresponding ToolMessages following this AIMessage
+                expected_ids = {tc["id"] for tc in tool_calls}
+                found_ids = set()
+                for j in range(i + 1, len(messages)):
+                    if isinstance(messages[j], LCToolMessage):
+                        found_ids.add(getattr(messages[j], 'tool_call_id', None))
+                    elif isinstance(messages[j], AIMessage):
+                        break  # Next AI turn - stop looking
+
+                if not expected_ids.issubset(found_ids):
+                    corrupted_index = i
+                    break  # Fix the first corruption found
+
+            if corrupted_index is None:
+                return
+
+            corrupted_msg = messages[corrupted_index]
+            tool_calls = corrupted_msg.tool_calls
+            logger.warning(
+                f"Corrupted thread state detected at message index {corrupted_index}: "
+                f"AIMessage with {len(tool_calls)} dangling tool_call(s). Repairing..."
+            )
+
+            # Remove all messages AFTER the corrupted AIMessage
+            messages_to_remove = messages[corrupted_index + 1:]
+            remove_ops = [RemoveMessage(id=m.id) for m in messages_to_remove if hasattr(m, 'id') and m.id]
+
+            # Inject synthetic ToolMessages for each dangling tool_call
+            repair_messages = []
+            for tc in tool_calls:
+                repair_messages.append(LCToolMessage(
+                    content="[Cancelled] Tool execution was interrupted before completion.",
+                    tool_call_id=tc["id"],
+                    name=tc.get("name", "unknown"),
+                ))
+
+            # Apply: remove orphaned messages, then add synthetic ToolMessages
+            update_messages = remove_ops + repair_messages
+            await app.aupdate_state(config, {"messages": update_messages})
+            logger.info(
+                f"Thread state repaired: removed {len(remove_ops)} orphaned message(s), "
+                f"injected {len(repair_messages)} synthetic ToolMessage(s)"
+            )
+
+        except Exception as e:
+            logger.warning(f"Thread state repair check failed (non-fatal): {e}")
+
     # This is a the main function that handles incoming WebSocket requests. This will build the LangGraph workflow, and invoke it from a checkpointed state.
     async def handle_request(self, incoming_message: dict, websocket: WebSocket):
         """Handle incoming WebSocket requests with proper locking and cancellation"""
@@ -113,6 +195,10 @@ class RequestHandler:
                     },
                     "recursion_limit": recursion_limit
                 }
+
+                # Auto-repair corrupted thread state (dangling tool_calls without ToolMessages)
+                # This can happen when a previous task was cancelled mid-tool-execution
+                await self._repair_thread_state_if_needed(app, config)
 
                 async for chunk in app.astream(state, config=config, stream_mode=["updates", "messages"], subgraphs=True):
 
@@ -385,6 +471,9 @@ class RequestHandler:
                     },
                     "recursion_limit": recursion_limit
                 }
+
+                # Auto-repair corrupted thread state (defensive - less likely in HITL flow)
+                await self._repair_thread_state_if_needed(app, config)
 
                 # Build HITLResponse from user decisions
                 decisions = response_message.get("decisions", [])

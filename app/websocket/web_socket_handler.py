@@ -99,6 +99,7 @@ class WebSocketHandler:
         logger.info(f"New WebSocket connection attempt from {self.websocket.client}")
         await self.manager.connect(self.websocket)
         current_task = None
+        pending_messages = []  # Queue for messages received while a task is running
 
         # Track if we've sent an auth warning (only send once)
         auth_warning_sent = False
@@ -175,21 +176,31 @@ class WebSocketHandler:
                                 logger.info(f"Unauthenticated WebSocket from {self.websocket.client} (auth not required)")
                                 auth_warning_sent = True
 
-                    # Cancel previous task if it exists and create new one
+                    # If a task is already running, queue this message instead of cancelling
+                    # This prevents corrupting the thread state (dangling tool_calls without ToolMessages)
                     if current_task and not current_task.done():
-                        logger.info("Cancelling previous task")
-                        current_task.cancel()
-                        try:
-                            await current_task
-                        except asyncio.CancelledError:
-                            logger.info("Previous task was cancelled successfully")
+                        logger.info("Task running - queuing message for processing after completion")
+                        pending_messages.append(ChatMessage(**json_data))
+                        if self._is_websocket_open(self.websocket):
+                            await self.manager.send_personal_message({
+                                "type": "queued",
+                                "content": "Message queued!"
+                            }, self.websocket)
+                        continue
 
                     message = ChatMessage(**json_data)
 
                     logger.info(f"Received message: {message}")
-                    current_task = asyncio.create_task(
-                        self.request_handler.handle_request(message, self.websocket)
-                    )
+
+                    async def run_and_drain(msg):
+                        """Run the request, then drain any messages queued during execution."""
+                        await self.request_handler.handle_request(msg, self.websocket)
+                        while pending_messages:
+                            next_msg = pending_messages.pop(0)
+                            logger.info(f"Processing queued message: {next_msg}")
+                            await self.request_handler.handle_request(next_msg, self.websocket)
+
+                    current_task = asyncio.create_task(run_and_drain(message))
                 except WebSocketDisconnect as e:
                     if e.code == 1000:
                         logger.info(f"WebSocket connection closed gracefully by client: {e.reason}")
@@ -216,6 +227,7 @@ class WebSocketHandler:
                     "content": f"Error 253: {str(e)}"
                 }, self.websocket)
         finally:
+            pending_messages.clear()
             if current_task and not current_task.done():
                 current_task.cancel()
                 try:
