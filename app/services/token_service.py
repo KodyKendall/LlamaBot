@@ -1,6 +1,7 @@
-"""JWT token service for WebSocket authentication."""
+"""JWT token service for WebSocket authentication and browser session cookies."""
 
 import os
+import secrets
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -14,6 +15,64 @@ logger = logging.getLogger(__name__)
 # Configuration with fallbacks
 SECRET_KEY = os.getenv("WS_SECRET_KEY", os.getenv("SECRET_KEY", "fallback-dev-key-change-in-production"))
 EXPIRY_MINUTES = int(os.getenv("WS_TOKEN_EXPIRY_MINUTES", "30"))
+
+
+def _ensure_session_secret() -> str:
+    """Return SESSION_SECRET, auto-generating + persisting to .env if missing.
+
+    Browser session cookies use a key independent from the WS token key so a
+    leaked WS token cannot mint browser sessions, and vice versa.
+    """
+    existing = os.getenv("SESSION_SECRET")
+    if existing:
+        return existing
+    # Lazy import to avoid a hard dep on init_pg_checkpointer at module import time
+    try:
+        from init_pg_checkpointer import ensure_env_variable
+        return ensure_env_variable("SESSION_SECRET", secrets.token_hex(32))
+    except Exception as e:
+        # Fallback: generate in-memory only. Sessions won't survive restarts but
+        # the app keeps working in environments where .env is read-only (CI, tests).
+        logger.warning(f"Could not persist SESSION_SECRET to .env ({e}); using ephemeral key")
+        ephemeral = secrets.token_hex(32)
+        os.environ["SESSION_SECRET"] = ephemeral
+        return ephemeral
+
+
+SESSION_SECRET = _ensure_session_secret()
+SESSION_TTL_DAYS = int(os.getenv("SESSION_TTL_DAYS", "30"))
+SESSION_COOKIE_NAME = "llamabot_session"
+
+# Cookie Secure flag — defaults to True so production is safe-by-default. Set
+# LLAMABOT_COOKIE_SECURE=false in dev .env to allow plain http://localhost
+# round-trips (browsers refuse to send Secure cookies over http://).
+SESSION_COOKIE_SECURE = os.getenv("LLAMABOT_COOKIE_SECURE", "true").lower() != "false"
+
+
+def create_session_token(user: User) -> str:
+    """Sign a 30-day session JWT for browser cookie auth."""
+    now = datetime.now(timezone.utc)
+    payload = {
+        "user_id": user.id,
+        "username": user.username,
+        "type": "session",
+        "iat": now,
+        "exp": now + timedelta(days=SESSION_TTL_DAYS),
+    }
+    return jwt.encode(payload, SESSION_SECRET, algorithm="HS256")
+
+
+def verify_session_token(token: str) -> Optional[dict]:
+    """Verify a browser session JWT. Returns the payload or None on any failure."""
+    try:
+        payload = jwt.decode(token, SESSION_SECRET, algorithms=["HS256"])
+        if payload.get("type") != "session":
+            return None
+        return payload
+    except jwt.ExpiredSignatureError:
+        return None
+    except jwt.InvalidTokenError:
+        return None
 
 
 def create_ws_token(user: User) -> str:

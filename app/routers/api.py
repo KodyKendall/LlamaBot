@@ -792,10 +792,10 @@ async def update_leonardo_md(
 # ============== Visible Agents Configuration ==============
 
 # Default visible agents for users without a custom configuration
-DEFAULT_VISIBLE_AGENTS = ["ticket", "engineer", "testing", "feedback", "user"]
+DEFAULT_VISIBLE_AGENTS = ["ticket", "engineer", "testing", "feedback", "user", "beginner"]
 
 # All valid agent mode keys (must match config.js agentModes)
-VALID_AGENT_MODES = ["ticket", "engineer", "feedback", "prototype", "ai_builder", "testing", "architect", "user"]
+VALID_AGENT_MODES = ["ticket", "engineer", "feedback", "prototype", "ai_builder", "testing", "architect", "user", "beginner"]
 
 
 class UpdateVisibleAgentsRequest(BaseModel):

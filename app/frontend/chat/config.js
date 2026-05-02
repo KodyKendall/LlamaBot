@@ -31,7 +31,8 @@ export const DEFAULT_CONFIG = {
     testing: 'rails_testing_agent',
     ticket: 'rails_ticket_mode_agent',
     architect: 'rails_architect_agent',
-    user: 'rails_user_mode_agent'
+    user: 'rails_user_mode_agent',
+    beginner: 'rails_beginner_agent'
   },
 
   // Streaming configuration

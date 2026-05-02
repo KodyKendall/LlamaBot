@@ -34,8 +34,8 @@ from app.agents.leonardo.rails_agent.tools import (
     grep_files, glob_files,
     git_command, github_cli_command, internet_search
 )
-# Import the model factory from middleware to use the same model as the main agent
-from app.agents.leonardo.rails_agent.middleware import DynamicModelMiddleware
+# Shared LLM factory - single source of truth for model selection
+from app.agents.leonardo.llm_factory import get_llm
 
 logger = logging.getLogger(__name__)
 
@@ -192,9 +192,8 @@ def create_sub_agent(llm_model: str = None):
         # Note: delegate_task is NOT included to prevent infinite recursion
     ]
 
-    # Use the same model as the main agent by reusing DynamicModelMiddleware's _get_llm
-    model_middleware = DynamicModelMiddleware()
-    model = model_middleware._get_llm(llm_model or 'gemini-3-flash')
+    # Use the same model as the main agent via the shared llm_factory
+    model = get_llm(llm_model or 'deepseek-v4-flash')
 
     return create_agent(
         model=model,
@@ -320,9 +319,8 @@ def create_research_sub_agent(llm_model: str = None):
         # NO delegate_task/delegate_research - prevent recursion
     ]
 
-    # Use the same model as the main agent
-    model_middleware = DynamicModelMiddleware()
-    model = model_middleware._get_llm(llm_model or 'gemini-3-flash')
+    # Use the same model as the main agent via the shared llm_factory
+    model = get_llm(llm_model or 'deepseek-v4-flash')
 
     return create_agent(
         model=model,

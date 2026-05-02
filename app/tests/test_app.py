@@ -18,7 +18,7 @@ class TestMainEndpoints:
         mock_user = User(id=1, username="testuser", role="engineer", is_admin=False, password_hash="test")
 
         with patch("app.routers.ui.has_any_users", return_value=True), \
-             patch("app.routers.ui.authenticate_user", return_value=mock_user):
+             patch("app.dependencies.authenticate_user", return_value=mock_user):
             client = TestClient(app)
             response = client.get("/", headers=auth_headers)
             # Should return 200 with HTML content

@@ -54,7 +54,7 @@ class TestApplicationIntegration:
             # Mock file open to return mock HTML content
             mock_html = "<html><body><h1>Mock Page</h1></body></html>"
             with patch("app.routers.ui.has_any_users", return_value=True), \
-                 patch("app.routers.ui.authenticate_user", return_value=mock_user), \
+                 patch("app.dependencies.authenticate_user", return_value=mock_user), \
                  patch("builtins.open", mock_open(read_data=mock_html)):
 
                 client = TestClient(app)

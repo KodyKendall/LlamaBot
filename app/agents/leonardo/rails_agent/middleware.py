@@ -8,95 +8,15 @@ This module contains:
 """
 
 from langchain.agents.middleware import AgentMiddleware
-from langchain_anthropic import ChatAnthropic
-from langchain_openai import ChatOpenAI
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_deepseek import ChatDeepSeek
-from langchain_core.language_models import LanguageModelInput
 from google.api_core.exceptions import ResourceExhausted
 from langchain_core.messages import HumanMessage, AIMessage
 from typing import Any
-import json
 import logging
-import os
 
 from app.agents.leonardo.rails_agent.state import RailsAgentState
+from app.agents.leonardo.llm_factory import get_llm
 
 logger = logging.getLogger(__name__)
-
-
-# =============================================================================
-# Custom ChatDeepSeek with reasoning_content support for multi-turn
-# =============================================================================
-
-class ChatDeepSeekWithReasoning(ChatDeepSeek):
-    """Custom ChatDeepSeek that properly includes reasoning_content in API requests.
-
-    DeepSeek's reasoner model requires reasoning_content to be present in assistant
-    messages during multi-turn conversations with tool calls. The base ChatDeepSeek
-    class stores reasoning_content in additional_kwargs but doesn't include it when
-    sending messages back to the API.
-
-    This subclass overrides _get_request_payload to:
-    1. Extract reasoning_content from AIMessage.additional_kwargs BEFORE parent conversion
-    2. Inject it back into the payload AFTER parent conversion
-    3. Auto-add empty reasoning_content for reasoner models if missing
-
-    See: https://api-docs.deepseek.com/guides/thinking_mode#tool-calls
-    Fix based on: https://github.com/langchain-ai/langchain/pull/34516
-    """
-
-    def _get_request_payload(
-        self,
-        input_: LanguageModelInput,
-        *,
-        stop: list[str] | None = None,
-        **kwargs: Any,
-    ) -> dict:
-        # Step 1: Extract reasoning_content from AIMessages BEFORE parent conversion
-        # The parent method loses additional_kwargs, so we need to preserve them
-        from langchain_core.messages import BaseMessage
-
-        reasoning_contents = {}
-        messages_list = input_ if isinstance(input_, list) else [input_]
-
-        for i, msg in enumerate(messages_list):
-            if isinstance(msg, AIMessage):
-                # Extract reasoning_content from additional_kwargs
-                reasoning = msg.additional_kwargs.get("reasoning_content")
-                if reasoning is not None:
-                    reasoning_contents[i] = reasoning
-                else:
-                    # For reasoner model, we need to add empty string if missing
-                    reasoning_contents[i] = ""
-
-        # Step 2: Get the base payload from parent
-        payload = super()._get_request_payload(input_, stop=stop, **kwargs)
-
-        # Step 3: Inject reasoning_content back into assistant messages
-        # We need to match by index since role order may differ
-        assistant_idx = 0
-        for i, message in enumerate(payload["messages"]):
-            if message["role"] == "assistant":
-                # Find the corresponding original message index
-                original_idx = None
-                count = 0
-                for j, msg in enumerate(messages_list):
-                    if isinstance(msg, AIMessage):
-                        if count == assistant_idx:
-                            original_idx = j
-                            break
-                        count += 1
-
-                if original_idx is not None and original_idx in reasoning_contents:
-                    message["reasoning_content"] = reasoning_contents[original_idx]
-                elif "reasoning_content" not in message:
-                    # Fallback: add empty reasoning_content for reasoner model
-                    message["reasoning_content"] = ""
-
-                assistant_idx += 1
-
-        return payload
 
 
 # =============================================================================
@@ -339,85 +259,23 @@ class DeepSeekReasoningMiddleware(AgentMiddleware):
 class DynamicModelMiddleware(AgentMiddleware):
     """Middleware that dynamically switches LLM based on state.llm_model.
 
-    This allows the frontend to select which model to use for each request,
-    supporting multiple providers (Anthropic, OpenAI).
+    Delegates model construction to app.agents.leonardo.llm_factory.get_llm so
+    that all agents (middleware-based and direct-invoke) share one source of
+    truth for the model registry.
 
     Note: Prompt caching for Anthropic is handled by passing a SystemMessage
     with cache_control to create_agent's system_prompt parameter in nodes.py.
     """
 
     def _get_llm(self, model_name: str):
-        """Get LLM instance based on model name from frontend.
-
-        All models are configured with thinking/reasoning enabled:
-        - Gemini: include_thoughts=True, thinking_level="low"
-        - Claude: thinking with budget_tokens (5000 for sonnet, 3000 for haiku)
-        - OpenAI: reasoning with effort="low" and output_version for content blocks
-        - DeepSeek: enable_reasoning=True via extra_body (OpenAI-compatible API)
-        """
-        # --- DeepSeek Integration ---
-        # Using custom ChatDeepSeekWithReasoning for proper reasoning_content handling
-        # in multi-turn tool-calling conversations
-        if model_name == "deepseek-v4-flash":
-            # DeepSeek V4 Flash reasoning mode - shows chain-of-thought
-            # ChatDeepSeekWithReasoning injects reasoning_content into API requests
-            return ChatDeepSeekWithReasoning(
-                model="deepseek-v4-flash",
-                timeout=180,  # 3 minute timeout for reasoning model
-            )
-        elif model_name == "gpt-5-codex":
-            return ChatOpenAI(
-                model="gpt-5-codex",
-                use_responses_api=True,
-                reasoning={"effort": "low", "summary": "auto"},  # summary enables reasoning output
-                output_version="responses/v1"  # Format reasoning into content blocks
-            )
-        elif model_name == "gpt-5-mini":
-            return ChatOpenAI(
-                model="gpt-5-mini",
-                use_responses_api=True,
-                reasoning={"effort": "low", "summary": "auto"},  # summary enables reasoning output
-                output_version="responses/v1"  # Format reasoning into content blocks
-            )
-        elif model_name == "claude-4.5-sonnet":
-            return ChatAnthropic(
-                model="claude-sonnet-4-5-20250929",
-                max_tokens=16384,
-                thinking={"type": "enabled", "budget_tokens": 5000}
-            )
-        elif model_name == 'gemini-3-flash':
-            # Note: thinking_level requires langchain-google-genai >= 4.0.0
-            # If you get "Unknown field for ThinkingConfig: thinking_level", upgrade the package
-            return ChatGoogleGenerativeAI(
-                model="gemini-3-flash-preview",
-                include_thoughts=True
-                # thinking_level="low"
-            )
-        elif model_name == 'gemini-3-pro':
-            return ChatGoogleGenerativeAI(
-                model="gemini-3.1-pro-preview",
-                include_thoughts=True
-            )
-        elif model_name == 'claude-4.5-haiku':
-            return ChatAnthropic(
-                model="claude-haiku-4-5",
-                max_tokens=16384,
-                thinking={"type": "enabled", "budget_tokens": 3000}
-            )
-
-        # Default to Gemini 3 Flash with thinking enabled
-        return ChatGoogleGenerativeAI(
-            model="gemini-3-flash-preview",
-            include_thoughts=True
-            # thinking_level="low"
-        )
+        """Backward-compatible alias for sub-agents that reach into the middleware."""
+        return get_llm(model_name)
 
     def wrap_model_call(self, request, handler):
         """Sync version: Override the model in the request based on state."""
-        # llm_model = request.state.get('llm_model', 'gemini-3-flash')
-        llm_model = request.state.get('llm_model', 'claude-4.5-haiku')
+        llm_model = request.state.get('llm_model') or 'deepseek-v4-flash'
         logger.info(f"Using LLM model: {llm_model}")
-        model = self._get_llm(llm_model)
+        model = get_llm(llm_model)
         # This is all you need for automatic retries on rate limits from Google
         model = model.with_retry(
             retry_if_exception_type=(ResourceExhausted,),
@@ -428,10 +286,9 @@ class DynamicModelMiddleware(AgentMiddleware):
 
     async def awrap_model_call(self, request, handler):
         """Async version: Override the model in the request based on state."""
-        # llm_model = request.state.get('llm_model', 'gemini-3-flash')
-        llm_model = request.state.get('llm_model', 'claude-4.5-haiku')
+        llm_model = request.state.get('llm_model') or 'deepseek-v4-flash'
         logger.info(f"Using LLM model: {llm_model}")
-        model = self._get_llm(llm_model)
+        model = get_llm(llm_model)
         return await handler(request.override(model=model))
 
 

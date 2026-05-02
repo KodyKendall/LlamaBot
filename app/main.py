@@ -47,14 +47,33 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
-# Add CORS middleware for React frontend
+# Add CORS middleware for React frontend.
+#
+# Note: `allow_origins=["*"]` + `allow_credentials=True` is browser-rejected
+# for credentialed requests, so it never actually worked for cookies anyway.
+# With session cookies, the origin allowlist matters — configure it explicitly.
+allowed_origins_env = os.getenv("LLAMABOT_ALLOWED_ORIGINS", "").strip()
+if allowed_origins_env:
+    allowed_origins = [o.strip() for o in allowed_origins_env.split(",") if o.strip()]
+else:
+    # Default: same-origin only. CORS doesn't apply to same-origin requests,
+    # so `[]` is the correct setting (rejects all cross-origin) without breaking
+    # anything that runs on the same host the API is served from.
+    allowed_origins = []
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for ngrok/external access
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+if not os.getenv("LLAMAPRESS_AI_LOGIN_SECRET"):
+    logger.warning(
+        "LLAMAPRESS_AI_LOGIN_SECRET is not set. Magic-link sign-in "
+        "(GET /login?token=...) will return 503 until configured. "
+        "POST /login and HTTP Basic Auth still work."
+    )
 
 # Mount static directories
 frontend_dir = Path(__file__).parent / "frontend"

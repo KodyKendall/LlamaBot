@@ -2,6 +2,7 @@
 
 import json
 import logging
+import os
 from pathlib import Path
 
 from fastapi import APIRouter, Request, Depends, HTTPException, Form
@@ -12,13 +13,24 @@ from app.db import engine
 from app.models import User
 from app.dependencies import (
     security, get_db_session, auth, get_current_user, admin_required, has_any_users,
-    engineer_or_admin_required
+    engineer_or_admin_required, try_authenticate
 )
 from app.services.user_service import authenticate_user, get_user_by_username
+from app.services.token_service import (
+    SESSION_COOKIE_NAME,
+    SESSION_COOKIE_SECURE,
+    SESSION_TTL_DAYS,
+    create_session_token,
+)
+from app.services.magic_link_service import (
+    MagicLinkInvalid,
+    MagicLinkSecretMissing,
+    verify_magic_link_token,
+)
 
 # Role-based default visible agents
 DEFAULT_VISIBLE_AGENTS_USER = ["feedback"]
-DEFAULT_VISIBLE_AGENTS_ENGINEER = ["ticket", "engineer", "testing", "feedback", "user", "prototype", "ai_builder", "architect"]
+DEFAULT_VISIBLE_AGENTS_ENGINEER = ["ticket", "engineer", "testing", "feedback", "user", "prototype", "ai_builder", "architect", "beginner"]
 
 logger = logging.getLogger(__name__)
 
@@ -34,16 +46,15 @@ async def root(request: Request):
     if not has_any_users():
         return RedirectResponse(url="/register", status_code=302)
 
-    # Otherwise require authentication
-    credentials = await security(request)
+    # Otherwise require authentication (session cookie OR Basic Auth).
+    # Unauthenticated browser users are redirected to /login so they get the
+    # nice HTML form rather than the browser's native Basic Auth dialog.
+    # Basic Auth still works for curl / scripted callers — they pass an
+    # Authorization header and never see the redirect.
     with Session(engine) as session:
-        user = authenticate_user(session, credentials.username, credentials.password)
+        user = try_authenticate(request, session)
         if not user:
-            raise HTTPException(
-                status_code=401,
-                detail="Invalid credentials",
-                headers={"WWW-Authenticate": "Basic"},
-            )
+            return RedirectResponse(url="/login", status_code=302)
 
         # Get visible agents for this user (role-based defaults)
         visible_agents = None
@@ -63,10 +74,14 @@ async def root(request: Request):
         # Serve the chat.html file with user role and visible agents injected
         with open(frontend_dir / "chat.html") as f:
             html = f.read()
-        # Inject user role and visible agents as global variables for the frontend
+        # Inject user role, visible agents, and PostHog config as global variables for the frontend
+        posthog_key = os.getenv("LLAMABOT_POSTHOG_KEY", "")
+        posthog_host = os.getenv("LLAMABOT_POSTHOG_HOST", "")
         config_script = f'''<script>
 window.LLAMABOT_USER_ROLE = "{getattr(user, "role", "engineer")}";
 window.LLAMABOT_VISIBLE_AGENTS = {json.dumps(visible_agents)};
+window.LLAMABOT_POSTHOG_KEY = {json.dumps(posthog_key) if posthog_key else "null"};
+window.LLAMABOT_POSTHOG_HOST = {json.dumps(posthog_host) if posthog_host else "null"};
 </script>'''
         html = html.replace('</head>', f'{config_script}</head>')
         return HTMLResponse(content=html)
@@ -136,6 +151,108 @@ async def register(
             status_code=500,
             detail="Failed to create user"
         )
+
+
+_SESSION_COOKIE_KWARGS = dict(
+    key=SESSION_COOKIE_NAME,
+    httponly=True,
+    secure=SESSION_COOKIE_SECURE,
+    samesite="lax",
+    path="/",
+    max_age=SESSION_TTL_DAYS * 24 * 3600,
+)
+
+
+def _set_session_cookie(response, user: User) -> None:
+    response.set_cookie(value=create_session_token(user), **_SESSION_COOKIE_KWARGS)
+
+
+@router.post("/login")
+async def login(
+    request: Request,
+    session: Session = Depends(get_db_session),
+):
+    """Exchange username/password for a session cookie.
+
+    Accepts either JSON `{"username": ..., "password": ...}` or
+    `application/x-www-form-urlencoded` so password managers and basic <form>
+    submissions both work.
+    """
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid JSON body")
+        username = body.get("username")
+        password = body.get("password")
+    else:
+        form = await request.form()
+        username = form.get("username")
+        password = form.get("password")
+
+    if not isinstance(username, str) or not isinstance(password, str):
+        raise HTTPException(status_code=400, detail="username and password required")
+
+    user = authenticate_user(session, username, password)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    response = JSONResponse({"ok": True, "username": user.username})
+    _set_session_cookie(response, user)
+    return response
+
+
+@router.get("/login")
+async def login_get(
+    token: str = "",
+    session: Session = Depends(get_db_session),
+):
+    """Login endpoint — dual purpose.
+
+    - `GET /login` (no token): serves the HTML sign-in form. Replaces the
+      browser's native Basic Auth dialog as the front door for browser users.
+    - `GET /login?token=<signed>`: magic-link sign-in. Used by the
+      LlamaPress.ai Rails mothership to redirect a user into a freshly-claimed
+      Leonardo instance with the user already signed in. Validates an
+      HMAC-signed token, looks up the user by username, sets the session
+      cookie, and redirects to /.
+
+    Unknown username → 401 (no auto-provision; /register remains the only
+    user-creation path). The Rails side guarantees the user exists before
+    generating the magic-link token.
+    """
+    if not token:
+        # No token → serve the sign-in form. If no users exist yet, push them
+        # to registration instead.
+        if not has_any_users():
+            return RedirectResponse(url="/register", status_code=302)
+        with open("login.html") as f:
+            return HTMLResponse(content=f.read())
+
+    try:
+        username = verify_magic_link_token(token)
+    except MagicLinkSecretMissing:
+        # Operator-facing: the instance launcher forgot to wire the secret through.
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Magic-link sign-in is not configured on this instance "
+                "(LLAMAPRESS_AI_LOGIN_SECRET is unset). POST /login still works."
+            ),
+        )
+    except MagicLinkInvalid as e:
+        logger.info(f"Magic-link rejected: {e}")
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    user = get_user_by_username(session, username)
+    if not user or not user.is_active:
+        # Intentional: 401, not auto-provision. Rails owns the sequencing fix.
+        raise HTTPException(status_code=401, detail="Unknown user")
+
+    response = RedirectResponse(url="/", status_code=302)
+    _set_session_cookie(response, user)
+    return response
 
 
 @router.get("/users", response_class=HTMLResponse)
@@ -1502,15 +1619,19 @@ async def settings_page(current_user: User = Depends(get_current_user)):
 
 @router.post("/logout")
 async def logout():
+    """Logout endpoint.
+
+    Clears the session cookie *and* returns 401 with WWW-Authenticate: Basic
+    so any browser still relying on cached Basic creds also gets evicted.
+    Both auth modes are cleared in one shot.
     """
-    Logout endpoint - returns 401 to clear browser's cached credentials.
-    The browser will prompt for new credentials on the next request.
-    """
-    raise HTTPException(
+    response = JSONResponse(
+        {"detail": "Logged out"},
         status_code=401,
-        detail="Logged out",
-        headers={"WWW-Authenticate": "Basic"}
+        headers={"WWW-Authenticate": "Basic"},
     )
+    response.delete_cookie(key=SESSION_COOKIE_NAME, path="/")
+    return response
 
 
 @router.get("/leonardo-md", response_class=HTMLResponse)

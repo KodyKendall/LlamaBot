@@ -61,7 +61,8 @@
       "Bash(timeout 10 python3:*)",
       "Bash(docker system:*)",
       "Bash(gh auth login --help:*)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(git -C /Users/kodykendall/SoftEngineering/LLMPress/LlamaBot diff app/agents/leonardo/rails_agent/middleware.py)"
     ],
     "deny": [],
     "ask": []

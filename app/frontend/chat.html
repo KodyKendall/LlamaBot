@@ -146,6 +146,19 @@
                     <i class="fa-solid fa-microchip"></i>
                     <span>Model</span>
                 </button>
+                <div class="toolbar-divider"></div>
+                <div class="custom-dropdown-container toolbar-agent-mode">
+                    <select data-llamabot="agent-mode-select" class="custom-dropdown">
+                        <option value="engineer" data-short-label="Engineer" data-original-label="Engineer Mode">Engineer</option>
+                        <option value="ticket" data-short-label="Ticket">Ticket Mode</option>
+                        <option value="user" data-short-label="Database">Database Mode</option>
+                        <option value="prototype" data-short-label="Design">Design Mode</option>
+                        <option value="ai_builder" data-short-label="AI Builder">AI Builder Mode</option>
+                        <option value="testing" data-short-label="Test Builder">Test Builder Mode</option>
+                        <option value="architect" data-short-label="Architect">Architect Mode</option>
+                        <option value="beginner" data-short-label="Beginner">Beginner Mode</option>
+                    </select>
+                </div>
             </div>
             <input type="file" data-llamabot="file-input" class="hidden-file-input" accept=".pdf,.png,.jpg,.jpeg,.gif,.webp,.webm,.mp4,image/png,image/jpeg,image/gif,image/webp,video/webm,video/mp4,application/pdf" multiple>
             <!-- Model selector (hidden by default, shown when model toggle clicked) -->
@@ -199,18 +212,6 @@
                                 <div class="execution-mode-option-desc">Leonardo will explore the code and present a plan before editing</div>
                             </div>
                         </div>
-                    </div>
-                    <!-- Agent mode selector (always visible) -->
-                    <div class="custom-dropdown-container">
-                        <select data-llamabot="agent-mode-select" class="custom-dropdown">
-                            <option value="engineer" data-short-label="Engineer">Engineer Mode</option>
-                            <option value="ticket" data-short-label="Ticket">Ticket Mode</option>
-                            <option value="user" data-short-label="Database">Database Mode</option>
-                            <option value="prototype" data-short-label="Design">Design Mode</option>
-                            <option value="ai_builder" data-short-label="AI Builder">AI Builder Mode</option>
-                            <option value="testing" data-short-label="Test Builder">Test Builder Mode</option>
-                            <option value="architect" data-short-label="Architect">Architect Mode</option>
-                        </select>
                     </div>
                     <button data-llamabot="send-button" class="send-icon-button" disabled title="Send message">
                         <i class="fa-solid fa-arrow-up"></i>
@@ -425,6 +426,23 @@
                 });
             }
         });
+    </script>
+
+    <!-- PostHog analytics (only initializes if LLAMABOT_POSTHOG_KEY is set) -->
+    <script>
+        !function(t,e){var o,n,p,r;e.__SV||(window.posthog && window.posthog.__loaded)||(window.posthog=e,e._i=[],e.init=function(i,s,a){function g(t,e){var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}(p=t.createElement("script")).type="text/javascript",p.crossOrigin="anonymous",p.async=!0,p.src=s.api_host.replace(".i.posthog.com","-assets.i.posthog.com")+"/static/array.js",(r=t.getElementsByTagName("script")[0]).parentNode.insertBefore(p,r);var u=e;for(void 0!==a?u=e[a]=[]:a="posthog",u.people=u.people||[],u.toString=function(t){var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e},u.people.toString=function(){return u.toString(1)+".people (stub)"},o="Ii init Di qi Sr Bi Zi Pi capture calculateEventProperties Yi register register_once register_for_session unregister unregister_for_session Xi getFeatureFlag getFeatureFlagPayload getFeatureFlagResult isFeatureEnabled reloadFeatureFlags updateFlags updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures on onFeatureFlags onSurveysLoaded onSessionId getSurveys getActiveMatchingSurveys renderSurvey displaySurvey cancelPendingSurvey canRenderSurvey canRenderSurveyAsync Ji identify setPersonProperties group resetGroups setPersonPropertiesForFlags resetPersonPropertiesForFlags setGroupPropertiesForFlags resetGroupPropertiesForFlags reset get_distinct_id getGroups get_session_id get_session_replay_url alias set_config startSessionRecording stopSessionRecording sessionRecordingStarted captureException startExceptionAutocapture stopExceptionAutocapture loadToolbar get_property getSessionProperty Wi Vi createPersonProfile setInternalOrTestUser Gi Fi Ki opt_in_capturing opt_out_capturing has_opted_in_capturing has_opted_out_capturing get_explicit_consent_status is_capturing clear_opt_in_out_capturing $i debug Tr Ui getPageViewId captureTraceFeedback captureTraceMetric Ri".split(" "),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])},e.__SV=1)}(document,window.posthog||[]);
+
+        if (window.LLAMABOT_POSTHOG_KEY) {
+          posthog.init(window.LLAMABOT_POSTHOG_KEY, {
+            api_host: window.LLAMABOT_POSTHOG_HOST || 'https://us.i.posthog.com',
+            defaults: '2026-01-30',
+            person_profiles: 'always',
+            recordCrossOriginIframes: true,
+            loaded: (posthog) => {
+              posthog.capture("llamabot_instance_loaded")
+            }
+          })
+        }
     </script>
 
     <!-- Link to external JavaScript -->
