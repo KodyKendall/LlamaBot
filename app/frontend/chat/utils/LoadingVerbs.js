@@ -39,7 +39,21 @@ export class LoadingVerbs {
       "Re-prompting",
       "Meta-ruminating",
       "Token-tickling",
-      "Server-stretching"
+      "Server-stretching",
+      "Hallum-inating",
+      "Prompt-ificating",
+      "Wool-shuffling",
+      "Latent-spacing",
+      "Gradient-descendenating",
+      "Embeddinating",
+      "Contexticating",
+      "Attentionating",
+      "Dropoutifying",
+      "Backpropagating",
+      "Tensor-wooling",
+      "Epoch-counting",
+      "Loss-minimizing",
+      "Soft-maxinating"
     ];
     this.intervalId = null;
   }
@@ -119,7 +133,21 @@ export class LoadingVerbs {
       "Re-prompting",
       "Meta-ruminating",
       "Token-tickling",
-      "Server-stretching"
+      "Server-stretching",
+      "Hallucinating",
+      "Prompt-wrangling",
+      "Weight-shuffling",
+      "Latent-spacing",
+      "Gradient-descending",
+      "Embedding-juggling",
+      "Context-windowshopping",
+      "Attention-heading",
+      "Dropout-napping",
+      "Backpropagating",
+      "Tensor-flexing",
+      "Epoch-counting",
+      "Loss-minimizing",
+      "Softmaxing"
     ];
     return verbs[Math.floor(Math.random() * verbs.length)];
   }

@@ -34,7 +34,13 @@ from app.agents.leonardo.rails_agent.tool_prompts import (
     WRITE_LEONARDO_MD_DESCRIPTION,
 )
 
-from app.agents.leonardo.project_context import LEONARDO_MD_PATH
+from app.agents.leonardo.project_context import (
+    LEONARDO_MD_PATH,
+    SOUL_MD_PATH,
+    USER_MD_PATH,
+    IDENTITY_MD_PATH,
+    BOOTSTRAP_MD_PATH,
+)
 
 from app.agents.leonardo.memory import (
     write_memory_file,
@@ -1847,6 +1853,85 @@ def write_leonardo_md(
         return Command(
             update={
                 "messages": [ToolMessage(f"Error writing LEONARDO.md: {e}", tool_call_id=tool_call_id)]
+            }
+        )
+
+
+VALID_PERSONALITY_FILES = {
+    "SOUL.md": SOUL_MD_PATH,
+    "USER.md": USER_MD_PATH,
+    "IDENTITY.md": IDENTITY_MD_PATH,
+}
+
+
+@tool(description="""Write a personality file (SOUL.md, USER.md, or IDENTITY.md) to the .leonardo/ workspace.
+These files define the agent's identity, personality, and knowledge about the user.
+Use this during bootstrap onboarding or when updating personality/user info.
+- filename: Must be one of: SOUL.md, USER.md, IDENTITY.md
+- content: The markdown content to write""")
+def write_personality_file(
+    filename: str,
+    content: str,
+    runtime: ToolRuntime,
+) -> Command:
+    """Write a personality file to .leonardo/."""
+    tool_call_id = runtime.tool_call_id
+
+    if filename not in VALID_PERSONALITY_FILES:
+        return Command(
+            update={
+                "messages": [ToolMessage(
+                    f"Error: filename must be one of: {', '.join(VALID_PERSONALITY_FILES.keys())}",
+                    tool_call_id=tool_call_id
+                )]
+            }
+        )
+
+    filepath = Path(VALID_PERSONALITY_FILES[filename])
+    try:
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+        filepath.write_text(content, encoding="utf-8")
+        return Command(
+            update={
+                "messages": [ToolMessage(f"Successfully wrote {filename} ({len(content)} chars).", tool_call_id=tool_call_id)]
+            }
+        )
+    except Exception as e:
+        return Command(
+            update={
+                "messages": [ToolMessage(f"Error writing {filename}: {e}", tool_call_id=tool_call_id)]
+            }
+        )
+
+
+@tool(description="""Complete the bootstrap onboarding process by deleting BOOTSTRAP.md.
+Call this AFTER you have written IDENTITY.md, SOUL.md, and USER.md using write_personality_file.
+This removes the bootstrap script so future conversations use normal mode.""")
+def complete_bootstrap(
+    runtime: ToolRuntime,
+) -> Command:
+    """Delete BOOTSTRAP.md to complete onboarding."""
+    tool_call_id = runtime.tool_call_id
+    filepath = Path(BOOTSTRAP_MD_PATH)
+
+    if not filepath.exists():
+        return Command(
+            update={
+                "messages": [ToolMessage("BOOTSTRAP.md already removed. Bootstrap is complete.", tool_call_id=tool_call_id)]
+            }
+        )
+
+    try:
+        filepath.unlink()
+        return Command(
+            update={
+                "messages": [ToolMessage("Bootstrap complete! BOOTSTRAP.md has been removed. You are now fully online.", tool_call_id=tool_call_id)]
+            }
+        )
+    except Exception as e:
+        return Command(
+            update={
+                "messages": [ToolMessage(f"Error removing BOOTSTRAP.md: {e}", tool_call_id=tool_call_id)]
             }
         )
 

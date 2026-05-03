@@ -15,12 +15,14 @@ from typing import Literal
 
 from app.agents.leonardo.rails_agent.state import RailsAgentState
 from app.agents.leonardo.rails_agent.tools import (
-    write_todos, write_file, read_file, ls, edit_file, search_file, bash_command,
+    write_todos, write_file, read_file, ls, edit_file, bash_command,
+    glob_files, grep_files, internet_search,
     read_leonardo_md, write_leonardo_md, edit_leonardo_md,
     save_memory, list_memories, delete_memory,
+    write_personality_file, complete_bootstrap,
 )
 from app.agents.leonardo.rails_beginner_agent.prompts import BEGINNER_AGENT_PROMPT
-from app.agents.leonardo.project_context import build_system_prompt_with_project_context
+from app.agents.leonardo.project_context import build_beginner_system_prompt
 from app.agents.leonardo.llm_factory import get_llm
 
 import logging
@@ -32,7 +34,7 @@ APP_DIR = PROJECT_ROOT / 'app'
 
 
 def get_sys_msg():
-    full_prompt = build_system_prompt_with_project_context(BEGINNER_AGENT_PROMPT)
+    full_prompt = build_beginner_system_prompt(BEGINNER_AGENT_PROMPT)
     return {
         "role": "system",
         "content": [
@@ -47,9 +49,11 @@ def get_sys_msg():
 
 default_tools = [
     write_todos,
-    ls, read_file, write_file, edit_file, search_file, bash_command,
+    ls, read_file, write_file, edit_file, bash_command,
+    glob_files, grep_files, internet_search,
     read_leonardo_md, write_leonardo_md, edit_leonardo_md,
     save_memory, list_memories, delete_memory,
+    write_personality_file, complete_bootstrap,
 ]
 
 
@@ -68,8 +72,10 @@ def leonardo_beginner(state: RailsAgentState) -> Command[Literal["tools"]]:
 
     tools = [
         write_todos,
-        ls, read_file, write_file, edit_file, search_file, bash_command,
+        ls, read_file, write_file, edit_file, bash_command,
+        glob_files, grep_files, internet_search,
         read_leonardo_md, write_leonardo_md, edit_leonardo_md,
+        write_personality_file, complete_bootstrap,
     ]
 
     failed_tool_calls_count = state.get("failed_tool_calls_count", 0)
