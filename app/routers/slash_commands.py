@@ -432,7 +432,7 @@ def _run_backup_in_background(backup_id: str):
     s3_bucket = os.getenv("S3_BUCKET_PATH", "")
     project_dir = HOST_LEONARDO_PATH
 
-    command = f"bash bin/backups/cloud/master_backup_all.sh {instance_name} {s3_bucket} {project_dir}"
+    command = f"chmod +x bin/backups/cloud/*.sh && bash bin/backups/cloud/master_backup_all.sh {instance_name} {s3_bucket} {project_dir}"
     try:
         result = execute_command(command, timeout=600)
         if result.returncode == 0:
