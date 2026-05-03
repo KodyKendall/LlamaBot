@@ -244,7 +244,7 @@ class ChatApp {
           thread_id,
           agent_name,
           agent_mode: this.elements.agentModeSelect?.value,
-          llm_model: this.elements.modelSelect?.value || 'gemini-3-flash',
+          llm_model: this.elements.modelSelect?.value || 'deepseek-v4-flash',
           origin: window.location.host,
           ask_before_edits: true,
         });
@@ -733,7 +733,7 @@ class ChatApp {
 
     let message = input.value.trim();
     const agentMode = this.elements.agentModeSelect?.value;
-    const llmModel = this.elements.modelSelect?.value || 'gemini-3-flash';
+    const llmModel = this.elements.modelSelect?.value || 'deepseek-v4-flash';
 
     // Ensure AppState is synchronized with current dropdown value before sending
     // This fixes a race condition where AppState could be stale after page initialization
