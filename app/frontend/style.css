@@ -353,6 +353,32 @@ body {
     box-shadow: 0 2px 8px rgba(0,0,0,0.2);
 }
 
+/* Backup status indicator */
+.backup-status {
+    font-size: 0.7rem;
+    color: var(--text-muted, #888);
+    text-decoration: none;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    margin-left: -4px;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.backup-status--active {
+    opacity: 0.7;
+}
+
+.backup-status--done {
+    opacity: 0.9;
+    color: #4caf50;
+}
+
+.backup-status--error {
+    opacity: 0.9;
+    color: #f44336;
+}
+
 /* Settings button */
 .settings-btn {
     width: 32px;

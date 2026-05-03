@@ -1,8 +1,11 @@
 """Slash Commands API for executing host scripts."""
 
+import json
 import logging
 import subprocess
 import os
+import uuid
+import threading
 from datetime import datetime
 from typing import List, Optional
 
@@ -102,14 +105,6 @@ SLASH_COMMANDS = {
         "description": "Restart llamapress and llamabot containers",
         "dangerous": True,
         "confirm_message": "This will restart the application. You may lose your connection briefly. Continue?"
-    },
-    "bash": {
-        "script": None,
-        "command": None,  # Uses args from request
-        "description": "Run a custom bash command",
-        "dangerous": True,
-        "confirm_message": "This will execute a custom bash command. Continue?",
-        "accepts_args": True
     },
     "history": {
         "script": None,
@@ -400,3 +395,100 @@ async def get_command_history(
         }
         for entry in history
     ]
+
+
+# --- Auto-backup on completion ---
+
+_backup_status = {}  # {backup_id: {"status": "running"|"completed"|"failed", "error": str|None}}
+BACKUP_HISTORY_FILE = os.path.join(LEONARDO_PATH, "logs", "backup_history.json")
+
+
+def _log_backup_result(backup_id: str, status: str, error: str = None, stdout: str = None):
+    """Append backup result to persistent history file."""
+    try:
+        os.makedirs(os.path.dirname(BACKUP_HISTORY_FILE), exist_ok=True)
+        history = []
+        if os.path.exists(BACKUP_HISTORY_FILE):
+            with open(BACKUP_HISTORY_FILE, "r") as f:
+                history = json.load(f)
+        history.append({
+            "id": backup_id,
+            "status": status,
+            "error": error,
+            "stdout": (stdout or "")[-2000:],
+            "timestamp": datetime.now().isoformat()
+        })
+        # Keep last 100 entries
+        history = history[-100:]
+        with open(BACKUP_HISTORY_FILE, "w") as f:
+            json.dump(history, f, indent=2)
+    except Exception as e:
+        logger.warning(f"Failed to log backup result: {e}")
+
+
+def _run_backup_in_background(backup_id: str):
+    """Run master_backup_all.sh in a background thread."""
+    instance_name = os.getenv("INSTANCE_NAME", "")
+    s3_bucket = os.getenv("S3_BUCKET_PATH", "")
+    project_dir = HOST_LEONARDO_PATH
+
+    command = f"bash bin/backups/cloud/master_backup_all.sh {instance_name} {s3_bucket} {project_dir}"
+    try:
+        result = execute_command(command, timeout=600)
+        if result.returncode == 0:
+            _backup_status[backup_id] = {"status": "completed", "error": None}
+            _log_backup_result(backup_id, "completed", stdout=result.stdout)
+        else:
+            error = result.stderr[:500] if result.stderr else "Unknown error"
+            _backup_status[backup_id] = {"status": "failed", "error": error}
+            _log_backup_result(backup_id, "failed", error=error, stdout=result.stdout)
+    except Exception as e:
+        error = str(e)[:500]
+        _backup_status[backup_id] = {"status": "failed", "error": error}
+        _log_backup_result(backup_id, "failed", error=error)
+    finally:
+        # Clean up old statuses (keep only last 10)
+        if len(_backup_status) > 10:
+            oldest_keys = list(_backup_status.keys())[:-10]
+            for k in oldest_keys:
+                _backup_status.pop(k, None)
+
+
+@router.post("/api/auto-backup", response_class=JSONResponse)
+async def trigger_auto_backup(current_user: User = Depends(auth)):
+    """Trigger a non-blocking backup on task completion."""
+    instance_name = os.getenv("INSTANCE_NAME", "")
+    s3_bucket = os.getenv("S3_BUCKET_PATH", "")
+
+    if not instance_name or not s3_bucket:
+        return {"status": "skipped", "reason": "INSTANCE_NAME or S3_BUCKET_PATH not configured"}
+
+    backup_id = str(uuid.uuid4())[:8]
+    _backup_status[backup_id] = {"status": "running", "error": None}
+
+    thread = threading.Thread(target=_run_backup_in_background, args=(backup_id,), daemon=True)
+    thread.start()
+
+    return {"status": "started", "backup_id": backup_id}
+
+
+@router.get("/api/auto-backup/{backup_id}/status", response_class=JSONResponse)
+async def get_backup_status(backup_id: str, current_user: User = Depends(auth)):
+    """Check the status of a running backup."""
+    status = _backup_status.get(backup_id)
+    if not status:
+        return {"status": "unknown"}
+    return status
+
+
+@router.get("/api/auto-backup/history", response_class=JSONResponse)
+async def get_backup_history(current_user: User = Depends(auth)):
+    """Get persistent backup history."""
+    try:
+        if os.path.exists(BACKUP_HISTORY_FILE):
+            with open(BACKUP_HISTORY_FILE, "r") as f:
+                history = json.load(f)
+            return list(reversed(history))  # Most recent first
+        return []
+    except Exception:
+        return []

@@ -1590,6 +1590,28 @@ async def settings_page(current_user: User = Depends(get_current_user)):
         {"<div class='card'><div class='card-header'>Automation</div><a href='/scheduled-jobs' class='menu-item'><i class='fa-solid fa-clock'></i><span>Scheduled Jobs</span><i class='fa-solid fa-chevron-right chevron'></i></a></div>" if current_user.role == 'engineer' or current_user.is_admin else ""}
 
         <div class="card">
+            <div class="card-header">Backup</div>
+            <a href="/backup-history" target="_blank" class="menu-item">
+                <i class="fa-solid fa-clock-rotate-left"></i>
+                <span>Backup History</span>
+                <i class="fa-solid fa-chevron-right chevron"></i>
+            </a>
+            <div class="menu-item" style="cursor: default;">
+                <i class="fa-solid fa-cloud-arrow-up"></i>
+                <span>Auto-backup on completion</span>
+                <label style="position: relative; display: inline-block; width: 44px; height: 24px;">
+                    <input type="checkbox" id="autoBackupToggle" style="opacity: 0; width: 0; height: 0;"
+                        onchange="toggleAutoBackup(this.checked)">
+                    <span style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #555; border-radius: 24px; transition: 0.3s;"></span>
+                    <span id="autoBackupSlider" style="position: absolute; content: ''; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; border-radius: 50%; transition: 0.3s;"></span>
+                </label>
+            </div>
+            <div style="padding: 4px 0 0 36px; font-size: 0.75rem; color: #666;">
+                Runs cloud backup after each task completes
+            </div>
+        </div>
+
+        <div class="card">
             <button class="logout-btn" onclick="logout()">
                 <i class="fa-solid fa-right-from-bracket"></i>
                 Sign Out
@@ -1598,6 +1620,32 @@ async def settings_page(current_user: User = Depends(get_current_user)):
     </div>
 
     <script>
+        // Auto-backup toggle
+        (function() {{
+            const toggle = document.getElementById('autoBackupToggle');
+            const slider = document.getElementById('autoBackupSlider');
+            const isEnabled = localStorage.getItem('autoBackupEnabled') !== 'false';
+            toggle.checked = isEnabled;
+            updateSliderStyle(isEnabled);
+        }})();
+
+        function toggleAutoBackup(enabled) {{
+            localStorage.setItem('autoBackupEnabled', enabled ? 'true' : 'false');
+            updateSliderStyle(enabled);
+        }}
+
+        function updateSliderStyle(enabled) {{
+            const slider = document.getElementById('autoBackupSlider');
+            const track = slider.previousElementSibling;
+            if (enabled) {{
+                track.style.backgroundColor = '#4CAF50';
+                slider.style.transform = 'translateX(20px)';
+            }} else {{
+                track.style.backgroundColor = '#555';
+                slider.style.transform = 'translateX(0)';
+            }}
+        }}
+
         function logout() {{
             // Clear credentials by making a request that will fail, then redirect
             fetch('/logout', {{
@@ -3591,6 +3639,201 @@ async def scheduled_jobs_page(user: User = Depends(engineer_or_admin_required)):
 
         // Load data on page load
         loadJobs();
+    </script>
+</body>
+</html>
+"""
+    return HTMLResponse(content=html)
+
+
+@router.get("/backup-history", response_class=HTMLResponse)
+async def backup_history_page(current_user: User = Depends(get_current_user)):
+    """Serve the backup history page."""
+    html = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Backup History</title>
+    <link rel="icon" type="image/png" href="https://llamapress-ai-image-uploads.s3.us-west-2.amazonaws.com/4bmqe5iolvp84ceyk9ttz8vylrym">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        :root {
+            --bg-color: #1a1a1a;
+            --chat-bg: #2d2d2d;
+            --text-color: #e0e0e0;
+            --border-color: #404040;
+            --accent-color: #4CAF50;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 0;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+        .header {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+        h1 {
+            font-size: 1.5rem;
+            margin: 0;
+        }
+        .backup-entry {
+            background: var(--chat-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 12px;
+        }
+        .backup-entry.completed {
+            border-left: 3px solid #4caf50;
+        }
+        .backup-entry.failed {
+            border-left: 3px solid #f44336;
+        }
+        .backup-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        .backup-status-badge {
+            font-size: 0.8rem;
+            font-weight: 600;
+            padding: 2px 8px;
+            border-radius: 4px;
+        }
+        .backup-status-badge.completed {
+            background: rgba(76, 175, 80, 0.2);
+            color: #4caf50;
+        }
+        .backup-status-badge.failed {
+            background: rgba(244, 67, 54, 0.2);
+            color: #f44336;
+        }
+        .backup-time {
+            font-size: 0.85rem;
+            color: #888;
+        }
+        .backup-error {
+            font-size: 0.8rem;
+            color: #f44336;
+            background: rgba(244, 67, 54, 0.1);
+            padding: 8px 12px;
+            border-radius: 4px;
+            margin-top: 8px;
+            font-family: monospace;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        .backup-output {
+            font-size: 0.75rem;
+            color: #aaa;
+            background: #1a1a1a;
+            padding: 8px 12px;
+            border-radius: 4px;
+            margin-top: 8px;
+            font-family: monospace;
+            white-space: pre-wrap;
+            max-height: 200px;
+            overflow-y: auto;
+            word-break: break-all;
+        }
+        .backup-output summary {
+            cursor: pointer;
+            color: #888;
+            font-size: 0.75rem;
+            margin-bottom: 4px;
+        }
+        .empty-state {
+            text-align: center;
+            color: #666;
+            padding: 60px 20px;
+        }
+        .empty-state i {
+            font-size: 3rem;
+            margin-bottom: 16px;
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1><i class="fa-solid fa-cloud-arrow-up" style="margin-right: 10px;"></i>Backup History</h1>
+        </div>
+        <div id="backup-list">
+            <div class="empty-state">
+                <i class="fa-solid fa-spinner fa-spin"></i>
+                Loading...
+            </div>
+        </div>
+    </div>
+
+    <script>
+        async function loadHistory() {
+            try {
+                const res = await fetch('/api/auto-backup/history');
+                const history = await res.json();
+                const container = document.getElementById('backup-list');
+
+                if (!history || history.length === 0) {
+                    container.innerHTML = `
+                        <div class="empty-state">
+                            <i class="fa-solid fa-box-open"></i>
+                            <p>No backup history yet</p>
+                        </div>
+                    `;
+                    return;
+                }
+
+                container.innerHTML = history.map(entry => {
+                    const date = new Date(entry.timestamp);
+                    const timeStr = date.toLocaleString();
+                    const errorHtml = entry.error
+                        ? `<div class="backup-error">${escapeHtml(entry.error)}</div>`
+                        : '';
+                    const outputHtml = entry.stdout
+                        ? `<details class="backup-output"><summary>Show output</summary>${escapeHtml(entry.stdout)}</details>`
+                        : '';
+
+                    return `
+                        <div class="backup-entry ${entry.status}">
+                            <div class="backup-header">
+                                <span class="backup-time">${timeStr}</span>
+                                <span class="backup-status-badge ${entry.status}">${entry.status === 'completed' ? 'Success' : 'Failed'}</span>
+                            </div>
+                            ${errorHtml}
+                            ${outputHtml}
+                        </div>
+                    `;
+                }).join('');
+            } catch (e) {
+                document.getElementById('backup-list').innerHTML = `
+                    <div class="empty-state">
+                        <i class="fa-solid fa-triangle-exclamation"></i>
+                        <p>Failed to load backup history</p>
+                    </div>
+                `;
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        loadHistory();
     </script>
 </body>
 </html>

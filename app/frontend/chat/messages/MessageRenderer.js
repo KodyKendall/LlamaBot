@@ -482,7 +482,79 @@ export class MessageRenderer {
     // Emit custom event for other components to handle
     window.dispatchEvent(new CustomEvent('streamEnded'));
 
+    // Trigger auto-backup if enabled
+    this.triggerAutoBackup();
+
     return null;
+  }
+
+  /**
+   * Trigger non-blocking auto-backup on task completion
+   */
+  triggerAutoBackup() {
+    // Check if auto-backup is enabled (default: on)
+    if (localStorage.getItem('autoBackupEnabled') === 'false') return;
+
+    const statusEl = document.querySelector('[data-llamabot="backup-status"]');
+    if (!statusEl) return;
+
+    statusEl.textContent = 'saving...';
+    statusEl.className = 'backup-status backup-status--active';
+
+    fetch('/api/auto-backup', { method: 'POST' })
+      .then(res => res.json())
+      .then(data => {
+        if (data.status === 'skipped') {
+          statusEl.textContent = 'not saved';
+          statusEl.className = 'backup-status backup-status--error';
+          setTimeout(() => {
+            statusEl.textContent = '';
+            statusEl.className = 'backup-status';
+          }, 5000);
+          return;
+        }
+        if (data.status === 'started' && data.backup_id) {
+          this.pollBackupStatus(data.backup_id, statusEl);
+        }
+      })
+      .catch(() => {
+        statusEl.textContent = '';
+        statusEl.className = 'backup-status';
+      });
+  }
+
+  /**
+   * Poll backup status until complete
+   */
+  pollBackupStatus(backupId, statusEl) {
+    const poll = () => {
+      fetch(`/api/auto-backup/${backupId}/status`)
+        .then(res => res.json())
+        .then(data => {
+          if (data.status === 'running') {
+            setTimeout(poll, 5000);
+          } else if (data.status === 'completed') {
+            statusEl.textContent = 'saved!';
+            statusEl.className = 'backup-status backup-status--done';
+            setTimeout(() => {
+              statusEl.textContent = '';
+              statusEl.className = 'backup-status';
+            }, 3000);
+          } else {
+            statusEl.textContent = 'backup failed';
+            statusEl.className = 'backup-status backup-status--error';
+            setTimeout(() => {
+              statusEl.textContent = '';
+              statusEl.className = 'backup-status';
+            }, 5000);
+          }
+        })
+        .catch(() => {
+          statusEl.textContent = '';
+          statusEl.className = 'backup-status';
+        });
+    };
+    setTimeout(poll, 5000);
   }
 
   /**
