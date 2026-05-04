@@ -205,6 +205,7 @@ async def login(
 
 @router.get("/login")
 async def login_get(
+    request: Request,
     token: str = "",
     session: Session = Depends(get_db_session),
 ):
@@ -250,7 +251,14 @@ async def login_get(
         # Intentional: 401, not auto-provision. Rails owns the sequencing fix.
         raise HTTPException(status_code=401, detail="Unknown user")
 
-    response = RedirectResponse(url="/", status_code=302)
+    # Preserve ?prompt= param through the redirect so chat auto-sends it
+    redirect_url = "/"
+    prompt = request.query_params.get("prompt")
+    if prompt:
+        from urllib.parse import urlencode
+        redirect_url = f"/?{urlencode({'prompt': prompt})}"
+
+    response = RedirectResponse(url=redirect_url, status_code=302)
     _set_session_cookie(response, user)
     return response
 

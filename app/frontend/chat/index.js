@@ -320,6 +320,9 @@ class ChatApp {
     // Fetch available models and disable unavailable ones
     this.fetchAvailableModels();
 
+    // Check for ?prompt= URL parameter and auto-send after WebSocket connects
+    this.checkAutoPrompt();
+
     // Dispatch ready event for external scripts to hook into
     window.dispatchEvent(new CustomEvent('llamabot:ready', { detail: { instance: this } }));
   }
@@ -721,6 +724,38 @@ class ChatApp {
           if (check) check.remove();
         }
       });
+    }
+  }
+
+  /**
+   * Check for ?prompt= URL parameter and auto-send once WebSocket is connected
+   */
+  checkAutoPrompt() {
+    const params = new URLSearchParams(window.location.search);
+    const autoPrompt = params.get('prompt');
+    if (!autoPrompt) return;
+
+    // Remove the prompt param from URL so it doesn't re-send on refresh
+    const url = new URL(window.location);
+    url.searchParams.delete('prompt');
+    window.history.replaceState({}, '', url);
+
+    // Wait for WebSocket connection + auth to complete, then send
+    const sendOnConnect = () => {
+      // Small delay to ensure auth message is sent first (sendAuthMessage is async)
+      setTimeout(() => {
+        const input = this.elements.messageInput;
+        if (input) {
+          input.value = autoPrompt;
+        }
+        this.sendMessageWithDebugInfo();
+      }, 300);
+    };
+
+    if (this.webSocketManager?.socket?.readyState === 1) {
+      sendOnConnect();
+    } else {
+      window.addEventListener('websocketConnected', sendOnConnect, { once: true });
     }
   }
 
