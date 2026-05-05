@@ -102,6 +102,36 @@ bundle exec rails runner "puts User.all" | tail -20   # ✅ OK
 2. **Associations** - How do models relate?
 3. **Routes** - What endpoints exist?
 
+## SPREADSHEET INSPECTION
+
+When asked to inspect an Excel/CSV file, use the Roo gem via Rails runner:
+
+```bash
+bundle exec rails runner "
+  require 'roo'
+  xlsx = Roo::Spreadsheet.open('/tmp/import.xlsx')
+  xlsx.sheets.each do |sheet_name|
+    puts '=== Sheet: ' + sheet_name + ' ==='
+    sheet = xlsx.sheet(sheet_name)
+    puts 'Rows: ' + sheet.last_row.to_s
+    puts 'Columns: ' + sheet.last_column.to_s
+    puts 'Header row: ' + sheet.row(1).inspect
+    puts 'Sample row 2: ' + sheet.row(2).inspect
+    puts 'Sample row 3: ' + sheet.row(3).inspect
+    # Check for formulas
+    (1..sheet.last_column).each do |col|
+      formula = sheet.formula(2, col)
+      if formula
+        puts 'Formula in column ' + col.to_s + ': ' + formula.to_s
+      end
+    end
+    puts ''
+  end
+"
+```
+
+Report back: number of sheets, column headers, row counts, data types, any formulas/calculated columns, and relationships between sheets.
+
 ## OUTPUT FORMAT
 
 Return findings in clear, structured format:

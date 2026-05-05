@@ -21,6 +21,7 @@ from app.agents.leonardo.rails_agent.tools import (
     save_memory, list_memories, delete_memory,
     write_personality_file, complete_bootstrap,
 )
+from app.agents.leonardo.rails_agent.sub_agents import delegate_task, delegate_research
 from app.agents.leonardo.rails_beginner_agent.prompts import BEGINNER_AGENT_PROMPT
 from app.agents.leonardo.project_context import build_beginner_system_prompt
 from app.agents.leonardo.llm_factory import get_llm
@@ -54,6 +55,7 @@ default_tools = [
     read_leonardo_md, write_leonardo_md, edit_leonardo_md,
     save_memory, list_memories, delete_memory,
     write_personality_file, complete_bootstrap,
+    delegate_task, delegate_research,
 ]
 
 
@@ -76,6 +78,7 @@ def leonardo_beginner(state: RailsAgentState) -> Command[Literal["tools"]]:
         glob_files, grep_files, internet_search,
         read_leonardo_md, write_leonardo_md, edit_leonardo_md,
         write_personality_file, complete_bootstrap,
+        delegate_task, delegate_research,
     ]
 
     failed_tool_calls_count = state.get("failed_tool_calls_count", 0)
