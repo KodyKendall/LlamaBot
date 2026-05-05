@@ -842,6 +842,63 @@ async def set_visible_agents(
     return {"visible_agents": request.visible_agents, "message": "Visible agents updated"}
 
 
+# ============== Site Settings API ==============
+
+VALID_SITE_SETTINGS = {"show_token_wheel"}
+
+
+def get_site_setting(session: Session, key: str, default: str = "false") -> str:
+    """Get a site setting value, returning default if not found."""
+    from app.models import SiteSetting
+    setting = session.get(SiteSetting, key)
+    return setting.value if setting else default
+
+
+@router.get("/api/site-settings/{key}", response_class=JSONResponse)
+async def api_get_site_setting(
+    key: str,
+    username: str = Depends(auth),
+    session: Session = Depends(get_db_session),
+):
+    """Get a site setting value."""
+    if key not in VALID_SITE_SETTINGS:
+        raise HTTPException(status_code=400, detail=f"Unknown setting: {key}")
+    value = get_site_setting(session, key)
+    return {"key": key, "value": value}
+
+
+@router.put("/api/site-settings/{key}", response_class=JSONResponse)
+async def api_set_site_setting(
+    key: str,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_db_session),
+):
+    """Set a site setting value (engineer or admin only)."""
+    if current_user.role not in ("engineer",) and not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Only engineers or admins can change site settings")
+    if key not in VALID_SITE_SETTINGS:
+        raise HTTPException(status_code=400, detail=f"Unknown setting: {key}")
+
+    from app.models import SiteSetting
+    from datetime import datetime, timezone
+
+    body = await request.json()
+    value = str(body.get("value", "false"))
+
+    setting = session.get(SiteSetting, key)
+    if setting:
+        setting.value = value
+        setting.updated_at = datetime.now(timezone.utc)
+    else:
+        setting = SiteSetting(key=key, value=value)
+        session.add(setting)
+    session.commit()
+
+    logger.info(f"Site setting '{key}' set to '{value}' by {current_user.username}")
+    return {"key": key, "value": value}
+
+
 # ============== Skills Library API ==============
 
 @router.get("/api/skills", response_class=JSONResponse)

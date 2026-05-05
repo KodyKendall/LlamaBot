@@ -13,6 +13,7 @@ export class ScrollManager {
     this.unreadCount = 0;
     this.unreadBadge = null;
     this.onUnreadCountChange = null; // Callback for favicon badge
+    this._programmaticScroll = false; // Track programmatic scrolls to avoid false "not at bottom"
 
     this.init();
   }
@@ -52,6 +53,14 @@ export class ScrollManager {
   checkIfUserAtBottom() {
     if (!this.messageHistory) return false;
 
+    // If we just did a programmatic scroll, don't recalculate — trust that we're at bottom
+    if (this._programmaticScroll) {
+      this._programmaticScroll = false;
+      this.isUserAtBottom = true;
+      this.updateScrollToBottomButton();
+      return true;
+    }
+
     const scrollTop = this.messageHistory.scrollTop;
     const scrollHeight = this.messageHistory.scrollHeight;
     const clientHeight = this.messageHistory.clientHeight;
@@ -80,6 +89,7 @@ export class ScrollManager {
 
     // Only scroll if user is at bottom or force is true
     if (force || this.isUserAtBottom) {
+      this._programmaticScroll = true;
       this.messageHistory.scrollTop = this.messageHistory.scrollHeight;
       this.isUserAtBottom = true;
       this.updateScrollToBottomButton();

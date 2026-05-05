@@ -39,7 +39,6 @@ from app.agents.leonardo.project_context import (
     SOUL_MD_PATH,
     USER_MD_PATH,
     IDENTITY_MD_PATH,
-    BOOTSTRAP_MD_PATH,
 )
 
 from app.agents.leonardo.memory import (
@@ -1866,7 +1865,7 @@ VALID_PERSONALITY_FILES = {
 
 @tool(description="""Write a personality file (SOUL.md, USER.md, or IDENTITY.md) to the .leonardo/ workspace.
 These files define the agent's identity, personality, and knowledge about the user.
-Use this during bootstrap onboarding or when updating personality/user info.
+Use this when updating personality/user info over time as you learn about the user.
 - filename: Must be one of: SOUL.md, USER.md, IDENTITY.md
 - content: The markdown content to write""")
 def write_personality_file(
@@ -1904,36 +1903,6 @@ def write_personality_file(
         )
 
 
-@tool(description="""Complete the bootstrap onboarding process by deleting BOOTSTRAP.md.
-Call this AFTER you have written IDENTITY.md, SOUL.md, and USER.md using write_personality_file.
-This removes the bootstrap script so future conversations use normal mode.""")
-def complete_bootstrap(
-    runtime: ToolRuntime,
-) -> Command:
-    """Delete BOOTSTRAP.md to complete onboarding."""
-    tool_call_id = runtime.tool_call_id
-    filepath = Path(BOOTSTRAP_MD_PATH)
-
-    if not filepath.exists():
-        return Command(
-            update={
-                "messages": [ToolMessage("BOOTSTRAP.md already removed. Bootstrap is complete.", tool_call_id=tool_call_id)]
-            }
-        )
-
-    try:
-        filepath.unlink()
-        return Command(
-            update={
-                "messages": [ToolMessage("Bootstrap complete! BOOTSTRAP.md has been removed. You are now fully online.", tool_call_id=tool_call_id)]
-            }
-        )
-    except Exception as e:
-        return Command(
-            update={
-                "messages": [ToolMessage(f"Error removing BOOTSTRAP.md: {e}", tool_call_id=tool_call_id)]
-            }
-        )
 
 
 @tool(description="""Read the langgraph.json configuration file.

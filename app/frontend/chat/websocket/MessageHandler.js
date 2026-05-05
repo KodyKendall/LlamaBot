@@ -215,8 +215,7 @@ export class MessageHandler {
       currentMessage.setAttribute('data-raw-content', fullMessage);
     }
 
-    // Handle scrolling
-    this.scrollManager.checkIfUserAtBottom();
+    // Auto-scroll if user was already at bottom (scroll listener tracks user intent)
     this.scrollManager.scrollToBottom();
   }
 
@@ -483,6 +482,8 @@ export class MessageHandler {
   handleGenericMessage(data) {
     if (data.type === 'end' || data.type === 'system_message' || data.type === 'error') {
       this.messageRenderer.handleEndMessage();
+      // Remove beginner mode overlay when agent finishes
+      this.iframeManager.removeStreamingOverlay();
       // Clear plan tracking when conversation ends
       this.activePlanId = null;
       this.planStepMapping.clear();

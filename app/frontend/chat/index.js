@@ -561,6 +561,11 @@ class ChatApp {
           // Trigger input event to update send button state
           this.elements.messageInput.dispatchEvent(new Event('input', { bubbles: true }));
           console.log('Launchpad: Prefilled chat with command:', command);
+
+          if (event.data.auto_send) {
+            this.sendMessageWithDebugInfo();
+            console.log('Launchpad: Auto-sent prefilled command');
+          }
         }
       }
     });
@@ -811,6 +816,11 @@ class ChatApp {
     this.appState.resetMessageState();
     this.streamingState.reset();
     this.iframeManager.removeStreamingOverlay();
+
+    // Show building overlay for beginner mode
+    if (agentMode === 'beginner') {
+      this.iframeManager.createStreamingOverlay({ showCloseButton: true, text: 'Your App is Building!' });
+    }
 
     // Get file attachments before clearing (needed for display)
     const attachments = this.fileAttachmentManager?.getAttachments() || [];

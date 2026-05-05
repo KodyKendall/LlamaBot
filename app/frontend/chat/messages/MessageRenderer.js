@@ -632,7 +632,7 @@ export class MessageRenderer {
       if (thinkingMessage) {
         this.messageHistory.insertBefore(aiMessageDiv, thinkingMessage);
       } else {
-        const scrollButton = document.getElementById('scrollToBottomBtn');
+        const scrollButton = document.querySelector('[data-llamabot="scroll-to-bottom"]');
         if (scrollButton && lastToolMessage.nextSibling === scrollButton) {
           // Insert before scroll button
           this.messageHistory.insertBefore(aiMessageDiv, scrollButton);
@@ -658,7 +658,7 @@ export class MessageRenderer {
    * Clear all messages
    */
   clearMessages() {
-    const scrollButton = document.getElementById('scrollToBottomBtn');
+    const scrollButton = document.querySelector('[data-llamabot="scroll-to-bottom"]');
     this.messageHistory.innerHTML = '';
 
     if (scrollButton) {

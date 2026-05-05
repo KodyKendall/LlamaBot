@@ -19,7 +19,7 @@ from app.agents.leonardo.rails_agent.tools import (
     glob_files, grep_files, internet_search,
     read_leonardo_md, write_leonardo_md, edit_leonardo_md,
     save_memory, list_memories, delete_memory,
-    write_personality_file, complete_bootstrap,
+    write_personality_file,
 )
 from app.agents.leonardo.rails_agent.sub_agents import delegate_task, delegate_research
 from app.agents.leonardo.rails_beginner_agent.prompts import BEGINNER_AGENT_PROMPT
@@ -54,7 +54,7 @@ default_tools = [
     glob_files, grep_files, internet_search,
     read_leonardo_md, write_leonardo_md, edit_leonardo_md,
     save_memory, list_memories, delete_memory,
-    write_personality_file, complete_bootstrap,
+    write_personality_file,
     delegate_task, delegate_research,
 ]
 
@@ -77,7 +77,7 @@ def leonardo_beginner(state: RailsAgentState) -> Command[Literal["tools"]]:
         ls, read_file, write_file, edit_file, bash_command,
         glob_files, grep_files, internet_search,
         read_leonardo_md, write_leonardo_md, edit_leonardo_md,
-        write_personality_file, complete_bootstrap,
+        write_personality_file,
         delegate_task, delegate_research,
     ]
 

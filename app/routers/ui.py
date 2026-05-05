@@ -74,12 +74,17 @@ async def root(request: Request):
         # Serve the chat.html file with user role and visible agents injected
         with open(frontend_dir / "chat.html") as f:
             html = f.read()
+        # Read site settings
+        from app.routers.api import get_site_setting
+        show_token_wheel = get_site_setting(session, "show_token_wheel", "false") == "true"
+
         # Inject user role, visible agents, and PostHog config as global variables for the frontend
         posthog_key = os.getenv("LLAMABOT_POSTHOG_KEY", "")
         posthog_host = os.getenv("LLAMABOT_POSTHOG_HOST", "")
         config_script = f'''<script>
 window.LLAMABOT_USER_ROLE = "{getattr(user, "role", "engineer")}";
 window.LLAMABOT_VISIBLE_AGENTS = {json.dumps(visible_agents)};
+window.LLAMABOT_SHOW_TOKEN_WHEEL = {"true" if show_token_wheel else "false"};
 window.LLAMABOT_POSTHOG_KEY = {json.dumps(posthog_key) if posthog_key else "null"};
 window.LLAMABOT_POSTHOG_HOST = {json.dumps(posthog_host) if posthog_host else "null"};
 </script>'''
@@ -1412,8 +1417,15 @@ async def prompt_library_page(current_user: User = Depends(get_current_user)):
 
 
 @router.get("/settings", response_class=HTMLResponse)
-async def settings_page(current_user: User = Depends(get_current_user)):
+async def settings_page(
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_db_session),
+):
     """Serve the settings page."""
+    from app.routers.api import get_site_setting
+    show_token_wheel = get_site_setting(session, "show_token_wheel", "false") == "true"
+    is_engineer_or_admin = current_user.role == "engineer" or current_user.is_admin
+
     html = f"""
 <!DOCTYPE html>
 <html>
@@ -1619,6 +1631,23 @@ async def settings_page(current_user: User = Depends(get_current_user)):
             </div>
         </div>
 
+        {"" if not is_engineer_or_admin else '''<div class="card">
+            <div class="card-header">Display</div>
+            <div class="menu-item" style="cursor: default;">
+                <i class="fa-solid fa-chart-pie"></i>
+                <span>Show Token Wheel</span>
+                <label style="position: relative; display: inline-block; width: 44px; height: 24px;">
+                    <input type="checkbox" id="tokenWheelToggle" style="opacity: 0; width: 0; height: 0;"
+                        onchange="toggleTokenWheel(this.checked)">
+                    <span style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #555; border-radius: 24px; transition: 0.3s;"></span>
+                    <span id="tokenWheelSlider" style="position: absolute; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; border-radius: 50%; transition: 0.3s;"></span>
+                </label>
+            </div>
+            <div style="padding: 4px 0 0 36px; font-size: 0.75rem; color: #666;">
+                Shows context window usage percentage in chat
+            </div>
+        </div>'''}
+
         <div class="card">
             <button class="logout-btn" onclick="logout()">
                 <i class="fa-solid fa-right-from-bracket"></i>
@@ -1644,6 +1673,38 @@ async def settings_page(current_user: User = Depends(get_current_user)):
 
         function updateSliderStyle(enabled) {{
             const slider = document.getElementById('autoBackupSlider');
+            const track = slider.previousElementSibling;
+            if (enabled) {{
+                track.style.backgroundColor = '#4CAF50';
+                slider.style.transform = 'translateX(20px)';
+            }} else {{
+                track.style.backgroundColor = '#555';
+                slider.style.transform = 'translateX(0)';
+            }}
+        }}
+
+        // Token wheel toggle
+        (function() {{
+            const toggle = document.getElementById('tokenWheelToggle');
+            const slider = document.getElementById('tokenWheelSlider');
+            if (!toggle || !slider) return;
+            const isEnabled = {'true' if show_token_wheel else 'false'};
+            toggle.checked = isEnabled;
+            updateTokenWheelSlider(isEnabled);
+        }})();
+
+        function toggleTokenWheel(enabled) {{
+            updateTokenWheelSlider(enabled);
+            fetch('/api/site-settings/show_token_wheel', {{
+                method: 'PUT',
+                headers: {{ 'Content-Type': 'application/json' }},
+                body: JSON.stringify({{ value: enabled ? 'true' : 'false' }})
+            }});
+        }}
+
+        function updateTokenWheelSlider(enabled) {{
+            const slider = document.getElementById('tokenWheelSlider');
+            if (!slider) return;
             const track = slider.previousElementSibling;
             if (enabled) {{
                 track.style.backgroundColor = '#4CAF50';

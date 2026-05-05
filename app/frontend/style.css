@@ -1471,6 +1471,14 @@ body {
     word-break: break-word;
 }
 
+/* Hidden tool messages (beginner mode) - hide both the inner div and parent wrapper */
+[data-llamabot="tool-hidden"] {
+    display: none;
+}
+[data-llamabot="tool-message"]:has([data-llamabot="tool-hidden"]) {
+    display: none;
+}
+
 /* ============================================
    COMPACT TOOL MESSAGES (Minimal Design)
    ============================================ */

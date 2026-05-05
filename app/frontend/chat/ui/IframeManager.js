@@ -180,7 +180,7 @@ export class IframeManager {
    * Create streaming overlay with animation
    * Used during HTML generation to show progress animation
    */
-  createStreamingOverlay() {
+  createStreamingOverlay({ showCloseButton = false, text = 'Your Page is Being Built!' } = {}) {
     // Check if overlay already exists
     if (document.getElementById('streamingOverlay')) {
       return;
@@ -204,9 +204,35 @@ export class IframeManager {
     overlay.style.zIndex = '10';
     overlay.style.borderRadius = '8px';
 
+    // Add close button if requested
+    if (showCloseButton) {
+      const closeBtn = document.createElement('button');
+      closeBtn.innerHTML = '&times;';
+      closeBtn.style.position = 'absolute';
+      closeBtn.style.top = '10px';
+      closeBtn.style.right = '10px';
+      closeBtn.style.background = 'rgba(255, 255, 255, 0.2)';
+      closeBtn.style.border = 'none';
+      closeBtn.style.color = 'white';
+      closeBtn.style.fontSize = '2rem';
+      closeBtn.style.cursor = 'pointer';
+      closeBtn.style.borderRadius = '50%';
+      closeBtn.style.width = '40px';
+      closeBtn.style.height = '40px';
+      closeBtn.style.display = 'flex';
+      closeBtn.style.alignItems = 'center';
+      closeBtn.style.justifyContent = 'center';
+      closeBtn.style.lineHeight = '1';
+      closeBtn.style.zIndex = '11';
+      closeBtn.addEventListener('mouseenter', () => { closeBtn.style.background = 'rgba(255, 255, 255, 0.4)'; });
+      closeBtn.addEventListener('mouseleave', () => { closeBtn.style.background = 'rgba(255, 255, 255, 0.2)'; });
+      closeBtn.addEventListener('click', () => this.removeStreamingOverlay());
+      overlay.appendChild(closeBtn);
+    }
+
     // Create text
     const overlayText = document.createElement('div');
-    overlayText.textContent = 'Your Page is Being Built!';
+    overlayText.textContent = text;
     overlayText.style.color = 'white';
     overlayText.style.fontSize = '2.5rem';
     overlayText.style.fontWeight = 'bold';

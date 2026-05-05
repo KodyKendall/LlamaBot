@@ -12,6 +12,9 @@ const EXPANDABLE_TOOLS = ['grep_files', 'glob_files', 'bash_command', 'delegate_
 // Tools that should be expandable but only show input args (no output)
 const INPUT_ONLY_EXPANDABLE_TOOLS = ['read_file', 'edit_file', 'write_file'];
 
+// Tools to SHOW in beginner mode (everything else is hidden)
+const BEGINNER_VISIBLE_TOOLS = ['write_todos', 'delegate_task', 'delegate_research', 'web_search', 'web_fetch'];
+
 export class ToolMessageRenderer {
   constructor(iframeManager = null, getRailsDebugInfoCallback = null) {
     this.iframeManager = iframeManager;
@@ -31,6 +34,13 @@ export class ToolMessageRenderer {
    */
   createCollapsibleToolMessage(toolName, firstArgument, toolArgs, toolResult, agentDepth = 0) {
     const uniqueId = generateUniqueId('tool');
+
+    // In beginner mode, only show high-level tools (hide everything else)
+    if (this._isBeginnerMode() && !BEGINNER_VISIBLE_TOOLS.includes(toolName)) {
+      console.log('[ToolRenderer] HIDING tool in beginner mode:', toolName);
+      return `<div data-llamabot="tool-hidden" data-tool-name="${toolName}"></div>`;
+    }
+    console.log('[ToolRenderer] SHOWING tool:', toolName, 'beginner:', this._isBeginnerMode());
 
     // Special rendering for different tool types
     if (toolName === 'write_todos') {
@@ -239,6 +249,15 @@ export class ToolMessageRenderer {
   }
 
   /**
+   * Check if the current agent mode is beginner
+   */
+  _isBeginnerMode() {
+    const modeSelect = document.querySelector('[data-llamabot="agent-mode-select"]');
+    console.log('[ToolRenderer] mode select value:', modeSelect?.value);
+    return modeSelect?.value === 'beginner';
+  }
+
+  /**
    * Escape HTML to prevent XSS
    */
   _escapeHtml(text) {
@@ -317,6 +336,13 @@ export class ToolMessageRenderer {
 
     // Handle input-only expandable tools (read_file, edit_file) - just update status
     if (INPUT_ONLY_EXPANDABLE_TOOLS.includes(baseMessage.name)) {
+      // Always refresh iframe on edit/write success, even if tool is hidden in beginner mode
+      if ((baseMessage.name === 'edit_file' || baseMessage.name === 'write_file') &&
+          baseMessage.artifact?.status === 'success' &&
+          this.iframeManager && this.getRailsDebugInfoCallback) {
+        this.iframeManager.refreshRailsApp(this.getRailsDebugInfoCallback);
+      }
+
       const expandableDiv = messageDiv.querySelector('[data-llamabot="tool-expandable"]');
       if (expandableDiv) {
         const toolCompact = expandableDiv.querySelector('[data-llamabot="tool-compact"]');

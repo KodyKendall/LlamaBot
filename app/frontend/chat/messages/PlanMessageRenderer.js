@@ -84,7 +84,7 @@ export class PlanMessageRenderer {
       <div class="plan-progress-bar" data-progress-id="${planId}">
         <div class="plan-progress-fill" style="width: ${percentage}%"></div>
       </div>
-      <div class="plan-progress-text" onclick="togglePlanDetails('${planId}')">
+      <div class="plan-progress-text expanded" onclick="togglePlanDetails('${planId}')">
         ${allDone
           ? `<span class="plan-done-badge">${prefix}✓ Complete</span>`
           : `<span class="plan-count">${prefix}${completed}/${total} tasks</span>`
@@ -121,7 +121,7 @@ export class PlanMessageRenderer {
     }).join('');
 
     return `
-      <div class="plan-tasks-list" id="plan-details-${planId}" style="display: none;">
+      <div class="plan-tasks-list" id="plan-details-${planId}">
         <div class="plan-tasks-header">All Tasks</div>
         ${tasksHTML}
       </div>
@@ -206,7 +206,7 @@ export class PlanMessageRenderer {
         `;
       } else {
         const newTasksHTML = `
-          <div class="plan-tasks-list" id="plan-details-${planId}" style="display: none;">
+          <div class="plan-tasks-list" id="plan-details-${planId}">
             <div class="plan-tasks-header">All Tasks</div>
             ${tasksHTML}
           </div>
@@ -250,14 +250,6 @@ window.togglePlanDetails = function(planId) {
     // Toggle expanded class on progress text for arrow rotation
     if (progressText) {
       progressText.classList.toggle('expanded', !isVisible);
-    }
-
-    // Animate in
-    if (!isVisible) {
-      detailsElement.style.opacity = '0';
-      setTimeout(() => {
-        detailsElement.style.opacity = '1';
-      }, 10);
     }
   }
 };

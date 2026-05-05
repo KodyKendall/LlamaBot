@@ -180,6 +180,14 @@ class ScheduledJobRun(ActiveRecordMixin, SQLModel, table=True):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
+class SiteSetting(ActiveRecordMixin, SQLModel, table=True):
+    """Instance-wide key-value settings (e.g., show_token_wheel)."""
+
+    key: str = Field(primary_key=True, max_length=100)
+    value: str = Field(max_length=1000)
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
 class SchedulerInvocationLog(SQLModel, table=True):
     """Log entry for each cron invocation of /api/scheduled-jobs/invoke.
 
