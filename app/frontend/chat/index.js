@@ -283,18 +283,24 @@ class ChatApp {
       this.elements.fileInput,
       this.elements.attachmentsPreview
     );
+    this.fileAttachmentManager.initUploadMenu(
+      this.container.querySelector('[data-llamabot="file-attach-menu"]'),
+      this.container.querySelector('[data-llamabot="attach-for-ai-btn"]'),
+      this.container.querySelector('[data-llamabot="upload-to-assets-btn"]'),
+      this.container.querySelector('[data-llamabot="upload-file-input"]')
+    );
+    this.fileAttachmentManager.initFileBrowser(
+      this.container.querySelector('[data-llamabot="browse-files-btn"]'),
+      this.container.querySelector('[data-llamabot="file-browser-panel"]'),
+      this.container.querySelector('[data-llamabot="file-browser-list"]'),
+      this.container.querySelector('[data-llamabot="file-browser-close"]')
+    );
     this.fileAttachmentManager.setupDragAndDrop(
       this.elements.inputArea,
       this.elements.dropZoneOverlay
     );
     this.fileAttachmentManager.setupPaste(this.elements.messageInput);
 
-    // Close toolbar when file attach is clicked
-    if (this.elements.fileAttachBtn) {
-      this.elements.fileAttachBtn.addEventListener('click', () => {
-        this.closeToolsToolbar();
-      });
-    }
 
     // Initialize screen recorder
     this.screenRecorder = new ScreenRecorder();
@@ -812,6 +818,16 @@ class ChatApp {
       message = `${message}\n\n<SELECTED_ELEMENT>\n${selectedHTML}\n</SELECTED_ELEMENT>`;
     }
 
+    // Get file attachments before clearing (needed for display)
+    const attachments = this.fileAttachmentManager?.getAttachments() || [];
+
+    // Append uploaded file references to the message so the AI knows about them
+    const uploadedFiles = attachments.filter(a => a.type === 'uploaded_file');
+    if (uploadedFiles.length > 0) {
+      const fileList = uploadedFiles.map(f => `- ${f.filename} (saved to ${f.path})`).join('\n');
+      message = `${message}\n\n<UPLOADED_FILES>\nThe user uploaded the following files to the Rails app:\n${fileList}\n</UPLOADED_FILES>`;
+    }
+
     // Reset state
     this.appState.resetMessageState();
     this.streamingState.reset();
@@ -822,13 +838,11 @@ class ChatApp {
       this.iframeManager.createStreamingOverlay({ showCloseButton: true, text: 'Your App is Building!' });
     }
 
-    // Get file attachments before clearing (needed for display)
-    const attachments = this.fileAttachmentManager?.getAttachments() || [];
-
     // Extract attachment metadata for display (without large base64 data)
     const attachmentMeta = attachments.map(a => ({
       filename: a.filename,
-      mime_type: a.mime_type
+      mime_type: a.mime_type,
+      ...(a.path ? { path: a.path } : {})
     }));
 
     // Add user message with attachment badges
@@ -915,7 +929,7 @@ class ChatApp {
       agent_name: agentName,
       agent_mode: agentMode,
       llm_model: llmModel,
-      attachments: attachments,
+      attachments: attachments.filter(a => a.type !== 'uploaded_file'),
       ask_before_edits: executionMode === 'ask'
     };
 

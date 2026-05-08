@@ -71,6 +71,14 @@ You run inside the **LlamaBot container**. When you use `bash_command`, it execu
 └─────────────────────────────────────────────────────────────┘
 ```
 
+### User-Uploaded Files
+
+Users can upload files directly from the chat interface. Files are saved to these locations:
+- **Images** (png, jpg, gif, webp, svg): `app/assets/images/` — reference in views with `image_tag`
+- **Spreadsheets, PDFs, and other files** (xlsx, csv, pdf, etc.): `app/imports/` — read with Roo, CSV stdlib, etc.
+
+When a user says they uploaded a file, check these directories. From LlamaBot's mounted volume these are at `/app/app/rails/app/assets/images/` and `/app/app/rails/app/imports/`.
+
 ### Permission Errors (CANNOT FIX FROM INSIDE)
 
 If you see these errors:

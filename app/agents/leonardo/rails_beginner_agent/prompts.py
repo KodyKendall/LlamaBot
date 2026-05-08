@@ -244,25 +244,34 @@ Phases must be **tiny, visible MVP slices**. Each phase ends with the user click
 
 Many beginners have a spreadsheet that runs their business. They want it to become a real app.
 
+### Where user-uploaded files live
+
+Users can upload files directly from the chat interface:
+- **Images** (png, jpg, gif, webp, svg) are saved to: `app/assets/images/`
+- **Spreadsheets, PDFs, and other files** (xlsx, csv, pdf, etc.) are saved to: `app/imports/`
+
 ### When the user mentions a file or sends an attachment
 
-1. **Pull the file** to `app/assets/imported/` using `bash_command`:
+1. **Check if the file is already on disk.** The user may have used the "Upload to Assets" button, which saves it directly:
+   - Images: `app/assets/images/filename.png`
+   - Spreadsheets/other: `app/imports/filename.xlsx`
+
+   If the file was attached for AI instead (you can see it in the message), pull it to disk:
    ```
    bash_command: bundle exec rails runner "
      require 'fileutils'
-     FileUtils.mkdir_p('app/assets/imported')
+     FileUtils.mkdir_p('app/imports')
      blob = ActiveStorage::Blob.find_by(filename: 'their_file.xlsx')
-     File.open('app/assets/imported/their_file.xlsx', 'wb') { |f| f.write(blob.download) }
-     puts 'Saved to app/assets/imported/their_file.xlsx'
+     File.open('app/imports/their_file.xlsx', 'wb') { |f| f.write(blob.download) }
+     puts 'Saved to app/imports/their_file.xlsx'
    "
    ```
-   **Always save imported files (spreadsheets, images, PDFs) to `app/assets/imported/`.** This is the permanent home for user-uploaded files that get pulled from S3/ActiveStorage. Never use `/tmp/` — files there disappear on restart.
 
 2. **Quick peek with a direct `bash_command` (NOT delegated).** Get the headers and first few rows yourself so you can build the visual immediately:
    ```
    bash_command: bundle exec rails runner "
      require 'roo'
-     xlsx = Roo::Excelx.new('app/assets/imported/their_file.xlsx')
+     xlsx = Roo::Excelx.new('app/imports/their_file.xlsx')
      xlsx.sheets.each do |sheet|
        puts \"=== Sheet: #{sheet} ===\"
        s = xlsx.sheet(sheet)
@@ -280,7 +289,7 @@ Many beginners have a spreadsheet that runs their business. They want it to beco
 
 4. **THEN delegate the full build.** Now that the user can see something, delegate the heavy lifting:
    ```
-   delegate_task("Read the spreadsheet at app/assets/imported/their_file.xlsx. Create a scaffold for [Model] with the right fields based on the column headers. Run migrations. Import all rows. Then update app/views/public/home.html.erb to render the data dynamically from the database instead of hardcoded HTML.")
+   delegate_task("Read the spreadsheet at app/imports/their_file.xlsx. Create a scaffold for [Model] with the right fields based on the column headers. Run migrations. Import all rows. Then update app/views/public/home.html.erb to render the data dynamically from the database instead of hardcoded HTML.")
    ```
 
 5. **Tell them what you did in plain words:**

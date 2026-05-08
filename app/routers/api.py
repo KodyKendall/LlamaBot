@@ -6,7 +6,7 @@ import re
 import os
 
 from typing import Optional
-from fastapi import APIRouter, Request, Depends, HTTPException, Query
+from fastapi import APIRouter, Request, Depends, HTTPException, Query, UploadFile, File
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlmodel import Session
@@ -1054,3 +1054,89 @@ async def api_use_skill(
         raise HTTPException(status_code=404, detail="Skill not found")
 
     return {"usage_count": skill.usage_count}
+
+
+# ============== File Upload to Assets ==============
+
+UPLOAD_ALLOWED_EXTENSIONS = {
+    '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg',
+    '.xlsx', '.xls', '.csv',
+    '.pdf',
+    '.mp4', '.webm',
+}
+
+IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'}
+
+RAILS_ROOT = "/app/app/rails"
+IMAGES_DIR = f"{RAILS_ROOT}/app/assets/images"
+IMPORTS_DIR = f"{RAILS_ROOT}/app/imports"
+
+
+@router.post("/api/upload-to-assets", response_class=JSONResponse)
+async def upload_to_assets(
+    file: UploadFile = File(...),
+    username: str = Depends(auth),
+):
+    """Upload a file: images go to app/assets/images, everything else to app/imports."""
+    import pathlib
+
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No filename provided")
+
+    # Validate extension
+    ext = pathlib.Path(file.filename).suffix.lower()
+    if ext not in UPLOAD_ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File type '{ext}' not allowed. Allowed: {', '.join(sorted(UPLOAD_ALLOWED_EXTENSIONS))}"
+        )
+
+    # Sanitize filename - keep only safe characters
+    safe_filename = re.sub(r'[^\w\-.]', '_', file.filename)
+
+    # Route images to assets/images, everything else to app/imports
+    if ext in IMAGE_EXTENSIONS:
+        dest_dir = IMAGES_DIR
+        relative_path = f"app/assets/images/{safe_filename}"
+    else:
+        dest_dir = IMPORTS_DIR
+        relative_path = f"app/imports/{safe_filename}"
+
+    # Ensure directory exists
+    os.makedirs(dest_dir, exist_ok=True)
+
+    # Save file
+    dest_path = os.path.join(dest_dir, safe_filename)
+    contents = await file.read()
+    with open(dest_path, "wb") as f:
+        f.write(contents)
+
+    logger.info(f"File uploaded: {relative_path} by {username} ({len(contents)} bytes)")
+
+    return {
+        "filename": safe_filename,
+        "path": relative_path,
+        "size": len(contents),
+    }
+
+
+@router.get("/api/uploaded-files", response_class=JSONResponse)
+async def list_uploaded_files(username: str = Depends(auth)):
+    """List files in app/assets/images and app/imports."""
+    import pathlib
+
+    files = []
+    for dir_path, rel_prefix in [(IMAGES_DIR, "app/assets/images"), (IMPORTS_DIR, "app/imports")]:
+        d = pathlib.Path(dir_path)
+        if not d.exists():
+            continue
+        for f in sorted(d.iterdir()):
+            if f.is_file() and not f.name.startswith('.'):
+                files.append({
+                    "filename": f.name,
+                    "path": f"{rel_prefix}/{f.name}",
+                    "size": f.stat().st_size,
+                    "folder": rel_prefix,
+                })
+
+    return {"files": files}

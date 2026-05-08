@@ -35,7 +35,7 @@
                 <i class="fa-solid fa-clock-rotate-left"></i>
                 <span class="unsaved-badge hidden" data-llamabot="unsaved-badge"></span>
             </button>
-            <a href="/settings" class="settings-btn" title="Settings">
+            <a href="/settings" target="_blank" class="settings-btn" title="Settings">
                 <i class="fa-solid fa-gear"></i>
             </a>
             <button class="collapse-sidebar-btn" data-llamabot="collapse-sidebar-btn" title="Collapse sidebar">
@@ -128,9 +128,6 @@
                     <button data-llamabot="capture-logs-btn" class="toolbar-tool" title="Capture Rails logs (10s)">
                         <i class="fa-solid fa-bug"></i>
                     </button>
-                    <button data-llamabot="file-attach-btn" class="toolbar-tool" title="Attach file (PDF, images)">
-                        <i class="fa-solid fa-paperclip"></i>
-                    </button>
                     <button data-llamabot="prompt-library-btn" class="toolbar-tool" title="Prompt Library">
                         <i class="fa-solid fa-book"></i>
                     </button>
@@ -161,7 +158,8 @@
                     </select>
                 </div>
             </div>
-            <input type="file" data-llamabot="file-input" class="hidden-file-input" accept=".pdf,.png,.jpg,.jpeg,.gif,.webp,.webm,.mp4,image/png,image/jpeg,image/gif,image/webp,video/webm,video/mp4,application/pdf" multiple>
+            <input type="file" data-llamabot="file-input" class="hidden-file-input" accept=".pdf,.png,.jpg,.jpeg,.gif,.webp,.webm,.mp4,.xlsx,.xls,.csv,image/png,image/jpeg,image/gif,image/webp,video/webm,video/mp4,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv" multiple>
+            <input type="file" data-llamabot="upload-file-input" class="hidden-file-input" accept=".pdf,.png,.jpg,.jpeg,.gif,.webp,.svg,.xlsx,.xls,.csv,.mp4,.webm" multiple>
             <!-- Model selector (hidden by default, shown when model toggle clicked) -->
             <div class="model-selector-container hidden" data-llamabot="model-selector-container">
                 <div class="custom-dropdown-container">
@@ -191,6 +189,31 @@
                     <button data-llamabot="element-selector-btn" class="tools-toggle-btn" title="Select element from page">
                         <i class="fa-solid fa-mouse-pointer"></i>
                     </button>
+                    <!-- File attach with dropdown menu -->
+                    <div class="file-attach-wrapper" style="position: relative; display: inline-block;">
+                        <button data-llamabot="file-attach-btn" class="tools-toggle-btn" title="Attach file (PDF, images, Excel)">
+                            <i class="fa-solid fa-paperclip"></i>
+                        </button>
+                        <div data-llamabot="file-attach-menu" class="file-attach-menu hidden">
+                            <button data-llamabot="attach-for-ai-btn" class="file-attach-menu-item">
+                                <i class="fa-solid fa-robot"></i> Attach for AI
+                            </button>
+                            <button data-llamabot="upload-to-assets-btn" class="file-attach-menu-item">
+                                <i class="fa-solid fa-upload"></i> Upload to Assets
+                            </button>
+                            <button data-llamabot="browse-files-btn" class="file-attach-menu-item">
+                                <i class="fa-solid fa-folder-open"></i> Browse Uploads
+                            </button>
+                        </div>
+                        <!-- File browser panel -->
+                        <div data-llamabot="file-browser-panel" class="file-browser-panel hidden">
+                            <div class="file-browser-header">
+                                <span>Uploaded Files</span>
+                                <button data-llamabot="file-browser-close" class="file-browser-close">&times;</button>
+                            </div>
+                            <div data-llamabot="file-browser-list" class="file-browser-list"></div>
+                        </div>
+                    </div>
                     <!-- Execution mode selector (dropdown with descriptions) -->
                     <div class="execution-mode-selector" data-llamabot="execution-mode-selector">
                         <button class="execution-mode-trigger" data-llamabot="execution-mode-trigger">
