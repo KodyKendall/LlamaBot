@@ -326,6 +326,9 @@ class ChatApp {
     // Fetch available models and disable unavailable ones
     this.fetchAvailableModels();
 
+    // Check for ?conversation= URL parameter and render pre-loaded messages
+    this.checkConversationParam();
+
     // Check for ?prompt= URL parameter and auto-send after WebSocket connects
     this.checkAutoPrompt();
 
@@ -735,6 +738,36 @@ class ChatApp {
           if (check) check.remove();
         }
       });
+    }
+  }
+
+  /**
+   * Check for ?conversation= URL parameter and render pre-loaded chat bubbles.
+   * Expects a base64-encoded JSON array: [{"role":"human"|"ai","content":"..."},...]
+   */
+  checkConversationParam() {
+    const params = new URLSearchParams(window.location.search);
+    const conversationB64 = params.get('conversation');
+    if (!conversationB64) return;
+
+    // Remove the param from URL so refresh doesn't duplicate
+    const url = new URL(window.location);
+    url.searchParams.delete('conversation');
+    window.history.replaceState({}, '', url);
+
+    try {
+      const json = atob(conversationB64);
+      const messages = JSON.parse(json);
+
+      if (!Array.isArray(messages)) return;
+
+      for (const msg of messages) {
+        if (!msg.content || !msg.role) continue;
+        const type = msg.role === 'human' ? 'human' : 'ai';
+        this.messageRenderer.addMessage(msg.content, type);
+      }
+    } catch (e) {
+      console.error('Failed to parse ?conversation= parameter:', e);
     }
   }
 
