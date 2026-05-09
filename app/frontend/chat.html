@@ -10,11 +10,22 @@
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <!-- Fabric.js for screenshot annotation -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
+    <!-- Canvas confetti for welcome prompt celebration -->
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
     <!-- Font Awesome for icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <!-- Link to external CpSS -->
     <link rel="stylesheet" href="/frontend/style.css?v=9">
 </head>
+<style>
+    .welcome-fade-in {
+      animation: welcomeFadeIn 2s ease-out forwards;
+    }
+    @keyframes welcomeFadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+</style>
 <body>
     <div class="chat-section">
         <div class="chat-header">

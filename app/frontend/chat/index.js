@@ -332,6 +332,9 @@ class ChatApp {
     // Check for ?prompt= URL parameter and auto-send after WebSocket connects
     this.checkAutoPrompt();
 
+    // Check for ?welcome_prompt= URL parameter (fade-in + confetti on completion)
+    this.checkWelcomePrompt();
+
     // Dispatch ready event for external scripts to hook into
     window.dispatchEvent(new CustomEvent('llamabot:ready', { detail: { instance: this } }));
   }
@@ -791,6 +794,52 @@ class ChatApp {
         const input = this.elements.messageInput;
         if (input) {
           input.value = autoPrompt;
+        }
+        this.sendMessageWithDebugInfo();
+      }, 300);
+    };
+
+    if (this.webSocketManager?.socket?.readyState === 1) {
+      sendOnConnect();
+    } else {
+      window.addEventListener('websocketConnected', sendOnConnect, { once: true });
+    }
+  }
+
+  /**
+   * Check for ?welcome_prompt= URL parameter.
+   * Same as ?prompt= but also triggers a fade-in on the UI and confetti on completion.
+   */
+  checkWelcomePrompt() {
+    const params = new URLSearchParams(window.location.search);
+    const welcomePrompt = params.get('welcome_prompt');
+    if (!welcomePrompt) return;
+
+    // Remove the param from URL so it doesn't re-send on refresh
+    const url = new URL(window.location);
+    url.searchParams.delete('welcome_prompt');
+    window.history.replaceState({}, '', url);
+
+    // Fade-in effect on the chat UI
+    document.body.classList.add('welcome-fade-in');
+
+    // Set flag so MessageRenderer fires confetti on stream end
+    window._welcomePromptActive = true;
+    window.addEventListener('streamEnded', () => {
+      if (!window._welcomePromptActive) return;
+      window._welcomePromptActive = false;
+      if (typeof confetti === 'function') {
+        confetti({ particleCount: 150, spread: 80, origin: { y: 0.6 } });
+        setTimeout(() => confetti({ particleCount: 80, spread: 100, origin: { y: 0.5 } }), 300);
+      }
+    }, { once: true });
+
+    // Auto-send the prompt (same logic as checkAutoPrompt)
+    const sendOnConnect = () => {
+      setTimeout(() => {
+        const input = this.elements.messageInput;
+        if (input) {
+          input.value = welcomePrompt;
         }
         this.sendMessageWithDebugInfo();
       }, 300);
