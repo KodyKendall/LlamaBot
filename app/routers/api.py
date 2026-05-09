@@ -792,10 +792,10 @@ async def update_leonardo_md(
 # ============== Visible Agents Configuration ==============
 
 # Default visible agents for users without a custom configuration
-DEFAULT_VISIBLE_AGENTS = ["ticket", "engineer", "testing", "feedback", "user", "beginner"]
+DEFAULT_VISIBLE_AGENTS = ["ticket", "engineer", "testing", "feedback", "user", "beginner", "excel_focus"]
 
 # All valid agent mode keys (must match config.js agentModes)
-VALID_AGENT_MODES = ["ticket", "engineer", "feedback", "prototype", "ai_builder", "testing", "architect", "user", "beginner"]
+VALID_AGENT_MODES = ["ticket", "engineer", "feedback", "prototype", "ai_builder", "testing", "architect", "user", "beginner", "excel_focus"]
 
 
 class UpdateVisibleAgentsRequest(BaseModel):
@@ -1140,3 +1140,116 @@ async def list_uploaded_files(username: str = Depends(auth)):
                 })
 
     return {"files": files}
+
+
+# ============== Remote Setup API ==============
+# Used by the mothership (Rails) to push context files after claiming an instance.
+# Auth: HTTP Basic Auth with the admin credentials set up by LlamabotAdminRegistrar.
+
+
+class WriteFileEntry(BaseModel):
+    path: str
+    content: str
+
+
+class WriteFilesRequest(BaseModel):
+    files: list[WriteFileEntry]
+
+
+# Map friendly mothership paths to actual filesystem paths.
+# Paths not in this map are written as-is (relative to CWD).
+WRITE_FILES_PATH_MAP = {
+    "Leonardo.md": ".leonardo/LEONARDO.md",
+    "User.md": ".leonardo/USER.md",
+}
+
+
+@router.post("/api/write_files", response_class=JSONResponse)
+async def api_write_files(
+    body: WriteFilesRequest,
+    current_user: User = Depends(admin_required),
+):
+    """Write files to disk. Used by the mothership to push context files after claiming an instance."""
+    results = []
+
+    for entry in body.files:
+        file_path = entry.path
+
+        # Resolve friendly names to actual paths
+        resolved = WRITE_FILES_PATH_MAP.get(file_path, file_path)
+        resolved = os.path.normpath(resolved)
+
+        # Prevent path traversal outside the working directory
+        if resolved.startswith("..") or os.path.isabs(resolved):
+            results.append({"path": file_path, "status": "error", "detail": "Absolute or traversal paths not allowed"})
+            continue
+
+        try:
+            parent = os.path.dirname(resolved)
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+            with open(resolved, "w", encoding="utf-8") as f:
+                f.write(entry.content)
+            logger.info(f"write_files: wrote {resolved} ({len(entry.content)} chars) by {current_user.username}")
+            results.append({"path": file_path, "status": "ok"})
+        except Exception as e:
+            logger.error(f"write_files: failed to write {file_path}: {e}")
+            results.append({"path": file_path, "status": "error", "detail": str(e)})
+
+    return {"results": results}
+
+
+class ImportFromS3Request(BaseModel):
+    url: str
+    filename: str | None = None
+
+
+@router.post("/api/setup/import-excel", response_class=JSONResponse)
+async def api_import_excel_from_s3(
+    body: ImportFromS3Request,
+    current_user: User = Depends(admin_required),
+):
+    """Download a file from S3 (pre-signed URL) and save it to rails/app/imports/."""
+    import pathlib
+    import httpx
+
+    # Derive filename from the URL if not provided (strip query params)
+    if body.filename:
+        filename = body.filename
+    else:
+        url_path = body.url.split("?")[0]
+        filename = url_path.rsplit("/", 1)[-1]
+
+    if not filename:
+        raise HTTPException(status_code=400, detail="Could not determine filename from URL. Provide a 'filename' field.")
+
+    # Validate extension
+    ext = pathlib.Path(filename).suffix.lower()
+    if ext not in {".xlsx", ".xls", ".csv"}:
+        raise HTTPException(status_code=400, detail=f"File type '{ext}' not allowed. Allowed: .xlsx, .xls, .csv")
+
+    # Sanitize filename
+    safe_filename = re.sub(r'[^\w\-.]', '_', filename)
+
+    os.makedirs(IMPORTS_DIR, exist_ok=True)
+    dest_path = os.path.join(IMPORTS_DIR, safe_filename)
+
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.get(body.url)
+            resp.raise_for_status()
+
+        with open(dest_path, "wb") as f:
+            f.write(resp.content)
+
+        logger.info(f"import-excel: downloaded {safe_filename} ({len(resp.content)} bytes) by {current_user.username}")
+        return {
+            "filename": safe_filename,
+            "path": f"app/imports/{safe_filename}",
+            "size": len(resp.content),
+        }
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=502, detail=f"Failed to download from S3: HTTP {e.response.status_code}")
+    except Exception as e:
+        logger.error(f"import-excel: failed to download {body.url}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to download file: {e}")

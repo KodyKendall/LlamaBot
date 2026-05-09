@@ -278,6 +278,12 @@ async def startup_event():
         except ImportError:
             logger.info("rails_user_mode_agent not found, skipping")
 
+        try:
+            from app.agents.leonardo.rails_excel_focus_agent.nodes import build_workflow as build_rails_excel_focus
+            app.state.compiled_graphs["rails_excel_focus_agent"] = build_rails_excel_focus(checkpointer=checkpointer)
+        except ImportError:
+            logger.info("rails_excel_focus_agent not found, skipping")
+
         logger.info(f"Compiled {len(app.state.compiled_graphs)} LangGraph workflows: {list(app.state.compiled_graphs.keys())}")
     except Exception as e:
         logger.error(f"Error compiling LangGraph workflows: {e}", exc_info=True)

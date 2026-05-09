@@ -32,7 +32,8 @@ export const DEFAULT_CONFIG = {
     ticket: 'rails_ticket_mode_agent',
     architect: 'rails_architect_agent',
     user: 'rails_user_mode_agent',
-    beginner: 'rails_beginner_agent'
+    beginner: 'rails_beginner_agent',
+    excel_focus: 'rails_excel_focus_agent'
   },
 
   // Streaming configuration

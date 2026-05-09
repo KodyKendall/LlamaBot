@@ -30,7 +30,7 @@ from app.services.magic_link_service import (
 
 # Role-based default visible agents
 DEFAULT_VISIBLE_AGENTS_USER = ["feedback"]
-DEFAULT_VISIBLE_AGENTS_ENGINEER = ["ticket", "engineer", "testing", "feedback", "user", "prototype", "ai_builder", "architect", "beginner"]
+DEFAULT_VISIBLE_AGENTS_ENGINEER = ["ticket", "engineer", "testing", "feedback", "user", "prototype", "ai_builder", "architect", "beginner", "excel_focus"]
 
 logger = logging.getLogger(__name__)
 
@@ -256,12 +256,14 @@ async def login_get(
         # Intentional: 401, not auto-provision. Rails owns the sequencing fix.
         raise HTTPException(status_code=401, detail="Unknown user")
 
-    # Preserve ?prompt= param through the redirect so chat auto-sends it
-    redirect_url = "/"
-    prompt = request.query_params.get("prompt")
-    if prompt:
-        from urllib.parse import urlencode
-        redirect_url = f"/?{urlencode({'prompt': prompt})}"
+    # Preserve ?prompt= and ?conversation= params through the redirect
+    from urllib.parse import urlencode
+    forward_params = {}
+    for key in ("prompt", "conversation"):
+        val = request.query_params.get(key)
+        if val:
+            forward_params[key] = val
+    redirect_url = f"/?{urlencode(forward_params)}" if forward_params else "/"
 
     response = RedirectResponse(url=redirect_url, status_code=302)
     _set_session_cookie(response, user)

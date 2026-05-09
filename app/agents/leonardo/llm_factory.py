@@ -93,6 +93,11 @@ def get_llm(model_name: str):
             model="deepseek-v4-flash",
             timeout=180,
         )
+    if model_name == "deepseek-v4-pro":
+        return ChatDeepSeekWithReasoning(
+            model="deepseek-v4-pro",
+            timeout=180,
+        )
     if model_name == "gpt-5-codex":
         return ChatOpenAI(
             model="gpt-5-codex",
