@@ -52,9 +52,19 @@ LLAMABOT_ASCII
 
 _show_llamabot_banner
 
-# Prompt for OpenAI API Key
-read -p "🦙🤖 Paste your OpenAI API Key: " OPENAI_API_KEY
-export OPENAI_API_KEY
+# Prompt for LLM provider API keys — all optional, press Enter to skip any.
+# At least one is recommended; LlamaBot will only enable providers whose keys are set.
+echo ""
+echo "🦙🤖 Configure LLM providers. All keys are optional — press Enter to skip any."
+echo ""
+read -p "  OpenAI API Key (optional, blank to skip): " OPENAI_API_KEY
+read -p "  Gemini API Key (optional, blank to skip): " GEMINI_API_KEY
+read -p "  DeepSeek API Key (optional, blank to skip): " DEEPSEEK_API_KEY
+export OPENAI_API_KEY GEMINI_API_KEY DEEPSEEK_API_KEY
+
+if [ -z "$OPENAI_API_KEY" ] && [ -z "$GEMINI_API_KEY" ] && [ -z "$DEEPSEEK_API_KEY" ]; then
+  echo "⚠️  No LLM keys provided. You can add them to .env later, but LlamaBot won't be able to generate completions until at least one is set."
+fi
 
 # Prompt for Hosted Domain
 read -p "🌐 Enter your hosted domain (e.g., example.com): " HOSTED_DOMAIN
@@ -106,8 +116,14 @@ if ! command -v docker >/dev/null 2>&1; then
     # 1-c  Enable & start Docker daemon
     sudo systemctl enable --now docker
 
-    # 1-d  (Optional) Allow current user to run Docker without sudo
+    # 1-d  (Optional) Allow current user to run Docker without sudo.
+    # Add both $USER (in case script is run by a non-default user) and ubuntu
+    # (the default user on Lightsail/EC2 Ubuntu 24.04 images). usermod is idempotent
+    # and will not error if the user is already in the group.
     sudo usermod -aG docker "$USER"
+    if id ubuntu >/dev/null 2>&1; then
+        sudo usermod -aG docker ubuntu
+    fi
     
     sudo mkdir -p /etc/docker
     cat <<'EOF' | sudo tee /etc/docker/daemon.json
@@ -157,8 +173,7 @@ AWS_BUCKET='your-bucket-name'
 AWS_REGION='your-region'
 
 # A Record Domain to this specific LlamaPress, Needed for pages#home controller method if you want multi-site routing.
-# HOSTED_DOMAIN="llamapress.ai" 
-OPENAI_API_KEY=${OPENAI_API_KEY}
+# HOSTED_DOMAIN="llamapress.ai"
 
 POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
 DB_URI="postgresql://postgres:${POSTGRES_PASSWORD}@db:5432/llamapress_production"
@@ -166,10 +181,17 @@ DATABASE_URL="postgresql://postgres:${POSTGRES_PASSWORD}@db:5432/llamapress_prod
 SECRET_KEY_BASE=${NEW_KEY}
 EOF
 
+# Append LLM API keys — only write lines for providers the user actually configured,
+# so unset keys stay absent from .env (rather than appearing as KEY=) and downstream
+# code can rely on env-var presence checks.
+[ -n "$OPENAI_API_KEY" ]   && echo "OPENAI_API_KEY=${OPENAI_API_KEY}"     >> .env
+[ -n "$GEMINI_API_KEY" ]   && echo "GEMINI_API_KEY=${GEMINI_API_KEY}"     >> .env
+[ -n "$DEEPSEEK_API_KEY" ] && echo "DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}" >> .env
+
 cp .env .env.rails
 
-#remove OPENAI_API_KEY from .env.rails
-sed -i '/OPENAI_API_KEY/d' .env.rails
+# LLM keys belong only to llamabot, not the Rails app — strip them from .env.rails.
+sed -i -e '/^OPENAI_API_KEY=/d' -e '/^GEMINI_API_KEY=/d' -e '/^DEEPSEEK_API_KEY=/d' .env.rails
 
 mkdir -p rails/app rails/config rails/db rails/config/environments
 touch rails/config/routes.rb
@@ -279,6 +301,10 @@ ${SERVER_NAME} {
 rails-${SERVER_NAME} {
     encode gzip
     reverse_proxy 127.0.0.1:3000
+}
+vscode-${SERVER_NAME} {
+    encode gzip
+    reverse_proxy 127.0.0.1:8443
 }
 EOF
 

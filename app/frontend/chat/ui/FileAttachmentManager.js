@@ -193,12 +193,16 @@ export class FileAttachmentManager {
         for (const f of folderFiles) {
           const sizeStr = this.formatFileSize(f.size);
           const isImage = folder.includes('images');
-          const icon = isImage ? 'fa-file-image' : 'fa-file';
+          const previewable = isImage && f.size <= 50 * 1024 * 1024;
+          const previewUrl = `/api/uploaded-files/preview?path=${encodeURIComponent(f.path)}`;
+          const leading = previewable
+            ? `<img class="file-browser-thumb" src="${previewUrl}" alt="" onerror="this.outerHTML='<i class=\\'fa-solid fa-file-image\\'></i>'">`
+            : `<i class="fa-solid ${this.iconForFile(f.filename, isImage)}"></i>`;
           // Check if already attached
           const alreadyAttached = this.attachments.some(a => a.path === f.path);
           html += `
             <div class="file-browser-item ${alreadyAttached ? 'file-browser-item--attached' : ''}" data-path="${f.path}" data-filename="${f.filename}" data-size="${f.size}" data-folder="${f.folder}">
-              <i class="fa-solid ${icon}"></i>
+              ${leading}
               <span class="file-browser-item-name" title="${f.path}">${f.filename}</span>
               <span class="file-browser-item-size">${sizeStr}</span>
               <button class="file-browser-attach-btn" title="${alreadyAttached ? 'Already attached' : 'Attach to message'}">
@@ -221,6 +225,17 @@ export class FileAttachmentManager {
           const btn = item.querySelector('.file-browser-attach-btn');
           btn.innerHTML = '<i class="fa-solid fa-check"></i>';
           btn.title = 'Already attached';
+        });
+      });
+
+      // Click thumbnail to open full-size lightbox preview
+      this.fileBrowserList.querySelectorAll('.file-browser-item').forEach(item => {
+        const thumb = item.querySelector('img.file-browser-thumb');
+        if (!thumb) return;
+        thumb.style.cursor = 'zoom-in';
+        thumb.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.openImagePreview(thumb.getAttribute('src'), item.dataset.filename);
         });
       });
     } catch (err) {
@@ -514,13 +529,22 @@ export class FileAttachmentManager {
     this.previewContainer.classList.remove('hidden');
 
     const badges = this.attachments.map((attachment, index) => {
-      const typeInfo = ALLOWED_TYPES[attachment.mime_type] || { icon: 'fa-file' };
       const sizeStr = this.formatFileSize(attachment.size);
       const isUploaded = attachment.type === 'uploaded_file';
+      const isImage = (attachment.mime_type || '').startsWith('image/');
+      const thumbSrc = this.thumbnailSrcFor(attachment);
+
+      let leading;
+      if (isImage && thumbSrc) {
+        leading = `<img class="attachment-thumb" src="${thumbSrc}" alt="" data-index="${index}">`;
+      } else {
+        const icon = this.iconForFile(attachment.filename, isImage);
+        leading = `<i class="fa-solid ${icon}"></i>`;
+      }
 
       return `
         <div class="attachment-badge ${isUploaded ? 'attachment-badge--uploaded' : ''}" data-index="${index}">
-          <i class="fa-solid ${isUploaded ? 'fa-cloud-arrow-up' : typeInfo.icon}"></i>
+          ${leading}
           <span class="attachment-name" title="${isUploaded ? attachment.path : attachment.filename}">${this.truncateFilename(attachment.filename)}</span>
           <span class="attachment-size">(${sizeStr})</span>
           <button class="attachment-remove" data-index="${index}" title="Remove">
@@ -541,6 +565,89 @@ export class FileAttachmentManager {
         this.removeAttachment(index);
       });
     });
+
+    // Click thumbnail to open lightbox preview
+    this.previewContainer.querySelectorAll('.attachment-thumb').forEach(img => {
+      img.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const index = parseInt(img.dataset.index, 10);
+        const att = this.attachments[index];
+        if (!att) return;
+        this.openImagePreview(this.thumbnailSrcFor(att), att.filename);
+      });
+    });
+  }
+
+  /**
+   * Compute an <img>-compatible src for an attachment (data URI or remote URL).
+   * Returns null if not an image or no source available.
+   */
+  thumbnailSrcFor(attachment) {
+    if (!(attachment.mime_type || '').startsWith('image/')) return null;
+    if (attachment.type === 'uploaded_file' && attachment.path) {
+      return `/api/uploaded-files/preview?path=${encodeURIComponent(attachment.path)}`;
+    }
+    if (attachment.data) {
+      return `data:${attachment.mime_type};base64,${attachment.data}`;
+    }
+    return null;
+  }
+
+  /**
+   * Pick a FontAwesome icon class for a file based on its extension.
+   */
+  iconForFile(filename, isImage) {
+    if (isImage) return 'fa-file-image';
+    const ext = (filename || '').split('.').pop().toLowerCase();
+    switch (ext) {
+      case 'pdf': return 'fa-file-pdf';
+      case 'xlsx': case 'xls': case 'xlsm': return 'fa-file-excel';
+      case 'csv': case 'tsv': return 'fa-file-csv';
+      case 'doc': case 'docx': return 'fa-file-word';
+      case 'ppt': case 'pptx': return 'fa-file-powerpoint';
+      case 'mp4': case 'mov': case 'webm': case 'avi': case 'mkv': return 'fa-file-video';
+      case 'mp3': case 'wav': case 'ogg': case 'flac': case 'm4a': return 'fa-file-audio';
+      case 'zip': case 'tar': case 'gz': case 'rar': case '7z': return 'fa-file-zipper';
+      case 'json': case 'yml': case 'yaml': case 'xml': case 'html': case 'htm':
+      case 'js': case 'ts': case 'jsx': case 'tsx': case 'py': case 'rb': case 'go':
+      case 'rs': case 'java': case 'c': case 'cpp': case 'h': case 'sh': return 'fa-file-code';
+      case 'txt': case 'md': case 'log': return 'fa-file-lines';
+      default: return 'fa-file';
+    }
+  }
+
+  /**
+   * Show a full-size image preview lightbox. Closes on backdrop click, X, or Escape.
+   */
+  openImagePreview(src, filename) {
+    if (!src) return;
+    // Avoid stacking duplicates
+    document.querySelectorAll('.image-preview-modal').forEach(el => el.remove());
+
+    const modal = document.createElement('div');
+    modal.className = 'image-preview-modal';
+    modal.innerHTML = `
+      <div class="image-preview-content">
+        <button class="image-preview-close" title="Close">&times;</button>
+        <img class="image-preview-img" src="${src}" alt="">
+        ${filename ? `<div class="image-preview-caption">${filename}</div>` : ''}
+      </div>
+    `;
+
+    const close = () => {
+      modal.remove();
+      document.removeEventListener('keydown', onKey);
+    };
+    const onKey = (e) => { if (e.key === 'Escape') close(); };
+
+    modal.addEventListener('click', (e) => {
+      // Close on backdrop click only (not when clicking the image/content)
+      if (e.target === modal) close();
+    });
+    modal.querySelector('.image-preview-close').addEventListener('click', close);
+    document.addEventListener('keydown', onKey);
+
+    document.body.appendChild(modal);
   }
 
   /**

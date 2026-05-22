@@ -34,8 +34,7 @@ google-api-core==2.25.1
 google-auth==2.40.3
 googleapis-common-protos==1.70.0
 greenlet==3.2.2
-grpcio==1.75.0
-grpcio-status==1.75.0
+grpcio>=1.75.0
 h11==0.16.0
 httpcore==1.0.9
 httptools==0.6.4
@@ -61,12 +60,10 @@ langchain-openai==1.0.0
 langchain-deepseek>=0.1.0
 langchain-text-splitters==1.0.0
 langgraph>=1.0.2
-langgraph-api>=0.2.110
 langgraph-checkpoint>=2.1.1
 langgraph-checkpoint-postgres>=2.0.23
 langgraph-cli>=0.3.6
 langgraph-prebuilt>=1.0.0
-langgraph-runtime-inmem>=0.6.5
 langgraph-sdk>=0.2.9
 langgraph-supervisor>=0.0.28
 langsmith==0.4.8
@@ -83,7 +80,7 @@ numpy==2.2.6
 ollama==0.6.0
 openai==2.2.0
 orjson==3.10.18
-ormsgpack==1.10.0
+ormsgpack>=1.12.0
 packaging==24.2
 playwright==1.52.0
 pluggy==1.6.0

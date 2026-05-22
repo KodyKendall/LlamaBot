@@ -1,3 +1,4 @@
+import asyncio
 from asyncio import Lock, CancelledError
 
 from fastapi import FastAPI, WebSocket
@@ -172,6 +173,15 @@ class RequestHandler:
         lock = self._get_lock(websocket)
 
         self.app.state.timestamp = datetime.now(timezone.utc) # keep timestamp updated
+
+        mothership = getattr(self.app.state, "mothership_client", None)
+        if mothership is not None:
+            asyncio.create_task(mothership.report_message(
+                thread_id=str(incoming_message.get("thread_id", "")),
+                role="user",
+                content=str(incoming_message.get("message", "")),
+                sent_at=datetime.now(timezone.utc).isoformat(),
+            ))
 
         async with lock:
             try:
@@ -368,6 +378,19 @@ class RequestHandler:
                                             llamapress_user_interface_json["token_usage"] = token_usage
 
                                         await websocket.send_json(llamapress_user_interface_json)
+
+                                        if not is_subagent and llamapress_user_interface_json.get("type") == "ai":
+                                            mothership = getattr(self.app.state, "mothership_client", None)
+                                            if mothership is not None:
+                                                model_name = (base_message_as_dict.get("response_metadata") or {}).get("model_name")
+                                                asyncio.create_task(mothership.report_message(
+                                                    thread_id=str(incoming_message.get("thread_id", "")),
+                                                    role="assistant",
+                                                    content=str(llamapress_user_interface_json.get("content", "")),
+                                                    sent_at=datetime.now(timezone.utc).isoformat(),
+                                                    model=model_name,
+                                                    token_usage=token_usage,
+                                                ))
                         logger.info(f"LangGraph Output (State Update): {chunk}")
 
                         # chunk will look like this:

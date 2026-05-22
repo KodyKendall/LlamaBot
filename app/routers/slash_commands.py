@@ -89,10 +89,17 @@ SLASH_COMMANDS = {
     },
     "chown": {
         "script": None,  # Direct command
-        "command": "chown -R $(id -u):$(id -g) .",
+        "command": "echo 'Host: '$(hostname) && echo 'User: '$(id -un)'('$(id -u)':'$(id -g)')' && echo 'Dir: '$(pwd) && echo '---' && chown -R $(id -u):$(id -g) . 2>&1 && echo 'OK: ownership updated.' || echo 'FAILED: chown error (see above)'",
         "description": "Fix file ownership permissions",
         "dangerous": True,
         "confirm_message": "This will change ownership of all files to current user. Continue?"
+    },
+    "debug": {
+        "script": None,
+        "command": "echo 'hostname: '$(hostname) && echo 'whoami: '$(whoami) && echo 'id: '$(id) && echo 'pwd: '$(pwd) && echo 'uname: '$(uname -a) && echo 'pid 1: '$(cat /proc/1/cmdline 2>/dev/null | tr '\\0' ' ' || echo 'N/A') && echo 'ls -la (first 10):' && ls -la | head -10",
+        "description": "Show debug info about execution environment (host vs container)",
+        "dangerous": False,
+        "confirm_message": "Show system debug info?"
     },
     "truncate-checkpoints": {
         "script": "bin/db/truncate_checkpoints.sh",
@@ -116,12 +123,12 @@ SLASH_COMMANDS = {
     },
     "gh": {
         "script": None,
-        "command": "gh auth login -p https -h github.com -w",
-        "description": "Authenticate with GitHub (opens browser)",
+        "command": None,
+        "description": "Authenticate with GitHub",
         "dangerous": False,
-        "confirm_message": "This will start GitHub authentication. A browser tab will open and the code will be copied to your clipboard. After authorizing in browser, wait ~30 seconds for completion. Continue?",
-        "special_handler": "gh_auth",  # Frontend handles code copy + URL open
-        "timeout": 120  # Give user 2 minutes to complete device flow
+        "confirm_message": None,
+        "client_only": True,
+        "special_handler": "gh_auth_modal"  # Frontend opens GitHub auth modal
     },
     "gh-copy": {
         "script": None,
@@ -188,6 +195,7 @@ def execute_command(command: str, timeout: int = 300) -> subprocess.CompletedPro
     """
     if is_native_linux_host():
         # Linux production: use nsenter to run on host
+        logger.info(f"Executing on HOST via nsenter: {command[:100]}")
         nsenter_cmd = [
             "nsenter", "-t", "1", "-m", "-u", "-i", "-n", "-p",
             "--", "/bin/bash", "-c", f"cd {HOST_LEONARDO_PATH} && {command}"
@@ -201,6 +209,7 @@ def execute_command(command: str, timeout: int = 300) -> subprocess.CompletedPro
     else:
         # macOS dev (or any non-Linux): run directly in container
         # Leonardo is mounted at LEONARDO_PATH (/app/leonardo)
+        logger.info(f"Executing IN CONTAINER (nsenter unavailable): {command[:100]}")
         return subprocess.run(
             ["bash", "-c", command],
             capture_output=True,
@@ -416,7 +425,7 @@ def _log_backup_result(backup_id: str, status: str, error: str = None, stdout: s
             "status": status,
             "error": error,
             "stdout": (stdout or "")[-2000:],
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now(tz=__import__('zoneinfo').ZoneInfo('America/Los_Angeles')).isoformat()
         })
         # Keep last 100 entries
         history = history[-100:]

@@ -34,6 +34,19 @@ DEFAULT_VISIBLE_AGENTS_ENGINEER = ["ticket", "engineer", "testing", "feedback", 
 
 logger = logging.getLogger(__name__)
 
+
+def _read_leonardo_value(filename: str) -> str | None:
+    path = f".leonardo/{filename}"
+    try:
+        if not os.path.exists(path):
+            return None
+        with open(path, "r", encoding="utf-8") as f:
+            value = f.read().strip()
+        return value or None
+    except Exception as e:
+        logger.warning(f"Could not read {path}: {e}")
+        return None
+
 router = APIRouter()
 
 # Frontend directory path
@@ -81,12 +94,18 @@ async def root(request: Request):
         # Inject user role, visible agents, and PostHog config as global variables for the frontend
         posthog_key = os.getenv("LLAMABOT_POSTHOG_KEY", "")
         posthog_host = os.getenv("LLAMABOT_POSTHOG_HOST", "")
+        enable_github_button = os.getenv("ENABLE_GITHUB_BUTTON", "").lower() == "true"
+        llamapress_user_id = _read_leonardo_value("LLAMAPRESS_USER_ID.txt")
+        llamapress_email = _read_leonardo_value("LLAMAPRESS_EMAIL.txt")
         config_script = f'''<script>
 window.LLAMABOT_USER_ROLE = "{getattr(user, "role", "engineer")}";
 window.LLAMABOT_VISIBLE_AGENTS = {json.dumps(visible_agents)};
 window.LLAMABOT_SHOW_TOKEN_WHEEL = {"true" if show_token_wheel else "false"};
 window.LLAMABOT_POSTHOG_KEY = {json.dumps(posthog_key) if posthog_key else "null"};
 window.LLAMABOT_POSTHOG_HOST = {json.dumps(posthog_host) if posthog_host else "null"};
+window.LLAMAPRESS_USER_ID = {json.dumps(llamapress_user_id) if llamapress_user_id else "null"};
+window.LLAMAPRESS_EMAIL = {json.dumps(llamapress_email) if llamapress_email else "null"};
+window.ENABLE_GITHUB_BUTTON = {"true" if enable_github_button else "false"};
 </script>'''
         html = html.replace('</head>', f'{config_script}</head>')
         return HTMLResponse(content=html)
@@ -3869,7 +3888,12 @@ async def backup_history_page(current_user: User = Depends(get_current_user)):
 
                 container.innerHTML = history.map(entry => {
                     const date = new Date(entry.timestamp);
-                    const timeStr = date.toLocaleString();
+                    const timeStr = date.toLocaleString('en-US', {
+                        timeZone: 'America/Los_Angeles',
+                        year: 'numeric', month: 'short', day: 'numeric',
+                        hour: 'numeric', minute: '2-digit', second: '2-digit',
+                        hour12: true, timeZoneName: 'short'
+                    });
                     const errorHtml = entry.error
                         ? `<div class="backup-error">${escapeHtml(entry.error)}</div>`
                         : '';

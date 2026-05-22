@@ -86,6 +86,52 @@ class MothershipClient:
             logger.error(f"Lease renewal request failed: {e}")
             return None
 
+    async def report_message(
+        self,
+        *,
+        thread_id: str,
+        role: str,
+        content: str,
+        sent_at: str,
+        model: Optional[str] = None,
+        token_usage: Optional[dict] = None,
+    ) -> None:
+        """
+        POST /api/leonardo/report_message
+
+        Fire-and-forget message tracking. Reports each user message and each
+        finalized top-level assistant reply to the mothership for usage analytics.
+        Never raises — failures are logged at WARNING and dropped.
+        """
+        if not self.enabled:
+            return
+
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                payload = {
+                    "instance_name": self.config["instance_name"],
+                    "thread_id": thread_id,
+                    "role": role,
+                    "content": content,
+                    "sent_at": sent_at,
+                }
+                if model:
+                    payload["model"] = model
+                if token_usage:
+                    payload["token_usage"] = token_usage
+                response = await client.post(
+                    f"{self.config['mothership_url']}/api/leonardo/report_message",
+                    json=payload,
+                    headers={"Authorization": f"Bearer {self.config['mothership_api_token']}"},
+                )
+                response.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            logger.warning(f"Message report failed (HTTP {e.response.status_code}): {e.response.text}")
+        except httpx.RequestError as e:
+            logger.warning(f"Message report request failed: {e}")
+        except Exception as e:
+            logger.warning(f"Message report unexpected error: {e}")
+
     async def notify_teardown(self, reason: str = "sigterm") -> Optional[dict]:
         """
         POST /api/leonardo/teardown

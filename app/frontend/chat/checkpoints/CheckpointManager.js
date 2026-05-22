@@ -10,6 +10,7 @@
 
 import { DiffViewer } from './DiffViewer.js';
 import { GitGraphRenderer } from './GitGraphRenderer.js';
+import { GitHubAuthModal } from './GitHubAuthModal.js';
 
 export class CheckpointManager {
   constructor(chatApp) {
@@ -21,6 +22,7 @@ export class CheckpointManager {
     this.diffViewer = null;
     this.badgeCheckInterval = null;
     this.gitGraphRenderer = new GitGraphRenderer(this);
+    this.gitHubAuthModal = new GitHubAuthModal();
     this.selectedCommit = null;
     this.graphData = null;
 
@@ -120,6 +122,9 @@ export class CheckpointManager {
         <button class="sync-github-btn" title="Push to remote">
           <i class="fa-solid fa-cloud-arrow-up"></i>
         </button>
+        <button class="github-auth-btn" title="Contact kody@llamapress.ai for your code">
+          <i class="fa-brands fa-github"></i>
+        </button>
         <button class="expand-history-btn" title="Open full git history">
           <i class="fa-solid fa-up-right-and-down-left-from-center"></i>
         </button>
@@ -189,6 +194,16 @@ export class CheckpointManager {
     // Add sync to GitHub button handler
     const syncBtn = panel.querySelector('.sync-github-btn');
     syncBtn.onclick = () => this.syncToGitHub();
+
+    // Add GitHub auth button handler (disabled unless ENABLE_GITHUB_BUTTON is set)
+    const ghAuthBtn = panel.querySelector('.github-auth-btn');
+    if (window.ENABLE_GITHUB_BUTTON) {
+      ghAuthBtn.onclick = () => this.gitHubAuthModal.start();
+      ghAuthBtn.title = 'Connect GitHub';
+    } else {
+      ghAuthBtn.disabled = true;
+      ghAuthBtn.classList.add('github-auth-btn-disabled');
+    }
 
     // Add expand to full page button handler
     const expandBtn = panel.querySelector('.expand-history-btn');

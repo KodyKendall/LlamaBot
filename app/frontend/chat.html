@@ -486,7 +486,18 @@
             person_profiles: 'always',
             recordCrossOriginIframes: true,
             loaded: (posthog) => {
-              posthog.capture("llamabot_instance_loaded")
+              posthog.capture("llamabot_instance_loaded");
+              try {
+                if (window.LLAMAPRESS_USER_ID) {
+                  const props = {};
+                  if (window.LLAMAPRESS_EMAIL) {
+                    props.email = window.LLAMAPRESS_EMAIL;
+                  }
+                  posthog.identify(window.LLAMAPRESS_USER_ID, props);
+                }
+              } catch (e) {
+                console.warn("PostHog identify failed:", e);
+              }
             }
           })
         }

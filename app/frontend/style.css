@@ -5002,6 +5002,15 @@ body {
     text-align: center;
 }
 
+.file-browser-thumb {
+    width: 28px;
+    height: 28px;
+    border-radius: 4px;
+    object-fit: cover;
+    flex-shrink: 0;
+    background: rgba(255, 255, 255, 0.05);
+}
+
 .file-browser-item-name {
     flex: 1;
     overflow: hidden;
@@ -5133,6 +5142,78 @@ body {
     color: #3b82f6;
     font-size: 0.9rem;
     flex-shrink: 0;
+}
+
+.attachment-badge .attachment-thumb {
+    width: 28px;
+    height: 28px;
+    border-radius: 4px;
+    object-fit: cover;
+    flex-shrink: 0;
+    cursor: zoom-in;
+    background: rgba(255, 255, 255, 0.05);
+}
+
+/* Image preview lightbox (used for browse-uploads thumbs and attached image badges) */
+.image-preview-modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.85);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+    animation: modal-fade-in 0.15s ease-out;
+}
+
+.image-preview-content {
+    position: relative;
+    max-width: 92vw;
+    max-height: 92vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+}
+
+.image-preview-img {
+    max-width: 92vw;
+    max-height: 84vh;
+    border-radius: 8px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    background: #111;
+}
+
+.image-preview-close {
+    position: absolute;
+    top: -12px;
+    right: -12px;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(0, 0, 0, 0.75);
+    color: #fff;
+    font-size: 22px;
+    line-height: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
+.image-preview-close:hover {
+    background: rgba(239, 68, 68, 0.85);
+}
+
+.image-preview-caption {
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 13px;
+    max-width: 80vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .attachment-badge .attachment-name {
@@ -6101,6 +6182,27 @@ body {
 .sync-github-btn:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+}
+
+.github-auth-btn {
+    background: none;
+    border: none;
+    color: var(--text-secondary, #aaa);
+    font-size: 1.1rem;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+}
+
+.github-auth-btn:hover:not(:disabled) {
+    background-color: rgba(255, 255, 255, 0.1);
+    color: var(--text-primary, #fff);
+}
+
+.github-auth-btn-disabled {
+    opacity: 0.4;
+    cursor: not-allowed !important;
 }
 
 .expand-history-btn {
@@ -7184,4 +7286,255 @@ body {
     .diff-code {
         font-size: 0.75rem;
     }
+}
+
+/* ============== GitHub Auth Modal ============== */
+
+.gh-auth-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.75);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1100;
+    animation: fadeIn 0.2s ease;
+}
+
+.gh-auth-modal-content {
+    background: linear-gradient(145deg, rgba(30, 24, 45, 0.98) 0%, rgba(20, 16, 35, 0.98) 100%);
+    border: 1px solid rgba(139, 92, 246, 0.3);
+    border-radius: 16px;
+    padding: 28px;
+    max-width: 420px;
+    width: 90%;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    animation: slideUp 0.25s ease;
+}
+
+.gh-auth-modal-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 24px;
+    color: #fff;
+    font-size: 1.2rem;
+    font-weight: 600;
+}
+
+.gh-auth-modal-header .gh-octocat {
+    color: #fff;
+    flex-shrink: 0;
+}
+
+.gh-auth-modal-body {
+    margin-bottom: 24px;
+}
+
+.gh-auth-steps {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.gh-auth-step {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 0.95rem;
+}
+
+.gh-auth-step-num {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: rgba(139, 92, 246, 0.3);
+    color: #a78bfa;
+    font-size: 0.8rem;
+    font-weight: 600;
+    flex-shrink: 0;
+}
+
+.gh-auth-code-box {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    margin: 8px 0 8px 34px;
+    padding: 14px 20px;
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid rgba(139, 92, 246, 0.4);
+    border-radius: 10px;
+}
+
+.gh-auth-code {
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+    font-size: 1.6rem;
+    font-weight: 700;
+    color: #a78bfa;
+    letter-spacing: 3px;
+}
+
+.gh-auth-copy-btn {
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: rgba(255, 255, 255, 0.7);
+    padding: 6px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 0.9rem;
+}
+
+.gh-auth-copy-btn:hover {
+    background: rgba(255, 255, 255, 0.2);
+    color: #fff;
+}
+
+.gh-auth-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: #a78bfa;
+    text-decoration: none;
+    font-weight: 500;
+    padding: 8px 16px;
+    background: rgba(139, 92, 246, 0.15);
+    border: 1px solid rgba(139, 92, 246, 0.3);
+    border-radius: 8px;
+    transition: all 0.2s ease;
+}
+
+.gh-auth-link:hover {
+    background: rgba(139, 92, 246, 0.25);
+    color: #c4b5fd;
+    text-decoration: none;
+}
+
+.gh-auth-link i {
+    font-size: 0.8rem;
+}
+
+.gh-auth-waiting {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    margin-top: 20px;
+    padding: 12px;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 0.9rem;
+}
+
+.gh-auth-waiting i {
+    color: #a78bfa;
+}
+
+.gh-auth-check-btn {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: rgba(255, 255, 255, 0.5);
+    padding: 4px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.8rem;
+    transition: all 0.2s ease;
+    margin-left: 4px;
+}
+
+.gh-auth-check-btn:hover {
+    background: rgba(255, 255, 255, 0.15);
+    color: rgba(255, 255, 255, 0.8);
+}
+
+.gh-auth-check-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.gh-auth-success {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    padding: 20px;
+    text-align: center;
+}
+
+.gh-auth-success i {
+    font-size: 2.5rem;
+    color: #22c55e;
+}
+
+.gh-auth-success p {
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 1rem;
+    margin: 0;
+}
+
+.gh-auth-error {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    padding: 20px;
+    text-align: center;
+}
+
+.gh-auth-error i {
+    font-size: 2.5rem;
+    color: #ef4444;
+}
+
+.gh-auth-error p {
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 1rem;
+    margin: 0;
+}
+
+.gh-auth-status-output {
+    margin-top: 12px;
+    padding: 10px;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 6px;
+    font-family: 'SF Mono', Monaco, monospace;
+    font-size: 0.8rem;
+    color: rgba(255, 255, 255, 0.6);
+    white-space: pre-wrap;
+    word-break: break-all;
+    max-height: 120px;
+    overflow-y: auto;
+}
+
+.gh-auth-modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+}
+
+.gh-auth-btn-cancel,
+.gh-auth-btn-close {
+    padding: 10px 20px;
+    border-radius: 8px;
+    border: none;
+    cursor: pointer;
+    font-size: 0.95rem;
+    font-weight: 500;
+    transition: all 0.2s ease;
+    background: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.8);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.gh-auth-btn-cancel:hover,
+.gh-auth-btn-close:hover {
+    background: rgba(255, 255, 255, 0.15);
+    color: #fff;
 }

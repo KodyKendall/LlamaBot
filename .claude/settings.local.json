@@ -62,7 +62,9 @@
       "Bash(docker system:*)",
       "Bash(gh auth login --help:*)",
       "WebSearch",
-      "Bash(git -C /Users/kodykendall/SoftEngineering/LLMPress/LlamaBot diff app/agents/leonardo/rails_agent/middleware.py)"
+      "Bash(git -C /Users/kodykendall/SoftEngineering/LLMPress/LlamaBot diff app/agents/leonardo/rails_agent/middleware.py)",
+      "Bash(aws route53 *)",
+      "Read(//private/etc/**)"
     ],
     "deny": [],
     "ask": []

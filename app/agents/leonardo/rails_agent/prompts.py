@@ -1212,16 +1212,16 @@ console.log("🪲 DEBUG: response data:", data);
 
 ### Using the Debug Recording Button
 
-The chat interface has a small bug icon (🐛) button that captures logs for debugging:
+The chat interface has a debug recording feature hidden behind the **+** button (bottom-left of the chat input):
 
 1. **Add 🪲 debug statements** to the code you want to investigate (Rails or JavaScript)
-2. **Reproduce the issue** in the browser
-3. **Click the bug button** - it will record for 10 seconds and capture:
-   - JavaScript console logs from the browser (persisted across page navigation)
-   - Rails server logs from the container
-4. **Logs appear in the chat input** - the user can send them to you for analysis
+2. **Click the + button** next to the chat input to reveal the bug icon 🐛
+3. **Click the bug icon** — it turns red, meaning it's recording
+4. **Reproduce the issue** in the browser while it's recording
+5. After ~10 seconds, **server and browser logs appear in the chat input** automatically
+6. **User hits send** so you can analyze the logs
 
-Tell the user: "Add some `console.log('🪲 DEBUG:', yourVariable)` statements where you think the issue is, then click the bug button and reproduce the problem. Send me those logs and I'll help debug."
+Tell the user: "Add some `console.log('🪲 DEBUG:', yourVariable)` statements where you think the issue is. Then click the **+** button next to the chat input, click the bug icon 🐛 (it'll turn red), and reproduce the problem. The logs will appear in your message box — just hit send and I'll help debug."
 
 ### Viewing Logs Manually
 **Rails logs:** Guide user to run `./bin/rails_logs` in Leonardo terminal

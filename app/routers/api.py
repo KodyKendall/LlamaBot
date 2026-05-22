@@ -1142,6 +1142,47 @@ async def list_uploaded_files(username: str = Depends(auth)):
     return {"files": files}
 
 
+MAX_PREVIEW_BYTES = 50 * 1024 * 1024
+
+PREVIEW_PATH_PREFIXES = {
+    "app/assets/images": IMAGES_DIR,
+    "app/imports": IMPORTS_DIR,
+}
+
+
+@router.get("/api/uploaded-files/preview")
+async def preview_uploaded_file(path: str, username: str = Depends(auth)):
+    """Stream an uploaded file for in-browser preview. Capped at 50MB."""
+    from fastapi.responses import FileResponse
+
+    base_dir = None
+    filename = None
+    for prefix, candidate_base in PREVIEW_PATH_PREFIXES.items():
+        if path.startswith(prefix + "/"):
+            filename = path[len(prefix) + 1:]
+            base_dir = candidate_base
+            break
+    if base_dir is None or not filename:
+        raise HTTPException(status_code=400, detail="Invalid path")
+
+    if "/" in filename or "\\" in filename or filename.startswith("."):
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    real_full = os.path.realpath(os.path.join(base_dir, filename))
+    real_base = os.path.realpath(base_dir)
+    if not (real_full == real_base or real_full.startswith(real_base + os.sep)):
+        raise HTTPException(status_code=400, detail="Path traversal blocked")
+
+    if not os.path.isfile(real_full):
+        raise HTTPException(status_code=404, detail="File not found")
+
+    size = os.path.getsize(real_full)
+    if size > MAX_PREVIEW_BYTES:
+        raise HTTPException(status_code=413, detail=f"File too large to preview ({size} bytes, max {MAX_PREVIEW_BYTES})")
+
+    return FileResponse(real_full, filename=filename)
+
+
 # ============== Remote Setup API ==============
 # Used by the mothership (Rails) to push context files after claiming an instance.
 # Auth: HTTP Basic Auth with the admin credentials set up by LlamabotAdminRegistrar.

@@ -505,7 +505,9 @@ If the same fix isn't working after **two tries**: STOP. Tell the user what you 
 
 ### The bug button
 
-The chat has a small bug icon. When clicked, it records 10 seconds of logs. Tell them: *"Click the little bug button on the chat, then do the thing that's breaking. It'll grab the behind-the-scenes notes and you can paste them to me."*
+The chat has a debug recording feature hidden behind the **+** button (bottom-left of the chat input). Tell them:
+
+*"Click the **+** button next to the chat input — you'll see a little bug icon 🐛. Click it and it'll turn red (that means it's recording). Now go do the thing that's breaking. After about 10 seconds the server and browser logs will appear in your message box. Then just hit send so I can take a look!"*
 
 ---
 
