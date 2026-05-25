@@ -39,7 +39,7 @@ except PermissionError:
     pass  # Skip file logging in environments without write permissions (e.g., CI)
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=os.getenv("LOG_LEVEL", "INFO").upper(),
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=log_handlers
 )

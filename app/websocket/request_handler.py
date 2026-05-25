@@ -85,20 +85,23 @@ class RequestHandler:
 
     async def _repair_thread_state_if_needed(self, app, config):
         """
-        Detect and repair corrupted thread state where an AIMessage has
-        tool_calls not followed by corresponding ToolMessages.
+        Detect and repair two shapes of corrupted thread state that violate
+        the LLM contract `every tool message must follow an assistant message
+        with matching tool_calls`:
 
-        This happens when a task is cancelled mid-tool-execution. The
-        checkpointer persists the AIMessage with tool_calls, but the
-        ToolMessages never get added. This breaks the LLM API contract.
+        (A) Orphan ToolMessage — a ToolMessage with no preceding AIMessage
+            whose tool_calls include its tool_call_id. Cause: prior repair
+            or summarization dropped the anchoring AIMessage but left the
+            ToolMessage. Fix: RemoveMessage the orphan.
 
-        Scans the FULL message history (not just the last message) because
-        additional HumanMessages may have been appended after the corruption.
+        (B) Dangling tool_calls — an AIMessage with tool_calls that have no
+            corresponding following ToolMessage. Cause: task cancelled
+            mid-tool-execution. Fix: remove anything after the corrupted
+            AIMessage and inject synthetic "[Cancelled]" ToolMessages.
 
-        Repair strategy: remove all messages after the corrupted AIMessage
-        and inject synthetic ToolMessages, so the LLM can continue cleanly.
+        Both fixes are applied in a single aupdate_state call.
         """
-        from langchain_core.messages import AIMessage, ToolMessage as LCToolMessage, HumanMessage
+        from langchain_core.messages import AIMessage, ToolMessage as LCToolMessage
         from langchain_core.messages import RemoveMessage
 
         try:
@@ -110,56 +113,84 @@ class RequestHandler:
             if not messages:
                 return
 
-            # Scan for any AIMessage with tool_calls not followed by ToolMessages
+            # Pass 1 (shape A): find orphan ToolMessages. Walk left-to-right
+            # tracking the "open" set of tool_call_ids from the most recent
+            # AIMessage. A ToolMessage whose tool_call_id is not in that set
+            # has no anchor.
+            orphan_msgs = []
+            open_ids: set = set()
+            for msg in messages:
+                if isinstance(msg, AIMessage):
+                    open_ids = {tc["id"] for tc in (getattr(msg, "tool_calls", []) or [])}
+                elif isinstance(msg, LCToolMessage):
+                    tcid = getattr(msg, "tool_call_id", None)
+                    if tcid in open_ids:
+                        open_ids.discard(tcid)
+                    else:
+                        orphan_msgs.append(msg)
+
+            # Pass 2 (shape B): find first AIMessage with dangling tool_calls.
             corrupted_index = None
             for i, msg in enumerate(messages):
                 if not isinstance(msg, AIMessage):
                     continue
-                tool_calls = getattr(msg, 'tool_calls', [])
+                tool_calls = getattr(msg, "tool_calls", [])
                 if not tool_calls:
                     continue
-
-                # Check if all tool_calls have corresponding ToolMessages following this AIMessage
                 expected_ids = {tc["id"] for tc in tool_calls}
                 found_ids = set()
                 for j in range(i + 1, len(messages)):
                     if isinstance(messages[j], LCToolMessage):
-                        found_ids.add(getattr(messages[j], 'tool_call_id', None))
+                        found_ids.add(getattr(messages[j], "tool_call_id", None))
                     elif isinstance(messages[j], AIMessage):
-                        break  # Next AI turn - stop looking
-
+                        break
                 if not expected_ids.issubset(found_ids):
                     corrupted_index = i
-                    break  # Fix the first corruption found
+                    break
 
-            if corrupted_index is None:
+            if not orphan_msgs and corrupted_index is None:
                 return
 
-            corrupted_msg = messages[corrupted_index]
-            tool_calls = corrupted_msg.tool_calls
-            logger.warning(
-                f"Corrupted thread state detected at message index {corrupted_index}: "
-                f"AIMessage with {len(tool_calls)} dangling tool_call(s). Repairing..."
-            )
-
-            # Remove all messages AFTER the corrupted AIMessage
-            messages_to_remove = messages[corrupted_index + 1:]
-            remove_ops = [RemoveMessage(id=m.id) for m in messages_to_remove if hasattr(m, 'id') and m.id]
-
-            # Inject synthetic ToolMessages for each dangling tool_call
+            remove_ops = []
             repair_messages = []
-            for tc in tool_calls:
-                repair_messages.append(LCToolMessage(
-                    content="[Cancelled] Tool execution was interrupted before completion.",
-                    tool_call_id=tc["id"],
-                    name=tc.get("name", "unknown"),
-                ))
 
-            # Apply: remove orphaned messages, then add synthetic ToolMessages
+            # Shape A: RemoveMessage each orphan ToolMessage. Orphans removed
+            # here will not be in the messages_to_remove slice below because
+            # the dangling-tool_calls fix only looks after `corrupted_index`.
+            if orphan_msgs:
+                logger.warning(
+                    f"Corrupted thread state detected: {len(orphan_msgs)} orphan ToolMessage(s) "
+                    f"with no anchoring AIMessage. Repairing..."
+                )
+                for m in orphan_msgs:
+                    mid = getattr(m, "id", None)
+                    if mid:
+                        remove_ops.append(RemoveMessage(id=mid))
+
+            # Shape B: drop everything after the corrupted AIMessage and inject
+            # synthetic ToolMessages for its dangling tool_calls.
+            if corrupted_index is not None:
+                corrupted_msg = messages[corrupted_index]
+                tool_calls = corrupted_msg.tool_calls
+                logger.warning(
+                    f"Corrupted thread state detected at message index {corrupted_index}: "
+                    f"AIMessage with {len(tool_calls)} dangling tool_call(s). Repairing..."
+                )
+                for m in messages[corrupted_index + 1:]:
+                    if hasattr(m, "id") and m.id:
+                        remove_ops.append(RemoveMessage(id=m.id))
+                for tc in tool_calls:
+                    repair_messages.append(LCToolMessage(
+                        content="[Cancelled] Tool execution was interrupted before completion.",
+                        tool_call_id=tc["id"],
+                        name=tc.get("name", "unknown"),
+                    ))
+
             update_messages = remove_ops + repair_messages
             await app.aupdate_state(config, {"messages": update_messages})
             logger.info(
-                f"Thread state repaired: removed {len(remove_ops)} orphaned message(s), "
+                f"Thread state repaired: removed {len(remove_ops)} message(s) "
+                f"({len(orphan_msgs)} orphan(s) + others), "
                 f"injected {len(repair_messages)} synthetic ToolMessage(s)"
             )
 
@@ -212,13 +243,31 @@ class RequestHandler:
 
                 async for chunk in app.astream(state, config=config, stream_mode=["updates", "messages"], subgraphs=True):
 
+                    # If the WS died mid-stream (e.g., uvicorn keepalive ping
+                    # timeout), stop here. Continuing would let the graph keep
+                    # advancing through tool nodes and writing checkpoints with
+                    # no observer, producing orphan ToolMessages that corrupt
+                    # the thread.
+                    if not self._is_websocket_open(websocket):
+                        logger.warning(
+                            f"WS closed mid-stream for thread {incoming_message.get('thread_id')}; "
+                            f"aborting astream consumer."
+                        )
+                        if mothership is not None:
+                            asyncio.create_task(mothership.report_disconnect(
+                                thread_id=str(incoming_message.get("thread_id", "")),
+                                reason="ws_closed_mid_stream",
+                            ))
+                        break
+
                     # NOTE: In LangGraph 0.5, they introduced this "subgraphs" parameter, that changes the datashape if you set it to True.
                     # if subgraph=True, it returns a tuple with 3 elements, instead of 2 elements.
                     # the first element is the subgraph name, the second element is the streaming data type ["updates", "messages", "values"], and the third element is the actual metadata.
 
                     is_this_chunk_an_llm_message = isinstance(chunk, tuple) and len(chunk) == 3 and chunk[1] == 'messages'
                     is_this_chunk_an_update_stream_type = isinstance(chunk, tuple) and len(chunk) == 3 and chunk[1] == 'updates'
-                    logger.info(f"🍅🍅🍅 Chunk: {chunk}")
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(f"🍅🍅🍅 Chunk: {chunk}")
                     
                     # Extract agent depth from subgraph tuple
                     # chunk[0] is a tuple like () for main agent or ('tools:xxx',) for sub-agent
@@ -238,7 +287,8 @@ class RequestHandler:
                         # - Thinking/Reasoning blocks: [{type: "thinking"/"reasoning", text/thinking: "..."}]
                         # - DeepSeek: reasoning_content in additional_kwargs (separate from content)
                         content = base_message_as_dict["content"]
-                        logger.info(f"🍅 Content type: {type(content)}, Content: {content}")
+                        if logger.isEnabledFor(logging.DEBUG):
+                            logger.debug(f"🍅 Content type: {type(content)}, Content: {content}")
 
                         # Separate thinking/reasoning content from regular text content
                         # This allows the frontend to display thinking in a dedicated area

@@ -32,7 +32,7 @@ services:
     user: "1000:1000"  # Run as UID 1000 to prevent root-owned file creation
     env_file:
       - .env
-    command: bash -c "python init_pg_checkpointer.py --uri $DB_URI && uvicorn main:app --host 0.0.0.0 --port 8000"
+    command: bash -c "python init_pg_checkpointer.py --uri $DB_URI && uvicorn main:app --host 0.0.0.0 --port 8000 --ws-ping-interval 60 --ws-ping-timeout 60"
     # command: bash -c "cd /app && uvicorn app.main:app --host 0.0.0.0 --port 8000"
     # command: bash -c "tail -f /dev/null"
     # command: bash -c "python init_pg_checkpointer.py --uri $DB_URI && uvicorn main:app --host 0.0.0.0 --port 8000"

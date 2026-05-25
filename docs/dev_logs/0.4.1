@@ -60,3 +60,13 @@
 - [x] Add timezone info on backup history user interface
 - [x] Add telemetry for mothership
 - [x] Improve file user experience
+
+0.4.1q:
+- [x] Fix WS disconnect → orphan ToolMessage corruption (social-support-society incident). When the WS died mid-stream the astream loop kept consuming chunks, writing checkpoints with no observer and producing orphan ToolMessages that 400'd every subsequent request.
+- [x] Break astream loop on WS close in `request_handler.py` so the graph stops advancing once the client is gone (root-cause fix for the orphan)
+- [x] Extend `_repair_thread_state_if_needed` to detect and auto-heal orphan ToolMessages, not just dangling tool_calls
+- [x] Raise uvicorn ws keepalive to 60s/60s (was default 20s/20s) in Dockerfile + both Leonardo compose files
+- [x] Gate per-chunk `🍅` logging behind DEBUG via new `LOG_LEVEL` env var; reduces event-loop I/O pressure under streaming load
+- [x] Add `mothership_client.report_disconnect()` telemetry, fired when WS closes mid-stream — gives visibility into how often this happens without users having to file tickets
+- [x] Add `app/scripts/repair_thread.py` operational tool for inspecting/repairing corrupted thread checkpoints (dry-run by default, `--fix` to apply)
+- [x] Clean up redundant `logging.basicConfig` in `web_socket_connection_manager.py`

@@ -172,13 +172,14 @@ AWS_PASS='your-secret-key'
 AWS_BUCKET='your-bucket-name'
 AWS_REGION='your-region'
 
-# A Record Domain to this specific LlamaPress, Needed for pages#home controller method if you want multi-site routing.
-# HOSTED_DOMAIN="llamapress.ai"
-
 POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
 DB_URI="postgresql://postgres:${POSTGRES_PASSWORD}@db:5432/llamapress_production"
-DATABASE_URL="postgresql://postgres:${POSTGRES_PASSWORD}@db:5432/llamapress_production"
+AUTH_DB_URI="postgresql://postgres:${POSTGRES_PASSWORD}@db:5432/llamabot_production"
 SECRET_KEY_BASE=${NEW_KEY}
+
+SES_SMTP_USERNAME='your_aws_ses_username'
+SES_SMTP_PASSWORD='your_aws_ses_password'
+
 EOF
 
 # Append LLM API keys — only write lines for providers the user actually configured,

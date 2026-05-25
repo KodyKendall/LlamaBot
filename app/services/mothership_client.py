@@ -132,6 +132,41 @@ class MothershipClient:
         except Exception as e:
             logger.warning(f"Message report unexpected error: {e}")
 
+    async def report_disconnect(
+        self,
+        *,
+        thread_id: str,
+        reason: str,
+    ) -> None:
+        """
+        POST /api/leonardo/report_disconnect
+
+        Fire-and-forget telemetry for mid-stream WebSocket closes. Lets the
+        mothership see how often instances drop connections during streaming
+        without users having to file tickets. Never raises.
+        """
+        if not self.enabled:
+            return
+
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.post(
+                    f"{self.config['mothership_url']}/api/leonardo/report_disconnect",
+                    json={
+                        "instance_name": self.config["instance_name"],
+                        "thread_id": thread_id,
+                        "reason": reason,
+                    },
+                    headers={"Authorization": f"Bearer {self.config['mothership_api_token']}"},
+                )
+                response.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            logger.warning(f"Disconnect report failed (HTTP {e.response.status_code}): {e.response.text}")
+        except httpx.RequestError as e:
+            logger.warning(f"Disconnect report request failed: {e}")
+        except Exception as e:
+            logger.warning(f"Disconnect report unexpected error: {e}")
+
     async def notify_teardown(self, reason: str = "sigterm") -> Optional[dict]:
         """
         POST /api/leonardo/teardown

@@ -3,12 +3,6 @@ from starlette.websockets import WebSocketState
 import asyncio
 import logging
 from typing import Union
-# from logging_config import setup_google_cloud_logging
-
-logging.basicConfig(level=logging.INFO)
-# Initialize Google Cloud Logging
-# setup_google_cloud_logging()
-
 logger = logging.getLogger(__name__)
 
 class WebSocketConnectionManager:
