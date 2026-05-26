@@ -197,6 +197,63 @@ class RequestHandler:
         except Exception as e:
             logger.warning(f"Thread state repair check failed (non-fatal): {e}")
 
+    async def _check_paywall_or_block(self, websocket: WebSocket) -> bool:
+        """
+        Per-instance paywall gate. Returns True if the message should be blocked
+        (a paywall_hit was sent to the websocket); False if it should proceed.
+
+        Fast path: cached state says allowed (or cache empty) -> return False, no network.
+        Slow path: cached state says blocked -> recheck mothership (the "user just paid"
+        recovery path). Fail-open on any mothership error.
+        """
+        paywall_enabled = os.getenv("PAYWALL_ENABLED", "false").lower() == "true"
+        logger.info(f"paywall gate: PAYWALL_ENABLED={paywall_enabled}")
+        if not paywall_enabled:
+            return False
+
+        credits = getattr(self.app.state, "paywall_credits", {}) or {}
+        logger.info(f"paywall gate: cache state={credits}")
+
+        # Cold start (no cache yet) or cached allowed -> fast path, allow.
+        if credits.get("allowed_next") is not False:
+            logger.info("paywall gate: cache allows (or empty), fast path -> ALLOW")
+            return False
+
+        # Cached blocked -> recheck mothership.
+        mothership = getattr(self.app.state, "mothership_client", None)
+        if mothership is None:
+            logger.info("paywall gate: no mothership client -> ALLOW (fail-open)")
+            return False
+
+        logger.info("paywall gate: cache blocked, calling check_paywall...")
+        recheck = await mothership.check_paywall()
+        logger.info(f"paywall gate: recheck returned {recheck}")
+        if recheck is None:
+            logger.info("paywall gate: recheck failed -> ALLOW (fail-open)")
+            return False
+
+        if recheck.get("allowed"):
+            self.app.state.paywall_credits = {
+                "allowed_next": True,
+                "messages_remaining": recheck.get("messages_remaining"),
+            }
+            logger.info(f"paywall gate: recheck says allowed -> ALLOW, cache updated to {self.app.state.paywall_credits}")
+            return False
+
+        # Still blocked — refresh cache and notify frontend.
+        messages_remaining = recheck.get("messages_remaining", 0)
+        self.app.state.paywall_credits = {
+            "allowed_next": False,
+            "messages_remaining": messages_remaining,
+        }
+        logger.info(f"paywall gate: recheck confirms BLOCKED, sending paywall_hit (messages_remaining={messages_remaining})")
+        if self._is_websocket_open(websocket):
+            await websocket.send_json({
+                "type": "paywall_hit",
+                "messages_remaining": messages_remaining,
+            })
+        return True
+
     # This is a the main function that handles incoming WebSocket requests. This will build the LangGraph workflow, and invoke it from a checkpointed state.
     async def handle_request(self, incoming_message: dict, websocket: WebSocket):
         """Handle incoming WebSocket requests with proper locking and cancellation"""
@@ -205,14 +262,28 @@ class RequestHandler:
 
         self.app.state.timestamp = datetime.now(timezone.utc) # keep timestamp updated
 
+        # Paywall gate — must run before report_message so blocked messages
+        # don't get counted against the user's quota.
+        if await self._check_paywall_or_block(websocket):
+            return
+
         mothership = getattr(self.app.state, "mothership_client", None)
         if mothership is not None:
-            asyncio.create_task(mothership.report_message(
-                thread_id=str(incoming_message.get("thread_id", "")),
-                role="user",
-                content=str(incoming_message.get("message", "")),
-                sent_at=datetime.now(timezone.utc).isoformat(),
-            ))
+            async def _report_user_and_cache_paywall():
+                result = await mothership.report_message(
+                    thread_id=str(incoming_message.get("thread_id", "")),
+                    role="user",
+                    content=str(incoming_message.get("message", "")),
+                    sent_at=datetime.now(timezone.utc).isoformat(),
+                )
+                # Only role="user" responses carry paywall fields.
+                if result and "allowed_next" in result:
+                    self.app.state.paywall_credits = {
+                        "allowed_next": result.get("allowed_next"),
+                        "messages_remaining": result.get("messages_remaining"),
+                    }
+                    logger.info(f"paywall cache updated: {self.app.state.paywall_credits}")
+            asyncio.create_task(_report_user_and_cache_paywall())
 
         async with lock:
             try:

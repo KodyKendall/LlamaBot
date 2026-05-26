@@ -2,6 +2,8 @@
  * WebSocket message routing and processing
  */
 
+const PAYWALL_UPGRADE_URL = 'https://llamapress.ai/pricing';
+
 export class MessageHandler {
   constructor(appState, streamingState, messageRenderer, iframeManager, scrollManager, tokenIndicator, config) {
     this.appState = appState;
@@ -480,7 +482,7 @@ export class MessageHandler {
    * Handle generic messages (tool, error, end, etc.)
    */
   handleGenericMessage(data) {
-    if (data.type === 'end' || data.type === 'system_message' || data.type === 'error') {
+    if (data.type === 'end' || data.type === 'system_message' || data.type === 'error' || data.type === 'paywall_hit') {
       this.messageRenderer.handleEndMessage();
       // Remove beginner mode overlay when agent finishes
       this.iframeManager.removeStreamingOverlay();
@@ -500,8 +502,9 @@ export class MessageHandler {
         detail: { elapsedTime }
       }));
 
-      // For system_message or error, also render the message content
-      if ((data.type === 'system_message' || data.type === 'error') && data.content) {
+      if (data.type === 'paywall_hit') {
+        this.messageRenderer.renderPaywallMessage(PAYWALL_UPGRADE_URL);
+      } else if ((data.type === 'system_message' || data.type === 'error') && data.content) {
         this.messageRenderer.addMessage(data.content, data.type, data.base_message);
       }
     } else {

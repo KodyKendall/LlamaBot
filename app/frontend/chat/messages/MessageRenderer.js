@@ -457,6 +457,45 @@ export class MessageRenderer {
   }
 
   /**
+   * Render paywall card with upgrade CTA
+   */
+  renderPaywallMessage(upgradeUrl) {
+    const messageDiv = document.createElement('div');
+    messageDiv.setAttribute('data-llamabot', 'paywall-message');
+    messageDiv.innerHTML = `
+      <div class="paywall-card-icon">
+        <i class="fa-solid fa-crown"></i>
+      </div>
+      <div class="paywall-card-body">
+        <div class="paywall-card-title">You've used your 10 free messages for today.</div>
+        <div class="paywall-card-subtitle">Upgrade to keep Leo always on, unlock more messages, and continue building without sleep interruptions.</div>
+        <a href="${upgradeUrl}" target="_blank" rel="noopener noreferrer" class="paywall-card-cta">
+          <i class="fa-solid fa-bolt"></i>
+          <span>Upgrade to keep building</span>
+        </a>
+      </div>
+    `;
+
+    const cta = messageDiv.querySelector('.paywall-card-cta');
+    if (cta) {
+      cta.addEventListener('click', () => {
+        if (window.posthog) {
+          window.posthog.capture('paywall_upgrade_clicked', { upgrade_url: upgradeUrl });
+        }
+      });
+    }
+
+    this.insertMessage(messageDiv);
+    this.stopThinking();
+
+    if (window.posthog) {
+      window.posthog.capture('paywall_hit');
+    }
+
+    return messageDiv;
+  }
+
+  /**
    * Handle end of stream
    */
   handleEndMessage() {

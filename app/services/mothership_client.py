@@ -95,16 +95,20 @@ class MothershipClient:
         sent_at: str,
         model: Optional[str] = None,
         token_usage: Optional[dict] = None,
-    ) -> None:
+    ) -> Optional[dict]:
         """
         POST /api/leonardo/report_message
 
-        Fire-and-forget message tracking. Reports each user message and each
-        finalized top-level assistant reply to the mothership for usage analytics.
-        Never raises — failures are logged at WARNING and dropped.
+        Reports each user message and each finalized top-level assistant reply
+        to the mothership for usage analytics. Never raises — failures return None.
+
+        For role="user", the response includes paywall fields
+        ({allowed_next, messages_remaining}) which callers use to populate
+        the local paywall cache. For role="assistant", the response contains
+        no paywall fields.
         """
         if not self.enabled:
-            return
+            return None
 
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
@@ -125,12 +129,45 @@ class MothershipClient:
                     headers={"Authorization": f"Bearer {self.config['mothership_api_token']}"},
                 )
                 response.raise_for_status()
+                body = response.json()
+                logger.info(f"report_message response (role={role}): {body}")
+                return body
         except httpx.HTTPStatusError as e:
             logger.warning(f"Message report failed (HTTP {e.response.status_code}): {e.response.text}")
+            return None
         except httpx.RequestError as e:
             logger.warning(f"Message report request failed: {e}")
+            return None
         except Exception as e:
             logger.warning(f"Message report unexpected error: {e}")
+            return None
+
+    async def check_paywall(self) -> Optional[dict]:
+        """
+        POST /api/leonardo/check_paywall
+
+        Recheck-on-blocked path: called only when the cached paywall state
+        says blocked, to detect "user just paid / daily reset" transitions.
+        Returns {"allowed": bool, "messages_remaining": int|None} or None on
+        any error. Fail-open contract — callers treat None as "allow".
+        """
+        if not self.enabled:
+            return None
+
+        try:
+            async with httpx.AsyncClient(timeout=2.0) as client:
+                response = await client.post(
+                    f"{self.config['mothership_url']}/api/leonardo/check_paywall",
+                    json={"instance_name": self.config["instance_name"]},
+                    headers={"Authorization": f"Bearer {self.config['mothership_api_token']}"},
+                )
+                response.raise_for_status()
+                body = response.json()
+                logger.info(f"check_paywall response: {body}")
+                return body
+        except Exception as e:
+            logger.warning(f"Paywall recheck failed, failing open: {e}")
+            return None
 
     async def report_disconnect(
         self,

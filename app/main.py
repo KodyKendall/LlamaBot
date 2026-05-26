@@ -92,6 +92,10 @@ app.state.compiled_graphs = {}  # Cache for pre-compiled LangGraph workflows
 app.state.mothership_client = MothershipClient()
 app.state.lease_manager = LeaseManager(app, app.state.mothership_client)
 
+# Paywall state cache, populated from mothership.report_message responses.
+# Shape: {"allowed_next": bool, "messages_remaining": int|None} — empty until first user message.
+app.state.paywall_credits = {}
+
 # Path to legacy auth file (for migration)
 LEGACY_AUTH_FILE = Path(__file__).parent / "auth.json"
 

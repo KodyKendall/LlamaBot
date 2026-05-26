@@ -32,7 +32,7 @@ async def start_device_flow(
     async with httpx.AsyncClient() as client:
         resp = await client.post(
             "https://github.com/login/device/code",
-            data={"client_id": client_id, "scope": "repo"},
+            data={"client_id": client_id, "scope": "repo read:org workflow gist"},
             headers={"Accept": "application/json"},
         )
 
