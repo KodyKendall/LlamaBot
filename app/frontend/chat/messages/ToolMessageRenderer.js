@@ -336,8 +336,11 @@ export class ToolMessageRenderer {
 
     // Handle input-only expandable tools (read_file, edit_file) - just update status
     if (INPUT_ONLY_EXPANDABLE_TOOLS.includes(baseMessage.name)) {
-      // Always refresh iframe on edit/write success, even if tool is hidden in beginner mode
-      if ((baseMessage.name === 'edit_file' || baseMessage.name === 'write_file') &&
+      // Refresh iframe on edit/write success (gated on user preference, defaults to enabled).
+      // Still fires even if tool is hidden in beginner mode.
+      const autoRefreshOnEdit = localStorage.getItem('autoRefreshOnEdit') !== 'false';
+      if (autoRefreshOnEdit &&
+          (baseMessage.name === 'edit_file' || baseMessage.name === 'write_file') &&
           baseMessage.artifact?.status === 'success' &&
           this.iframeManager && this.getRailsDebugInfoCallback) {
         this.iframeManager.refreshRailsApp(this.getRailsDebugInfoCallback);
@@ -354,8 +357,9 @@ export class ToolMessageRenderer {
               icon.outerHTML = ToolIcons.successIcon();
             }
 
-            // Refresh the main iframe when edit_file or write_file succeeds
-            if ((baseMessage.name === 'edit_file' || baseMessage.name === 'write_file') &&
+            // Refresh the main iframe when edit_file or write_file succeeds (gated on user preference)
+            if (localStorage.getItem('autoRefreshOnEdit') !== 'false' &&
+                (baseMessage.name === 'edit_file' || baseMessage.name === 'write_file') &&
                 this.iframeManager && this.getRailsDebugInfoCallback) {
               this.iframeManager.refreshRailsApp(this.getRailsDebugInfoCallback);
             }

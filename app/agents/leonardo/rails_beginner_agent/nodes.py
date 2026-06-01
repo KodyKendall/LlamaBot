@@ -15,7 +15,7 @@ from typing import Literal
 
 from app.agents.leonardo.rails_agent.state import RailsAgentState
 from app.agents.leonardo.rails_agent.tools import (
-    write_todos, write_file, read_file, ls, edit_file, bash_command,
+    write_todos, write_file, read_file, ls, edit_file, bash_command, tail_rails_logs,
     glob_files, grep_files, internet_search,
     read_leonardo_md, write_leonardo_md, edit_leonardo_md,
     save_memory, list_memories, delete_memory,
@@ -50,7 +50,7 @@ def get_sys_msg():
 
 default_tools = [
     write_todos,
-    ls, read_file, write_file, edit_file, bash_command,
+    ls, read_file, write_file, edit_file, bash_command, tail_rails_logs,
     glob_files, grep_files, internet_search,
     read_leonardo_md, write_leonardo_md, edit_leonardo_md,
     save_memory, list_memories, delete_memory,
@@ -74,7 +74,7 @@ def leonardo_beginner(state: RailsAgentState) -> Command[Literal["tools"]]:
 
     tools = [
         write_todos,
-        ls, read_file, write_file, edit_file, bash_command,
+        ls, read_file, write_file, edit_file, bash_command, tail_rails_logs,
         glob_files, grep_files, internet_search,
         read_leonardo_md, write_leonardo_md, edit_leonardo_md,
         write_personality_file,

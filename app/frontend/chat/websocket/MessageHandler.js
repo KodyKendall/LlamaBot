@@ -178,6 +178,13 @@ export class MessageHandler {
       this.currentThinkingId = `thinking-${Date.now()}`;
       this.currentThinkingBuffer = '';
       this.hasNonThinkingMessageSinceLastThinking = false;
+
+      // Force the next streamed text chunk to start a new bubble instead of
+      // appending to the bubble that came before this thinking block.
+      // DeepSeek interleaves reasoning_content with content, so without this
+      // post-thinking text would silently concatenate into the prior bubble.
+      this.appState.setCurrentAiMessage(null);
+      this.appState.currentAiMessageBuffer = '';
     }
 
     // Append to buffer

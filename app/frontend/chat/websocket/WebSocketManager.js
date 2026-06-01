@@ -36,11 +36,12 @@ export class WebSocketManager {
    */
   connectWebSocket() {
     const wsUrl = this.config.websocketUrl || getWebSocketUrl();
+    this.wsUrl = wsUrl;
     this.socket = new WebSocket(wsUrl);
     this.isActionCable = false;
 
     this.socket.onopen = () => this.handleOpen();
-    this.socket.onclose = () => this.handleClose();
+    this.socket.onclose = (event) => this.handleClose(event);
     this.socket.onerror = (error) => this.handleError(error);
     this.socket.onmessage = (event) => this.handleMessage(event);
 
@@ -68,7 +69,7 @@ export class WebSocketManager {
 
     // Set handlers
     this.socket.onopen = () => this.handleOpen();
-    this.socket.onclose = () => this.handleClose();
+    this.socket.onclose = (event) => this.handleClose(event);
     this.socket.onerror = (error) => this.handleError(error);
     this.socket.onmessage = (event) => this.handleMessage(event);
 
@@ -117,15 +118,24 @@ export class WebSocketManager {
   /**
    * Handle WebSocket close event
    */
-  handleClose() {
+  handleClose(event) {
+    const closeInfo = event ? {
+      code: event.code,
+      reason: event.reason,
+      wasClean: event.wasClean,
+      url: this.wsUrl,
+      isActionCable: this.isActionCable
+    } : { url: this.wsUrl, isActionCable: this.isActionCable };
+    console.warn('WebSocket closed:', closeInfo);
+
     this.updateConnectionStatus(false);
 
     if (this.elements.sendButton) {
       this.elements.sendButton.disabled = true;
     }
 
-    // Emit custom event
-    window.dispatchEvent(new CustomEvent('websocketDisconnected'));
+    // Emit custom event with close info
+    window.dispatchEvent(new CustomEvent('websocketDisconnected', { detail: closeInfo }));
 
     // Attempt to reconnect after delay
     this.scheduleReconnect();
@@ -133,9 +143,19 @@ export class WebSocketManager {
 
   /**
    * Handle WebSocket error event
+   *
+   * Note: the browser's WebSocket `error` event is intentionally opaque for
+   * security reasons — it carries no diagnostic detail. The real signal lives
+   * in the `close` event (`code` / `reason`) that fires immediately after.
    */
   handleError(error) {
-    console.error('WebSocket error:', error);
+    const readyState = this.socket ? this.socket.readyState : null;
+    console.error('WebSocket error:', {
+      url: this.wsUrl,
+      isActionCable: this.isActionCable,
+      readyState,
+      event: error
+    });
 
     // Emit custom event with error
     window.dispatchEvent(new CustomEvent('websocketError', { detail: error }));

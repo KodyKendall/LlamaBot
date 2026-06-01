@@ -1652,6 +1652,23 @@ async def settings_page(
             </div>
         </div>
 
+        <div class="card">
+            <div class="card-header">App Preview</div>
+            <div class="menu-item" style="cursor: default;">
+                <i class="fa-solid fa-arrows-rotate"></i>
+                <span>Auto-refresh on edits</span>
+                <label style="position: relative; display: inline-block; width: 44px; height: 24px;">
+                    <input type="checkbox" id="autoRefreshOnEditToggle" style="opacity: 0; width: 0; height: 0;"
+                        onchange="toggleAutoRefreshOnEdit(this.checked)">
+                    <span style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #555; border-radius: 24px; transition: 0.3s;"></span>
+                    <span id="autoRefreshOnEditSlider" style="position: absolute; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; border-radius: 50%; transition: 0.3s;"></span>
+                </label>
+            </div>
+            <div style="padding: 4px 0 0 36px; font-size: 0.75rem; color: #666;">
+                Reloads the app preview iframe after each edit_file or write_file tool call
+            </div>
+        </div>
+
         {"" if not is_engineer_or_admin else '''<div class="card">
             <div class="card-header">Display</div>
             <div class="menu-item" style="cursor: default;">
@@ -1694,6 +1711,33 @@ async def settings_page(
 
         function updateSliderStyle(enabled) {{
             const slider = document.getElementById('autoBackupSlider');
+            const track = slider.previousElementSibling;
+            if (enabled) {{
+                track.style.backgroundColor = '#4CAF50';
+                slider.style.transform = 'translateX(20px)';
+            }} else {{
+                track.style.backgroundColor = '#555';
+                slider.style.transform = 'translateX(0)';
+            }}
+        }}
+
+        // Auto-refresh on edit toggle (defaults to enabled)
+        (function() {{
+            const toggle = document.getElementById('autoRefreshOnEditToggle');
+            if (!toggle) return;
+            const isEnabled = localStorage.getItem('autoRefreshOnEdit') !== 'false';
+            toggle.checked = isEnabled;
+            updateAutoRefreshOnEditSlider(isEnabled);
+        }})();
+
+        function toggleAutoRefreshOnEdit(enabled) {{
+            localStorage.setItem('autoRefreshOnEdit', enabled ? 'true' : 'false');
+            updateAutoRefreshOnEditSlider(enabled);
+        }}
+
+        function updateAutoRefreshOnEditSlider(enabled) {{
+            const slider = document.getElementById('autoRefreshOnEditSlider');
+            if (!slider) return;
             const track = slider.previousElementSibling;
             if (enabled) {{
                 track.style.backgroundColor = '#4CAF50';

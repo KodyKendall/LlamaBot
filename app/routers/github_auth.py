@@ -117,16 +117,25 @@ def _install_gh_token(token: str) -> dict:
     from app.routers.slash_commands import execute_command, is_native_linux_host
 
     try:
+        # On Linux host (prod), drop to uid 1000 (ubuntu) so gh writes config to
+        # /home/ubuntu/.config/gh/ instead of /root/.config/gh/ — this is what
+        # /gh-copy and the container copy step below expect to read from.
+        on_linux = is_native_linux_host()
+        user_prefix = "runuser -u ubuntu -- " if on_linux else ""
+
         # Step 1: Login with the token on the host
-        login_cmd = f"echo '{token}' | gh auth login --with-token"
+        if on_linux:
+            login_cmd = f"runuser -u ubuntu -- bash -c \"echo '{token}' | gh auth login --with-token\""
+        else:
+            login_cmd = f"echo '{token}' | gh auth login --with-token"
         result = execute_command(login_cmd, timeout=30)
 
         if result.returncode != 0:
             logger.error(f"gh auth login failed: {result.stderr}")
             return {"success": False, "message": f"gh auth login failed: {result.stderr}"}
 
-        # Step 2: Setup git credential helper
-        setup_cmd = "gh auth setup-git"
+        # Step 2: Setup git credential helper (as ubuntu, so config goes in /home/ubuntu)
+        setup_cmd = f"{user_prefix}gh auth setup-git"
         execute_command(setup_cmd, timeout=15)
 
         # Step 3: Copy creds to containers (if on Linux host)

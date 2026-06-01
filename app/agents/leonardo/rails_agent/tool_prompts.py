@@ -275,6 +275,25 @@ Also use when the user asks "what do you remember?" or similar."""
 DELETE_MEMORY_DESCRIPTION = """Delete a memory by filename (e.g., "prefers-tailwind.md").
 Use when the user asks to forget something, or when a memory is outdated and being replaced."""
 
+TAIL_RAILS_LOGS_DESCRIPTION = """Read recent stdout/stderr logs from the Rails container via the Docker logs API.
+
+Works even when the Rails container is STOPPED or CRASHED — Docker keeps the logs around. This is the primary
+diagnostic tool when `bash_command` fails with "409 Conflict" or "container not running" — that means the
+Rails process exited (usually a bad migration, missing gem, or syntax error on boot), and the logs hold the
+real reason.
+
+When to use:
+- `bash_command` just returned "409", "container not running", or hangs — read the logs to find out why Rails died.
+- A `bundle exec rails db:migrate` or `db:prepare` step failed and you need the actual error message.
+- The user reports "the page is broken", a 500 error, or "nothing is loading".
+- After a long-running request, to see server-side output (rendered template, query log, exception trace).
+
+Parameters:
+- lines: Number of recent log lines to return (default 200, max 2000).
+
+Returns the demultiplexed log text (stdout + stderr interleaved). Does not write a file.
+"""
+
 VIEW_CURRENT_PAGE_HTML_DESCRIPTION = """
 The `view_page` tool gives you what the user is seeing, and backend context, as ground truth for all UI-related/exploratory questions.
 

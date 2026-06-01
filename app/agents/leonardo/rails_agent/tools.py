@@ -32,6 +32,7 @@ from app.agents.leonardo.rails_agent.tool_prompts import (
     READ_LEONARDO_MD_DESCRIPTION,
     EDIT_LEONARDO_MD_DESCRIPTION,
     WRITE_LEONARDO_MD_DESCRIPTION,
+    TAIL_RAILS_LOGS_DESCRIPTION,
 )
 
 from app.agents.leonardo.project_context import (
@@ -931,6 +932,93 @@ def capture_rails_logs(duration: int = 10, output_file: str = None) -> str:
     chown_for_ubuntu(full_path)  # Fix permissions for ubuntu user
 
     return str(full_path)
+
+
+def _demultiplex_docker_log_stream(raw: bytes) -> str:
+    """Decode Docker's log stream into plain text.
+
+    Docker uses two formats depending on whether the container has a TTY:
+    - non-TTY: each frame is 8 bytes [stream_type, 0, 0, 0, size(4 BE)] + payload
+    - TTY:     raw stream, no framing
+    Auto-detect by looking at the first byte (\\x01 = stdout, \\x02 = stderr).
+    """
+    if not raw:
+        return ""
+    if raw[:1] in (b"\x01", b"\x02"):
+        parts: list[str] = []
+        i = 0
+        while i + 8 <= len(raw):
+            size = int.from_bytes(raw[i + 4:i + 8], "big")
+            if i + 8 + size > len(raw):
+                break
+            parts.append(raw[i + 8:i + 8 + size].decode("utf-8", errors="replace"))
+            i += 8 + size
+        return "".join(parts)
+    return raw.decode("utf-8", errors="replace")
+
+
+@tool(description=TAIL_RAILS_LOGS_DESCRIPTION)
+def tail_rails_logs(
+    runtime: ToolRuntime,
+    lines: int = 200,
+) -> Command:
+    """Read recent stdout/stderr from the Rails container (works on stopped containers)."""
+    tool_call_id = runtime.tool_call_id
+
+    try:
+        lines = max(1, min(int(lines), 2000))
+    except (TypeError, ValueError):
+        lines = 200
+
+    try:
+        container_name = get_rails_container_name()
+    except Exception as e:
+        return Command(
+            update={
+                "messages": [ToolMessage(f"Could not resolve Rails container name: {e}", tool_call_id=tool_call_id)]
+            }
+        )
+
+    cmd = [
+        "curl", "--silent", "--show-error",
+        "--unix-socket", "/var/run/docker.sock",
+        f"http://localhost/containers/{container_name}/logs?stdout=true&stderr=true&tail={lines}",
+    ]
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, timeout=15)
+    except subprocess.TimeoutExpired:
+        return Command(
+            update={
+                "messages": [ToolMessage("Timed out reading Rails container logs.", tool_call_id=tool_call_id)]
+            }
+        )
+    except Exception as e:
+        return Command(
+            update={
+                "messages": [ToolMessage(f"Error reading Rails container logs: {e}", tool_call_id=tool_call_id)]
+            }
+        )
+
+    if result.returncode != 0:
+        stderr_text = result.stderr.decode("utf-8", errors="replace") if isinstance(result.stderr, bytes) else str(result.stderr)
+        return Command(
+            update={
+                "messages": [ToolMessage(f"Docker logs API error (container={container_name}): {stderr_text}", tool_call_id=tool_call_id)]
+            }
+        )
+
+    logs_text = _demultiplex_docker_log_stream(result.stdout)
+    logs_text = truncate_output(logs_text, BASH_OUTPUT_MAX_CHARS)
+    if not logs_text.strip():
+        logs_text = "(no recent log output)"
+
+    header = f"Recent Rails container logs ({container_name}, last {lines} lines):\n"
+    return Command(
+        update={
+            "messages": [ToolMessage(header + logs_text, tool_call_id=tool_call_id)]
+        }
+    )
 
 
 @tool(description=BASH_COMMAND_FOR_RAILS_DESCRIPTION)
