@@ -80,6 +80,12 @@ class ChatApp {
     this.isAgentRunning = false;
     this.cancelPressCount = 0;
 
+    // Resume-on-reconnect: if the WS drops while the agent is running, we
+    // stash the last payload and re-send it once the socket reconnects so
+    // the user gets a response without having to retype.
+    this.lastSentMessageData = null;
+    this.pendingResendData = null;
+
     // Activity tracking for lease management
     this.lastActivitySync = 0;
     this.ACTIVITY_SYNC_INTERVAL = 60000; // Sync to backend every 60 seconds max
@@ -201,10 +207,36 @@ class ChatApp {
     const socket = this.webSocketManager.connect();
     this.appState.setSocket(socket);
 
-    // Listen for websocket disconnection to hide thinking indicator
-    window.addEventListener('websocketDisconnected', () => {
+    // On transient disconnects, leave the thinking indicator running — the
+    // backend agent task is cancelled but we'll re-send the last message on
+    // reconnect (see resume-on-reconnect below). Only show the lost-connection
+    // error when retries are exhausted.
+    window.addEventListener('websocketReconnectFailed', () => {
+      this.pendingResendData = null;
       this.hideThinkingIndicator();
       this.setAgentRunning(false);
+    });
+
+    // If the WS drops while the agent is running, queue the last payload for
+    // resend on the next successful (re)connect.
+    window.addEventListener('websocketDisconnected', () => {
+      if (this.isAgentRunning && this.lastSentMessageData) {
+        this.pendingResendData = this.lastSentMessageData;
+      }
+    });
+
+    // On (re)connect, flush any queued resend. The small delay lets the auth
+    // message go first (sendAuthMessage is async; see checkAutoPrompt for the
+    // same pattern).
+    window.addEventListener('websocketConnected', () => {
+      if (!this.pendingResendData) return;
+      const payload = this.pendingResendData;
+      this.pendingResendData = null;
+      setTimeout(() => {
+        if (this.webSocketManager?.send(payload)) {
+          console.log('Resumed: re-sent last message after reconnect');
+        }
+      }, 300);
     });
 
     // Listen for agent task completion to stop duration timer and show elapsed time
@@ -212,6 +244,8 @@ class ChatApp {
       const elapsedTime = event.detail?.elapsedTime;
       this.stopDurationTimerDisplay();
       this.setAgentRunning(false);
+      this.lastSentMessageData = null;
+      this.pendingResendData = null;
 
       // Update any completed plan badges with the elapsed time
       if (elapsedTime) {
@@ -673,6 +707,8 @@ class ChatApp {
     if (!this.webSocketManager) return;
     this.webSocketManager.send({ type: 'cancel' });
     this.cancelPressCount++;
+    this.lastSentMessageData = null;
+    this.pendingResendData = null;
   }
 
   /**
@@ -1016,6 +1052,8 @@ class ChatApp {
     };
 
     this.webSocketManager.send(messageData);
+    this.lastSentMessageData = messageData;
+    this.pendingResendData = null;
     this.setAgentRunning(true);
 
     // Call custom callback if provided

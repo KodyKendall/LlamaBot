@@ -16,6 +16,8 @@ export class WebSocketManager {
     this.reconnectTimer = null;
     this.isActionCable = false;
     this.isAuthenticated = false;
+    this.reconnectAttempts = 0;
+    this.maxReconnectAttempts = config.maxReconnectAttempts ?? 5;
   }
 
   /**
@@ -84,6 +86,7 @@ export class WebSocketManager {
    */
   handleOpen() {
     this.updateConnectionStatus(true);
+    this.reconnectAttempts = 0;
 
     if (this.elements.sendButton) {
       this.elements.sendButton.disabled = false;
@@ -124,8 +127,15 @@ export class WebSocketManager {
       reason: event.reason,
       wasClean: event.wasClean,
       url: this.wsUrl,
-      isActionCable: this.isActionCable
-    } : { url: this.wsUrl, isActionCable: this.isActionCable };
+      isActionCable: this.isActionCable,
+      attempt: this.reconnectAttempts,
+      maxAttempts: this.maxReconnectAttempts
+    } : {
+      url: this.wsUrl,
+      isActionCable: this.isActionCable,
+      attempt: this.reconnectAttempts,
+      maxAttempts: this.maxReconnectAttempts
+    };
     console.warn('WebSocket closed:', closeInfo);
 
     this.updateConnectionStatus(false);
@@ -242,6 +252,10 @@ export class WebSocketManager {
   /**
    * Schedule reconnection attempt
    * Note: ActionCable handles reconnection automatically
+   *
+   * Caps retries at `maxReconnectAttempts`. When exhausted, dispatches
+   * `websocketReconnectFailed` so the UI can show the "Lost connection"
+   * error only after we've truly given up — not on transient drops.
    */
   scheduleReconnect() {
     // ActionCable handles reconnection automatically, skip for ActionCable
@@ -249,10 +263,23 @@ export class WebSocketManager {
       return;
     }
 
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      console.error(`WebSocket reconnect failed after ${this.reconnectAttempts} attempts`);
+      window.dispatchEvent(new CustomEvent('websocketReconnectFailed', {
+        detail: {
+          attempts: this.reconnectAttempts,
+          maxAttempts: this.maxReconnectAttempts,
+          url: this.wsUrl
+        }
+      }));
+      return;
+    }
+
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
     }
 
+    this.reconnectAttempts += 1;
     this.reconnectTimer = setTimeout(() => {
       this.connect();
     }, this.config.reconnectDelay || 3000);
