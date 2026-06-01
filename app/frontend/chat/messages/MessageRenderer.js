@@ -467,8 +467,8 @@ export class MessageRenderer {
         <i class="fa-solid fa-crown"></i>
       </div>
       <div class="paywall-card-body">
-        <div class="paywall-card-title">You've used your 10 free messages for today.</div>
-        <div class="paywall-card-subtitle">Upgrade to keep Leo always on, unlock more messages, and continue building without sleep interruptions.</div>
+        <div class="paywall-card-title">You've used your free messages for today</div>
+        <div class="paywall-card-subtitle">Come back tomorrow or upgrade for more messages</div>
         <a href="${upgradeUrl}" target="_blank" rel="noopener noreferrer" class="paywall-card-cta">
           <i class="fa-solid fa-bolt"></i>
           <span>Upgrade to keep building</span>
