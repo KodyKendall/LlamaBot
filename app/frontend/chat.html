@@ -390,6 +390,8 @@
                     const notes = data.notes || [];
 
                     if (version) {
+                        console.log(`LlamaBot v${version}`);
+
                         // Update version badge
                         const versionBadge = document.querySelector('[data-llamabot="version-badge"]');
                         if (versionBadge) {
