@@ -678,6 +678,26 @@ Run Rails commands with `bundle exec` prefix.
 
 **REMINDER:** Do NOT use bash for: `cat`, `grep`, `find`, `head`, `tail`, `sed`, `awk`, `ls` (for file operations). Use the dedicated tools above. (Piping through `head`/`tail` to limit output is OK.)
 
+### Restarting Rails (when routes / code / initializers don't reload)
+
+Rails reloads ERB views and most model/controller code on every request in dev, but **routes.rb, initializers, Gemfile, and class-level metaprogramming require a process restart.** Two tiers:
+
+**Soft restart (prefer this — ~2s, keeps DB connections warm):**
+```
+bash_command: rm -f tmp/restart.txt && touch tmp/restart.txt
+```
+Puma watches `tmp/restart.txt` and gracefully restarts the app when its mtime changes. The `rm -f` first is important — `restart.txt` is often owned by root from the image build, so a plain `touch` fails with permission denied. Deleting then recreating the file works because `tmp/` itself is writable.
+
+When to use: changed `routes.rb`, an initializer, or anything you suspect needs a fresh boot but not a full container restart.
+
+**Hard restart (~15-30s, full container kick):** Call the `hard_restart_rails` tool. Use it when:
+- Soft restart didn't pick up the change.
+- Changed `Gemfile` / `Gemfile.lock` (bundler needs to re-resolve).
+- Changed `.env` (env vars are read at container boot).
+- The Rails process is wedged.
+
+**Never** ask the user to refresh the page after either restart — the page auto-recovers.
+
 ---
 
 ## Rails Conventions

@@ -275,6 +275,24 @@ Also use when the user asks "what do you remember?" or similar."""
 DELETE_MEMORY_DESCRIPTION = """Delete a memory by filename (e.g., "prefers-tailwind.md").
 Use when the user asks to forget something, or when a memory is outdated and being replaced."""
 
+HARD_RESTART_RAILS_DESCRIPTION = """Forcefully restart the Rails (LlamaPress) container — a "hard kick" when a soft restart isn't enough.
+
+This stops and restarts the entire Rails container process. Use it when:
+- A soft restart (`rm -f tmp/restart.txt && touch tmp/restart.txt` via `bash_command`) didn't pick up the change.
+- You changed Gemfile / Gemfile.lock and need bundler to re-resolve.
+- You changed an initializer in `config/initializers/` or anything Puma loads at boot.
+- You changed env vars in `.env` that Rails reads at boot.
+- The Rails process is wedged / unresponsive and needs to be killed.
+
+For ordinary code or routes changes, PREFER the soft restart over this tool — it's ~2s vs ~15-30s, keeps DB connections warm, and is gentler on the user. Reach for hard_restart_rails only when the soft path is insufficient.
+
+What this does NOT do:
+- Restart the LlamaBot (your own) container. You'd kill yourself mid-call.
+- Re-read `docker-compose.yml`. For that, the user has a `/restart` slash command.
+
+After calling this, the container is briefly unavailable (~10-30s). Tell the user the page will be unreachable for a few seconds and come back automatically. Do not retry `bash_command` immediately after — wait until the container is back.
+"""
+
 TAIL_RAILS_LOGS_DESCRIPTION = """Read recent stdout/stderr logs from the Rails container via the Docker logs API.
 
 Works even when the Rails container is STOPPED or CRASHED — Docker keeps the logs around. This is the primary

@@ -33,6 +33,7 @@ from app.agents.leonardo.rails_agent.tool_prompts import (
     EDIT_LEONARDO_MD_DESCRIPTION,
     WRITE_LEONARDO_MD_DESCRIPTION,
     TAIL_RAILS_LOGS_DESCRIPTION,
+    HARD_RESTART_RAILS_DESCRIPTION,
 )
 
 from app.agents.leonardo.project_context import (
@@ -1017,6 +1018,77 @@ def tail_rails_logs(
     return Command(
         update={
             "messages": [ToolMessage(header + logs_text, tool_call_id=tool_call_id)]
+        }
+    )
+
+
+@tool(description=HARD_RESTART_RAILS_DESCRIPTION)
+def hard_restart_rails(
+    runtime: ToolRuntime,
+) -> Command:
+    """Forcefully restart the Rails container via the Docker socket.
+
+    Equivalent to `docker compose restart llamapress` — kills the Rails process
+    (SIGTERM, then SIGKILL after the timeout) and starts the same container
+    fresh. Does NOT recreate the container from docker-compose.yml.
+    """
+    tool_call_id = runtime.tool_call_id
+
+    try:
+        container_name = get_rails_container_name()
+    except Exception as e:
+        return Command(
+            update={
+                "messages": [ToolMessage(f"Could not resolve Rails container name: {e}", tool_call_id=tool_call_id)]
+            }
+        )
+
+    cmd = [
+        "curl", "--silent", "--show-error", "--fail-with-body",
+        "-X", "POST",
+        "--unix-socket", "/var/run/docker.sock",
+        f"http://localhost/containers/{container_name}/restart?t=10",
+    ]
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    except subprocess.TimeoutExpired:
+        return Command(
+            update={
+                "messages": [ToolMessage(
+                    f"Restart of {container_name} did not complete within 60s. "
+                    "The container may still be coming back up — check `tail_rails_logs` in a moment.",
+                    tool_call_id=tool_call_id,
+                )]
+            }
+        )
+    except Exception as e:
+        return Command(
+            update={
+                "messages": [ToolMessage(f"Error calling Docker restart API: {e}", tool_call_id=tool_call_id)]
+            }
+        )
+
+    if result.returncode != 0:
+        return Command(
+            update={
+                "messages": [ToolMessage(
+                    f"Docker restart API error (container={container_name}): "
+                    f"{(result.stderr or result.stdout or '').strip()}",
+                    tool_call_id=tool_call_id,
+                )]
+            }
+        )
+
+    return Command(
+        update={
+            "messages": [ToolMessage(
+                f"Hard restart of {container_name} kicked off. The Rails app will be unreachable for a few "
+                "seconds while it boots back up. Tell the user the page will reload automatically — do not "
+                "ask them to refresh. If you need to verify it came back, wait ~10s, then call "
+                "`tail_rails_logs` to confirm Puma logged 'Listening on'.",
+                tool_call_id=tool_call_id,
+            )]
         }
     )
 
