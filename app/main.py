@@ -289,6 +289,12 @@ async def startup_event():
         except ImportError:
             logger.info("rails_excel_focus_agent not found, skipping")
 
+        try:
+            from app.agents.leonardo.pyxl_agent.nodes import build_workflow as build_pyxl_agent
+            app.state.compiled_graphs["pyxl_agent"] = build_pyxl_agent(checkpointer=checkpointer)
+        except ImportError:
+            logger.info("pyxl_agent not found, skipping")
+
         logger.info(f"Compiled {len(app.state.compiled_graphs)} LangGraph workflows: {list(app.state.compiled_graphs.keys())}")
     except Exception as e:
         logger.error(f"Error compiling LangGraph workflows: {e}", exc_info=True)

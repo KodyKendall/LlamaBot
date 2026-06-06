@@ -1097,7 +1097,11 @@ class RequestHandler:
         # Remove './' if present and convert path to module format
         if module_path.startswith('./'):
             module_path = module_path[2:]
-        module_path = module_path.replace('/', '.').replace('.py', '')
+        # Strip the .py extension as a suffix only — using replace('.py', '') would
+        # also clobber it inside path segments like 'pyxl_agent' (-> 'xl_agent').
+        if module_path.endswith('.py'):
+            module_path = module_path[:-3]
+        module_path = module_path.replace('/', '.')
 
         # Dynamically import the module and get the function
         module = importlib.import_module(module_path)

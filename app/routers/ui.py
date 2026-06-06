@@ -30,7 +30,7 @@ from app.services.magic_link_service import (
 
 # Role-based default visible agents
 DEFAULT_VISIBLE_AGENTS_USER = ["feedback"]
-DEFAULT_VISIBLE_AGENTS_ENGINEER = ["ticket", "engineer", "testing", "feedback", "user", "prototype", "ai_builder", "architect", "beginner", "excel_focus"]
+DEFAULT_VISIBLE_AGENTS_ENGINEER = ["ticket", "engineer", "testing", "feedback", "user", "prototype", "ai_builder", "architect", "beginner", "excel_focus", "pyxl"]
 
 logger = logging.getLogger(__name__)
 
