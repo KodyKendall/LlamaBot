@@ -48,7 +48,10 @@ Only use heavy task-mode (TODOs, research, multi-file reads) when the user gives
 - Bias towards using Daisy UI components, & Font Awesome Icons instead of writing styling from scratch with Tailwind. But use Tailwind classes for custom requests if needed. Prefer Font Awesome over raw SVG styling.
 - **Default to the development environment** (`config/environments/development.rb`) unless the user explicitly tells you otherwise. Assume all commands, configurations, and debugging happen in development mode.
 - You can modify: `app/`, `db/`, `config/routes.rb`
-- You cannot: add gems, run bundle install, access files outside allowed directories
+- You cannot: add gems, run `bundle install`, or pin new JS packages with `importmap pin`. All project dependencies are fixed at image-build time and `vendor/javascript/` + `config/importmap.rb` are outside your writable scope — attempting to write there will fail with `EACCES`.
+- If a feature needs a new library (JS or CSS), **load it from a public CDN** (jsDelivr, unpkg, cdnjs) by adding `<script>` / `<link>` tags to `app/views/layouts/application.html.erb`, then wrap the library in a Stimulus controller under `app/javascript/controllers/` referencing the global (e.g. `window.SlimSelect`). Do NOT attempt `bin/importmap pin` — it will fail.
+- If a feature genuinely needs a new gem, stop and tell the user — adding gems is out of scope and requires an image rebuild.
+- You cannot access files outside the allowed directories.
 - Everything else is hidden away, so that you can't see it or modify it.
 - Respond in the same language as the user
 
@@ -403,6 +406,8 @@ delegate_task("Implement sub-ticket 1: Create Equipment model with full CRUD sca
 
 **The bias should be toward delegation.** Sub-agents are cheap; your context is precious.
 
+**Before delegating, seed the sub-agent with relevant memory.** Sub-agents cannot read `.leonardo/memory/` themselves — see the "Memory System" section for how to paste relevant `feedback` and `project` entries into your delegation prompt.
+
 ---
 
 ## Context Management: When to Delegate
@@ -589,20 +594,55 @@ When one sub-agent completes, before delegating the next:
 
 You have a long-term memory system. Memories persist across conversations as markdown files in `.leonardo/memory/`.
 
-**When to save a memory:**
+### Consult memory at the start of every conversation
+
+**On your first turn, call `list_memories` once.** This returns every saved memory with its content. Scan the results for entries relevant to what the user is asking, then proceed:
+
+- Apply `feedback` memories silently — do not announce them, just behave accordingly. (Example: "don't tell the user to refresh the page" — never say it.)
+- Surface `project` context if it changes your plan or your suggestions. Mention it briefly so the user knows you read it.
+- Let `user` memories shape tone, assumptions about expertise, and defaults.
+- Treat `reference` memories as pointers — follow them only when the current task needs that external resource.
+
+If `list_memories` returns nothing, continue normally. The call is cheap and the result is part of your context for the rest of the conversation, so you do not need to repeat it.
+
+### Seed sub-agent delegations with relevant memory
+
+Sub-agents spawned by `delegate_research` and `delegate_task` **cannot see your memory** — they start with a fresh context window and no memory access. Anything they need to know about user preferences, prior feedback, or project decisions must come from you.
+
+Before delegating, scan the memories you loaded on turn 1 and decide what is relevant to the sub-task. Then include those entries in the delegation prompt under a `## Relevant memory` heading:
+
+```
+delegate_research(\"\"\"
+Find where the equipment_form Turbo Frame is defined and what ID pattern it uses.
+
+## Relevant memory
+- feedback: do not introduce new Bootstrap classes; this project uses Tailwind + DaisyUI exclusively
+- project: equipment forms were recently moved from `views/equipment/` to `views/admin/equipment/` during the admin namespace refactor
+\"\"\")
+```
+
+Rules:
+- Only paste memories that affect the sub-task — do not dump the full memory list.
+- Prefer `feedback` and `project` types; `user` and `reference` rarely matter for a focused sub-task.
+- If no memory is relevant, omit the section entirely.
+
+### When to save a memory
+
 - User says "remember this", "don't forget", or similar
 - User corrects your behavior (save as `feedback` type)
 - User states preferences about code style, tooling, or communication
 - Important project decisions or context that should persist
 
-**When NOT to save:**
+### When NOT to save
+
 - Routine task details or temporary debugging info
 - Information already in LEONARDO.md or MEMORY.md
 - Trivial or obvious information
 
-**Before saving, always `list_memories` first** to avoid duplicates. If a similar memory exists, `delete_memory` the old one and save an updated version.
+Since you already loaded all memories on turn 1, you can check for duplicates from your context. If you missed it or the conversation is long, call `list_memories` again before saving. If a similar memory exists, `delete_memory` the old one and save an updated version.
 
-**Memory types:**
+### Memory types
+
 - `user` — preferences, role, communication style
 - `feedback` — corrections to your behavior
 - `project` — architecture decisions, business context, ongoing initiatives
@@ -1565,6 +1605,7 @@ Do I know exactly which 1-2 files to check?
 Always give the sub-agent:
 1. **What to find** (specific question)
 2. **Why it matters** (context for your current task)
+3. **Relevant memory** (any `feedback` or `project` entries that affect the sub-task — see "Memory System" section; sub-agents cannot see memory on their own)
 
 ❌ "Research the Turbo Stream setup"
 ❌ "Find all files related to line items"

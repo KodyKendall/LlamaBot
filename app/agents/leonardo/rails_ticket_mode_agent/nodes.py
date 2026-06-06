@@ -32,6 +32,7 @@ from app.agents.leonardo.rails_agent.state import RailsAgentState
 from app.agents.leonardo.rails_agent.tools import (
     write_todos, ls, read_file, write_file, edit_file, search_file, bash_command,
     rails_api_sh,
+    save_memory, list_memories, delete_memory,
 )
 from app.agents.leonardo.rails_ticket_mode_agent.prompts import TICKET_MODE_AGENT_PROMPT
 from app.agents.leonardo.project_context import build_system_prompt_with_project_context
@@ -251,6 +252,7 @@ default_tools = [
     delegate_task,       # Sub-agent delegation for focused research tasks
     delegate_research,   # Read-only sub-agent for codebase investigation
     write_final_ticket,  # Creates ticket directly in Rails database
+    save_memory, list_memories, delete_memory,
 ]
 
 

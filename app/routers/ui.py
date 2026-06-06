@@ -3408,18 +3408,13 @@ async def scheduled_jobs_page(user: User = Depends(engineer_or_admin_required)):
                     <div class="form-group">
                         <label>Agent</label>
                         <select id="jobAgent" required>
-                            <option value="rails_agent">Rails Agent</option>
-                            <option value="llamabot">LlamaBot</option>
-                            <option value="llamapress">LlamaPress</option>
+                            <option value="">Loading agents…</option>
                         </select>
                     </div>
                     <div class="form-group">
                         <label>Model</label>
                         <select id="jobModel">
-                            <option value="gemini-3-flash">Gemini 3 Flash</option>
-                            <option value="claude-4.5-haiku">Claude 4.5 Haiku</option>
-                            <option value="claude-4.5-sonnet">Claude 4.5 Sonnet</option>
-                            <option value="gpt-4o-mini">GPT-4o Mini</option>
+                            <option value="">Loading models…</option>
                         </select>
                     </div>
                 </div>
@@ -3486,6 +3481,72 @@ async def scheduled_jobs_page(user: User = Depends(engineer_or_admin_required)):
     <script>
         let jobs = [];
         let runs = [];
+
+        const MODEL_LABELS = {
+            'gemini-3-flash': 'Gemini 3 Flash',
+            'gemini-3-pro': 'Gemini 3 Pro',
+            'claude-4.5-haiku': 'Claude 4.5 Haiku',
+            'claude-4.5-sonnet': 'Claude 4.5 Sonnet',
+            'gpt-5-mini': 'GPT-5 Mini',
+            'gpt-5-codex': 'GPT-5 Codex',
+            'deepseek-v4-flash': 'DeepSeek V4 Flash',
+        };
+
+        function prettyAgentLabel(name) {
+            return name.replace(/_/g, ' ').replace(/\\b\\w/g, c => c.toUpperCase());
+        }
+
+        async function loadAgents() {
+            try {
+                const response = await fetch('/available-agents');
+                const data = await response.json();
+                const sel = document.getElementById('jobAgent');
+                const agents = data.agents || [];
+                sel.innerHTML = agents.map(a =>
+                    `<option value="${a}">${prettyAgentLabel(a)}</option>`
+                ).join('');
+            } catch (e) {
+                console.error('Failed to load agents:', e);
+            }
+        }
+
+        async function loadModels() {
+            try {
+                const response = await fetch('/api/available-models');
+                const data = await response.json();
+                const sel = document.getElementById('jobModel');
+                const models = data.models || [];
+                sel.innerHTML = models.map(m => {
+                    const label = MODEL_LABELS[m.value] || m.value;
+                    const suffix = m.available ? '' : ' (No API Key)';
+                    const disabled = m.available ? '' : 'disabled';
+                    const title = m.reason ? ` title="${m.reason}"` : '';
+                    return `<option value="${m.value}" ${disabled}${title}>${label}${suffix}</option>`;
+                }).join('');
+                const firstAvailable = models.find(m => m.available);
+                if (firstAvailable) sel.value = firstAvailable.value;
+            } catch (e) {
+                console.error('Failed to load models:', e);
+            }
+        }
+
+        // If a saved job's agent/model is no longer in the dropdown (graph removed,
+        // API key revoked, model deprecated), inject it as a disabled option so the
+        // user still sees what was configured and can pick a replacement.
+        function ensureOptionPresent(selectEl, value, labelFallback) {
+            if (!value) return;
+            const existing = Array.from(selectEl.options).find(o => o.value === value);
+            if (existing) {
+                selectEl.value = value;
+                return;
+            }
+            const opt = document.createElement('option');
+            opt.value = value;
+            opt.textContent = `${labelFallback || value} (unavailable)`;
+            opt.disabled = true;
+            opt.selected = true;
+            selectEl.appendChild(opt);
+        }
 
         async function loadJobs() {
             try {
@@ -3603,6 +3664,9 @@ async def scheduled_jobs_page(user: User = Depends(engineer_or_admin_required)):
             document.getElementById('modalTitle').textContent = 'Create Job';
             document.getElementById('jobForm').reset();
             document.getElementById('jobId').value = '';
+            // Refresh in background — initial load already populated these on page load.
+            loadAgents();
+            loadModels();
             document.getElementById('jobModal').classList.add('active');
         }
 
@@ -3621,8 +3685,17 @@ async def scheduled_jobs_page(user: User = Depends(engineer_or_admin_required)):
             document.getElementById('jobId').value = job.id;
             document.getElementById('jobName').value = job.name;
             document.getElementById('jobDescription').value = job.description || '';
-            document.getElementById('jobAgent').value = job.agent_name;
-            document.getElementById('jobModel').value = job.llm_model;
+            await Promise.all([loadAgents(), loadModels()]);
+            ensureOptionPresent(
+                document.getElementById('jobAgent'),
+                job.agent_name,
+                prettyAgentLabel(job.agent_name || '')
+            );
+            ensureOptionPresent(
+                document.getElementById('jobModel'),
+                job.llm_model,
+                MODEL_LABELS[job.llm_model] || job.llm_model
+            );
             document.getElementById('jobPrompt').value = job.prompt;
             document.getElementById('jobCron').value = job.cron_expression;
             document.getElementById('jobTimezone').value = job.timezone;
@@ -3773,6 +3846,8 @@ async def scheduled_jobs_page(user: User = Depends(engineer_or_admin_required)):
 
         // Load data on page load
         loadJobs();
+        loadAgents();
+        loadModels();
     </script>
 </body>
 </html>

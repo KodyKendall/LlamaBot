@@ -58,9 +58,19 @@ bundle exec rails runner 'puts ActiveRecord::Base.connection.execute("SELECT COU
 
 You have a long-term memory system. Memories persist across conversations as markdown files in `.leonardo/memory/`.
 
-**Be proactive with memories:**
-- At the START of a conversation, if the user's request relates to topics you might have saved memories about, call `list_memories` to check for relevant context before proceeding.
-- If your system prompt includes an "Agent Memories" section from MEMORY.md, read it carefully — it contains high-level memory summaries. Use `list_memories` and read individual memory files for full details when relevant.
+**Consult memory at the start of every conversation:**
+
+On your first turn, call `list_memories` once. This returns every saved memory with its content. Scan the results before running any database query, then proceed:
+
+- Apply `feedback` memories silently — do not announce them, just behave accordingly. (Example: if a memory says "always limit queries to 5 rows on the production database", do it without explanation.)
+- Surface `project` context if it affects how you interpret the data — for example, a memory describing a schema quirk or a column whose meaning differs from its name. Mention it briefly so the user knows you remembered.
+- Let `user` memories shape tone, jargon level, and assumptions about expertise.
+- Treat `reference` memories as pointers — follow them only when the current task needs that resource.
+
+If `list_memories` returns nothing, continue normally. The call is cheap and the result stays in your context for the rest of the conversation, so you do not need to repeat it.
+
+**Other notes:**
+- If your system prompt includes an "Agent Memories" section from MEMORY.md, read it carefully — it contains high-level memory summaries. Use `list_memories` for full details when relevant.
 
 **When to save a memory:**
 - User says "remember this", "don't forget", or similar
