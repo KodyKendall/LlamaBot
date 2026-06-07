@@ -58,6 +58,10 @@ export class MessageRenderer {
       return this.renderApprovalMessage(content);
     }
 
+    if (type === 'question_request' || type === 'suggest_mode_switch') {
+      return this.renderInterruptMessage(content);
+    }
+
     if (type === 'system_message') {
       return this.renderSystemMessage(content);
     }
@@ -439,6 +443,18 @@ export class MessageRenderer {
   renderApprovalMessage(htmlContent) {
     const messageDiv = document.createElement('div');
     messageDiv.setAttribute('data-llamabot', 'approval-message');
+    messageDiv.innerHTML = htmlContent;
+    this.insertMessage(messageDiv);
+    this.stopThinking();
+    return messageDiv;
+  }
+
+  /**
+   * Render interrupt-based message (question card or mode switch card)
+   */
+  renderInterruptMessage(htmlContent) {
+    const messageDiv = document.createElement('div');
+    messageDiv.setAttribute('data-llamabot', 'interrupt-message');
     messageDiv.innerHTML = htmlContent;
     this.insertMessage(messageDiv);
     this.stopThinking();

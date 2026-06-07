@@ -12,8 +12,8 @@ const EXPANDABLE_TOOLS = ['grep_files', 'glob_files', 'bash_command', 'delegate_
 // Tools that should be expandable but only show input args (no output)
 const INPUT_ONLY_EXPANDABLE_TOOLS = ['read_file', 'edit_file', 'write_file'];
 
-// Tools to SHOW in beginner mode (everything else is hidden)
-const BEGINNER_VISIBLE_TOOLS = ['write_todos', 'delegate_task', 'delegate_research', 'web_search', 'web_fetch'];
+// Tools to SHOW in beginner/plan mode (everything else is hidden)
+const BEGINNER_VISIBLE_TOOLS = ['write_todos', 'delegate_task', 'delegate_research', 'web_search', 'web_fetch', 'ask_user_question', 'suggest_plan_mode'];
 
 export class ToolMessageRenderer {
   constructor(iframeManager = null, getRailsDebugInfoCallback = null) {
@@ -35,12 +35,23 @@ export class ToolMessageRenderer {
   createCollapsibleToolMessage(toolName, firstArgument, toolArgs, toolResult, agentDepth = 0) {
     const uniqueId = generateUniqueId('tool');
 
-    // In beginner mode, only show high-level tools (hide everything else)
-    if (this._isBeginnerMode() && !BEGINNER_VISIBLE_TOOLS.includes(toolName)) {
-      console.log('[ToolRenderer] HIDING tool in beginner mode:', toolName);
+    // In beginner/plan mode, hide sub-agent tools AND non-visible tools
+    if (this._isBeginnerMode() || this._isPlanMode()) {
+      // Hide ALL sub-agent content (depth > 0) — keep the UI clean
+      if (agentDepth > 0) {
+        return `<div data-llamabot="tool-hidden" data-tool-name="${toolName}"></div>`;
+      }
+      // Hide non-visible main-agent tools
+      if (!BEGINNER_VISIBLE_TOOLS.includes(toolName)) {
+        return `<div data-llamabot="tool-hidden" data-tool-name="${toolName}"></div>`;
+      }
+    }
+
+    // ask_user_question and suggest_plan_mode are handled via WebSocket interrupt messages
+    // (question_request / suggest_mode_switch), not as tool renders. Hide them here.
+    if (toolName === 'ask_user_question' || toolName === 'suggest_plan_mode') {
       return `<div data-llamabot="tool-hidden" data-tool-name="${toolName}"></div>`;
     }
-    console.log('[ToolRenderer] SHOWING tool:', toolName, 'beginner:', this._isBeginnerMode());
 
     // Special rendering for different tool types
     if (toolName === 'write_todos') {
@@ -258,6 +269,14 @@ export class ToolMessageRenderer {
   }
 
   /**
+   * Check if the current execution mode is plan
+   */
+  _isPlanMode() {
+    const savedMode = document.cookie.split(';').find(c => c.trim().startsWith('executionMode='));
+    return savedMode?.split('=')?.[1]?.trim() === 'plan';
+  }
+
+  /**
    * Escape HTML to prevent XSS
    */
   _escapeHtml(text) {
@@ -407,3 +426,8 @@ window.toggleToolExpand = function(toolId) {
     expandableDiv.classList.toggle('expanded');
   }
 };
+
+// Note: ask_user_question and suggest_plan_mode are now handled via WebSocket
+// interrupt messages (question_request / suggest_mode_switch) in MessageHandler.js,
+// not as tool card renders. The old window.answerQuestion and window.switchToPlanMode
+// functions have been removed.

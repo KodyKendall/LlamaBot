@@ -156,6 +156,14 @@ class WebSocketHandler:
                         )
                         continue
 
+                    # Handle question response (user answered a plan mode question)
+                    if isinstance(json_data, dict) and json_data.get("type") == "question_response":
+                        logger.info("QUESTION_RESPONSE RECV")
+                        current_task = asyncio.create_task(
+                            self.request_handler.handle_question_response(json_data, self.websocket)
+                        )
+                        continue
+
                     # For all other messages, check authentication
                     # First try to extract token from message (Rails gem pattern)
                     await self._check_auth_from_message(json_data)

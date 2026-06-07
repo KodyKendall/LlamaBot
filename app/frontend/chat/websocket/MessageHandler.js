@@ -116,15 +116,41 @@ export class MessageHandler {
       this.handleAIMessage(data);
     } else if (data.type === 'approval_request') {
       this.handleApprovalRequest(data);
+    } else if (data.type === 'question_request') {
+      this.handleQuestionRequest(data);
+    } else if (data.type === 'suggest_mode_switch') {
+      this.handleSuggestModeSwitch(data);
     } else {
       this.handleGenericMessage(data);
     }
   }
 
   /**
+   * Check if current mode is beginner or plan (hides sub-agent content)
+   */
+  _isSimplifiedMode() {
+    const modeSelect = document.querySelector('[data-llamabot="agent-mode-select"]');
+    const isBeginnerAgent = modeSelect?.value === 'beginner';
+    const savedMode = document.cookie.split(';').find(c => c.trim().startsWith('executionMode='));
+    const isPlanExec = savedMode?.split('=')?.[1]?.trim() === 'plan';
+    return isBeginnerAgent || isPlanExec;
+  }
+
+  /**
    * Handle AI message chunks (streaming)
    */
   handleAIMessageChunk(data) {
+    // In beginner/plan mode, hide sub-agent messages (depth > 0)
+    if (this._isSimplifiedMode() && (data.agent_depth || 0) > 0) {
+      return;
+    }
+
+    // Skip tool result messages that come through the messages stream
+    // (ToolMessage content like "Updated todo list to [...]" should not render as AI text)
+    if (data.base_message?.type === 'tool') {
+      return;
+    }
+
     // Handle thinking/reasoning content if present - render inline in message history
     if (data.thinking) {
       const thinkingText = this.extractThinkingContent(data.thinking);
@@ -309,6 +335,11 @@ export class MessageHandler {
     const agentDepth = data.agent_depth || 0;
     const isSubagent = data.is_subagent || false;
 
+    // In beginner/plan mode, hide sub-agent messages (depth > 0)
+    if (this._isSimplifiedMode() && agentDepth > 0) {
+      return;
+    }
+
     // Update depth tracking in app state
     if (agentDepth !== undefined) {
       this.appState.setAgentDepth(agentDepth);
@@ -486,6 +517,193 @@ export class MessageHandler {
   }
 
   /**
+   * Handle question request (plan mode — agent asks the user a question via interrupt)
+   */
+  handleQuestionRequest(data) {
+    this.finalizeCurrentThinking();
+
+    const { question, options, context, thread_id, agent_name } = data;
+    const questionId = `question-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
+
+    const html = this._buildQuestionCardHtml(questionId, question, options || [], context || '', thread_id, agent_name);
+    this.messageRenderer.addMessage(html, 'question_request', null);
+
+    // Attach interactive event listeners after DOM render
+    setTimeout(() => this._attachQuestionListeners(questionId, thread_id, agent_name), 0);
+  }
+
+  _buildQuestionCardHtml(questionId, question, options, context, threadId, agentName) {
+    const optionButtons = options.map(opt =>
+      `<button class="plan-option-btn" data-option="${this._escapeHtml(opt)}">${this._escapeHtml(opt)}</button>`
+    ).join('');
+
+    const skipBtn = `<button class="plan-skip-btn">Skip</button>`;
+
+    return `
+      <div class="plan-question-card" data-question-id="${questionId}"
+           data-thread-id="${threadId}" data-agent-name="${agentName}">
+        <div class="plan-question-text">${this._escapeHtml(question)}</div>
+        ${context ? `<div class="plan-question-context">${this._escapeHtml(context)}</div>` : ''}
+        ${options.length > 0 ? `
+          <div class="plan-question-options">
+            ${optionButtons}
+            ${skipBtn}
+          </div>
+        ` : ''}
+        <button class="plan-continue-btn" style="display: none;">Continue</button>
+        <div class="plan-question-input-row">
+          <textarea class="plan-question-input" rows="2" placeholder="Add to your answer..."></textarea>
+          <button class="plan-send-btn"><i class="fa-solid fa-arrow-up"></i></button>
+        </div>
+      </div>
+    `;
+  }
+
+  _attachQuestionListeners(questionId, threadId, agentName) {
+    const card = document.querySelector(`[data-question-id="${questionId}"]`);
+    if (!card) return;
+    let selectedOptions = [];
+
+    const updateContinueBtn = () => {
+      const continueBtn = card.querySelector('.plan-continue-btn');
+      const input = card.querySelector('.plan-question-input');
+      const hasSelection = selectedOptions.length > 0;
+      const hasText = input?.value?.trim()?.length > 0;
+      continueBtn.style.display = (hasSelection || hasText) ? 'block' : 'none';
+    };
+
+    // Option toggle (multi-select)
+    card.querySelectorAll('.plan-option-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        btn.classList.toggle('selected');
+        const opt = btn.dataset.option;
+        if (selectedOptions.includes(opt)) {
+          selectedOptions = selectedOptions.filter(o => o !== opt);
+        } else {
+          selectedOptions.push(opt);
+        }
+        updateContinueBtn();
+      });
+    });
+
+    // Skip button
+    card.querySelector('.plan-skip-btn')?.addEventListener('click', () => {
+      this._submitQuestionAnswer(card, 'skip', threadId, agentName);
+    });
+
+    // Continue button
+    card.querySelector('.plan-continue-btn')?.addEventListener('click', () => {
+      const freeText = card.querySelector('.plan-question-input')?.value?.trim();
+      const parts = [...selectedOptions];
+      if (freeText) parts.push(freeText);
+      this._submitQuestionAnswer(card, parts.join(', '), threadId, agentName);
+    });
+
+    // Input handling
+    const input = card.querySelector('.plan-question-input');
+    const sendBtn = card.querySelector('.plan-send-btn');
+    input?.addEventListener('input', updateContinueBtn);
+    sendBtn?.addEventListener('click', () => {
+      const freeText = input?.value?.trim();
+      const parts = [...selectedOptions];
+      if (freeText) parts.push(freeText);
+      if (parts.length > 0) {
+        this._submitQuestionAnswer(card, parts.join(', '), threadId, agentName);
+      }
+    });
+
+    // Scroll question into view
+    card.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    setTimeout(() => card.scrollIntoView({ behavior: 'smooth', block: 'end' }), 150);
+  }
+
+  _submitQuestionAnswer(card, answer, threadId, agentName) {
+    // Disable the card
+    card.classList.add('answered');
+    card.querySelectorAll('button, textarea').forEach(el => el.disabled = true);
+
+    // Show user answer as a right-aligned message
+    if (answer && answer !== 'skip') {
+      const answerHtml = `<div class="plan-user-answer">${this._escapeHtml(answer)}</div>`;
+      this.messageRenderer.addMessage(answerHtml, 'human', null);
+    }
+
+    // Send question_response via WebSocket to resume the agent
+    if (window.chatApp?.webSocketManager) {
+      window.chatApp.webSocketManager.send({
+        type: 'question_response',
+        answer: answer,
+        thread_id: threadId,
+        agent_name: agentName,
+      });
+    }
+
+    // Show thinking indicator since agent will resume
+    window.chatApp?.setAgentRunning(true);
+  }
+
+  /**
+   * Handle suggest_mode_switch (beginner agent suggests switching to plan mode)
+   */
+  handleSuggestModeSwitch(data) {
+    this.finalizeCurrentThinking();
+
+    const { reason, target_mode, thread_id, agent_name } = data;
+    const switchId = `switch-${Date.now()}`;
+
+    const html = `
+      <div class="plan-question-card" data-switch-id="${switchId}">
+        <div class="plan-question-text">${this._escapeHtml(reason)}</div>
+        <div class="plan-question-options">
+          <button class="plan-option-btn plan-switch-btn" data-action="switch">
+            <i class="fa-solid fa-clipboard-list"></i> Switch to Plan mode
+          </button>
+          <button class="plan-skip-btn" data-action="skip">No thanks</button>
+        </div>
+      </div>
+    `;
+
+    this.messageRenderer.addMessage(html, 'suggest_mode_switch', null);
+
+    setTimeout(() => {
+      const card = document.querySelector(`[data-switch-id="${switchId}"]`);
+      if (!card) return;
+
+      card.querySelector('[data-action="switch"]')?.addEventListener('click', () => {
+        card.classList.add('answered');
+        card.querySelectorAll('button').forEach(b => b.disabled = true);
+        // Switch execution mode
+        if (window.chatApp) {
+          window.chatApp.setExecutionMode('plan');
+        }
+        // Resume the agent with "yes"
+        if (window.chatApp?.webSocketManager) {
+          window.chatApp.webSocketManager.send({
+            type: 'question_response',
+            answer: 'yes, switch to plan mode',
+            thread_id,
+            agent_name,
+          });
+        }
+      });
+
+      card.querySelector('[data-action="skip"]')?.addEventListener('click', () => {
+        card.classList.add('answered');
+        card.querySelectorAll('button').forEach(b => b.disabled = true);
+        // Resume the agent with "no"
+        if (window.chatApp?.webSocketManager) {
+          window.chatApp.webSocketManager.send({
+            type: 'question_response',
+            answer: 'no, continue in beginner mode',
+            thread_id,
+            agent_name,
+          });
+        }
+      });
+    }, 0);
+  }
+
+  /**
    * Handle generic messages (tool, error, end, etc.)
    */
   handleGenericMessage(data) {
@@ -515,6 +733,11 @@ export class MessageHandler {
         this.messageRenderer.addMessage(data.content, data.type, data.base_message);
       }
     } else {
+      // In beginner/plan mode, hide sub-agent generic messages (tool results, etc.)
+      if (this._isSimplifiedMode() && (data.agent_depth || 0) > 0) {
+        return;
+      }
+
       // Finalize thinking before tool messages so they appear interspersed
       if (data.type === 'tool') {
         this.finalizeCurrentThinking();

@@ -34,7 +34,8 @@ export const DEFAULT_CONFIG = {
     user: 'rails_user_mode_agent',
     beginner: 'rails_beginner_agent',
     excel_focus: 'rails_excel_focus_agent',
-    pyxl: 'pyxl_agent'
+    pyxl: 'pyxl_agent',
+    plan: 'rails_plan_mode_agent'
   },
 
   // Streaming configuration

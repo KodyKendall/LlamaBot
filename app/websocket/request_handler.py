@@ -522,29 +522,8 @@ class RequestHandler:
 
                 print("🎏🎏🎏 LangGraph astream is finished!")
 
-                # Check if graph was interrupted (HITL approval needed)
-                interrupted = False
-                if incoming_message.get("ask_before_edits"):
-                    try:
-                        state_snapshot = await app.aget_state(config)
-                        if state_snapshot.tasks and any(t.interrupts for t in state_snapshot.tasks):
-                            interrupted = True
-                            for task in state_snapshot.tasks:
-                                for intr in task.interrupts:
-                                    hitl_request = intr.value
-                                    if self._is_websocket_open(websocket):
-                                        await websocket.send_json({
-                                            "type": "approval_request",
-                                            "action_requests": [
-                                                {"name": ar["name"], "args": ar["args"], "description": ar.get("description", "")}
-                                                for ar in hitl_request["action_requests"]
-                                            ],
-                                            "thread_id": incoming_message.get('thread_id'),
-                                            "agent_name": incoming_message.get('agent_name'),
-                                        })
-                            logger.info("Graph interrupted for HITL approval - not sending end message")
-                    except Exception as e:
-                        logger.warning(f"Failed to check for HITL interrupts: {e}")
+                # Check if graph was interrupted (HITL approval, plan mode question, or mode switch)
+                interrupted = await self._check_and_send_interrupts(app, config, incoming_message, websocket)
 
                 if not interrupted:
                     # Update thread metadata after successful message processing
@@ -705,27 +684,8 @@ class RequestHandler:
                                             ws_msg["token_usage"] = token_usage
                                         await websocket.send_json(ws_msg)
 
-                # Check for another interrupt (agent may call another destructive tool)
-                interrupted = False
-                try:
-                    state_snapshot = await app.aget_state(config)
-                    if state_snapshot.tasks and any(t.interrupts for t in state_snapshot.tasks):
-                        interrupted = True
-                        for task in state_snapshot.tasks:
-                            for intr in task.interrupts:
-                                hitl_request = intr.value
-                                if self._is_websocket_open(websocket):
-                                    await websocket.send_json({
-                                        "type": "approval_request",
-                                        "action_requests": [
-                                            {"name": ar["name"], "args": ar["args"], "description": ar.get("description", "")}
-                                            for ar in hitl_request["action_requests"]
-                                        ],
-                                        "thread_id": response_message.get('thread_id'),
-                                        "agent_name": response_message.get('agent_name'),
-                                    })
-                except Exception as e:
-                    logger.warning(f"Failed to check for HITL interrupts after resume: {e}")
+                # Check for another interrupt (agent may call another destructive tool or ask another question)
+                interrupted = await self._check_and_send_interrupts(app, config, response_message, websocket)
 
                 if not interrupted and self._is_websocket_open(websocket):
                     await websocket.send_json({"type": "end"})
@@ -739,6 +699,195 @@ class RequestHandler:
                     await websocket.send_json({
                         "type": "error",
                         "content": f"Error resuming after approval: {str(e)}"
+                    })
+                raise e
+
+    async def _check_and_send_interrupts(self, app, config, message_data, websocket) -> bool:
+        """Check for pending interrupts and send appropriate WebSocket messages.
+
+        Returns True if an interrupt was found and sent to the frontend.
+        Handles question interrupts, mode switch suggestions, and HITL approval requests.
+        """
+        try:
+            state_snapshot = await app.aget_state(config)
+            if not state_snapshot.tasks or not any(t.interrupts for t in state_snapshot.tasks):
+                return False
+
+            for task in state_snapshot.tasks:
+                for intr in task.interrupts:
+                    interrupt_value = intr.value
+                    if not self._is_websocket_open(websocket):
+                        continue
+
+                    # Plan mode question interrupt
+                    if isinstance(interrupt_value, dict) and interrupt_value.get("type") == "user_question":
+                        await websocket.send_json({
+                            "type": "question_request",
+                            "question": interrupt_value.get("question", ""),
+                            "options": interrupt_value.get("options", []),
+                            "context": interrupt_value.get("context", ""),
+                            "thread_id": message_data.get('thread_id'),
+                            "agent_name": message_data.get('agent_name'),
+                        })
+                        logger.info("Graph interrupted for plan mode question")
+
+                    # Suggest plan mode interrupt
+                    elif isinstance(interrupt_value, dict) and interrupt_value.get("type") == "suggest_mode_switch":
+                        await websocket.send_json({
+                            "type": "suggest_mode_switch",
+                            "target_mode": interrupt_value.get("target_mode", "plan"),
+                            "reason": interrupt_value.get("reason", ""),
+                            "thread_id": message_data.get('thread_id'),
+                            "agent_name": message_data.get('agent_name'),
+                        })
+                        logger.info("Graph interrupted for mode switch suggestion")
+
+                    # HITL approval interrupt
+                    elif isinstance(interrupt_value, dict) and "action_requests" in interrupt_value:
+                        await websocket.send_json({
+                            "type": "approval_request",
+                            "action_requests": [
+                                {"name": ar["name"], "args": ar["args"], "description": ar.get("description", "")}
+                                for ar in interrupt_value["action_requests"]
+                            ],
+                            "thread_id": message_data.get('thread_id'),
+                            "agent_name": message_data.get('agent_name'),
+                        })
+                        logger.info("Graph interrupted for HITL approval")
+
+            return True
+        except Exception as e:
+            logger.warning(f"Failed to check for interrupts: {e}")
+            return False
+
+    async def handle_question_response(self, response_message: dict, websocket: WebSocket):
+        """Resume a graph after user answers a plan mode question."""
+        from langgraph.types import Command
+
+        ws_id = id(websocket)
+        lock = self._get_lock(websocket)
+
+        async with lock:
+            try:
+                # Re-resolve the graph (same agent, no HITL flag needed)
+                app, _, agent_config = self.get_langgraph_app_and_state({
+                    "agent_name": response_message.get("agent_name"),
+                    "message": "",  # No new message, just resuming
+                })
+
+                DEFAULT_RECURSION_LIMIT = 450
+                recursion_limit = agent_config.get("recursion_limit", DEFAULT_RECURSION_LIMIT)
+
+                config = {
+                    "configurable": {
+                        "thread_id": f"{response_message.get('thread_id')}",
+                        "recursion_limit": recursion_limit
+                    },
+                    "recursion_limit": recursion_limit
+                }
+
+                # Auto-repair corrupted thread state
+                await self._repair_thread_state_if_needed(app, config)
+
+                # Resume the graph — interrupt() returns this answer string
+                answer = response_message.get("answer", "")
+
+                async for chunk in app.astream(Command(resume=answer), config=config, stream_mode=["updates", "messages"], subgraphs=True):
+                    is_this_chunk_an_llm_message = isinstance(chunk, tuple) and len(chunk) == 3 and chunk[1] == 'messages'
+                    is_this_chunk_an_update_stream_type = isinstance(chunk, tuple) and len(chunk) == 3 and chunk[1] == 'updates'
+
+                    subgraph_tuple = chunk[0] if isinstance(chunk, tuple) and len(chunk) >= 1 else ()
+                    agent_depth = len(subgraph_tuple)
+                    is_subagent = agent_depth > 0
+
+                    if is_this_chunk_an_llm_message:
+                        message_chunk_from_llm = chunk[2][0]
+                        base_message_as_dict = dumpd(chunk[2][0])["kwargs"]
+                        content = base_message_as_dict["content"]
+
+                        thinking_content = None
+                        text_content = content
+
+                        additional_kwargs = base_message_as_dict.get("additional_kwargs", {})
+                        deepseek_reasoning = additional_kwargs.get("reasoning_content")
+                        if deepseek_reasoning:
+                            thinking_content = [{"type": "thinking", "thinking": deepseek_reasoning}]
+
+                        if isinstance(content, list):
+                            thinking_blocks = [b for b in content if b.get("type") in ("thinking", "reasoning", "reasoning_summary")]
+                            text_blocks = [b for b in content if b.get("type") not in ("thinking", "reasoning", "reasoning_summary")]
+                            if thinking_blocks:
+                                thinking_content = thinking_blocks
+                            text_content = text_blocks if text_blocks else ""
+
+                        if self._is_websocket_open(websocket):
+                            ws_message = {
+                                "type": "AIMessageChunk",
+                                "content": text_content,
+                                "thinking": thinking_content,
+                                "tool_calls": [],
+                                "base_message": base_message_as_dict,
+                                "agent_depth": agent_depth,
+                                "is_subagent": is_subagent,
+                            }
+                            await websocket.send_json(ws_message)
+
+                    elif is_this_chunk_an_update_stream_type:
+                        state_object = chunk[2]
+                        for agent_key, agent_data in state_object.items():
+                            if isinstance(agent_data, dict) and 'messages' in agent_data:
+                                messages = agent_data['messages']
+                                tool_calls = []
+                                if messages and len(messages) > 0:
+                                    message = messages[-1]
+                                    if hasattr(message, 'additional_kwargs') and message.additional_kwargs:
+                                        tool_calls_data = message.additional_kwargs.get('tool_calls')
+                                        if tool_calls_data:
+                                            tool_calls = tool_calls_data
+
+                                    messages_as_string = [msg.content if hasattr(msg, 'content') else str(msg) for msg in messages]
+                                    try:
+                                        base_message_as_dict = dumpd(message)["kwargs"]
+                                    except Exception:
+                                        base_message_as_dict = {"content": str(message), "type": "ai"}
+
+                                    token_usage = None
+                                    usage_metadata = getattr(message, 'usage_metadata', None)
+                                    if usage_metadata:
+                                        token_usage = {
+                                            "input_tokens": usage_metadata.get("input_tokens", 0) if isinstance(usage_metadata, dict) else getattr(usage_metadata, 'input_tokens', 0),
+                                            "output_tokens": usage_metadata.get("output_tokens", 0) if isinstance(usage_metadata, dict) else getattr(usage_metadata, 'output_tokens', 0),
+                                            "total_tokens": usage_metadata.get("total_tokens", 0) if isinstance(usage_metadata, dict) else getattr(usage_metadata, 'total_tokens', 0)
+                                        }
+
+                                    if self._is_websocket_open(websocket):
+                                        ws_msg = {
+                                            "type": message.type if hasattr(message, 'type') else "ai",
+                                            "content": messages_as_string[-1] if messages_as_string else "",
+                                            "tool_calls": tool_calls,
+                                            "base_message": base_message_as_dict,
+                                            "agent_depth": agent_depth,
+                                            "is_subagent": is_subagent,
+                                        }
+                                        if token_usage:
+                                            ws_msg["token_usage"] = token_usage
+                                        await websocket.send_json(ws_msg)
+
+                # Check for another interrupt (agent may ask another question)
+                interrupted = await self._check_and_send_interrupts(app, config, response_message, websocket)
+
+                if not interrupted and self._is_websocket_open(websocket):
+                    await websocket.send_json({"type": "end"})
+
+            except CancelledError as e:
+                logger.info("handle_question_response was cancelled")
+                raise e
+            except Exception as e:
+                logger.error(f"Error handling question response: {str(e)}", exc_info=True)
+                if self._is_websocket_open(websocket):
+                    await websocket.send_json({
+                        "type": "error",
+                        "content": f"Error resuming after question: {str(e)}"
                     })
                 raise e
 

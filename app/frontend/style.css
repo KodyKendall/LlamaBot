@@ -2006,6 +2006,177 @@ body {
     background: rgba(239, 68, 68, 0.05);
 }
 
+/* Plan mode: question card (interrupt-based) */
+.plan-question-card {
+    margin: 12px 0;
+}
+
+.plan-question-text {
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 1.1rem;
+    line-height: 1.7;
+    color: #e2e8f0;
+}
+
+.plan-question-context {
+    font-size: 12px;
+    color: #64748b;
+    margin-top: 4px;
+}
+
+/* Multi-select option buttons */
+.plan-question-options {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 10px;
+}
+
+.plan-option-btn {
+    background: rgba(139, 92, 246, 0.1);
+    border: 1px solid rgba(139, 92, 246, 0.3);
+    border-radius: 8px;
+    color: #c4b5fd;
+    padding: 8px 16px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.plan-option-btn:hover:not(:disabled) {
+    background: rgba(139, 92, 246, 0.2);
+    border-color: rgba(139, 92, 246, 0.5);
+}
+
+.plan-option-btn.selected {
+    background: rgba(139, 92, 246, 0.35);
+    border-color: #8b5cf6;
+    box-shadow: 0 0 8px rgba(139, 92, 246, 0.3);
+}
+
+.plan-option-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+/* Skip button */
+.plan-skip-btn {
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: rgba(255, 255, 255, 0.35);
+    font-size: 12px;
+    padding: 8px 16px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: color 0.15s ease;
+}
+
+.plan-skip-btn:hover:not(:disabled) {
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.plan-skip-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+/* Continue button */
+.plan-continue-btn {
+    background: linear-gradient(135deg, #4C3F6D, #8b5cf6);
+    border: none;
+    border-radius: 10px;
+    color: white;
+    padding: 10px 20px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    margin-top: 8px;
+    align-self: flex-start;
+    transition: opacity 0.15s ease;
+}
+
+.plan-continue-btn:hover:not(:disabled) {
+    opacity: 0.9;
+}
+
+.plan-continue-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+/* Sticky free-form input */
+.plan-question-input-row {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+    align-items: flex-end;
+}
+
+.plan-question-input {
+    flex: 1;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(139, 92, 246, 0.25);
+    border-radius: 10px;
+    color: #e2e8f0;
+    font-size: 14px;
+    line-height: 1.5;
+    padding: 8px 12px;
+    max-height: 120px;
+    overflow-y: auto;
+    resize: none;
+    outline: none;
+    transition: border-color 0.15s ease;
+}
+
+.plan-question-input:focus {
+    border-color: rgba(139, 92, 246, 0.5);
+}
+
+.plan-question-input:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.plan-send-btn {
+    background: linear-gradient(135deg, #4C3F6D, #8b5cf6);
+    border: none;
+    border-radius: 10px;
+    color: white;
+    width: 36px;
+    height: 36px;
+    cursor: pointer;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: opacity 0.15s ease;
+}
+
+.plan-send-btn:hover:not(:disabled) {
+    opacity: 0.9;
+}
+
+.plan-send-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+/* Answered state */
+.plan-question-card.answered {
+    opacity: 0.5;
+    pointer-events: none;
+}
+
+/* User answer bubble (right-aligned, purple italic) */
+.plan-user-answer {
+    color: #a78bfa;
+    font-size: 0.9rem;
+    font-style: italic;
+    text-align: right;
+    padding: 4px 0;
+}
+
 /* System message */
 [data-llamabot="system-message"] {
     text-align: center;

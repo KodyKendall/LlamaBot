@@ -1035,7 +1035,7 @@ class ChatApp {
     const executionMode = this.appState.getExecutionMode();
     let agentName = this.appState.getAgentConfig().name;
     if (executionMode === 'plan') {
-      agentName = 'rails_ticket_mode_agent'; // Plan mode uses ticket agent
+      agentName = 'rails_plan_mode_agent'; // Plan mode uses plan agent
     }
 
     // Send message

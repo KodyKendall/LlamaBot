@@ -1,14 +1,14 @@
-from langchain_core.tools import tool
 from dotenv import load_dotenv
 load_dotenv()
 
 from langgraph.graph import MessagesState
-from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
+from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, ToolMessage
 
 from langgraph.graph import START, StateGraph, END
-from langgraph.types import Command
+from langgraph.types import Command, interrupt
 from langgraph.prebuilt import tools_condition
 from langgraph.prebuilt import ToolNode
+from langchain.tools import tool, ToolRuntime
 
 from pathlib import Path
 from typing import Literal
@@ -48,6 +48,45 @@ def get_sys_msg():
     }
 
 
+SUGGEST_PLAN_MODE_DESCRIPTION = """Suggest switching to Plan mode when the user's request is complex and would benefit from planning first.
+Use this when:
+- The request involves multiple pages or features
+- The request needs clarification before building
+- The request would take many steps to implement
+- You're unsure what the user really wants
+
+Parameters:
+- reason: A short, friendly explanation of why Plan mode would help (in plain language, no tech jargon)
+
+This tool will pause and show the user a button to switch to Plan mode. They can accept or decline."""
+
+
+@tool(description=SUGGEST_PLAN_MODE_DESCRIPTION)
+def suggest_plan_mode(
+    reason: str,
+    runtime: ToolRuntime,
+) -> Command:
+    """Suggest switching to Plan mode, pausing for user decision."""
+    tool_call_id = runtime.tool_call_id
+
+    # interrupt() freezes the agent. The frontend shows a switch/skip card.
+    # When the user decides, interrupt() returns their answer.
+    user_decision = interrupt({
+        "type": "suggest_mode_switch",
+        "target_mode": "plan",
+        "reason": reason,
+    })
+
+    return Command(
+        update={
+            "messages": [ToolMessage(
+                content=f"User responded to plan mode suggestion: {user_decision}",
+                tool_call_id=tool_call_id
+            )]
+        }
+    )
+
+
 default_tools = [
     write_todos,
     ls, read_file, write_file, edit_file, bash_command, tail_rails_logs, hard_restart_rails,
@@ -56,6 +95,7 @@ default_tools = [
     save_memory, list_memories, delete_memory,
     write_personality_file,
     delegate_task, delegate_research,
+    suggest_plan_mode,
 ]
 
 
@@ -79,6 +119,7 @@ def leonardo_beginner(state: RailsAgentState) -> Command[Literal["tools"]]:
         read_leonardo_md, write_leonardo_md, edit_leonardo_md,
         write_personality_file,
         delegate_task, delegate_research,
+        suggest_plan_mode,
     ]
 
     failed_tool_calls_count = state.get("failed_tool_calls_count", 0)
