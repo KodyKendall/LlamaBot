@@ -301,14 +301,14 @@ async def users_page(admin: User = Depends(admin_required)):
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <style>
         :root {
-            --bg-color: #1a1a1a;
-            --chat-bg: #2d2d2d;
+            --bg-color: #0d0d1a;
+            --chat-bg: #1a1730;
             --text-color: #e0e0e0;
-            --border-color: #404040;
-            --accent-color: #4CAF50;
+            --border-color: rgba(139, 92, 246, 0.2);
+            --accent-color: #8b5cf6;
         }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
             background-color: var(--bg-color);
             color: var(--text-color);
             margin: 0;
@@ -339,7 +339,7 @@ async def users_page(admin: User = Depends(admin_required)):
             text-decoration: none;
             transition: background 0.2s;
         }
-        .back-btn:hover { background: var(--border-color); }
+        .back-btn:hover { background: rgba(139, 92, 246, 0.15); }
         h1 { font-size: 1.5rem; margin: 0; }
         .card {
             background: var(--chat-bg);
@@ -350,14 +350,14 @@ async def users_page(admin: User = Depends(admin_required)):
         }
         .card-header {
             font-size: 0.85rem;
-            color: #888;
+            color: rgba(255, 255, 255, 0.5);
             text-transform: uppercase;
             letter-spacing: 0.5px;
             margin-bottom: 16px;
         }
         table { width: 100%; border-collapse: collapse; }
         th, td { padding: 12px; text-align: left; border-bottom: 1px solid var(--border-color); }
-        th { color: #888; font-weight: 500; font-size: 0.85rem; }
+        th { color: rgba(255, 255, 255, 0.5); font-weight: 500; font-size: 0.85rem; }
         tr:last-child td { border-bottom: none; }
         .badge {
             padding: 4px 10px;
@@ -366,11 +366,11 @@ async def users_page(admin: User = Depends(admin_required)):
             font-weight: 500;
             text-transform: uppercase;
         }
-        .badge-engineer { background: rgba(33, 150, 243, 0.2); color: #64b5f6; }
-        .badge-user { background: rgba(156, 39, 176, 0.2); color: #ce93d8; }
-        .badge-admin { background: rgba(76, 175, 80, 0.2); color: #81c784; }
-        .badge-active { background: rgba(76, 175, 80, 0.2); color: #81c784; }
-        .badge-inactive { background: rgba(244, 67, 54, 0.2); color: #e57373; }
+        .badge-engineer { background: rgba(139, 92, 246, 0.2); color: #a78bfa; }
+        .badge-user { background: rgba(167, 139, 250, 0.15); color: #c4b5fd; }
+        .badge-admin { background: rgba(139, 92, 246, 0.2); color: #a78bfa; }
+        .badge-active { background: rgba(34, 197, 94, 0.15); color: #22c55e; }
+        .badge-inactive { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
         .btn {
             padding: 6px 12px;
             border: 1px solid var(--border-color);
@@ -382,12 +382,12 @@ async def users_page(admin: User = Depends(admin_required)):
             color: var(--text-color);
             transition: all 0.2s;
         }
-        .btn:hover { background: var(--border-color); }
-        .btn-danger { border-color: #e57373; color: #e57373; }
-        .btn-danger:hover { background: rgba(244, 67, 54, 0.2); }
+        .btn:hover { background: rgba(139, 92, 246, 0.15); }
+        .btn-danger { border-color: rgba(239, 68, 68, 0.25); color: #ef4444; }
+        .btn-danger:hover { background: rgba(239, 68, 68, 0.15); }
         .form-row { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
         .form-group { flex: 1; min-width: 120px; }
-        .form-group label { display: block; margin-bottom: 6px; font-size: 0.85rem; color: #888; }
+        .form-group label { display: block; margin-bottom: 6px; font-size: 0.85rem; color: rgba(255, 255, 255, 0.5); }
         .form-group input, .form-group select {
             width: 100%;
             padding: 10px;
@@ -399,23 +399,24 @@ async def users_page(admin: User = Depends(admin_required)):
         }
         .form-group input:focus, .form-group select:focus {
             outline: none;
-            border-color: var(--accent-color);
+            border-color: rgba(139, 92, 246, 0.4);
+            box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.08);
         }
         .btn-primary {
-            background: var(--accent-color);
-            border-color: var(--accent-color);
+            background: linear-gradient(135deg, #8b5cf6 0%, #a78bfa 100%);
+            border-color: #8b5cf6;
             color: white;
             padding: 10px 20px;
         }
-        .btn-primary:hover { opacity: 0.9; background: var(--accent-color); }
+        .btn-primary:hover { opacity: 0.9; }
         .message {
             padding: 12px 16px;
             border-radius: 8px;
             margin-bottom: 20px;
             display: none;
         }
-        .message.success { background: rgba(76, 175, 80, 0.2); color: #81c784; display: block; }
-        .message.error { background: rgba(244, 67, 54, 0.2); color: #e57373; display: block; }
+        .message.success { background: rgba(34, 197, 94, 0.1); border: 1px solid rgba(34, 197, 94, 0.25); color: #22c55e; display: block; }
+        .message.error { background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.25); color: #ef4444; display: block; }
         .actions { white-space: nowrap; }
         select.role-select {
             padding: 4px 8px;
@@ -623,17 +624,17 @@ async def prompt_library_page(current_user: User = Depends(get_current_user)):
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <style>
         :root {
-            --bg-color: #1a1a1a;
-            --chat-bg: #2d2d2d;
+            --bg-color: #0d0d1a;
+            --chat-bg: #1a1730;
             --text-color: #e0e0e0;
-            --border-color: #404040;
+            --border-color: rgba(139, 92, 246, 0.2);
             --accent-color: #8b5cf6;
             --accent-hover: #7c3aed;
             --skill-color: #3b82f6;
             --skill-hover: #2563eb;
         }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
             background-color: var(--bg-color);
             color: var(--text-color);
             margin: 0;
@@ -664,7 +665,7 @@ async def prompt_library_page(current_user: User = Depends(get_current_user)):
             text-decoration: none;
             transition: background 0.2s;
         }
-        .back-btn:hover { background: var(--border-color); }
+        .back-btn:hover { background: rgba(139, 92, 246, 0.15); }
         h1 { font-size: 1.5rem; margin: 0; flex: 1; }
         /* Tab styles */
         .tab-container {
@@ -765,17 +766,17 @@ async def prompt_library_page(current_user: User = Depends(get_current_user)):
             color: var(--text-color);
             transition: all 0.2s;
         }
-        .btn:hover { background: var(--border-color); }
+        .btn:hover { background: rgba(139, 92, 246, 0.15); }
         .btn-primary {
-            background: var(--accent-color);
-            border-color: var(--accent-color);
+            background: linear-gradient(135deg, #8b5cf6 0%, #a78bfa 100%);
+            border-color: #8b5cf6;
             color: white;
         }
-        .btn-primary:hover { background: var(--accent-hover); }
-        .btn-danger { border-color: #e57373; color: #e57373; }
-        .btn-danger:hover { background: rgba(244, 67, 54, 0.2); }
+        .btn-primary:hover { opacity: 0.9; }
+        .btn-danger { border-color: rgba(239, 68, 68, 0.25); color: #ef4444; }
+        .btn-danger:hover { background: rgba(239, 68, 68, 0.15); }
         .form-group { margin-bottom: 16px; }
-        .form-group label { display: block; margin-bottom: 6px; font-size: 0.85rem; color: #888; }
+        .form-group label { display: block; margin-bottom: 6px; font-size: 0.85rem; color: rgba(255, 255, 255, 0.5); }
         .form-group input, .form-group select, .form-group textarea {
             width: 100%;
             padding: 10px;
@@ -789,7 +790,8 @@ async def prompt_library_page(current_user: User = Depends(get_current_user)):
         .form-group textarea { min-height: 150px; resize: vertical; }
         .form-group input:focus, .form-group select:focus, .form-group textarea:focus {
             outline: none;
-            border-color: var(--accent-color);
+            border-color: rgba(139, 92, 246, 0.4);
+            box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.08);
         }
         .modal {
             display: none;
@@ -798,7 +800,7 @@ async def prompt_library_page(current_user: User = Depends(get_current_user)):
             left: 0;
             right: 0;
             bottom: 0;
-            background: rgba(0,0,0,0.7);
+            background: rgba(0,0,0,0.8);
             z-index: 1000;
             justify-content: center;
             align-items: center;
@@ -866,8 +868,8 @@ async def prompt_library_page(current_user: User = Depends(get_current_user)):
             margin-bottom: 20px;
             display: none;
         }
-        .message.success { background: rgba(139, 92, 246, 0.2); color: #a78bfa; display: block; }
-        .message.error { background: rgba(244, 67, 54, 0.2); color: #e57373; display: block; }
+        .message.success { background: rgba(34, 197, 94, 0.1); border: 1px solid rgba(34, 197, 94, 0.25); color: #22c55e; display: block; }
+        .message.error { background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.25); color: #ef4444; display: block; }
         /* Skill-specific styles */
         .skill-card { border-left: 3px solid var(--skill-color); }
         .skill-card:hover { border-color: var(--skill-hover); }
@@ -1456,14 +1458,14 @@ async def settings_page(
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <style>
         :root {{
-            --bg-color: #1a1a1a;
-            --chat-bg: #2d2d2d;
+            --bg-color: #0d0d1a;
+            --chat-bg: #1a1730;
             --text-color: #e0e0e0;
-            --border-color: #404040;
-            --accent-color: #4CAF50;
+            --border-color: rgba(139, 92, 246, 0.2);
+            --accent-color: #8b5cf6;
         }}
         body {{
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
             background-color: var(--bg-color);
             color: var(--text-color);
             margin: 0;
@@ -1495,7 +1497,7 @@ async def settings_page(
             transition: background 0.2s;
         }}
         .back-btn:hover {{
-            background: var(--border-color);
+            background: rgba(139, 92, 246, 0.15);
         }}
         h1 {{
             font-size: 1.5rem;
@@ -1510,7 +1512,7 @@ async def settings_page(
         }}
         .card-header {{
             font-size: 0.85rem;
-            color: #888;
+            color: rgba(255, 255, 255, 0.5);
             text-transform: uppercase;
             letter-spacing: 0.5px;
             margin-bottom: 16px;
@@ -1538,13 +1540,13 @@ async def settings_page(
         }}
         .user-details .role {{
             font-size: 0.85rem;
-            color: #888;
+            color: rgba(255, 255, 255, 0.5);
         }}
         .badge {{
             display: inline-block;
             padding: 2px 8px;
-            background: rgba(76, 175, 80, 0.2);
-            color: var(--accent-color);
+            background: rgba(139, 92, 246, 0.2);
+            color: #a78bfa;
             border-radius: 4px;
             font-size: 0.75rem;
             margin-left: 8px;
@@ -1573,7 +1575,7 @@ async def settings_page(
             flex: 1;
         }}
         .menu-item .chevron {{
-            color: #666;
+            color: rgba(255, 255, 255, 0.35);
         }}
         .logout-btn {{
             display: flex;
@@ -1582,16 +1584,16 @@ async def settings_page(
             gap: 10px;
             width: 100%;
             padding: 14px;
-            background: #d32f2f;
-            border: none;
+            background: rgba(239, 68, 68, 0.15);
+            border: 1px solid rgba(239, 68, 68, 0.25);
             border-radius: 8px;
-            color: white;
+            color: #ef4444;
             font-size: 1rem;
             cursor: pointer;
-            transition: background 0.2s;
+            transition: all 0.2s;
         }}
         .logout-btn:hover {{
-            background: #b71c1c;
+            background: rgba(239, 68, 68, 0.25);
         }}
         a {{
             color: inherit;
@@ -1647,7 +1649,7 @@ async def settings_page(
                     <span id="autoBackupSlider" style="position: absolute; content: ''; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; border-radius: 50%; transition: 0.3s;"></span>
                 </label>
             </div>
-            <div style="padding: 4px 0 0 36px; font-size: 0.75rem; color: #666;">
+            <div style="padding: 4px 0 0 36px; font-size: 0.75rem; color: rgba(255,255,255,0.35);">
                 Runs cloud backup after each task completes
             </div>
         </div>
@@ -1664,7 +1666,7 @@ async def settings_page(
                     <span id="autoRefreshOnEditSlider" style="position: absolute; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; border-radius: 50%; transition: 0.3s;"></span>
                 </label>
             </div>
-            <div style="padding: 4px 0 0 36px; font-size: 0.75rem; color: #666;">
+            <div style="padding: 4px 0 0 36px; font-size: 0.75rem; color: rgba(255,255,255,0.35);">
                 Reloads the app preview iframe after each edit_file or write_file tool call
             </div>
         </div>
@@ -1681,7 +1683,7 @@ async def settings_page(
                     <span id="tokenWheelSlider" style="position: absolute; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; border-radius: 50%; transition: 0.3s;"></span>
                 </label>
             </div>
-            <div style="padding: 4px 0 0 36px; font-size: 0.75rem; color: #666;">
+            <div style="padding: 4px 0 0 36px; font-size: 0.75rem; color: rgba(255,255,255,0.35);">
                 Shows context window usage percentage in chat
             </div>
         </div>'''}
@@ -1713,7 +1715,7 @@ async def settings_page(
             const slider = document.getElementById('autoBackupSlider');
             const track = slider.previousElementSibling;
             if (enabled) {{
-                track.style.backgroundColor = '#4CAF50';
+                track.style.backgroundColor = '#8b5cf6';
                 slider.style.transform = 'translateX(20px)';
             }} else {{
                 track.style.backgroundColor = '#555';
@@ -1740,7 +1742,7 @@ async def settings_page(
             if (!slider) return;
             const track = slider.previousElementSibling;
             if (enabled) {{
-                track.style.backgroundColor = '#4CAF50';
+                track.style.backgroundColor = '#8b5cf6';
                 slider.style.transform = 'translateX(20px)';
             }} else {{
                 track.style.backgroundColor = '#555';
@@ -1772,7 +1774,7 @@ async def settings_page(
             if (!slider) return;
             const track = slider.previousElementSibling;
             if (enabled) {{
-                track.style.backgroundColor = '#4CAF50';
+                track.style.backgroundColor = '#8b5cf6';
                 slider.style.transform = 'translateX(20px)';
             }} else {{
                 track.style.backgroundColor = '#555';
@@ -1830,14 +1832,14 @@ async def leonardo_md_page(current_user: User = Depends(get_current_user)):
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <style>
         :root {{
-            --bg-color: #1a1a1a;
-            --chat-bg: #2d2d2d;
+            --bg-color: #0d0d1a;
+            --chat-bg: #1a1730;
             --text-color: #e0e0e0;
-            --border-color: #404040;
-            --accent-color: #4CAF50;
+            --border-color: rgba(139, 92, 246, 0.2);
+            --accent-color: #8b5cf6;
         }}
         body {{
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
             background-color: var(--bg-color);
             color: var(--text-color);
             margin: 0;
@@ -1869,7 +1871,7 @@ async def leonardo_md_page(current_user: User = Depends(get_current_user)):
             transition: background 0.2s;
         }}
         .back-btn:hover {{
-            background: var(--border-color);
+            background: rgba(139, 92, 246, 0.15);
         }}
         h1 {{
             font-size: 1.5rem;
@@ -1884,7 +1886,7 @@ async def leonardo_md_page(current_user: User = Depends(get_current_user)):
         }}
         .card-header {{
             font-size: 0.85rem;
-            color: #888;
+            color: rgba(255, 255, 255, 0.5);
             text-transform: uppercase;
             letter-spacing: 0.5px;
             margin-bottom: 16px;
@@ -1894,7 +1896,7 @@ async def leonardo_md_page(current_user: User = Depends(get_current_user)):
         }}
         .card-header-note {{
             font-size: 0.75rem;
-            color: #666;
+            color: rgba(255, 255, 255, 0.35);
             text-transform: none;
             letter-spacing: normal;
         }}
@@ -1914,7 +1916,8 @@ async def leonardo_md_page(current_user: User = Depends(get_current_user)):
         }}
         textarea:focus {{
             outline: none;
-            border-color: var(--accent-color);
+            border-color: rgba(139, 92, 246, 0.4);
+            box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.08);
         }}
         textarea:read-only {{
             opacity: 0.7;
@@ -1929,17 +1932,17 @@ async def leonardo_md_page(current_user: User = Depends(get_current_user)):
             display: inline-flex;
             align-items: center;
             gap: 8px;
-            transition: background 0.2s;
+            transition: all 0.2s;
         }}
         .btn-primary {{
-            background: var(--accent-color);
+            background: linear-gradient(135deg, #8b5cf6 0%, #a78bfa 100%);
             color: white;
         }}
         .btn-primary:hover {{
-            background: #45a049;
+            opacity: 0.9;
         }}
         .btn-primary:disabled {{
-            background: #666;
+            opacity: 0.5;
             cursor: not-allowed;
         }}
         .actions {{
@@ -1956,18 +1959,18 @@ async def leonardo_md_page(current_user: User = Depends(get_current_user)):
         }}
         .message.success {{
             display: block;
-            background: rgba(76, 175, 80, 0.2);
-            color: #81c784;
-            border: 1px solid rgba(76, 175, 80, 0.3);
+            background: rgba(34, 197, 94, 0.1);
+            color: #22c55e;
+            border: 1px solid rgba(34, 197, 94, 0.25);
         }}
         .message.error {{
             display: block;
-            background: rgba(244, 67, 54, 0.2);
-            color: #e57373;
-            border: 1px solid rgba(244, 67, 54, 0.3);
+            background: rgba(239, 68, 68, 0.1);
+            color: #ef4444;
+            border: 1px solid rgba(239, 68, 68, 0.25);
         }}
         .read-only-notice {{
-            color: #888;
+            color: rgba(255, 255, 255, 0.5);
             font-size: 0.85rem;
             margin-top: 12px;
             display: flex;
@@ -2090,17 +2093,17 @@ async def git_history_page(current_user: User = Depends(get_current_user)):
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <style>
         :root {
-            --bg-color: #1a1a1a;
-            --panel-bg: #2d2d2d;
+            --bg-color: #0d0d1a;
+            --panel-bg: #1a1730;
             --text-color: #e0e0e0;
-            --text-secondary: #888;
-            --border-color: #404040;
+            --text-secondary: rgba(255, 255, 255, 0.5);
+            --border-color: rgba(139, 92, 246, 0.2);
             --accent-color: #8b5cf6;
             --accent-hover: #7c3aed;
         }
         * { box-sizing: border-box; }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
             background-color: var(--bg-color);
             color: var(--text-color);
             margin: 0;
@@ -2130,7 +2133,7 @@ async def git_history_page(current_user: User = Depends(get_current_user)):
             text-decoration: none;
             transition: all 0.2s;
         }
-        .back-btn:hover { background: var(--border-color); }
+        .back-btn:hover { background: rgba(139, 92, 246, 0.15); }
         h1 { font-size: 1.3rem; margin: 0; flex: 1; }
         .header-actions { display: flex; gap: 8px; }
         .btn {
@@ -2146,10 +2149,10 @@ async def git_history_page(current_user: User = Depends(get_current_user)):
             align-items: center;
             gap: 6px;
         }
-        .btn:hover { background: var(--border-color); }
+        .btn:hover { background: rgba(139, 92, 246, 0.15); }
         .btn-primary {
-            background: var(--accent-color);
-            border-color: var(--accent-color);
+            background: linear-gradient(135deg, #8b5cf6 0%, #a78bfa 100%);
+            border-color: #8b5cf6;
             color: white;
         }
         .btn-primary:hover { background: var(--accent-hover); }
@@ -3034,14 +3037,14 @@ async def scheduled_jobs_page(user: User = Depends(engineer_or_admin_required)):
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <style>
         :root {
-            --bg-color: #1a1a1a;
-            --chat-bg: #2d2d2d;
+            --bg-color: #0d0d1a;
+            --chat-bg: #1a1730;
             --text-color: #e0e0e0;
-            --border-color: #404040;
-            --accent-color: #4CAF50;
+            --border-color: rgba(139, 92, 246, 0.2);
+            --accent-color: #8b5cf6;
         }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
             background-color: var(--bg-color);
             color: var(--text-color);
             margin: 0;
@@ -3072,7 +3075,7 @@ async def scheduled_jobs_page(user: User = Depends(engineer_or_admin_required)):
             text-decoration: none;
             transition: background 0.2s;
         }
-        .back-btn:hover { background: var(--border-color); }
+        .back-btn:hover { background: rgba(139, 92, 246, 0.15); }
         h1 { font-size: 1.5rem; margin: 0; flex: 1; }
         .card {
             background: var(--chat-bg);
@@ -3083,7 +3086,7 @@ async def scheduled_jobs_page(user: User = Depends(engineer_or_admin_required)):
         }
         .card-header {
             font-size: 0.85rem;
-            color: #888;
+            color: rgba(255, 255, 255, 0.5);
             text-transform: uppercase;
             letter-spacing: 0.5px;
             margin-bottom: 16px;
@@ -3093,7 +3096,7 @@ async def scheduled_jobs_page(user: User = Depends(engineer_or_admin_required)):
         }
         table { width: 100%; border-collapse: collapse; }
         th, td { padding: 12px; text-align: left; border-bottom: 1px solid var(--border-color); }
-        th { color: #888; font-weight: 500; font-size: 0.85rem; }
+        th { color: rgba(255, 255, 255, 0.5); font-weight: 500; font-size: 0.85rem; }
         tr:last-child td { border-bottom: none; }
         .badge {
             padding: 4px 10px;
@@ -3102,13 +3105,13 @@ async def scheduled_jobs_page(user: User = Depends(engineer_or_admin_required)):
             font-weight: 500;
             text-transform: uppercase;
         }
-        .badge-enabled { background: rgba(76, 175, 80, 0.2); color: #81c784; }
-        .badge-disabled { background: rgba(244, 67, 54, 0.2); color: #e57373; }
-        .badge-completed { background: rgba(76, 175, 80, 0.2); color: #81c784; }
-        .badge-running { background: rgba(33, 150, 243, 0.2); color: #64b5f6; }
-        .badge-failed { background: rgba(244, 67, 54, 0.2); color: #e57373; }
-        .badge-timeout { background: rgba(255, 152, 0, 0.2); color: #ffb74d; }
-        .badge-pending { background: rgba(158, 158, 158, 0.2); color: #bdbdbd; }
+        .badge-enabled { background: rgba(34, 197, 94, 0.15); color: #22c55e; }
+        .badge-disabled { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
+        .badge-completed { background: rgba(34, 197, 94, 0.15); color: #22c55e; }
+        .badge-running { background: rgba(139, 92, 246, 0.2); color: #a78bfa; }
+        .badge-failed { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
+        .badge-timeout { background: rgba(251, 191, 36, 0.15); color: #fbbf24; }
+        .badge-pending { background: rgba(255, 255, 255, 0.1); color: rgba(255, 255, 255, 0.5); }
         .btn {
             padding: 6px 12px;
             border: 1px solid var(--border-color);
@@ -3120,18 +3123,18 @@ async def scheduled_jobs_page(user: User = Depends(engineer_or_admin_required)):
             color: var(--text-color);
             transition: all 0.2s;
         }
-        .btn:hover { background: var(--border-color); }
+        .btn:hover { background: rgba(139, 92, 246, 0.15); }
         .btn-primary {
-            background: var(--accent-color);
-            border-color: var(--accent-color);
+            background: linear-gradient(135deg, #8b5cf6 0%, #a78bfa 100%);
+            border-color: #8b5cf6;
             color: white;
         }
-        .btn-primary:hover { opacity: 0.9; background: var(--accent-color); }
-        .btn-danger { border-color: #e57373; color: #e57373; }
-        .btn-danger:hover { background: rgba(244, 67, 54, 0.2); }
+        .btn-primary:hover { opacity: 0.9; }
+        .btn-danger { border-color: rgba(239, 68, 68, 0.25); color: #ef4444; }
+        .btn-danger:hover { background: rgba(239, 68, 68, 0.15); }
         .btn-sm { padding: 4px 8px; font-size: 11px; }
         .form-group { margin-bottom: 16px; }
-        .form-group label { display: block; margin-bottom: 6px; font-size: 0.85rem; color: #888; }
+        .form-group label { display: block; margin-bottom: 6px; font-size: 0.85rem; color: rgba(255, 255, 255, 0.5); }
         .form-group input, .form-group select, .form-group textarea {
             width: 100%;
             padding: 10px;
@@ -3144,7 +3147,8 @@ async def scheduled_jobs_page(user: User = Depends(engineer_or_admin_required)):
         .form-group textarea { min-height: 100px; resize: vertical; }
         .form-group input:focus, .form-group select:focus, .form-group textarea:focus {
             outline: none;
-            border-color: var(--accent-color);
+            border-color: rgba(139, 92, 246, 0.4);
+            box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.08);
         }
         .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
         .message {
@@ -3153,8 +3157,8 @@ async def scheduled_jobs_page(user: User = Depends(engineer_or_admin_required)):
             margin-bottom: 20px;
             display: none;
         }
-        .message.success { background: rgba(76, 175, 80, 0.2); color: #81c784; display: block; }
-        .message.error { background: rgba(244, 67, 54, 0.2); color: #e57373; display: block; }
+        .message.success { background: rgba(34, 197, 94, 0.1); border: 1px solid rgba(34, 197, 94, 0.25); color: #22c55e; display: block; }
+        .message.error { background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.25); color: #ef4444; display: block; }
         .actions { white-space: nowrap; }
         .modal {
             display: none;
@@ -3163,7 +3167,7 @@ async def scheduled_jobs_page(user: User = Depends(engineer_or_admin_required)):
             left: 0;
             width: 100%;
             height: 100%;
-            background: rgba(0,0,0,0.7);
+            background: rgba(0,0,0,0.8);
             z-index: 1000;
             justify-content: center;
             align-items: center;
@@ -3225,7 +3229,7 @@ async def scheduled_jobs_page(user: User = Depends(engineer_or_admin_required)):
         .tab-content.active { display: block; }
         .cron-help {
             font-size: 11px;
-            color: #888;
+            color: rgba(255, 255, 255, 0.5);
             margin-top: 8px;
         }
         .cron-presets {
@@ -3246,10 +3250,10 @@ async def scheduled_jobs_page(user: User = Depends(engineer_or_admin_required)):
         }
         .cron-preset:hover {
             border-color: var(--accent-color);
-            background: rgba(76, 175, 80, 0.1);
+            background: rgba(139, 92, 246, 0.1);
         }
         .cron-preset code {
-            color: #81c784;
+            color: #a78bfa;
             margin-left: 4px;
         }
         .toggle {
@@ -3291,7 +3295,7 @@ async def scheduled_jobs_page(user: User = Depends(engineer_or_admin_required)):
         .empty-state {
             text-align: center;
             padding: 40px;
-            color: #888;
+            color: rgba(255, 255, 255, 0.5);
         }
         .empty-state i { font-size: 48px; margin-bottom: 16px; }
     </style>
@@ -3867,14 +3871,14 @@ async def backup_history_page(current_user: User = Depends(get_current_user)):
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <style>
         :root {
-            --bg-color: #1a1a1a;
-            --chat-bg: #2d2d2d;
+            --bg-color: #0d0d1a;
+            --chat-bg: #1a1730;
             --text-color: #e0e0e0;
-            --border-color: #404040;
-            --accent-color: #4CAF50;
+            --border-color: rgba(139, 92, 246, 0.2);
+            --accent-color: #8b5cf6;
         }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
             background-color: var(--bg-color);
             color: var(--text-color);
             margin: 0;
@@ -3904,10 +3908,10 @@ async def backup_history_page(current_user: User = Depends(get_current_user)):
             margin-bottom: 12px;
         }
         .backup-entry.completed {
-            border-left: 3px solid #4caf50;
+            border-left: 3px solid #22c55e;
         }
         .backup-entry.failed {
-            border-left: 3px solid #f44336;
+            border-left: 3px solid #ef4444;
         }
         .backup-header {
             display: flex;
@@ -3922,21 +3926,21 @@ async def backup_history_page(current_user: User = Depends(get_current_user)):
             border-radius: 4px;
         }
         .backup-status-badge.completed {
-            background: rgba(76, 175, 80, 0.2);
-            color: #4caf50;
+            background: rgba(34, 197, 94, 0.15);
+            color: #22c55e;
         }
         .backup-status-badge.failed {
-            background: rgba(244, 67, 54, 0.2);
-            color: #f44336;
+            background: rgba(239, 68, 68, 0.15);
+            color: #ef4444;
         }
         .backup-time {
             font-size: 0.85rem;
-            color: #888;
+            color: rgba(255, 255, 255, 0.5);
         }
         .backup-error {
             font-size: 0.8rem;
-            color: #f44336;
-            background: rgba(244, 67, 54, 0.1);
+            color: #ef4444;
+            background: rgba(239, 68, 68, 0.1);
             padding: 8px 12px;
             border-radius: 4px;
             margin-top: 8px;
@@ -3946,8 +3950,8 @@ async def backup_history_page(current_user: User = Depends(get_current_user)):
         }
         .backup-output {
             font-size: 0.75rem;
-            color: #aaa;
-            background: #1a1a1a;
+            color: rgba(255, 255, 255, 0.6);
+            background: #0d0d1a;
             padding: 8px 12px;
             border-radius: 4px;
             margin-top: 8px;
@@ -3959,13 +3963,13 @@ async def backup_history_page(current_user: User = Depends(get_current_user)):
         }
         .backup-output summary {
             cursor: pointer;
-            color: #888;
+            color: rgba(255, 255, 255, 0.5);
             font-size: 0.75rem;
             margin-bottom: 4px;
         }
         .empty-state {
             text-align: center;
-            color: #666;
+            color: rgba(255, 255, 255, 0.5);
             padding: 60px 20px;
         }
         .empty-state i {

@@ -1,100 +1,156 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>LlamaBot Registration</title>
+    <title>Leonardo</title>
+    <link rel="icon" type="image/png" href="https://llamapress-ai-image-uploads.s3.us-west-2.amazonaws.com/4bmqe5iolvp84ceyk9ttz8vylrym">
     <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
         body {
-            font-family: Arial, sans-serif;
-            max-width: 400px;
-            margin: 50px auto;
-            padding: 20px;
-            background-color: #f4f4f4;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background-color: #0d0d1a;
+            color: #e0e0e0;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
         .container {
-            background-color: white;
-            padding: 30px;
-            border-radius: 10px;
-            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            width: 100%;
+            max-width: 400px;
+            padding: 20px;
         }
-        h2 {
-            color: #333;
-            text-align: center;
+        .logo {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin-bottom: 32px;
+        }
+        .logo img {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            border: 3px solid rgba(139, 92, 246, 0.4);
+            box-shadow: 0 0 24px rgba(139, 92, 246, 0.15);
+            margin-bottom: 16px;
+        }
+        .logo h2 {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: #e0e0e0;
+        }
+        .card {
+            background: #1a1730;
+            border: 1px solid rgba(139, 92, 246, 0.2);
+            border-radius: 12px;
+            padding: 32px;
+            box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
+        }
+        label {
+            display: block;
+            font-size: 0.85rem;
+            color: rgba(255, 255, 255, 0.5);
+            margin-bottom: 6px;
         }
         input[type="text"], input[type="password"] {
             width: 100%;
-            padding: 10px;
-            margin: 10px 0;
-            border: 1px solid #ddd;
-            border-radius: 5px;
-            box-sizing: border-box;
+            padding: 12px;
+            margin-bottom: 16px;
+            border: 1px solid rgba(139, 92, 246, 0.2);
+            border-radius: 8px;
+            background: #0d0d1a;
+            color: #e0e0e0;
+            font-family: inherit;
+            font-size: 0.95rem;
+            transition: border-color 0.2s;
+        }
+        input[type="text"]:focus, input[type="password"]:focus {
+            outline: none;
+            border-color: rgba(139, 92, 246, 0.4);
+            box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.08);
         }
         button {
             width: 100%;
-            padding: 10px;
-            background-color: #4CAF50;
+            padding: 12px;
+            background: linear-gradient(135deg, #8b5cf6 0%, #a78bfa 100%);
             color: white;
             border: none;
-            border-radius: 5px;
+            border-radius: 8px;
             cursor: pointer;
-            font-size: 16px;
+            font-size: 1rem;
+            font-family: inherit;
+            font-weight: 500;
+            transition: opacity 0.2s;
         }
         button:hover {
-            background-color: #45a049;
+            opacity: 0.9;
         }
         .message {
-            margin: 10px 0;
-            padding: 10px;
-            border-radius: 5px;
+            margin-top: 16px;
+            padding: 10px 14px;
+            border-radius: 8px;
             text-align: center;
+            font-size: 0.9rem;
         }
         .error {
-            background-color: #ffebee;
-            color: #c62828;
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.25);
+            color: #ef4444;
         }
         .success {
-            background-color: #e8f5e9;
-            color: #2e7d32;
+            background: rgba(34, 197, 94, 0.1);
+            border: 1px solid rgba(34, 197, 94, 0.25);
+            color: #22c55e;
         }
         .warning {
-            background-color: #fff3e0;
-            color: #e65100;
+            background: rgba(251, 191, 36, 0.1);
+            border: 1px solid rgba(251, 191, 36, 0.25);
+            color: #fbbf24;
             margin-bottom: 20px;
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h2>🦙 LlamaBot Registration</h2>
-        <form id="registerForm">
-            <label for="username">Username:</label>
-            <input type="text" id="username" name="username" required>
-            
-            <label for="password">Password:</label>
-            <input type="password" id="password" name="password" required>
-            
-            <label for="confirm">Confirm Password:</label>
-            <input type="password" id="confirm" name="confirm" required>
-            
-            <button type="submit">Register</button>
-        </form>
-        <div id="message"></div>
+        <div class="logo">
+            <img src="https://llamapress-ai-image-uploads.s3.us-west-2.amazonaws.com/4bmqe5iolvp84ceyk9ttz8vylrym" alt="Leonardo">
+            <h2>Leonardo</h2>
+        </div>
+        <div class="card">
+            <form id="registerForm">
+                <label for="username">Username</label>
+                <input type="text" id="username" name="username" required>
+
+                <label for="password">Password</label>
+                <input type="password" id="password" name="password" required>
+
+                <label for="confirm">Confirm Password</label>
+                <input type="password" id="confirm" name="confirm" required>
+
+                <button type="submit">Register</button>
+            </form>
+            <div id="message"></div>
+        </div>
     </div>
-    
+
     <script>
         document.getElementById('registerForm').addEventListener('submit', async (e) => {
             e.preventDefault();
-            
+
             const username = document.getElementById('username').value;
             const password = document.getElementById('password').value;
             const confirm = document.getElementById('confirm').value;
             const messageDiv = document.getElementById('message');
-            
+
             if (password !== confirm) {
                 messageDiv.className = 'message error';
                 messageDiv.textContent = 'Passwords do not match!';
                 return;
             }
-            
+
             try {
                 const response = await fetch('/register', {
                     method: 'POST',
@@ -107,9 +163,9 @@
                         confirm: confirm
                     })
                 });
-                
+
                 const result = await response.json();
-                
+
                 if (response.ok) {
                     messageDiv.className = 'message success';
                     messageDiv.textContent = result.message + ' Redirecting...';

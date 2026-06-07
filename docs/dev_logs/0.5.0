@@ -1,4 +1,6 @@
 0.5.0:
-- Improve styling & add PyXL mode.
-- Add PyXL capabilities for very deep analysis of a spreadsheet.
-- Add in planning mode for beginners, along with the AskQuestion tool call
+- [x] Improve styling & add PyXL mode.
+- [x] Add PyXL capabilities for very deep analysis of a spreadsheet.
+- [x] Add in planning mode for beginners, along with the AskQuestion tool call
+- [x] Remove old agent modes that aren't being used
+- [x] Add tool to self-fix the permission issues in the Rails container
