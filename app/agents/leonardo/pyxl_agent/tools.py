@@ -13,7 +13,10 @@ Rails root is blocked.
 """
 from pathlib import Path
 
-from langchain.tools import tool
+from langchain.tools import tool, ToolRuntime
+from langgraph.types import Command
+from langchain_core.messages import ToolMessage
+import os
 import openpyxl
 from openpyxl.utils import get_column_letter
 from collections import Counter
@@ -800,3 +803,79 @@ def data_quality_check(file_path: str, sheet_name: str) -> str:
         return "\n".join(lines)
     except Exception as e:
         return f"Error in data quality check: {e}"
+
+
+# ---------------------------------------------------------------------------
+# Tech-spec file tools
+# ---------------------------------------------------------------------------
+
+TECH_SPECS_SUBDIR = "app/imports/tech_specs"
+UBUNTU_UID = 1000
+UBUNTU_GID = 1000
+
+
+def _chown_for_ubuntu(path: Path) -> None:
+    """Best-effort chown so the host ubuntu user can access the file."""
+    try:
+        os.chown(path, UBUNTU_UID, UBUNTU_GID)
+    except (OSError, PermissionError):
+        pass
+
+
+@tool("read_tech_spec")
+def read_tech_spec(spreadsheet_name: str) -> str:
+    """Check if a tech spec already exists for a spreadsheet and return its contents.
+
+    Args:
+        spreadsheet_name: The spreadsheet filename (e.g. 'sales.xlsx').
+                          Looks for app/imports/tech_specs/TECH_SPEC_<stem>.md.
+    """
+    stem = Path(spreadsheet_name).stem
+    spec_path = RAILS_DIR / TECH_SPECS_SUBDIR / f"TECH_SPEC_{stem}.md"
+
+    if not spec_path.exists():
+        return (
+            f"No existing tech spec found for '{spreadsheet_name}'. "
+            f"Path checked: {TECH_SPECS_SUBDIR}/TECH_SPEC_{stem}.md"
+        )
+
+    try:
+        content = spec_path.read_text()
+        if not content.strip():
+            return f"Tech spec file exists but is empty: {TECH_SPECS_SUBDIR}/TECH_SPEC_{stem}.md"
+        return f"Existing tech spec found ({TECH_SPECS_SUBDIR}/TECH_SPEC_{stem}.md):\n\n{content}"
+    except Exception as e:
+        return f"Error reading tech spec: {e}"
+
+
+@tool("write_tech_spec")
+def write_tech_spec(
+    spreadsheet_name: str,
+    content: str,
+    runtime: ToolRuntime,
+) -> Command:
+    """Save the final tech spec as a markdown file.
+
+    Args:
+        spreadsheet_name: The spreadsheet filename this spec is for (e.g. 'sales.xlsx').
+        content: The full markdown content of the tech spec.
+    """
+    stem = Path(spreadsheet_name).stem
+    spec_dir = RAILS_DIR / TECH_SPECS_SUBDIR
+    spec_path = spec_dir / f"TECH_SPEC_{stem}.md"
+
+    try:
+        spec_dir.mkdir(parents=True, exist_ok=True)
+        spec_path.write_text(content)
+        _chown_for_ubuntu(spec_path)
+    except Exception as e:
+        error_msg = f"Error writing tech spec: {e}"
+        return Command(update={"messages": [
+            ToolMessage(error_msg, artifact={"status": "error", "message": error_msg}, tool_call_id=runtime.tool_call_id)
+        ]})
+
+    rel_path = f"{TECH_SPECS_SUBDIR}/TECH_SPEC_{stem}.md"
+    success_msg = f"Tech spec saved to {rel_path}"
+    return Command(update={"messages": [
+        ToolMessage(success_msg, artifact={"status": "success", "message": success_msg, "file_path": rel_path}, tool_call_id=runtime.tool_call_id)
+    ]})

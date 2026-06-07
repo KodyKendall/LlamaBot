@@ -28,6 +28,7 @@ from app.agents.leonardo.pyxl_agent.tools import (
     get_sheet_dimensions, summarize_column, detect_column_types,
     find_patterns_and_anomalies, statistical_analysis,
     check_formulas, find_cross_sheet_relationships, data_quality_check,
+    read_tech_spec, write_tech_spec,
 )
 from app.agents.leonardo.pyxl_agent.prompts import EXCEL_ANALYSIS_PROMPT
 from app.agents.leonardo.rails_agent.middleware import (
@@ -91,6 +92,7 @@ default_tools = [
     write_todos,
     internet_search,
     save_memory, list_memories, delete_memory,
+    read_tech_spec, write_tech_spec,
 ]
 
 
