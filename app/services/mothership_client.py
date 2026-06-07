@@ -169,6 +169,37 @@ class MothershipClient:
             logger.warning(f"Paywall recheck failed, failing open: {e}")
             return None
 
+    async def check_updates(self, current_llamabot: str, current_llamapress: str) -> Optional[dict]:
+        """
+        POST /api/leonardo/check_updates
+
+        Check mothership for newer stable versions of llamabot and llamapress.
+        Returns {"updates_available": bool, "latest_versions": {...}} or None on error.
+        """
+        if not self.enabled:
+            return None
+
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.post(
+                    f"{self.config['mothership_url']}/api/leonardo/check_updates",
+                    json={
+                        "instance_name": self.config["instance_name"],
+                        "current_versions": {
+                            "llamabot": current_llamabot,
+                            "llamapress": current_llamapress,
+                        }
+                    },
+                    headers={"Authorization": f"Bearer {self.config['mothership_api_token']}"},
+                )
+                response.raise_for_status()
+                body = response.json()
+                logger.info(f"check_updates response: {body}")
+                return body
+        except Exception as e:
+            logger.warning(f"Update check failed: {e}")
+            return None
+
     async def report_disconnect(
         self,
         *,

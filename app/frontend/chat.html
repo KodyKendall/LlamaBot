@@ -68,6 +68,9 @@
                         <h3>Conversations</h3>
                         <div class="version-badge-container">
                             <span class="version-badge" data-llamabot="version-badge"></span>
+                            <span class="update-indicator hidden" data-llamabot="update-indicator" title="Update available">
+                                <i class="fa-solid fa-arrow-up"></i>
+                            </span>
                             <div class="version-tooltip" data-llamabot="version-tooltip"></div>
                         </div>
                     </div>
@@ -91,6 +94,13 @@
             </div>
         </div>
 
+        <div class="update-banner hidden" data-llamabot="update-banner">
+            <div class="update-banner-content">
+                <span class="update-banner-text" data-llamabot="update-banner-text"></span>
+                <button class="update-banner-btn" data-llamabot="update-now-btn">Update Now</button>
+                <button class="update-banner-dismiss" data-llamabot="update-banner-dismiss">&times;</button>
+            </div>
+        </div>
         <div class="message-history" data-llamabot="message-history">
             <div data-llamabot="ai-message">Hi! I'm your Leo. What are we building today?</div>
         </div>
@@ -176,6 +186,7 @@
                     <select data-llamabot="model-select" class="custom-dropdown">
                         <option value="gemini-3-flash" data-short-label="Gemini Flash">Gemini 3 Flash</option>
                         <option value="gemini-3-pro" data-short-label="Gemini Pro">Gemini 3 Pro</option>
+                        <option value="gemini-3.1-flash-lite" data-short-label="Gemini Lite">Gemini 3.1 Flash Lite</option>
                         <option value="claude-4.5-haiku" data-short-label="Haiku">Claude 4.5 Haiku</option>
                         <option value="gpt-5-mini" data-short-label="GPT-5">GPT-5 Mini</option>
                         <option value="deepseek-v4-flash" data-short-label="DeepSeek" selected>DeepSeek V4 Flash</option>
@@ -414,7 +425,93 @@
             } catch (e) {
                 // Silently fail - version display is optional
             }
+
+            // Check for available updates
+            try {
+                const updateResponse = await fetch('/api/check-updates');
+                if (updateResponse.ok) {
+                    const updateData = await updateResponse.json();
+                    if (updateData.updates_available) {
+                        window.__llamabotUpdateData = updateData;
+                        const lb = updateData.latest_versions.llamabot;
+                        const lp = updateData.latest_versions.llamapress;
+
+                        // Show green indicator on version badge
+                        const versionBadge = document.querySelector('[data-llamabot="version-badge"]');
+                        if (versionBadge) {
+                            versionBadge.classList.add('update-available');
+                            versionBadge.title = 'Update available! Click to update.';
+                        }
+                        const updateIndicator = document.querySelector('[data-llamabot="update-indicator"]');
+                        if (updateIndicator) {
+                            updateIndicator.classList.remove('hidden');
+                        }
+
+                        // Show update banner
+                        const banner = document.querySelector('[data-llamabot="update-banner"]');
+                        const bannerText = document.querySelector('[data-llamabot="update-banner-text"]');
+                        if (banner && bannerText) {
+                            const parts = [];
+                            if (lb && lb.version) parts.push(`LlamaBot ${lb.version}`);
+                            if (lp && lp.version) parts.push(`LlamaPress ${lp.version}`);
+                            bannerText.textContent = `Update available: ${parts.join(', ')}`;
+                            banner.classList.remove('hidden');
+                        }
+                    }
+                }
+            } catch (e) {
+                // Silently fail - update check is optional
+            }
         })();
+
+        // Update banner dismiss button
+        document.addEventListener('click', function(e) {
+            if (e.target.closest('[data-llamabot="update-banner-dismiss"]')) {
+                const banner = document.querySelector('[data-llamabot="update-banner"]');
+                if (banner) banner.classList.add('hidden');
+            }
+        });
+
+        // Update Now button handler (banner or version badge click)
+        document.addEventListener('click', async function(e) {
+            const updateBtn = e.target.closest('[data-llamabot="update-now-btn"]');
+            const badgeClick = e.target.closest('[data-llamabot="version-badge"].update-available');
+            const indicatorClick = e.target.closest('[data-llamabot="update-indicator"]');
+
+            if (!updateBtn && !badgeClick && !indicatorClick) return;
+            if (!window.__llamabotUpdateData) return;
+
+            const data = window.__llamabotUpdateData;
+            const lb = data.latest_versions.llamabot;
+            const lp = data.latest_versions.llamapress;
+
+            let msg = 'Update available!\n\n';
+            if (lb && lb.version) msg += `LlamaBot: ${lb.version}${lb.notes ? ' - ' + lb.notes : ''}\n`;
+            if (lp && lp.version) msg += `LlamaPress: ${lp.version}${lp.notes ? ' - ' + lp.notes : ''}\n`;
+            msg += '\nThis will pull new images and restart. You may lose your connection briefly.\n\nProceed?';
+
+            if (!confirm(msg)) return;
+
+            // Disable button to prevent double-click
+            const btn = document.querySelector('[data-llamabot="update-now-btn"]');
+            if (btn) {
+                btn.disabled = true;
+                btn.textContent = 'Updating...';
+            }
+
+            try {
+                await fetch('/api/update', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        llamabot_version: lb.version,
+                        llamapress_version: lp.version
+                    })
+                });
+            } catch (e) {
+                // Expected - server restarts and connection drops
+            }
+        });
     </script>
 
     <!-- Role-based mode and tab restriction -->

@@ -4,4 +4,9 @@
 - [x] Add in planning mode for beginners, along with the AskQuestion tool call
 - [x] Remove old agent modes that aren't being used
 - [x] Add tool to self-fix the permission issues in the Rails container
-- [x] Improve PyXL to write to markdown and allow for the user to ask questions/engage/add more context
+- [x] Improve PyXL to write to markdown and allow for the user to ask questions/engage/add more contex
+
+0.5.0a:
+- [x] Add Gemini 3.1 Flash Lite for Affordable Image Analysis
+- [x] Add in an update checker against mothership, so the user can pull down llamabot & llamapress updates without needing to use the terminal
+- [x] Add in a new route for transferring images from the mothership to here.

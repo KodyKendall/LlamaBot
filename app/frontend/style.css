@@ -1243,6 +1243,90 @@ body {
     display: block;
 }
 
+.version-badge.update-available {
+    color: #22c55e;
+    cursor: pointer;
+}
+
+.update-indicator {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    background: #22c55e;
+    color: white;
+    border-radius: 50%;
+    font-size: 0.45rem;
+    margin-left: 3px;
+    cursor: pointer;
+    animation: pulse-green 2s infinite;
+}
+
+.update-indicator.hidden {
+    display: none;
+}
+
+@keyframes pulse-green {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+.update-banner {
+    background: linear-gradient(135deg, #065f46, #047857);
+    color: white;
+    padding: 8px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.85rem;
+    flex-shrink: 0;
+}
+
+.update-banner.hidden {
+    display: none;
+}
+
+.update-banner-content {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.update-banner-btn {
+    background: white;
+    color: #065f46;
+    border: none;
+    padding: 4px 12px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.update-banner-btn:hover {
+    background: #d1fae5;
+}
+
+.update-banner-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.update-banner-dismiss {
+    background: none;
+    border: none;
+    color: white;
+    font-size: 1.1rem;
+    cursor: pointer;
+    padding: 0 4px;
+    opacity: 0.7;
+}
+
+.update-banner-dismiss:hover {
+    opacity: 1;
+}
+
 .new-thread-btn {
     width: 32px;
     height: 32px;

@@ -119,6 +119,27 @@ def get_container_version() -> str:
         return "dev"
 
 
+def get_llamapress_version() -> str:
+    """Get the LlamaPress version from docker-compose.yml."""
+    compose_paths = [
+        "/app/leonardo/docker-compose.yml",
+        "/app/leonardo/docker-compose-dev.yml",
+    ]
+    for compose_path in compose_paths:
+        try:
+            with open(compose_path, 'r') as f:
+                for line in f:
+                    if 'image:' in line and 'llamapress-simple:' in line:
+                        match = re.search(r'llamapress-simple:([^\s"\']+)', line)
+                        if match:
+                            return match.group(1)
+        except FileNotFoundError:
+            continue
+        except Exception as e:
+            logger.debug(f"Could not parse {compose_path} for llamapress version: {e}")
+    return "dev"
+
+
 @router.get("/api/version", response_class=JSONResponse)
 async def api_get_version():
     """Get the current LlamaBot version from docker-compose.yml or Docker image tag."""
@@ -204,6 +225,53 @@ async def api_get_version_notes():
     version = get_container_version()
     notes = get_version_notes(version)
     return {"version": version, "notes": notes}
+
+
+@router.get("/api/check-updates", response_class=JSONResponse)
+async def api_check_updates():
+    """Check mothership for available updates to llamabot and llamapress."""
+    from app.services.mothership_client import MothershipClient
+    mothership = MothershipClient()
+    if not mothership.enabled:
+        return {"updates_available": False, "reason": "mothership_not_configured"}
+
+    llamabot_version = get_container_version()
+    llamapress_version = get_llamapress_version()
+
+    result = await mothership.check_updates(llamabot_version, llamapress_version)
+    if result is None:
+        return {"updates_available": False, "reason": "check_failed"}
+    return result
+
+
+class UpdateRequest(BaseModel):
+    llamabot_version: str
+    llamapress_version: str
+
+
+@router.post("/api/update", response_class=JSONResponse)
+async def api_perform_update(
+    request: UpdateRequest,
+    current_user: User = Depends(engineer_or_admin_required),
+):
+    """Update docker-compose.yml image tags, pull new images, and restart."""
+    version_pattern = re.compile(r'^[0-9a-zA-Z.\-]+$')
+    if not version_pattern.match(request.llamabot_version) or not version_pattern.match(request.llamapress_version):
+        raise HTTPException(status_code=400, detail="Invalid version format")
+
+    from app.routers.slash_commands import execute_command
+    command = f"bash bin/update {request.llamabot_version} {request.llamapress_version}"
+    try:
+        result = execute_command(command, timeout=300)
+        return {
+            "success": result.returncode == 0,
+            "stdout": result.stdout.strip() if result.stdout else "",
+            "stderr": result.stderr.strip() if result.stderr else "",
+            "return_code": result.returncode,
+        }
+    except Exception as e:
+        # Container may be killed mid-response during restart
+        return {"success": True, "stdout": "Update initiated, server restarting...", "stderr": "", "return_code": 0}
 
 
 # ============== WebSocket Authentication API ==============
@@ -430,6 +498,7 @@ async def available_models():
         "gpt-5-codex": "OPENAI_API_KEY",
         "gemini-3-flash": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
         "gemini-3-pro": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
+        "gemini-3.1-flash-lite": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
         "deepseek-v4-flash": "DEEPSEEK_API_KEY",
         "deepseek-v4-pro": "DEEPSEEK_API_KEY",
     }
@@ -1294,4 +1363,74 @@ async def api_import_excel_from_s3(
         raise HTTPException(status_code=502, detail=f"Failed to download from S3: HTTP {e.response.status_code}")
     except Exception as e:
         logger.error(f"import-excel: failed to download {body.url}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to download file: {e}")
+
+
+ALLOWED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+MAX_IMAGE_SIZE = 25 * 1024 * 1024  # 25 MB
+
+
+@router.post("/api/setup/import-image", response_class=JSONResponse)
+async def api_import_image_from_s3(
+    body: ImportFromS3Request,
+    current_user: User = Depends(admin_required),
+):
+    """Download an image from S3 and save it to rails/app/imports/."""
+    import pathlib
+    import httpx
+    from urllib.parse import unquote
+
+    # Derive filename
+    if body.filename:
+        filename = body.filename
+    else:
+        url_path = body.url.split("?")[0]
+        filename = unquote(url_path.rsplit("/", 1)[-1])
+
+    if not filename:
+        raise HTTPException(status_code=400, detail="Could not determine filename from URL. Provide a 'filename' field.")
+
+    # Validate extension
+    ext = pathlib.Path(filename).suffix.lower()
+    if ext not in ALLOWED_IMAGE_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"not an image: {ext}")
+
+    # Sanitize (strip path traversal, unsafe chars)
+    safe_filename = re.sub(r'[^\w\-.]', '_', os.path.basename(filename))
+
+    os.makedirs(IMPORTS_DIR, exist_ok=True)
+    dest_path = os.path.join(IMPORTS_DIR, safe_filename)
+
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.get(body.url)
+            resp.raise_for_status()
+
+        # Size check
+        if len(resp.content) > MAX_IMAGE_SIZE:
+            raise HTTPException(status_code=400, detail=f"Image too large: {len(resp.content)} bytes (max {MAX_IMAGE_SIZE})")
+
+        # Magic-byte validation
+        header = resp.content[:12]
+        is_valid_image = (
+            header[:8] == b'\x89PNG\r\n\x1a\n'
+            or header[:2] == b'\xff\xd8'
+            or header[:4] == b'GIF8'
+            or (header[:4] == b'RIFF' and header[8:12] == b'WEBP')
+        )
+        if not is_valid_image:
+            raise HTTPException(status_code=400, detail="File content does not match a supported image format")
+
+        with open(dest_path, "wb") as f:
+            f.write(resp.content)
+
+        logger.info(f"import-image: downloaded {safe_filename} ({len(resp.content)} bytes) by {current_user.username}")
+        return {"status": "ok", "saved_path": f"rails/app/imports/{safe_filename}"}
+
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=502, detail=f"Failed to download from S3: HTTP {e.response.status_code}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"import-image: failed to download {body.url}: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to download file: {e}")

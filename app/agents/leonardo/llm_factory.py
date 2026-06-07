@@ -134,6 +134,12 @@ def get_llm(model_name: str):
             model="gemini-3.1-pro-preview",
             include_thoughts=True,
         )
+    if model_name == "gemini-3.1-flash-lite":
+        return ChatGoogleGenerativeAI(
+            model="gemini-3.1-flash-lite",
+            thinking_level="high",
+            include_thoughts=True,
+        )
 
     return ChatDeepSeekWithReasoning(
         model="deepseek-v4-flash",

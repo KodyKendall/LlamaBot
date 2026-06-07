@@ -35,6 +35,7 @@ MODEL_CAPABILITIES = {
     # Gemini models support video, images, PDFs
     'gemini-3-flash': {'images': True, 'video': True, 'pdf': True},
     'gemini-3-pro': {'images': True, 'video': True, 'pdf': True},
+    'gemini-3.1-flash-lite': {'images': True, 'video': True, 'pdf': True},
     'gemini-2.5-flash': {'images': True, 'video': True, 'pdf': True},
     'gemini-2.5-pro': {'images': True, 'video': True, 'pdf': True},
 
