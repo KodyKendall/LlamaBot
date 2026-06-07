@@ -30,10 +30,8 @@ export const DEFAULT_CONFIG = {
     ai_builder: 'rails_ai_builder_agent',
     testing: 'rails_testing_agent',
     ticket: 'rails_ticket_mode_agent',
-    architect: 'rails_architect_agent',
     user: 'rails_user_mode_agent',
     beginner: 'rails_beginner_agent',
-    excel_focus: 'rails_excel_focus_agent',
     pyxl: 'pyxl_agent',
     plan: 'rails_plan_mode_agent'
   },
