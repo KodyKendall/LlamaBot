@@ -951,8 +951,9 @@ class ChatApp {
     this.streamingState.reset();
     this.iframeManager.removeStreamingOverlay();
 
-    // Show building overlay for beginner mode
-    if (agentMode === 'beginner') {
+    // Show building overlay for beginner and plan modes
+    const executionModeForOverlay = this.appState.getExecutionMode();
+    if (agentMode === 'beginner' || executionModeForOverlay === 'plan') {
       this.iframeManager.createStreamingOverlay({ showCloseButton: true, text: 'Your App is Building!' });
     }
 

@@ -140,15 +140,25 @@ export class MessageHandler {
    * Handle AI message chunks (streaming)
    */
   handleAIMessageChunk(data) {
-    // In beginner/plan mode, hide sub-agent messages (depth > 0)
-    if (this._isSimplifiedMode() && (data.agent_depth || 0) > 0) {
-      return;
-    }
-
     // Skip tool result messages that come through the messages stream
     // (ToolMessage content like "Updated todo list to [...]" should not render as AI text)
     if (data.base_message?.type === 'tool') {
       return;
+    }
+
+    // In beginner/plan mode, hide sub-agent TEXT and tool content (depth > 0)
+    // but still allow thinking/reasoning to flow so activity indicators work
+    const isSubagent = (data.agent_depth || 0) > 0;
+    const isSimplified = this._isSimplifiedMode();
+    if (isSimplified && isSubagent) {
+      // Only process thinking content from sub-agents (for activity indicators)
+      if (data.thinking) {
+        const thinkingText = this.extractThinkingContent(data.thinking);
+        if (thinkingText) {
+          this.handleThinkingContent(thinkingText);
+        }
+      }
+      return; // Skip text content and tool calls from sub-agents
     }
 
     // Handle thinking/reasoning content if present - render inline in message history
@@ -711,6 +721,7 @@ export class MessageHandler {
       this.messageRenderer.handleEndMessage();
       // Remove beginner mode overlay when agent finishes
       this.iframeManager.removeStreamingOverlay();
+
       // Clear plan tracking when conversation ends
       this.activePlanId = null;
       this.planStepMapping.clear();
