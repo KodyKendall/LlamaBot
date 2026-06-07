@@ -67,6 +67,9 @@
       "Read(//private/etc/**)"
     ],
     "deny": [],
-    "ask": []
+    "ask": [],
+    "additionalDirectories": [
+      "/Users/kodykendall/SoftEngineering/LLMPress/Leonardo/langgraph"
+    ]
   }
 }

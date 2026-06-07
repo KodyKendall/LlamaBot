@@ -34,6 +34,7 @@ from app.agents.leonardo.rails_agent.tool_prompts import (
     WRITE_LEONARDO_MD_DESCRIPTION,
     TAIL_RAILS_LOGS_DESCRIPTION,
     HARD_RESTART_RAILS_DESCRIPTION,
+    FIX_PERMISSIONS_DESCRIPTION,
 )
 
 from app.agents.leonardo.project_context import (
@@ -1093,6 +1094,76 @@ def hard_restart_rails(
     )
 
 
+@tool(description=FIX_PERMISSIONS_DESCRIPTION)
+def fix_permissions(
+    runtime: ToolRuntime,
+) -> Command:
+    """Fix file permission issues in the Rails container by chowning problematic directories as root."""
+    tool_call_id = runtime.tool_call_id
+
+    try:
+        container_name = get_rails_container_name()
+    except Exception as e:
+        return Command(
+            update={
+                "messages": [ToolMessage(f"Could not resolve Rails container name: {e}", tool_call_id=tool_call_id)]
+            }
+        )
+
+    # Exec as root (no User field) to chown directories back to UID 1000
+    cmd_str = (
+        "chown -R 1000:1000 /rails/tmp /rails/coverage /rails/log 2>/dev/null; "
+        "echo 'Permissions fixed successfully'"
+    )
+    payload = {
+        "AttachStdout": True,
+        "AttachStderr": True,
+        "Tty": True,
+        "Cmd": ["/bin/sh", "-c", cmd_str],
+    }
+
+    # Create exec instance
+    create_cmd = [
+        "curl", "--silent", "--show-error", "--fail-with-body",
+        "--unix-socket", "/var/run/docker.sock",
+        "-H", "Content-Type: application/json",
+        "--data-binary", json.dumps(payload),
+        f"http://localhost/containers/{container_name}/exec",
+    ]
+
+    try:
+        create_result = subprocess.run(create_cmd, capture_output=True, text=True, timeout=30)
+        if create_result.returncode != 0:
+            return Command(update={"messages": [ToolMessage(f"Failed to create exec: {create_result.stderr or create_result.stdout}", tool_call_id=tool_call_id)]})
+
+        exec_data = json.loads(create_result.stdout)
+        exec_id = exec_data["Id"]
+
+        # Start exec
+        start_cmd = [
+            "curl", "--silent", "--show-error",
+            "--unix-socket", "/var/run/docker.sock",
+            "-H", "Content-Type: application/json",
+            "--data-binary", json.dumps({"Detach": False, "Tty": True}),
+            f"http://localhost/exec/{exec_id}/start",
+        ]
+        start_result = subprocess.run(start_cmd, capture_output=True, text=True, timeout=60)
+        output = start_result.stdout.strip()
+
+        return Command(
+            update={
+                "messages": [ToolMessage(
+                    f"Permission fix completed on {container_name}:\n{output}\n\n"
+                    "Directories /rails/tmp, /rails/coverage, and /rails/log have been chowned to 1000:1000. "
+                    "You can now retry the command that failed with permission errors.",
+                    tool_call_id=tool_call_id,
+                )]
+            }
+        )
+    except Exception as e:
+        return Command(update={"messages": [ToolMessage(f"Error fixing permissions: {e}", tool_call_id=tool_call_id)]})
+
+
 @tool(description=BASH_COMMAND_FOR_RAILS_DESCRIPTION)
 def bash_command(
     command: str,
@@ -1129,9 +1200,8 @@ def bash_command(
         error_guidance = (
             "\n\n<CRITICAL_ERROR>\n"
             f"Detected critical error patterns: {', '.join(matched_patterns[:3])}\n"
-            "This error likely CANNOT be fixed from inside the container.\n"
-            "STOP trying to fix this with chmod/chown - these won't work on mounted volumes.\n"
-            "Tell the user this is a host permission issue and ask them to contact a LlamaPress admin.\n"
+            "This is a file permission issue. Use the fix_permissions tool to resolve it, then retry your command.\n"
+            "Do NOT try chmod/chown via bash_command — it runs as UID 1000 which can't fix root-owned files.\n"
             "</CRITICAL_ERROR>"
         )
         message_content = f"Command output:\n{result}{error_guidance}"

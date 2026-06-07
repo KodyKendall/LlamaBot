@@ -15,7 +15,7 @@ from typing import Literal
 
 from app.agents.leonardo.rails_agent.state import RailsAgentState
 from app.agents.leonardo.rails_agent.tools import (
-    write_todos, write_file, read_file, ls, edit_file, bash_command, tail_rails_logs, hard_restart_rails,
+    write_todos, write_file, read_file, ls, edit_file, bash_command, tail_rails_logs, hard_restart_rails, fix_permissions,
     glob_files, grep_files, internet_search,
     read_leonardo_md, write_leonardo_md, edit_leonardo_md,
     save_memory, list_memories, delete_memory,
@@ -89,7 +89,7 @@ def suggest_plan_mode(
 
 default_tools = [
     write_todos,
-    ls, read_file, write_file, edit_file, bash_command, tail_rails_logs, hard_restart_rails,
+    ls, read_file, write_file, edit_file, bash_command, tail_rails_logs, hard_restart_rails, fix_permissions,
     glob_files, grep_files, internet_search,
     read_leonardo_md, write_leonardo_md, edit_leonardo_md,
     save_memory, list_memories, delete_memory,

@@ -259,11 +259,6 @@ async def startup_event():
         except ImportError:
             logger.info("rails_ai_builder_agent not found, skipping")
 
-        try:
-            from app.agents.leonardo.rails_frontend_starter_agent.nodes import build_workflow as build_rails_frontend
-            app.state.compiled_graphs["rails_frontend_starter_agent"] = build_rails_frontend(checkpointer=checkpointer)
-        except ImportError:
-            logger.info("rails_frontend_starter_agent not found, skipping")
 
         try:
             from app.agents.leonardo.rails_ticket_mode_agent.nodes import build_workflow as build_rails_ticket_mode

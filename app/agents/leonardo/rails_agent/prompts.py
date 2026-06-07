@@ -82,41 +82,17 @@ Users can upload files directly from the chat interface. Files are saved to thes
 
 When a user says they uploaded a file, check these directories. From LlamaBot's mounted volume these are at `/app/app/rails/app/assets/images/` and `/app/app/rails/app/imports/`.
 
-### Permission Errors (CANNOT FIX FROM INSIDE)
+### Permission Errors
 
 If you see these errors:
 - `Permission denied`
 - `EACCES`
 - `chmod: changing permissions... Operation not permitted`
 
-**STOP. You cannot fix these from inside the container.**
+1. **First, try to fix it yourself** — call the `fix_permissions` tool, then retry your command. This tool runs as root inside the Rails container and resets ownership on tmp/, coverage/, and log/ directories.
+2. **If `fix_permissions` doesn't resolve it** — tell the user this is a host-level permission issue and ask them to contact a LlamaPress admin at support@llamapress.ai.
 
-The permissions are controlled by the host filesystem. Running `chmod`, `chown`, or `sudo` inside the container **will not work** because Docker volumes preserve host ownership.
-
-### What to Do When You Hit Permission Errors
-
-1. **STOP** - Do NOT retry chmod/chown commands (they won't work)
-2. **Tell the user** what happened and that this is a host permission issue
-3. **Try the admin fix below** - if that doesn't work, contact LlamaPress admin
-
-### Admin Fix for Permission Errors (Run as Root)
-
-If you see permission errors on `tmp/cache`, `coverage/`, or similar directories, run these commands:
-
-```bash
-# Remove stale cache folders and recreate with open permissions
-docker compose exec -u root llamapress rm -rf /rails/tmp/cache /rails/coverage
-docker compose exec -u root llamapress mkdir -p /rails/tmp/cache /rails/coverage
-docker compose exec -u root llamapress chmod -R 777 /rails/tmp/cache /rails/coverage
-```
-
-This works because these are **container-created directories**, not host-mounted files.
-
-### Never Attempt These (They Won't Work)
-- `chmod` on host-mounted source files (app/, config/, etc.)
-- `chown` on mounted volume files
-- `sudo` commands expecting root permissions
-- Repeatedly retrying the same permission-denied command
+Do NOT try chmod/chown via `bash_command` — it runs as UID 1000 which cannot fix root-owned files.
 
 ---
 
@@ -1521,29 +1497,19 @@ I think the issue might be [hypothesis]. Should I try [alternative], or do you h
 
 Never silently retry the same failing action. If something doesn't work, verbalize the problem and adjust.
 
-### Permission Error Detection (AUTO-STOP)
+### Permission Error Detection
 
-**If you see these errors in bash_command output, STOP IMMEDIATELY:**
+**If you see these errors in bash_command output:**
 - "Permission denied"
 - "EACCES"
 - "Operation not permitted"
 - "Read-only file system"
 
-These are **infrastructure issues**, NOT code bugs. Do NOT:
-- Run chmod/chown (won't work on mounted Docker volumes)
-- Retry the same command
-- Try different permission commands
-- Research "docker volume permissions"
+1. **Call `fix_permissions`** — this runs as root and resets ownership on tmp/, coverage/, and log/.
+2. **Retry your command** after fix_permissions succeeds.
+3. **If it still fails** — tell the user this is a host-level permission issue and ask them to contact a LlamaPress admin at support@llamapress.ai. Continue with other tasks that don't require the blocked operation.
 
-Instead:
-1. STOP and explain: "I hit a permission error. This is a host filesystem issue that I cannot fix from inside the container."
-2. Tell the user to contact a LlamaPress admin
-3. Continue with other tasks that don't require the blocked operation
-
-**Signs you're in a permission loop (STOP NOW):**
-- You've tried chmod or chown more than once
-- Same "Permission denied" error appears in multiple tool outputs
-- You're modifying test environment configs to work around permissions
+Do NOT run chmod/chown via `bash_command` — it runs as UID 1000 which cannot fix root-owned files.
 
 ### Research vs Action Balance - TWO DELEGATION TOOLS (See Sub-Agents Section Above)
 
@@ -1792,12 +1758,11 @@ Use this tool to execute a bash command in the Rails Docker container, especiall
 ## IMPORTANT: Docker Architecture
 
 This command runs in a DIFFERENT container (LlamaPress/Rails), not where you are running.
-Files at `/rails` are mounted from the host - **permission errors CANNOT be fixed from inside**.
 
 If you see "Permission denied" or "EACCES":
-1. **STOP** - do not retry chmod/chown commands (they won't work on mounted volumes)
-2. Tell the user this is a **host-level permission issue**
-3. Ask them to contact a LlamaPress admin
+1. Call `fix_permissions` to fix ownership on tmp/, coverage/, and log/ directories
+2. Retry your command
+3. If it still fails, tell the user it's a host-level permission issue and ask them to contact a LlamaPress admin at support@llamapress.ai
 
 Output is automatically truncated if it exceeds ~12000 characters, keeping the first 50% and last 50% to preserve both context and results.
 

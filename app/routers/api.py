@@ -796,7 +796,7 @@ async def update_leonardo_md(
 DEFAULT_VISIBLE_AGENTS = ["ticket", "engineer", "testing", "feedback", "user", "beginner"]
 
 # All valid agent mode keys (must match config.js agentModes)
-VALID_AGENT_MODES = ["ticket", "engineer", "feedback", "prototype", "ai_builder", "testing", "user", "beginner"]
+VALID_AGENT_MODES = ["ticket", "engineer", "feedback", "ai_builder", "testing", "user", "beginner"]
 
 
 class UpdateVisibleAgentsRequest(BaseModel):

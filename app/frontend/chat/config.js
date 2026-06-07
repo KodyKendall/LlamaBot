@@ -19,13 +19,12 @@ export const DEFAULT_CONFIG = {
 
   // Agent configuration
   agent: {
-    name: 'rails_frontend_starter_agent',
+    name: 'rails_beginner_agent',
     type: 'default'
   },
 
   // Agent mode mappings
   agentModes: {
-    prototype: 'rails_frontend_starter_agent',
     engineer: 'rails_agent',
     ai_builder: 'rails_ai_builder_agent',
     testing: 'rails_testing_agent',

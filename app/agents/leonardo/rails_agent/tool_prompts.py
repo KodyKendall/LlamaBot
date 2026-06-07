@@ -293,6 +293,13 @@ What this does NOT do:
 After calling this, the container is briefly unavailable (~10-30s). Tell the user the page will be unreachable for a few seconds and come back automatically. Do not retry `bash_command` immediately after — wait until the container is back.
 """
 
+FIX_PERMISSIONS_DESCRIPTION = """Fix file permission errors in the Rails container by resetting ownership on common problematic directories (tmp/, coverage/, log/).
+
+Use this tool when you encounter Permission denied, EACCES, or Operation not permitted errors — especially when running rspec tests, asset compilation, or other commands that write to tmp/cache, tmp/sprockets, or coverage/.
+
+This runs as root inside the Rails container to chown directories back to the correct user. It is safe to run multiple times (idempotent).
+"""
+
 TAIL_RAILS_LOGS_DESCRIPTION = """Read recent stdout/stderr logs from the Rails container via the Docker logs API.
 
 Works even when the Rails container is STOPPED or CRASHED — Docker keeps the logs around. This is the primary
