@@ -10,3 +10,9 @@
 - [x] Add Gemini 3.1 Flash Lite for Affordable Image Analysis
 - [x] Add in an update checker against mothership, so the user can pull down llamabot & llamapress updates without needing to use the terminal
 - [x] Add in a new route for transferring images from the mothership to here.
+
+0.5.0b: 
+- [x] Add in the ability to go back to a user's LlamaPress dashboard, "https://llamapress/user_instances"
+
+0.5.0c:
+- [] Add an inbox for users & Leos to send messages to LlamaPress Support team, and for the LP support team to respond to them.
