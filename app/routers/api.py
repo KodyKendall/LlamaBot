@@ -918,9 +918,17 @@ VALID_SITE_SETTINGS = {"show_token_wheel", "proactive_build_after_ticket"}
 
 
 def get_site_setting(session: Session, key: str, default: str = "false") -> str:
-    """Get a site setting value, returning default if not found."""
+    """Get a site setting value, returning default if not found.
+
+    Falls back to the default when the auth database is unavailable
+    (e.g. LEONARDO_DB_URI is not set), matching db.py's degradation.
+    """
     from app.models import SiteSetting
-    setting = session.get(SiteSetting, key)
+    try:
+        setting = session.get(SiteSetting, key)
+    except Exception as e:
+        logger.warning(f"Could not read site setting '{key}', using default '{default}': {e}")
+        return default
     return setting.value if setting else default
 
 

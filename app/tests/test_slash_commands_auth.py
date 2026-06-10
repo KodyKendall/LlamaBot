@@ -80,7 +80,9 @@ class TestSlashCommandsAuthorization:
         # Verify we get the expected commands
         command_names = [cmd["name"] for cmd in data]
         assert "backup" in command_names
-        assert "bash" in command_names
+        # "bash" was removed (arbitrary command execution); "restart" remains a core command
+        assert "restart" in command_names
+        assert "bash" not in command_names
 
     def test_get_slash_commands_as_admin(self, admin_user):
         """Admin users can list slash commands."""
