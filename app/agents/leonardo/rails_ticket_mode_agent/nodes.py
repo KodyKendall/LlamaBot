@@ -31,6 +31,7 @@ import base64
 from app.agents.leonardo.rails_agent.state import RailsAgentState
 from app.agents.leonardo.rails_agent.tools import (
     write_todos, ls, read_file, write_file, edit_file, search_file, bash_command,
+    fix_permissions,
     rails_api_sh,
     save_memory, list_memories, delete_memory,
 )
@@ -249,6 +250,7 @@ default_tools = [
     write_todos,
     ls, read_file, write_file, edit_file, search_file,
     bash_command,
+    fix_permissions,     # Fix permission issues in Rails container
     delegate_task,       # Sub-agent delegation for focused research tasks
     delegate_research,   # Read-only sub-agent for codebase investigation
     write_final_ticket,  # Creates ticket directly in Rails database

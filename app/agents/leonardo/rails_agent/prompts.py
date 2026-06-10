@@ -88,11 +88,17 @@ If you see these errors:
 - `Permission denied`
 - `EACCES`
 - `chmod: changing permissions... Operation not permitted`
+- Sprockets cache errors like `apply2files - /rails/tmp/cache/assets/sprockets/...`
 
-1. **First, try to fix it yourself** — call the `fix_permissions` tool, then retry your command. This tool runs as root inside the Rails container and resets ownership on tmp/, coverage/, and log/ directories.
-2. **If `fix_permissions` doesn't resolve it** — tell the user this is a host-level permission issue and ask them to contact a LlamaPress admin at support@llamapress.ai.
+1. **Call `fix_permissions` immediately** — this is the ONLY correct fix. It runs as root inside the Rails container and resets ownership on tmp/, coverage/, and log/ directories.
+2. **Retry your command** after fix_permissions succeeds.
+3. **If it still fails** — tell the user this is a host-level permission issue and ask them to contact a LlamaPress admin at support@llamapress.ai.
 
-Do NOT try chmod/chown via `bash_command` — it runs as UID 1000 which cannot fix root-owned files.
+**NEVER do any of these to "fix" permission errors:**
+- ❌ Do NOT disable sprockets cache in `config/environments/test.rb` or any environment file
+- ❌ Do NOT modify Rails config files to work around permission errors
+- ❌ Do NOT run chmod/chown via `bash_command` — it runs as UID 1000 which cannot fix root-owned files
+- ❌ Do NOT try `sudo` — it's not available in the container
 
 ---
 
@@ -1504,12 +1510,13 @@ Never silently retry the same failing action. If something doesn't work, verbali
 - "EACCES"
 - "Operation not permitted"
 - "Read-only file system"
+- Sprockets cache errors (`apply2files`)
 
 1. **Call `fix_permissions`** — this runs as root and resets ownership on tmp/, coverage/, and log/.
 2. **Retry your command** after fix_permissions succeeds.
 3. **If it still fails** — tell the user this is a host-level permission issue and ask them to contact a LlamaPress admin at support@llamapress.ai. Continue with other tasks that don't require the blocked operation.
 
-Do NOT run chmod/chown via `bash_command` — it runs as UID 1000 which cannot fix root-owned files.
+**NEVER work around permission errors by modifying config files** (e.g., disabling sprockets cache in test.rb). Always use `fix_permissions` — it's the only correct fix. Do NOT run chmod/chown via `bash_command` — it runs as UID 1000 which cannot fix root-owned files.
 
 ### Research vs Action Balance - TWO DELEGATION TOOLS (See Sub-Agents Section Above)
 

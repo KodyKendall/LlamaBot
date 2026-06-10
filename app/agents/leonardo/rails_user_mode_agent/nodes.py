@@ -25,6 +25,7 @@ from datetime import date
 from app.agents.leonardo.rails_agent.state import RailsAgentState
 from app.agents.leonardo.rails_agent.tools import (
     bash_command,
+    fix_permissions,
     save_memory, list_memories, delete_memory,
     read_leonardo_md, edit_leonardo_md, write_leonardo_md,
 )
@@ -119,6 +120,7 @@ def get_cached_system_prompt():
 # Tools for database mode: bash_command + research + memory + project context
 default_tools = [
     bash_command,       # Rails console/runner for ActiveRecord operations
+    fix_permissions,    # Fix permission issues in Rails container
     delegate_research,  # Read-only sub-agent for codebase investigation
     save_memory, list_memories, delete_memory,  # Long-term memory
     read_leonardo_md, edit_leonardo_md, write_leonardo_md,  # Project context file

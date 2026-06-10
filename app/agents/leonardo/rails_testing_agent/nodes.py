@@ -31,6 +31,7 @@ from datetime import date
 from app.agents.leonardo.rails_agent.state import RailsAgentState
 from app.agents.leonardo.rails_agent.tools import (
     write_todos, ls, read_file, write_file, edit_file, search_file, bash_command,
+    fix_permissions,
     # Agent file tools (for reading test patterns from other agents)
     ls_agents, read_agent_file, write_agent_file, edit_agent_file,
     read_langgraph_json, edit_langgraph_json
@@ -175,6 +176,7 @@ default_tools = [
     write_todos,
     ls, read_file, write_file, edit_file, search_file,
     bash_command,  # For running rspec tests
+    fix_permissions,  # Fix permission issues in Rails container
     delegate_research,  # Read-only sub-agent for codebase investigation
     # Agent file tools (for reference/reading patterns)
     ls_agents, read_agent_file, write_agent_file, edit_agent_file,

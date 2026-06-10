@@ -295,9 +295,23 @@ After calling this, the container is briefly unavailable (~10-30s). Tell the use
 
 FIX_PERMISSIONS_DESCRIPTION = """Fix file permission errors in the Rails container by resetting ownership on common problematic directories (tmp/, coverage/, log/).
 
-Use this tool when you encounter Permission denied, EACCES, or Operation not permitted errors — especially when running rspec tests, asset compilation, or other commands that write to tmp/cache, tmp/sprockets, or coverage/.
+## WHEN TO USE THIS TOOL (MANDATORY)
 
-This runs as root inside the Rails container to chown directories back to the correct user. It is safe to run multiple times (idempotent).
+Call this tool IMMEDIATELY when you see ANY of these errors:
+- "Permission denied" (e.g., sprockets cache, tmp/cache/assets, coverage/)
+- "EACCES"
+- "Operation not permitted"
+- "apply2files" errors from sprockets cache
+
+This is the ONLY correct fix for permission errors. After calling this tool, retry your original command.
+
+## NEVER DO THESE INSTEAD:
+- ❌ Do NOT disable sprockets cache in config/environments/test.rb or any environment file
+- ❌ Do NOT modify Rails config files to work around permission errors
+- ❌ Do NOT run chmod/chown via bash_command — it runs as UID 1000 which cannot fix root-owned files
+- ❌ Do NOT try `sudo` — it's not available in the container
+
+These are all anti-patterns. The fix_permissions tool runs as root inside the Rails container and resets ownership. That's the correct solution. It is safe to run multiple times (idempotent).
 """
 
 TAIL_RAILS_LOGS_DESCRIPTION = """Read recent stdout/stderr logs from the Rails container via the Docker logs API.

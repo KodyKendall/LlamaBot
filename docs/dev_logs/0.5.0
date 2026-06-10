@@ -15,4 +15,10 @@
 - [x] Add in the ability to go back to a user's LlamaPress dashboard, "https://llamapress/user_instances"
 
 0.5.0c:
+- [x] add fix_permissions tool to additional agent modes
+
+0.5.0d: 
+- [x] improve prompts based on the fix_permissions role
+ 
+future:
 - [] Add an inbox for users & Leos to send messages to LlamaPress Support team, and for the LP support team to respond to them.

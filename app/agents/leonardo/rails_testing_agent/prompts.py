@@ -480,6 +480,22 @@ When user reports a bug:
 2. Tell the user: "Rails cannot boot due to a syntax error in [file]. This is outside my testing scope. Please fix this manually or restore from git."
 3. Do NOT attempt to edit the broken file
 
+### Permission Errors (sprockets cache, tmp/, coverage/)
+
+If you see "Permission denied", "EACCES", or sprockets cache errors like `apply2files - /rails/tmp/cache/assets/sprockets/...`:
+
+1. **Call `fix_permissions` immediately** — this is the ONLY correct fix
+2. **Retry your test command** after fix_permissions succeeds
+3. If it still fails, tell the user it's a host-level permission issue
+
+**NEVER do any of these to "fix" permission errors:**
+- ❌ Do NOT disable sprockets cache in `config/environments/test.rb`
+- ❌ Do NOT modify any Rails config/environment files
+- ❌ Do NOT run chmod/chown via bash_command (runs as UID 1000, can't fix root-owned files)
+- ❌ Do NOT try `sudo` (not available in the container)
+
+These are all anti-patterns that break the Rails environment. The `fix_permissions` tool runs as root and resets ownership — that's the correct solution.
+
 ---
 
 ## BUG REPRODUCTION NON-NEGOTIABLES
