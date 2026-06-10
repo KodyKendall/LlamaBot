@@ -1,200 +1,92 @@
-# CI Workflow for Leonardo
-# Runs lint + parallelized test suites on every push and pull request
+# .github/workflows/ci.yml
 
-name: Leonardo CI Tests
+name: LlamaBot CI Tests
 
+# Controls when the action will run.
 on:
+  # Triggers the workflow on push events but only for the "main" branch
   push:
-    branches: [main]
+    branches: [ "main" ]
+  # Triggers the workflow on pull request events targeting the "main" branch
   pull_request:
-    branches: [main]
-
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+    branches: [ "main" ]
 
 jobs:
-  # ─── Lint ────────────────────────────────────────────────
-  # lint:
-  #   name: ERB Lint
-  #   runs-on: ubuntu-latest
-  #   container:
-  #     image: kody06/llamapress-simple:0.4.0b
-  #     env:
-  #       RAILS_ENV: test
-  #   steps:
-  #     - uses: actions/checkout@v4
-
-  #     - name: Copy overlay files
-  #       run: |
-  #         cp -r rails/app/* /rails/app/
-  #         cp rails/.erb-lint.yml /rails/.erb-lint.yml
-
-  #     - name: ERB Lint - Tender Builder (Critical)
-  #       continue-on-error: true
-  #       run: |
-  #         cd /rails
-  #         bundle exec erb_lint \
-  #           app/views/tenders/builder.html.erb \
-  #           app/views/tenders/_builder_header.html.erb \
-  #           app/views/tenders/_builder_summary.html.erb \
-  #           app/views/tenders/_p_and_g_summary.html.erb \
-  #           app/views/tenders/_shop_drawings.html.erb \
-  #           app/views/tenders/_total_tonnes.html.erb \
-  #           app/views/tenders/_rate_per_tonne.html.erb \
-  #           app/views/tenders/_grand_total.html.erb \
-  #           app/views/tender_line_items/_tender_line_item.html.erb
-
-  #     - name: ERB Lint - BOQ Show (Critical)
-  #       continue-on-error: true
-  #       run: |
-  #         cd /rails
-  #         bundle exec erb_lint app/views/boqs/show.html.erb
-
-  #     - name: ERB Lint - All Files
-  #       continue-on-error: true
-  #       run: |
-  #         cd /rails
-  #         bundle exec erb_lint --lint-all
-
-  # ─── Unit Specs: Models (heaviest unit bucket) ──────────
-  unit-models:
-    name: Unit Specs (Models)
+  # This workflow contains a single job called "test"
+  test:
+    # The type of runner that the job will run on
     runs-on: ubuntu-latest
+
+    # These services are spun up as separate containers and are available
+    # to the main job container on the same Docker network.
+    # This replaces the `db` and `redis` services from your docker-compose.yml.
     services:
       postgres:
         image: postgres:16
         env:
+          POSTGRES_DB: llamapress_production
           POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: password
-          POSTGRES_DB: llamapress_test
-        ports:
-          - 5432:5432
+          # Using 'trust' is insecure for production but simplifies CI.
+          # It tells Postgres to allow any connection from its network without a password.
+          POSTGRES_HOST_AUTH_METHOD: trust
+        # Health check options to ensure postgres is ready before starting tests.
+        # GitHub Actions uses 'options' instead of the 'healthcheck' key.
         options: >-
-          --health-cmd="pg_isready -U postgres"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=5
-    container:
-      image: kody06/llamapress-simple:0.4.0b
-      env:
-        RAILS_ENV: test
-        DB_HOST: postgres
-        POSTGRES_PASSWORD: password
+          --health-cmd "pg_isready -U postgres -d llamapress_production"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          # Maps port 5432 on the runner to port 5432 on the postgres container
+          - 5432:5432
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+
     steps:
-      - uses: actions/checkout@v4
+      # 1. Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Copy overlay files
+      # 2. Create Docker Compose override file for CI
+      # This step ensures that we build the image from the Dockerfile in the repo
+      # instead of pulling a potentially outdated one from Docker Hub.
+      - name: Create Docker Compose override file for CI
         run: |
-          cp -r rails/app/* /rails/app/
-          cp -r rails/db/* /rails/db/
-          cp -r rails/spec /rails/
-          cp rails/config/routes.rb /rails/config/routes.rb
-          cp rails/config/database.yml /rails/config/database.yml
-
-      - name: Setup database
+          cat <<EOF > docker-compose.ci.yml
+          services:
+            llamabot:
+              build:
+                context: .
+                dockerfile: Dockerfile
+          EOF
+      
+      # 3. Create .env file from GitHub Secrets
+      # This securely injects your secrets into an .env file that docker-compose will use.
+      - name: Create .env file
         run: |
-          cd /rails
-          bundle exec rails db:create db:schema:load db:seed
+          echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" >> .env
+          # No POSTGRES_PASSWORD needed now. The DB_URI points to the 'postgres' service container.
+          echo "DB_URI=postgresql://postgres@postgres:5432/llamapress_production" >> .env
+          echo "LANGCHAIN_TRACING_V2=false" >> .env
+          # Add any other required environment variables here
 
-      - name: Run model specs
-        run: |
-          cd /rails
-          bundle exec rspec spec/models --format documentation
+      # 4. Build the Docker image using docker-compose
+      # This command starts the llamabot service and its dependencies,
+      # runs the test script, and then exits.
+      - name: Build the llamabot service
+        # Use both the original and the CI override file. The 'build' context from
+        # the CI file will override the 'image' from the main file.
+        run: docker compose -f docker-compose.yml -f docker-compose.ci.yml build llamabot
 
-  # ─── Request Specs (sharded across 2 runners) ──────────
-  request-specs:
-    name: Request Specs (Shard ${{ matrix.shard }})
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [0, 1]
-    services:
-      postgres:
-        image: postgres:16
+      # 5. Run the tests
+      # This command starts the llamabot service and its dependencies,
+      # runs the test script, and then exits.
+      - name: Run Pytest suite
         env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: password
-          POSTGRES_DB: llamapress_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd="pg_isready -U postgres"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=5
-    container:
-      image: kody06/llamapress-simple:0.4.0b
-      env:
-        RAILS_ENV: test
-        DB_HOST: postgres
-        POSTGRES_PASSWORD: password
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Copy overlay files
+          POSTGRES_HOST_AUTH_METHOD: trust   # ✅ ensures db container becomes healthy
+          POSTGRES_PASSWORD: postgres     # set password for db container
         run: |
-          cp -r rails/app/* /rails/app/
-          cp -r rails/db/* /rails/db/
-          cp -r rails/spec /rails/
-          cp rails/config/routes.rb /rails/config/routes.rb
-          cp rails/config/database.yml /rails/config/database.yml
-
-      - name: Setup database
-        run: |
-          cd /rails
-          bundle exec rails db:create db:schema:load db:seed
-
-      - name: Run request specs (shard ${{ matrix.shard }})
-        run: |
-          cd /rails
-          files=$(find spec/requests -name '*_spec.rb' | sort | awk "NR % 2 == ${{ matrix.shard }}")
-          echo "Running shard ${{ matrix.shard }} with $(echo "$files" | wc -l) files"
-          bundle exec rspec $files --format documentation
-
-  # ─── Browser Specs (Capybara/Cuprite) ───────────────────
-  browser-specs:
-    name: Browser Specs (System + Feature)
-    runs-on: ubuntu-latest
-    continue-on-error: true  # Temporary quarantine — remove once browser specs are stabilized
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: password
-          POSTGRES_DB: llamapress_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd="pg_isready -U postgres"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=5
-    container:
-      image: kody06/llamapress-simple:0.4.0b
-      env:
-        RAILS_ENV: test
-        DB_HOST: postgres
-        POSTGRES_PASSWORD: password
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Copy overlay files
-        run: |
-          cp -r rails/app/* /rails/app/
-          cp -r rails/db/* /rails/db/
-          cp -r rails/spec /rails/
-          cp rails/config/routes.rb /rails/config/routes.rb
-          cp rails/config/database.yml /rails/config/database.yml
-
-      - name: Setup database
-        run: |
-          cd /rails
-          bundle exec rails db:create db:schema:load db:seed
-
-      - name: Run browser specs
-        run: |
-          cd /rails
-          bundle exec rspec spec/system spec/features --format documentation
+          docker compose -f docker-compose.yml -f docker-compose.ci.yml up --wait db
+          docker compose -f docker-compose.yml -f docker-compose.ci.yml run --rm llamabot python run_tests.py all
