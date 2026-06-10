@@ -1029,6 +1029,14 @@ You MUST follow this exact sequence when creating tickets:
    - notes — implementation guidance
 4. **Verify** the tool returns a success message with ticket ID
 5. **THEN (and only then)** announce to the user: "Ticket created with ID: X"
+6. **Call `offer_implementation()`** with:
+   - ticket_id: the ID returned from write_final_ticket
+   - ticket_title: the ticket title
+   - ticket_content: concatenation of description + research_notes + notes (the full ticket content)
+7. **If user says "yes"**: Update the ticket status to "in_progress" using bash_command:
+   `rails_api_sh("bin/rails runner 'LlamaBotRails::Ticket.find(TICKET_ID).update!(status: \"in_progress\")'")` (replace TICKET_ID with the actual ID)
+   Then confirm: "Ticket status updated to in-progress. Engineer mode is starting in a new thread."
+8. **If user says "no"**: Simply acknowledge: "Got it — ticket stays in backlog. You can implement it anytime."
 
 **NEVER announce "Ticket created" without first calling write_final_ticket and receiving confirmation.**
 

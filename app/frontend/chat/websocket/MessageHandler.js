@@ -120,6 +120,8 @@ export class MessageHandler {
       this.handleQuestionRequest(data);
     } else if (data.type === 'suggest_mode_switch') {
       this.handleSuggestModeSwitch(data);
+    } else if (data.type === 'implement_ticket') {
+      this.handleImplementTicket(data);
     } else {
       this.handleGenericMessage(data);
     }
@@ -705,6 +707,95 @@ export class MessageHandler {
           window.chatApp.webSocketManager.send({
             type: 'question_response',
             answer: 'no, continue in beginner mode',
+            thread_id,
+            agent_name,
+          });
+        }
+      });
+    }, 0);
+  }
+
+  /**
+   * Handle implement_ticket (ticket agent offers to switch to engineer mode)
+   */
+  handleImplementTicket(data) {
+    this.finalizeCurrentThinking();
+    const { ticket_id, ticket_title, ticket_content, thread_id, agent_name } = data;
+
+    // Helper: perform the actual switch to engineer mode and start building
+    const doImplement = (card) => {
+      if (card) {
+        card.classList.add('answered');
+        card.querySelectorAll('button').forEach(b => b.disabled = true);
+      }
+
+      // 1. Resume ticket agent with "yes" (it will update ticket status)
+      if (window.chatApp?.webSocketManager) {
+        window.chatApp.webSocketManager.send({
+          type: 'question_response',
+          answer: 'yes',
+          thread_id,
+          agent_name,
+        });
+      }
+
+      // 2. Switch agent mode to engineer
+      const agentSelect = window.chatApp?.elements?.agentModeSelect;
+      if (agentSelect) {
+        agentSelect.value = 'engineer';
+        agentSelect.dispatchEvent(new Event('change'));
+      }
+
+      // 3. Create new thread
+      window.dispatchEvent(new CustomEvent('createNewThread'));
+
+      // 4. Auto-send ticket content to engineer agent (300ms delay for thread setup)
+      setTimeout(() => {
+        const input = window.chatApp?.elements?.messageInput;
+        if (input) {
+          input.value = `## Implement Ticket #${ticket_id}: ${ticket_title}\n\n${ticket_content}`;
+          window.chatApp.sendMessageWithDebugInfo();
+        }
+      }, 300);
+    };
+
+    // If proactive build is enabled, skip the confirmation and auto-implement
+    if (window.LLAMABOT_PROACTIVE_BUILD) {
+      this.messageRenderer.addMessage(
+        '<div class="plan-question-card answered"><div class="plan-question-text">Automatically switching to Engineer mode to implement this ticket...</div></div>',
+        'implement_ticket', null
+      );
+      doImplement(null);
+      return;
+    }
+
+    const switchId = `implement-${Date.now()}`;
+    const html = `
+      <div class="plan-question-card" data-switch-id="${switchId}">
+        <div class="plan-question-text">Do you want me to switch to Engineer mode and implement this ticket?</div>
+        <div class="plan-question-options">
+          <button class="plan-option-btn plan-switch-btn" data-action="implement">
+            <i class="fa-solid fa-code"></i> Yes, implement this
+          </button>
+          <button class="plan-skip-btn" data-action="skip">No thanks</button>
+        </div>
+      </div>
+    `;
+    this.messageRenderer.addMessage(html, 'implement_ticket', null);
+
+    setTimeout(() => {
+      const card = document.querySelector(`[data-switch-id="${switchId}"]`);
+      if (!card) return;
+
+      card.querySelector('[data-action="implement"]')?.addEventListener('click', () => doImplement(card));
+
+      card.querySelector('[data-action="skip"]')?.addEventListener('click', () => {
+        card.classList.add('answered');
+        card.querySelectorAll('button').forEach(b => b.disabled = true);
+        if (window.chatApp?.webSocketManager) {
+          window.chatApp.webSocketManager.send({
+            type: 'question_response',
+            answer: 'no',
             thread_id,
             agent_name,
           });

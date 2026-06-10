@@ -58,7 +58,7 @@ export class MessageRenderer {
       return this.renderApprovalMessage(content);
     }
 
-    if (type === 'question_request' || type === 'suggest_mode_switch') {
+    if (type === 'question_request' || type === 'suggest_mode_switch' || type === 'implement_ticket') {
       return this.renderInterruptMessage(content);
     }
 

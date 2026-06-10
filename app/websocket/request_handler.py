@@ -360,7 +360,8 @@ class RequestHandler:
                         # - DeepSeek: reasoning_content in additional_kwargs (separate from content)
                         content = base_message_as_dict["content"]
                         if logger.isEnabledFor(logging.DEBUG):
-                            logger.debug(f"🍅 Content type: {type(content)}, Content: {content}")
+                            True
+                            # logger.debug(f"🍅 Content type: {type(content)}, Content: {content}")
 
                         # Separate thinking/reasoning content from regular text content
                         # This allows the frontend to display thinking in a dedicated area
@@ -373,7 +374,7 @@ class RequestHandler:
                         deepseek_reasoning = additional_kwargs.get("reasoning_content")
                         if deepseek_reasoning:
                             thinking_content = [{"type": "thinking", "thinking": deepseek_reasoning}]
-                            logger.info(f"🧠 DeepSeek reasoning_content: {deepseek_reasoning[:100]}...")
+                            # logger.info(f"🧠 DeepSeek reasoning_content: {deepseek_reasoning[:100]}...")
 
                         if isinstance(content, list):
                             # Extract thinking/reasoning blocks (varies by provider)
@@ -426,7 +427,7 @@ class RequestHandler:
 
                     elif is_this_chunk_an_update_stream_type: # This means that LangGraph has given us a state update. This will often include a new message from the AI.
                         state_object = chunk[2]
-                        logger.info(f"🧠🧠🧠 LangGraph Output (State Update): {state_object}")
+                        # logger.info(f"🧠🧠🧠 LangGraph Output (State Update): {state_object}")
 
                         # Handle dynamic agent key - look for messages in any nested dict
                         messages = None
@@ -457,8 +458,8 @@ class RequestHandler:
                                                 tool_call_object = tool_calls[0]
                                                 tool_call_name = tool_call_object.get("name")
                                                 tool_call_args = tool_call_object.get("args")
-                                                logger.info(f"🔨🔨🔨 Tool Call Name: {tool_call_name}")
-                                                logger.info(f"🔨🔨🔨 Tool Call Args: {tool_call_args}")
+                                                # logger.info(f"🔨🔨🔨 Tool Call Name: {tool_call_name}")
+                                                # logger.info(f"🔨🔨🔨 Tool Call Args: {tool_call_args}")
 
                                     # AIMessage is not serializable to JSON, so we need to convert it to a string.
                                     messages_as_string = [msg.content if hasattr(msg, 'content') else str(msg) for msg in messages]
@@ -481,7 +482,7 @@ class RequestHandler:
                                             "output_tokens": usage_metadata.get("output_tokens", 0) if isinstance(usage_metadata, dict) else getattr(usage_metadata, 'output_tokens', 0),
                                             "total_tokens": usage_metadata.get("total_tokens", 0) if isinstance(usage_metadata, dict) else getattr(usage_metadata, 'total_tokens', 0)
                                         }
-                                        logger.info(f"📊 Token usage: {token_usage}")
+                                        # logger.info(f"📊 Token usage: {token_usage}")
 
                                     # Only send if WebSocket is still open
                                     if self._is_websocket_open(websocket):
@@ -513,13 +514,15 @@ class RequestHandler:
                                                     model=model_name,
                                                     token_usage=token_usage,
                                                 ))
-                        logger.info(f"LangGraph Output (State Update): {chunk}")
+                        
+                        # logger.info(f"LangGraph Output (State Update): {chunk}")
 
                         # chunk will look like this:
                         # {'llamabot': {'messages': [AIMessage(content='Hello! I hear you loud and clear. I'm LlamaBot, your full-stack Rails developer assistant. How can I help you today?', additional_kwargs={}, response_metadata={'finish_reason': 'stop', 'model_name': 'o4-mini-2025-04-16', 'service_tier': 'default'}, id='run--ce385bc4-fecb-4127-81d2-1da5814874f8')]}}
 
                     else:
-                        logger.info(f"Workflow output: {chunk}")
+                        True
+                        # logger.info(f"Workflow output: {chunk}")
 
                 print("🎏🎏🎏 LangGraph astream is finished!")
 
@@ -742,6 +745,18 @@ class RequestHandler:
                             "agent_name": message_data.get('agent_name'),
                         })
                         logger.info("Graph interrupted for mode switch suggestion")
+
+                    # Implement ticket interrupt - offer to switch to engineer mode
+                    elif isinstance(interrupt_value, dict) and interrupt_value.get("type") == "implement_ticket":
+                        await websocket.send_json({
+                            "type": "implement_ticket",
+                            "ticket_id": interrupt_value.get("ticket_id"),
+                            "ticket_title": interrupt_value.get("ticket_title", ""),
+                            "ticket_content": interrupt_value.get("ticket_content", ""),
+                            "thread_id": message_data.get('thread_id'),
+                            "agent_name": message_data.get('agent_name'),
+                        })
+                        logger.info("Graph interrupted for implement ticket offer")
 
                     # HITL approval interrupt
                     elif isinstance(interrupt_value, dict) and "action_requests" in interrupt_value:

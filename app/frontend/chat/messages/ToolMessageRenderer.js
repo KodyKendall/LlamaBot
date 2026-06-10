@@ -47,9 +47,9 @@ export class ToolMessageRenderer {
       }
     }
 
-    // ask_user_question and suggest_plan_mode are handled via WebSocket interrupt messages
-    // (question_request / suggest_mode_switch), not as tool renders. Hide them here.
-    if (toolName === 'ask_user_question' || toolName === 'suggest_plan_mode') {
+    // ask_user_question, suggest_plan_mode, and offer_implementation are handled via WebSocket
+    // interrupt messages (question_request / suggest_mode_switch / implement_ticket), not as tool renders. Hide them here.
+    if (toolName === 'ask_user_question' || toolName === 'suggest_plan_mode' || toolName === 'offer_implementation') {
       return `<div data-llamabot="tool-hidden" data-tool-name="${toolName}"></div>`;
     }
 

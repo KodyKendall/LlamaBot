@@ -90,6 +90,7 @@ async def root(request: Request):
         # Read site settings
         from app.routers.api import get_site_setting
         show_token_wheel = get_site_setting(session, "show_token_wheel", "false") == "true"
+        proactive_build = get_site_setting(session, "proactive_build_after_ticket", "false") == "true"
 
         # Inject user role, visible agents, and PostHog config as global variables for the frontend
         posthog_key = os.getenv("LLAMABOT_POSTHOG_KEY", "")
@@ -106,6 +107,7 @@ window.LLAMABOT_POSTHOG_HOST = {json.dumps(posthog_host) if posthog_host else "n
 window.LLAMAPRESS_USER_ID = {json.dumps(llamapress_user_id) if llamapress_user_id else "null"};
 window.LLAMAPRESS_EMAIL = {json.dumps(llamapress_email) if llamapress_email else "null"};
 window.ENABLE_GITHUB_BUTTON = {"true" if enable_github_button else "false"};
+window.LLAMABOT_PROACTIVE_BUILD = {"true" if proactive_build else "false"};
 </script>'''
         html = html.replace('</head>', f'{config_script}</head>')
         return HTMLResponse(content=html)
@@ -1447,6 +1449,7 @@ async def settings_page(
     """Serve the settings page."""
     from app.routers.api import get_site_setting
     show_token_wheel = get_site_setting(session, "show_token_wheel", "false") == "true"
+    proactive_build = get_site_setting(session, "proactive_build_after_ticket", "false") == "true"
     is_engineer_or_admin = current_user.role == "engineer" or current_user.is_admin
 
     html = f"""
@@ -1688,6 +1691,23 @@ async def settings_page(
             </div>
         </div>'''}
 
+        {"" if not is_engineer_or_admin else f'''<div class="card">
+            <div class="card-header">Automation</div>
+            <div class="menu-item" style="cursor: default;">
+                <i class="fa-solid fa-bolt"></i>
+                <span>Proactively Build After Ticket</span>
+                <label style="position: relative; display: inline-block; width: 44px; height: 24px;">
+                    <input type="checkbox" id="proactiveBuildToggle" style="opacity: 0; width: 0; height: 0;"
+                        onchange="toggleProactiveBuild(this.checked)">
+                    <span style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #555; border-radius: 24px; transition: 0.3s;"></span>
+                    <span id="proactiveBuildSlider" style="position: absolute; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; border-radius: 50%; transition: 0.3s;"></span>
+                </label>
+            </div>
+            <div style="padding: 4px 0 0 36px; font-size: 0.75rem; color: rgba(255,255,255,0.35);">
+                Automatically switches to Engineer mode and starts building after a ticket is written
+            </div>
+        </div>'''}
+
         <div class="card">
             <button class="logout-btn" onclick="logout()">
                 <i class="fa-solid fa-right-from-bracket"></i>
@@ -1771,6 +1791,38 @@ async def settings_page(
 
         function updateTokenWheelSlider(enabled) {{
             const slider = document.getElementById('tokenWheelSlider');
+            if (!slider) return;
+            const track = slider.previousElementSibling;
+            if (enabled) {{
+                track.style.backgroundColor = '#8b5cf6';
+                slider.style.transform = 'translateX(20px)';
+            }} else {{
+                track.style.backgroundColor = '#555';
+                slider.style.transform = 'translateX(0)';
+            }}
+        }}
+
+        // Proactive build toggle
+        (function() {{
+            const toggle = document.getElementById('proactiveBuildToggle');
+            const slider = document.getElementById('proactiveBuildSlider');
+            if (!toggle || !slider) return;
+            const isEnabled = {'true' if proactive_build else 'false'};
+            toggle.checked = isEnabled;
+            updateProactiveBuildSlider(isEnabled);
+        }})();
+
+        function toggleProactiveBuild(enabled) {{
+            updateProactiveBuildSlider(enabled);
+            fetch('/api/site-settings/proactive_build_after_ticket', {{
+                method: 'PUT',
+                headers: {{ 'Content-Type': 'application/json' }},
+                body: JSON.stringify({{ value: enabled ? 'true' : 'false' }})
+            }});
+        }}
+
+        function updateProactiveBuildSlider(enabled) {{
+            const slider = document.getElementById('proactiveBuildSlider');
             if (!slider) return;
             const track = slider.previousElementSibling;
             if (enabled) {{

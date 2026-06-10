@@ -914,7 +914,7 @@ async def set_visible_agents(
 
 # ============== Site Settings API ==============
 
-VALID_SITE_SETTINGS = {"show_token_wheel"}
+VALID_SITE_SETTINGS = {"show_token_wheel", "proactive_build_after_ticket"}
 
 
 def get_site_setting(session: Session, key: str, default: str = "false") -> str:
