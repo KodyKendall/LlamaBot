@@ -4,9 +4,11 @@ name: LlamaBot CI Tests
 
 # Controls when the action will run.
 on:
-  # Triggers the workflow on push events but only for the "main" branch
+  # Run on pushes to main AND the active dev branches (0.4.1-alpha etc.) —
+  # development happens on *-alpha branches, so CI must run there, not just
+  # on the (often stale) main branch.
   push:
-    branches: [ "main" ]
+    branches: [ "main", "*-alpha" ]
   # Triggers the workflow on pull request events targeting the "main" branch
   pull_request:
     branches: [ "main" ]
@@ -90,3 +92,103 @@ jobs:
         run: |
           docker compose -f docker-compose.yml -f docker-compose.ci.yml up --wait db
           docker compose -f docker-compose.yml -f docker-compose.ci.yml run --rm llamabot python run_tests.py all
+
+  # Full-stack e2e against the real Leonardo composition: builds the llamabot
+  # image from THIS commit, drops it into Leonardo's docker-compose stack
+  # (pinned llamapress image), and drives a real browser through login →
+  # WebSocket → agent round-trip using the deterministic fake-llm model.
+  # Catches chat-UI/WS/agent-routing regressions that unit tests can't see.
+  e2e:
+    name: E2E vs Leonardo stack (mock LLM)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout LlamaBot (this commit)
+        uses: actions/checkout@v4
+
+      - name: Build llamabot image from this commit
+        run: docker build -t llamabot:ci-e2e .
+
+      - name: Checkout Leonardo (e2e harness + stack definition)
+        uses: actions/checkout@v4
+        with:
+          repository: KodyKendall/Leonardo
+          path: leonardo
+
+      - name: Configure Leonardo stack to use this commit's image
+        working-directory: leonardo
+        run: |
+          cat > docker-compose.ci-llamabot.yml <<'OVERRIDE'
+          services:
+            llamabot:
+              image: llamabot:ci-e2e
+          OVERRIDE
+          cp .env.example .env
+          sed -i 's/^LANGSMITH_TRACING=.*/LANGSMITH_TRACING=false/' .env
+          sed -i 's/^LLAMABOT_ENABLE_FAKE_LLM=.*/LLAMABOT_ENABLE_FAKE_LLM=true/' .env
+
+      - name: Start database and create llamabot auth DB
+        working-directory: leonardo
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.ci-llamabot.yml up -d --wait db redis
+          docker compose -f docker-compose.yml -f docker-compose.ci-llamabot.yml exec -T db \
+            psql -U postgres -tc "SELECT 1 FROM pg_database WHERE datname='llamabot_production'" | grep -q 1 || \
+          docker compose -f docker-compose.yml -f docker-compose.ci-llamabot.yml exec -T db \
+            psql -U postgres -c "CREATE DATABASE llamabot_production"
+
+      - name: Start the stack
+        working-directory: leonardo
+        run: docker compose -f docker-compose.yml -f docker-compose.ci-llamabot.yml up -d llamapress llamabot
+
+      - name: Wait for chat UI (llamabot) and Rails (llamapress)
+        working-directory: leonardo
+        run: |
+          for i in $(seq 1 60); do
+            bot=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/login || true)
+            rails=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/up || true)
+            echo "attempt $i: llamabot /login -> ${bot:-none}, rails /up -> ${rails:-none}"
+            # /login is 200 once users exist, 302 (-> /register) on a fresh
+            # instance - both mean the app is up.
+            case "$bot" in 200|302) if [ "$rails" = "200" ]; then exit 0; fi ;; esac
+            sleep 5
+          done
+          echo "::error::Stack did not become healthy"
+          docker compose -f docker-compose.yml -f docker-compose.ci-llamabot.yml logs llamabot | tail -100
+          exit 1
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: leonardo/e2e/package-lock.json
+
+      - name: Install Playwright
+        working-directory: leonardo/e2e
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Run e2e smoke + mock-LLM tests
+        working-directory: leonardo/e2e
+        env:
+          E2E_BASE_URL: http://localhost:8080
+          E2E_COMPOSE_FILE: docker-compose.yml:docker-compose.ci-llamabot.yml
+          E2E_MOCK_LLM: 'true'
+        run: npx playwright test tests/smoke.spec.ts tests/mock-llm.spec.ts
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-e2e
+          path: leonardo/e2e/playwright-report/
+          retention-days: 7
+
+      - name: Container logs on failure
+        if: failure()
+        working-directory: leonardo
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.ci-llamabot.yml logs llamabot | tail -200
+          docker compose -f docker-compose.yml -f docker-compose.ci-llamabot.yml logs llamapress | tail -60

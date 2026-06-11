@@ -1,0 +1,141 @@
+name: Release
+
+# Publishes the llamabot Docker image to Docker Hub — but ONLY after the image
+# builds and boots successfully. This replaces running `docker buildx ... --push`
+# by hand from a laptop (see the comment at the bottom of the Dockerfile), so an
+# untested image can never reach prod.
+#
+# How to release:
+#   git tag v0.5.1
+#   git push origin v0.5.1
+# That publishes kody06/llamabot:0.5.1 (+ a :sha-<shortsha> tag).
+# Then bump the image tag in Leonardo's docker-compose.yml and let Leonardo's
+# CI (e2e smoke) validate the new composition.
+#
+# To dry-run (build + smoke test, NO push), use the "Run workflow" button in
+# the Actions tab with dry_run = true.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Image version tag, e.g. 0.5.1 (used only for manual runs)'
+        required: false
+      dry_run:
+        description: 'Build and smoke-test only; do NOT push to Docker Hub'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: kody06/llamabot
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Determine version
+        id: meta
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            v="${GITHUB_REF_NAME#v}"            # strip an optional leading "v"
+          elif [ -n "${{ github.event.inputs.version }}" ]; then
+            v="${{ github.event.inputs.version }}"
+          elif [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            v="0.0.0-dryrun"                     # dry runs push nothing; version is cosmetic
+          else
+            echo "::error::No version. Push a git tag (vX.Y.Z) or set the 'version' input."
+            exit 1
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "sha=sha-$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          echo "Releasing version '$v' (sha-$(git rev-parse --short HEAD))"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # 1) Build amd64 only, load it locally, and boot it BEFORE pushing anything.
+      - name: Build amd64 image for smoke test
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64
+          load: true
+          tags: ${{ env.IMAGE }}:smoke-test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # The image boots without a database when DB_URI is empty (checkpointer
+      # init is skipped), so a plain container + /login probe is a sufficient
+      # "did the image assemble correctly" gate. Deep integration is covered
+      # by the e2e job in ci.yml.
+      - name: Smoke test - boot container and verify /login returns 200
+        run: |
+          docker run -d --name release_smoke -p 8000:8000 ${{ env.IMAGE }}:smoke-test
+          echo "Waiting for uvicorn to serve /login..."
+          for i in $(seq 1 40); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/login || true)
+            echo "attempt $i: /login -> ${code:-no-response}"
+            if [ "$code" = "200" ]; then echo "Boot OK - image is healthy"; exit 0; fi
+            if ! docker ps --format '{{.Names}}' | grep -q '^release_smoke$'; then
+              echo "::error::Container exited before becoming healthy"
+              docker logs release_smoke
+              exit 1
+            fi
+            sleep 3
+          done
+          echo "::error::App did not become healthy within timeout"
+          docker logs release_smoke
+          exit 1
+
+      - name: Container logs on failure
+        if: failure()
+        run: docker logs release_smoke || true
+
+      - name: Log in to Docker Hub
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        uses: docker/login-action@v3
+        with:
+          username: kody06
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # 2) Smoke test passed — build multi-arch and push. The amd64 layers are
+      #    reused from the gha cache, so only arm64 is built fresh here.
+      - name: Build and push multi-arch image
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:${{ steps.meta.outputs.version }}
+            ${{ env.IMAGE }}:${{ steps.meta.outputs.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Summary
+        run: |
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            echo "### Dry run OK — image built and booted, nothing pushed" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### Released to Docker Hub" >> "$GITHUB_STEP_SUMMARY"
+            echo "- \`${{ env.IMAGE }}:${{ steps.meta.outputs.version }}\`" >> "$GITHUB_STEP_SUMMARY"
+            echo "- \`${{ env.IMAGE }}:${{ steps.meta.outputs.sha }}\`" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "Next: bump the tag in Leonardo's docker-compose.yml and open a PR — Leonardo CI validates the composition." >> "$GITHUB_STEP_SUMMARY"
+          fi

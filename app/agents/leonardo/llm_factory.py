@@ -13,17 +13,52 @@ configured LangChain chat model. Used by:
 DO NOT duplicate this logic in agent nodes. Import `get_llm` instead.
 """
 
+import os
 from typing import Any
 
 from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models import LanguageModelInput
-from langchain_core.messages import AIMessage
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import AIMessage, AIMessageChunk
+from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from langchain_deepseek import ChatDeepSeek
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
 
 
 DEFAULT_LLM_MODEL = "deepseek-v4-flash"
+
+
+class FakeTestChatModel(BaseChatModel):
+    """Deterministic offline model for e2e plumbing tests.
+
+    Only reachable when LLAMABOT_ENABLE_FAKE_LLM=true and the frontend sends
+    llm_model='fake-llm'. Returns a fixed response and never calls a tool,
+    so agent turns complete immediately with zero API cost.
+    """
+
+    response_text: str = "FAKE_LLM_RESPONSE: end-to-end plumbing OK"
+
+    @property
+    def _llm_type(self) -> str:
+        return "fake-llm"
+
+    def _generate(self, messages, stop=None, run_manager=None, **kwargs) -> ChatResult:
+        return ChatResult(
+            generations=[ChatGeneration(message=AIMessage(content=self.response_text))]
+        )
+
+    def _stream(self, messages, stop=None, run_manager=None, **kwargs):
+        # The websocket layer only renders streamed token chunks
+        # (stream_mode="messages"), so the fake model must stream.
+        for token in self.response_text.split(" "):
+            chunk = ChatGenerationChunk(message=AIMessageChunk(content=token + " "))
+            if run_manager:
+                run_manager.on_llm_new_token(token + " ", chunk=chunk)
+            yield chunk
+
+    def bind_tools(self, tools, **kwargs):
+        return self
 
 
 class ChatDeepSeekWithReasoning(ChatDeepSeek):
@@ -88,6 +123,8 @@ def get_llm(model_name: str):
 
     Unknown model names fall back to the project default (DeepSeek v4 Flash).
     """
+    if model_name == "fake-llm" and os.getenv("LLAMABOT_ENABLE_FAKE_LLM", "").lower() == "true":
+        return FakeTestChatModel()
     if model_name == "deepseek-v4-flash":
         return ChatDeepSeekWithReasoning(
             model="deepseek-v4-flash",
