@@ -84,7 +84,16 @@ jobs:
       # by the e2e job in ci.yml.
       - name: Smoke test - boot container and verify /login returns 200
         run: |
-          docker run -d --name release_smoke -p 8000:8000 ${{ env.IMAGE }}:smoke-test
+          # Placeholder API keys: agent graphs are compiled at startup and the
+          # provider clients pydantic-fail when their env var is entirely
+          # unset. Nothing is called during the smoke; presence is enough.
+          docker run -d --name release_smoke -p 8000:8000 \
+            -e OPENAI_API_KEY=ci-smoke \
+            -e ANTHROPIC_API_KEY=ci-smoke \
+            -e GOOGLE_API_KEY=ci-smoke \
+            -e DEEPSEEK_API_KEY=ci-smoke \
+            -e TAVILY_API_KEY=ci-smoke \
+            ${{ env.IMAGE }}:smoke-test
           echo "Waiting for uvicorn to serve /login..."
           for i in $(seq 1 40); do
             code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/login || true)
