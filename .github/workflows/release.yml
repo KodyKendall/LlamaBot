@@ -39,6 +39,19 @@ jobs:
   release:
     runs-on: ubuntu-latest
 
+    # The auth layer needs a real database before /login can serve (mirrors
+    # the postgres service in LlamaPress-Simple's release workflow).
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: llamabot_production
+        ports:
+          - 5432:5432
+        options: --health-cmd="pg_isready" --health-interval=10s --health-timeout=5s --health-retries=3
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -78,16 +91,14 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # The image boots without a database when DB_URI is empty (checkpointer
-      # init is skipped), so a plain container + /login probe is a sufficient
-      # "did the image assemble correctly" gate. Deep integration is covered
-      # by the e2e job in ci.yml.
-      - name: Smoke test - boot container and verify /login returns 200
+      # Boot gate: agents must compile (placeholder API keys are enough —
+      # provider clients only check the env var exists) and the auth layer
+      # must come up against a real database. Deep integration is covered by
+      # the e2e job in ci.yml.
+      - name: Smoke test - boot container and verify /login serves
         run: |
-          # Placeholder API keys: agent graphs are compiled at startup and the
-          # provider clients pydantic-fail when their env var is entirely
-          # unset. Nothing is called during the smoke; presence is enough.
-          docker run -d --name release_smoke -p 8000:8000 \
+          docker run -d --name release_smoke --network host \
+            -e AUTH_DB_URI=postgresql://postgres:postgres@localhost:5432/llamabot_production \
             -e OPENAI_API_KEY=ci-smoke \
             -e ANTHROPIC_API_KEY=ci-smoke \
             -e GOOGLE_API_KEY=ci-smoke \
@@ -98,7 +109,8 @@ jobs:
           for i in $(seq 1 40); do
             code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/login || true)
             echo "attempt $i: /login -> ${code:-no-response}"
-            if [ "$code" = "200" ]; then echo "Boot OK - image is healthy"; exit 0; fi
+            # 200 once users exist; 302 (-> /register) on a fresh database.
+            case "$code" in 200|302) echo "Boot OK - image is healthy"; exit 0;; esac
             if ! docker ps --format '{{.Names}}' | grep -q '^release_smoke$'; then
               echo "::error::Container exited before becoming healthy"
               docker logs release_smoke
