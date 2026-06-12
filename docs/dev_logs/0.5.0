@@ -24,7 +24,7 @@
 - [x] Add proactive building after ticket mode to speed up dev
  
 0.5.0f:
-- [x] Add .docx attachment support in chat — text extracted server-side and inlined, so it works for every model incl. DeepSeek.
+- [x] Allow .docx upload to assets; the file path is handed to the agent (via the existing uploaded-files message), which reads it from the Rails environment — no document parsing in the LLM transport layer.
 - [x] Add a Download button to every file in Browse Uploads (serves Content-Disposition: attachment; the OS opens it in the real app).
 - [x] Accept slideshows (PowerPoint .pptx/.ppt/.pptm, Keynote .key, OpenDocument .odp) and all Excel types incl. macros (.xlsm/.xlsb/.xltx/.xltm) for upload.
 - [x] Preview inline only for browser-native types (images, PDF); Office/slideshow files download instead of half-rendering — no LibreOffice/hosted-viewer dependency.
