@@ -1138,12 +1138,24 @@ async def api_use_skill(
 
 UPLOAD_ALLOWED_EXTENSIONS = {
     '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg',
-    '.xlsx', '.xls', '.csv',
+    # Spreadsheets — all Excel variants, incl. macro-enabled and binary
+    '.xlsx', '.xls', '.xlsm', '.xlsb', '.xltx', '.xltm', '.csv',
+    # Documents
     '.pdf', '.docx',
+    # Slideshows — PowerPoint (incl. macros), Keynote, OpenDocument
+    '.pptx', '.ppt', '.pptm', '.key', '.odp',
+    # Media
     '.mp4', '.webm',
 }
 
 IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'}
+
+# Types a browser can safely render inline. Deliberately excludes SVG: an SVG can
+# embed <script>, so serving it inline is an XSS vector — it downloads instead.
+# Everything not listed here (Office docs, slideshows, etc.) also downloads; we do
+# not render those server-side (no LibreOffice/conversion — keeps the image small
+# and the surface area tiny). The OS opens them in the real app.
+INLINE_PREVIEW_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.pdf'}
 
 RAILS_ROOT = "/app/app/rails"
 IMAGES_DIR = f"{RAILS_ROOT}/app/assets/images"
@@ -1229,8 +1241,14 @@ PREVIEW_PATH_PREFIXES = {
 
 
 @router.get("/api/uploaded-files/preview")
-async def preview_uploaded_file(path: str, username: str = Depends(auth)):
-    """Stream an uploaded file for in-browser preview. Capped at 50MB."""
+async def preview_uploaded_file(path: str, download: bool = False, username: str = Depends(auth)):
+    """Serve an uploaded file.
+
+    download=1 always forces a download (Content-Disposition: attachment).
+    Otherwise we serve inline only for browser-native types (raster images, PDF);
+    everything else — Office docs, slideshows, SVG — downloads. Capped at 50MB.
+    """
+    import pathlib
     from fastapi.responses import FileResponse
 
     base_dir = None
@@ -1258,7 +1276,10 @@ async def preview_uploaded_file(path: str, username: str = Depends(auth)):
     if size > MAX_PREVIEW_BYTES:
         raise HTTPException(status_code=413, detail=f"File too large to preview ({size} bytes, max {MAX_PREVIEW_BYTES})")
 
-    return FileResponse(real_full, filename=filename)
+    ext = pathlib.Path(filename).suffix.lower()
+    inline = (not download) and ext in INLINE_PREVIEW_EXTENSIONS
+    disposition = "inline" if inline else "attachment"
+    return FileResponse(real_full, filename=filename, content_disposition_type=disposition)
 
 
 # ============== Remote Setup API ==============

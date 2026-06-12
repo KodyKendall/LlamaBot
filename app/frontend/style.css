@@ -5373,6 +5373,24 @@ body {
     color: #a78bfa;
 }
 
+.file-browser-download-btn {
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.4);
+    cursor: pointer;
+    padding: 2px 4px;
+    border-radius: 4px;
+    font-size: 12px;
+    text-decoration: none;
+    transition: all 0.15s;
+    flex-shrink: 0;
+}
+
+.file-browser-download-btn:hover {
+    background: rgba(139, 92, 246, 0.2);
+    color: #a78bfa;
+}
+
 .file-browser-item--attached .file-browser-attach-btn {
     color: #22c55e;
     cursor: default;

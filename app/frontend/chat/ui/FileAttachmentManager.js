@@ -196,6 +196,7 @@ export class FileAttachmentManager {
           const isImage = folder.includes('images');
           const previewable = isImage && f.size <= 50 * 1024 * 1024;
           const previewUrl = `/api/uploaded-files/preview?path=${encodeURIComponent(f.path)}`;
+          const downloadUrl = `${previewUrl}&download=1`;
           const leading = previewable
             ? `<img class="file-browser-thumb" src="${previewUrl}" alt="" onerror="this.outerHTML='<i class=\\'fa-solid fa-file-image\\'></i>'">`
             : `<i class="fa-solid ${this.iconForFile(f.filename, isImage)}"></i>`;
@@ -206,6 +207,9 @@ export class FileAttachmentManager {
               ${leading}
               <span class="file-browser-item-name" title="${f.path}">${f.filename}</span>
               <span class="file-browser-item-size">${sizeStr}</span>
+              <a class="file-browser-download-btn" href="${downloadUrl}" download="${f.filename}" title="Download ${f.filename}">
+                <i class="fa-solid fa-download"></i>
+              </a>
               <button class="file-browser-attach-btn" title="${alreadyAttached ? 'Already attached' : 'Attach to message'}">
                 ${alreadyAttached ? '<i class="fa-solid fa-check"></i>' : '<i class="fa-solid fa-plus"></i>'}
               </button>
@@ -229,7 +233,13 @@ export class FileAttachmentManager {
         });
       });
 
-      // Click thumbnail to open full-size lightbox preview
+      // The download link is a real <a download> — just stop it from bubbling
+      // into the row's attach handler.
+      this.fileBrowserList.querySelectorAll('.file-browser-download-btn').forEach(link => {
+        link.addEventListener('click', (e) => e.stopPropagation());
+      });
+
+      // Click thumbnail to open full-size lightbox preview (images only)
       this.fileBrowserList.querySelectorAll('.file-browser-item').forEach(item => {
         const thumb = item.querySelector('img.file-browser-thumb');
         if (!thumb) return;
@@ -237,6 +247,22 @@ export class FileAttachmentManager {
         thumb.addEventListener('click', (e) => {
           e.stopPropagation();
           this.openImagePreview(thumb.getAttribute('src'), item.dataset.filename);
+        });
+      });
+
+      // Click the name of a browser-native file (PDF) to open it inline in a new
+      // tab. Office/slideshow files have no inline preview — use the download button.
+      const INLINE_OPEN_EXTS = ['pdf'];
+      this.fileBrowserList.querySelectorAll('.file-browser-item').forEach(item => {
+        const ext = (item.dataset.filename || '').split('.').pop().toLowerCase();
+        if (!INLINE_OPEN_EXTS.includes(ext)) return;
+        const nameEl = item.querySelector('.file-browser-item-name');
+        if (!nameEl) return;
+        nameEl.style.cursor = 'pointer';
+        nameEl.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const url = `/api/uploaded-files/preview?path=${encodeURIComponent(item.dataset.path)}`;
+          window.open(url, '_blank', 'noopener');
         });
       });
     } catch (err) {
@@ -602,10 +628,10 @@ export class FileAttachmentManager {
     const ext = (filename || '').split('.').pop().toLowerCase();
     switch (ext) {
       case 'pdf': return 'fa-file-pdf';
-      case 'xlsx': case 'xls': case 'xlsm': return 'fa-file-excel';
+      case 'xlsx': case 'xls': case 'xlsm': case 'xlsb': case 'xltx': case 'xltm': return 'fa-file-excel';
       case 'csv': case 'tsv': return 'fa-file-csv';
       case 'doc': case 'docx': return 'fa-file-word';
-      case 'ppt': case 'pptx': return 'fa-file-powerpoint';
+      case 'ppt': case 'pptx': case 'pptm': case 'key': case 'odp': return 'fa-file-powerpoint';
       case 'mp4': case 'mov': case 'webm': case 'avi': case 'mkv': return 'fa-file-video';
       case 'mp3': case 'wav': case 'ogg': case 'flac': case 'm4a': return 'fa-file-audio';
       case 'zip': case 'tar': case 'gz': case 'rar': case '7z': return 'fa-file-zipper';
