@@ -58,6 +58,33 @@ def get_model_capabilities(model_name: str) -> dict:
     """Get capabilities for a model, defaulting to Gemini if unknown (most permissive)."""
     return MODEL_CAPABILITIES.get(model_name, {'images': True, 'video': True, 'pdf': True})
 
+# Word documents are never sent to the LLM as binary: no provider accepts raw
+# .docx, so we extract the text server-side and inline it as a text block.
+# This makes docx attachments work for every model, including text-only DeepSeek.
+DOCX_MIME_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+MAX_DOCX_CHARS = 100_000
+
+def extract_docx_text(base64_data: str) -> str:
+    """Decode a base64-encoded .docx and return its text (paragraphs + table cells).
+
+    Raises if the payload is not a readable .docx; callers degrade to a note.
+    """
+    import base64
+    import io
+    from docx import Document
+
+    doc = Document(io.BytesIO(base64.b64decode(base64_data)))
+    parts = [p.text for p in doc.paragraphs if p.text.strip()]
+    for table in doc.tables:
+        for row in table.rows:
+            cells = [cell.text.strip() for cell in row.cells]
+            if any(cells):
+                parts.append(" | ".join(cells))
+    text = "\n".join(parts)
+    if len(text) > MAX_DOCX_CHARS:
+        text = text[:MAX_DOCX_CHARS] + "\n[truncated]"
+    return text
+
 def get_file_category(mime_type: str) -> str:
     """Categorize a mime type into content category."""
     if mime_type.startswith('image/'):
@@ -1117,6 +1144,10 @@ class RequestHandler:
         - GPT: Supports images only
         - DeepSeek: Text only
 
+        Word documents (.docx) bypass the capability check: their text is
+        extracted server-side and inlined as a text block, so they work for
+        every model.
+
         If there are no attachments, returns the plain text string for backwards compatibility.
         If there are attachments, returns a list of content blocks in LangChain format.
         For unsupported file types, adds a text note instead of the binary content.
@@ -1147,6 +1178,22 @@ class RequestHandler:
             filename = attachment.get("filename", "unknown")
 
             if not mime_type or not data:
+                continue
+
+            if mime_type == DOCX_MIME_TYPE:
+                try:
+                    extracted = extract_docx_text(data)
+                    content.append({
+                        "type": "text",
+                        "text": f"[Attached document: {filename}]\n\n{extracted}"
+                    })
+                    logger.info(f"Extracted docx text from attachment: {filename} ({len(extracted)} chars)")
+                except Exception as e:
+                    logger.warning(f"Failed to parse docx attachment {filename}: {e}")
+                    content.append({
+                        "type": "text",
+                        "text": f"[Note: attachment {filename} could not be read as a .docx file.]"
+                    })
                 continue
 
             file_category = get_file_category(mime_type)

@@ -16,6 +16,7 @@ const ALLOWED_TYPES = {
   'image/webp': { ext: 'webp', icon: 'fa-file-image' },
   'video/webm': { ext: 'webm', icon: 'fa-file-video' },
   'video/mp4': { ext: 'mp4', icon: 'fa-file-video' },
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': { ext: 'docx', icon: 'fa-file-word' },
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': { ext: 'xlsx', icon: 'fa-file-excel' },
   'application/vnd.ms-excel': { ext: 'xls', icon: 'fa-file-excel' },
   'text/csv': { ext: 'csv', icon: 'fa-file-csv' },

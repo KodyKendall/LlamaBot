@@ -1139,7 +1139,7 @@ async def api_use_skill(
 UPLOAD_ALLOWED_EXTENSIONS = {
     '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg',
     '.xlsx', '.xls', '.csv',
-    '.pdf',
+    '.pdf', '.docx',
     '.mp4', '.webm',
 }
 
