@@ -9,9 +9,11 @@ on:
   # on the (often stale) main branch.
   push:
     branches: [ "main", "*-alpha" ]
-  # Triggers the workflow on pull request events targeting the "main" branch
+  # Run on PRs into main AND the active dev branches — PRs target *-alpha
+  # during development, and without this they'd merge with no CI at all
+  # (push-triggered CI only runs *after* the merge).
   pull_request:
-    branches: [ "main" ]
+    branches: [ "main", "*-alpha" ]
 
 jobs:
   # This workflow contains a single job called "test"
