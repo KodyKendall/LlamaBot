@@ -5,6 +5,7 @@ from fastapi import FastAPI, WebSocket
 from starlette.websockets import WebSocketState
 
 from app.websocket.web_socket_request_context import WebSocketRequestContext
+from app.lib.token_usage import extract_token_usage
 from typing import Dict, Optional
 
 from langchain_core.messages import HumanMessage
@@ -471,18 +472,12 @@ class RequestHandler:
                                         logger.warning(f"Failed to serialize message: {e}")
                                         base_message_as_dict = {"content": str(message), "type": "ai"}
 
-                                    # Extract token usage metadata if available (for context window tracking)
-                                    # Anthropic sends usage_metadata on the final AIMessage (not during streaming)
-                                    token_usage = None
-                                    usage_metadata = getattr(message, 'usage_metadata', None)
-
-                                    if usage_metadata:
-                                        token_usage = {
-                                            "input_tokens": usage_metadata.get("input_tokens", 0) if isinstance(usage_metadata, dict) else getattr(usage_metadata, 'input_tokens', 0),
-                                            "output_tokens": usage_metadata.get("output_tokens", 0) if isinstance(usage_metadata, dict) else getattr(usage_metadata, 'output_tokens', 0),
-                                            "total_tokens": usage_metadata.get("total_tokens", 0) if isinstance(usage_metadata, dict) else getattr(usage_metadata, 'total_tokens', 0)
-                                        }
-                                        # logger.info(f"📊 Token usage: {token_usage}")
+                                    # Extract token usage metadata if available (for context window tracking).
+                                    # Includes prompt-cache fields (cache_read/cache_creation) so the
+                                    # mothership can measure cache-hit rate. Anthropic sends usage_metadata
+                                    # on the final AIMessage (not during streaming).
+                                    token_usage = extract_token_usage(message)
+                                    # logger.info(f"📊 Token usage: {token_usage}")
 
                                     # Only send if WebSocket is still open
                                     if self._is_websocket_open(websocket):
@@ -666,14 +661,7 @@ class RequestHandler:
                                     except Exception:
                                         base_message_as_dict = {"content": str(message), "type": "ai"}
 
-                                    token_usage = None
-                                    usage_metadata = getattr(message, 'usage_metadata', None)
-                                    if usage_metadata:
-                                        token_usage = {
-                                            "input_tokens": usage_metadata.get("input_tokens", 0) if isinstance(usage_metadata, dict) else getattr(usage_metadata, 'input_tokens', 0),
-                                            "output_tokens": usage_metadata.get("output_tokens", 0) if isinstance(usage_metadata, dict) else getattr(usage_metadata, 'output_tokens', 0),
-                                            "total_tokens": usage_metadata.get("total_tokens", 0) if isinstance(usage_metadata, dict) else getattr(usage_metadata, 'total_tokens', 0)
-                                        }
+                                    token_usage = extract_token_usage(message)
 
                                     if self._is_websocket_open(websocket):
                                         ws_msg = {
@@ -867,14 +855,7 @@ class RequestHandler:
                                     except Exception:
                                         base_message_as_dict = {"content": str(message), "type": "ai"}
 
-                                    token_usage = None
-                                    usage_metadata = getattr(message, 'usage_metadata', None)
-                                    if usage_metadata:
-                                        token_usage = {
-                                            "input_tokens": usage_metadata.get("input_tokens", 0) if isinstance(usage_metadata, dict) else getattr(usage_metadata, 'input_tokens', 0),
-                                            "output_tokens": usage_metadata.get("output_tokens", 0) if isinstance(usage_metadata, dict) else getattr(usage_metadata, 'output_tokens', 0),
-                                            "total_tokens": usage_metadata.get("total_tokens", 0) if isinstance(usage_metadata, dict) else getattr(usage_metadata, 'total_tokens', 0)
-                                        }
+                                    token_usage = extract_token_usage(message)
 
                                     if self._is_websocket_open(websocket):
                                         ws_msg = {
