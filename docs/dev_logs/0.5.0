@@ -23,7 +23,8 @@
 0.5.0e:
 - [x] Add proactive building after ticket mode to speed up dev
  
-0.5.0f:
+0.5.1:
+- [x] **Milestone: first image cut through the new candidate QA system** — a real-VM QA gate now sits in front of main (see Leonardo docs/QA_STAGING.md and RELEASE_FLOW.md). This release rolls up the previously-unshipped 0.5.0e–f changes.
 - [x] Allow .docx upload to assets; the file path is handed to the agent (via the existing uploaded-files message), which reads it from the Rails environment — no document parsing in the LLM transport layer.
 - [x] Add a Download button to every file in Browse Uploads (serves Content-Disposition: attachment; the OS opens it in the real app).
 - [x] Accept slideshows (PowerPoint .pptx/.ppt/.pptm, Keynote .key, OpenDocument .odp) and all Excel types incl. macros (.xlsm/.xlsb/.xltx/.xltm) for upload.
