@@ -3,3 +3,6 @@
 
 0.5.1a:
 - [x] Include token input caching hits/misses in our message telemetry
+
+0.5.1b:
+- [x] Chat: honor a `?llm_model=` URL param on the chat page — pin the model picker to the requested model (validated against the real dropdown options) and persist it to the session `llmModel` cookie, so funnels that need an image-capable model (e.g. the mothership picture-to-html flow, where the default DeepSeek v4 Flash can't see images) can hand users off to Gemini 3 Flash instead of the image-blind default. Unknown keys are ignored and the param is stripped from the URL after load. Browser-smoke coverage added in Leonardo e2e.
