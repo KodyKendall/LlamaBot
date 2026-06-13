@@ -357,6 +357,10 @@ class ChatApp {
     // Load settings from cookies
     this.loadSettingsFromCookies();
 
+    // Check for ?llm_model= URL param (e.g. funnels that need an image-capable
+    // model); overrides the cookie and must run before any auto-send below.
+    this.checkModelParam();
+
     // Fetch available models and disable unavailable ones
     this.fetchAvailableModels();
 
@@ -840,6 +844,32 @@ class ChatApp {
     } else {
       window.addEventListener('websocketConnected', sendOnConnect, { once: true });
     }
+  }
+
+  /**
+   * Check for ?llm_model= URL parameter and pin the model for this session.
+   * Used by funnels (e.g. mothership picture-to-html) that need an image-capable
+   * model since the default DeepSeek cannot view images. Persists to the llmModel
+   * cookie so the whole session stays on the chosen model, not just the first turn.
+   * Ignores unknown keys, matching the cookie-restore guard in loadSettingsFromCookies().
+   */
+  checkModelParam() {
+    const params = new URLSearchParams(window.location.search);
+    const model = params.get('llm_model');
+    if (!model) return;
+
+    // Remove the param so a refresh doesn't re-apply it after a manual switch
+    const url = new URL(window.location);
+    url.searchParams.delete('llm_model');
+    window.history.replaceState({}, '', url);
+
+    if (!this.elements.modelSelect) return;
+    const isValid = Array.from(this.elements.modelSelect.options).some(option => option.value === model);
+    if (!isValid) return;
+
+    this.elements.modelSelect.value = model;
+    setCookie('llmModel', model, this.config.cookieExpiryDays);
+    this.updateDropdownLabel(this.elements.modelSelect);
   }
 
   /**
