@@ -1,6 +1,9 @@
 """API routes for git-based checkpoint/rollback functionality."""
 
+import json
 import logging
+import subprocess
+from pathlib import Path
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import JSONResponse
@@ -11,6 +14,20 @@ from app.services.checkpoint_service import checkpoint_service
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# Path to the Leonardo repo mounted into the llamabot container. The Rails app
+# code (rails/app, routes.rb, db/) is bind-mounted from this same checkout into
+# the llamapress container, so pulling here + restarting llamapress is all it
+# takes to update the running app. (See checkpoint_service for git safe.directory
+# setup, which runs on import of this module.)
+LEONARDO_PATH = Path("/app/leonardo")
+
+# Friendly, non-technical message shown when a fast-forward pull is refused
+# because the box has local edits that conflict with the incoming update.
+FF_BLOCKED_MESSAGE = (
+    "Can't auto-update — you have file changes on this version that conflict "
+    "with the updated version. Commit or discard them before pulling this update."
+)
 
 
 # ============== Pydantic Models ==============
@@ -275,4 +292,219 @@ def git_push():
         raise HTTPException(status_code=500, detail="Git push timed out after 60 seconds")
     except Exception as e:
         logger.error(f"Failed to push to GitHub: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============== Git Pull / Update Endpoints ==============
+#
+# These power the "pull updates" button next to the push button: an operator on
+# one box (e.g. production) pulls code that was pushed from another box (e.g. a
+# dev instance) and the llamapress container restarts so the new code goes live.
+
+
+class CheckoutRequest(BaseModel):
+    branch: str
+
+
+def _git(*args: str, timeout: int = 60) -> subprocess.CompletedProcess:
+    """Run a git command against the Leonardo repo. Args are passed as a list
+    (no shell), so values like branch names can't be interpreted as flags/shell."""
+    return subprocess.run(
+        ["git", "-C", str(LEONARDO_PATH), *args],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+
+
+def _current_branch() -> str:
+    result = _git("rev-parse", "--abbrev-ref", "HEAD", timeout=10)
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def _remote_branches() -> list[str]:
+    """List branch names available on origin (without the 'origin/' prefix)."""
+    result = _git("branch", "-r", "--format=%(refname:short)", timeout=10)
+    if result.returncode != 0:
+        return []
+    branches = []
+    for line in result.stdout.splitlines():
+        name = line.strip()
+        if not name or "->" in name:  # skip 'origin/HEAD -> origin/main'
+            continue
+        if name.startswith("origin/"):
+            name = name[len("origin/"):]
+        branches.append(name)
+    # De-dupe while preserving order
+    return list(dict.fromkeys(branches))
+
+
+def _restart_llamapress() -> tuple[bool, str]:
+    """Restart the llamapress (Rails) container via the Docker socket.
+
+    Mirrors the agent's hard_restart_rails tool: resolve the container name
+    dynamically (it varies by environment) and POST to the restart endpoint.
+    Returns (success, message).
+    """
+    container_name = None
+    try:
+        listing = subprocess.run(
+            ["curl", "--silent", "--unix-socket", "/var/run/docker.sock",
+             "http://localhost/containers/json"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if listing.returncode == 0:
+            for container in json.loads(listing.stdout or "[]"):
+                for name in container.get("Names", []):
+                    clean = name.lstrip("/").lower()
+                    if "llamapress" in clean and "llamabot" not in clean:
+                        container_name = name.lstrip("/")
+                        break
+                if container_name:
+                    break
+    except Exception as e:
+        logger.warning(f"Could not list containers to find llamapress: {e}")
+
+    if not container_name:
+        return False, "Updated, but could not find the LlamaPress container to restart."
+
+    try:
+        restart = subprocess.run(
+            ["curl", "--silent", "--show-error", "--fail-with-body", "-X", "POST",
+             "--unix-socket", "/var/run/docker.sock",
+             f"http://localhost/containers/{container_name}/restart?t=10"],
+            capture_output=True, text=True, timeout=60,
+        )
+    except Exception as e:
+        return False, f"Updated, but the restart call failed: {e}"
+
+    if restart.returncode != 0:
+        return False, (
+            "Updated, but the LlamaPress restart failed: "
+            f"{(restart.stderr or restart.stdout or '').strip()}"
+        )
+    return True, "Update applied and LlamaPress is restarting."
+
+
+@router.get("/api/git/remote-status")
+def git_remote_status():
+    """Report whether this box is behind the remote, plus the available branches.
+
+    The pull button uses `behind` to show an "updates available" badge, and
+    `branches` to populate the branch switcher.
+    """
+    try:
+        fetch = _git("fetch", "--quiet")
+        if fetch.returncode != 0:
+            return JSONResponse(content={
+                "success": False,
+                "message": fetch.stderr.strip() or "git fetch failed",
+            })
+
+        branch = _current_branch()
+
+        # Resolve the upstream ref; fall back to origin/<branch> if none is set.
+        upstream = _git("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}", timeout=10)
+        ref = upstream.stdout.strip() if upstream.returncode == 0 else f"origin/{branch}"
+
+        behind = ahead = 0
+        counts = _git("rev-list", "--left-right", "--count", f"HEAD...{ref}", timeout=10)
+        if counts.returncode == 0 and counts.stdout.strip():
+            parts = counts.stdout.split()
+            if len(parts) == 2:
+                ahead, behind = int(parts[0]), int(parts[1])
+
+        return JSONResponse(content={
+            "success": True,
+            "branch": branch,
+            "behind": behind,
+            "ahead": ahead,
+            "up_to_date": behind == 0,
+            "branches": _remote_branches(),
+        })
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=500, detail="Checking for updates timed out")
+    except Exception as e:
+        logger.error(f"Failed to check remote status: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/git/pull")
+def git_pull():
+    """Pull the latest code for the current branch, then restart LlamaPress.
+
+    Uses --ff-only so a box with conflicting local edits fails loudly with a
+    plain-language message instead of silently creating merge conflicts.
+    """
+    try:
+        result = _git("pull", "--ff-only")
+
+        if result.returncode != 0:
+            # Almost always: local changes block the fast-forward. Give the
+            # operator a clear, actionable message rather than raw git output.
+            logger.info(f"git pull --ff-only refused: {result.stderr.strip()}")
+            return JSONResponse(content={
+                "success": False,
+                "message": FF_BLOCKED_MESSAGE,
+                "detail": result.stderr.strip(),
+            })
+
+        restarted, restart_message = _restart_llamapress()
+        return JSONResponse(content={
+            "success": True,
+            "restarted": restarted,
+            "message": restart_message if restarted else (
+                "Update pulled. " + restart_message
+            ),
+        })
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=500, detail="Git pull timed out after 60 seconds")
+    except Exception as e:
+        logger.error(f"Failed to pull updates: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/git/checkout")
+def git_checkout(request: CheckoutRequest):
+    """Switch to a branch from the remote, pull its latest code, and restart.
+
+    The branch is validated against the actual remote branch list, so an
+    arbitrary/empty value can't be passed through to git.
+    """
+    branch = (request.branch or "").strip()
+    if branch not in _remote_branches():
+        raise HTTPException(status_code=400, detail=f"Unknown branch: {branch or '(empty)'}")
+
+    try:
+        checkout = _git("checkout", branch)
+        if checkout.returncode != 0:
+            # A dirty tree blocks the switch — same actionable message as pull.
+            logger.info(f"git checkout {branch} refused: {checkout.stderr.strip()}")
+            return JSONResponse(content={
+                "success": False,
+                "message": FF_BLOCKED_MESSAGE,
+                "detail": checkout.stderr.strip(),
+            })
+
+        pull = _git("pull", "--ff-only")
+        if pull.returncode != 0:
+            return JSONResponse(content={
+                "success": False,
+                "message": FF_BLOCKED_MESSAGE,
+                "detail": pull.stderr.strip(),
+            })
+
+        restarted, restart_message = _restart_llamapress()
+        return JSONResponse(content={
+            "success": True,
+            "branch": branch,
+            "restarted": restarted,
+            "message": (
+                f"Switched to '{branch}'. {restart_message}"
+            ),
+        })
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=500, detail="Git checkout timed out")
+    except Exception as e:
+        logger.error(f"Failed to checkout branch {branch}: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))

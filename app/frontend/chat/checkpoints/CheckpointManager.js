@@ -122,6 +122,10 @@ export class CheckpointManager {
         <button class="sync-github-btn" title="Push to remote">
           <i class="fa-solid fa-cloud-arrow-up"></i>
         </button>
+        <button class="pull-github-btn" title="Check for updates">
+          <i class="fa-solid fa-cloud-arrow-down"></i>
+          <span class="pull-updates-badge hidden"></span>
+        </button>
         <button class="github-auth-btn" title="Contact kody@llamapress.ai for your code">
           <i class="fa-brands fa-github"></i>
         </button>
@@ -129,6 +133,18 @@ export class CheckpointManager {
           <i class="fa-solid fa-up-right-and-down-left-from-center"></i>
         </button>
         <button class="close-checkpoint-panel" title="Close">✕</button>
+      </div>
+      <div class="pull-updates-panel hidden">
+        <div class="pull-updates-status">
+          <i class="fa-solid fa-spinner fa-spin"></i> Checking for updates…
+        </div>
+        <button class="btn-pull-updates hidden">
+          <i class="fa-solid fa-cloud-arrow-down"></i> <span class="btn-pull-updates-text">Update now</span>
+        </button>
+        <div class="pull-branch-switcher">
+          <label class="pull-branch-label">Branch</label>
+          <select class="pull-branch-select"></select>
+        </div>
       </div>
       <div class="uncommitted-changes-banner hidden">
         <div class="uncommitted-changes-info" title="Click to see changed files">
@@ -194,6 +210,18 @@ export class CheckpointManager {
     // Add sync to GitHub button handler
     const syncBtn = panel.querySelector('.sync-github-btn');
     syncBtn.onclick = () => this.syncToGitHub();
+
+    // Add pull-updates button handler (toggles the updates popover)
+    const pullBtn = panel.querySelector('.pull-github-btn');
+    pullBtn.onclick = () => this.toggleUpdatesPanel();
+
+    // Add "Update now" button handler
+    const doPullBtn = panel.querySelector('.btn-pull-updates');
+    doPullBtn.onclick = () => this.pullFromGitHub();
+
+    // Add branch switcher handler
+    const branchSelect = panel.querySelector('.pull-branch-select');
+    branchSelect.onchange = (e) => this.switchBranch(e.target.value);
 
     // Add GitHub auth button handler (disabled unless ENABLE_GITHUB_BUTTON is set)
     const ghAuthBtn = panel.querySelector('.github-auth-btn');
@@ -337,8 +365,10 @@ export class CheckpointManager {
       this.checkpointPanel.classList.remove('hidden');
       this.fetchCheckpoints();
       this.checkUncommittedChanges();
+      this.checkRemoteStatus(); // refresh the "updates available" badge
     } else {
       this.checkpointPanel.classList.add('hidden');
+      this.checkpointPanel.querySelector('.pull-updates-panel').classList.add('hidden');
     }
   }
 
@@ -499,6 +529,160 @@ export class CheckpointManager {
       const syncBtn = this.checkpointPanel.querySelector('.sync-github-btn');
       syncBtn.disabled = false;
       syncBtn.innerHTML = '<i class="fa-solid fa-cloud-arrow-up"></i>';
+    }
+  }
+
+  /**
+   * Show/hide the "updates available" popover under the header.
+   */
+  toggleUpdatesPanel() {
+    const panel = this.checkpointPanel.querySelector('.pull-updates-panel');
+    const willShow = panel.classList.contains('hidden');
+    panel.classList.toggle('hidden');
+    if (willShow) {
+      this.checkRemoteStatus(); // re-check each time it's opened
+    }
+  }
+
+  /**
+   * Ask the backend whether this box is behind the remote, and populate the
+   * branch switcher. Drives the badge on the pull button and the popover text.
+   */
+  async checkRemoteStatus() {
+    const badge = this.checkpointPanel.querySelector('.pull-updates-badge');
+    const statusEl = this.checkpointPanel.querySelector('.pull-updates-status');
+    const updateBtn = this.checkpointPanel.querySelector('.btn-pull-updates');
+    const select = this.checkpointPanel.querySelector('.pull-branch-select');
+
+    try {
+      const response = await fetch('/api/git/remote-status', { credentials: 'same-origin' });
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        statusEl.innerHTML = '<i class="fa-solid fa-circle-exclamation"></i> Couldn\'t check for updates.';
+        updateBtn.classList.add('hidden');
+        badge.classList.add('hidden');
+        return;
+      }
+
+      // Populate branch switcher
+      select.innerHTML = '';
+      (data.branches || []).forEach((name) => {
+        const opt = document.createElement('option');
+        opt.value = name;
+        opt.textContent = name;
+        if (name === data.branch) opt.selected = true;
+        select.appendChild(opt);
+      });
+
+      // Badge + status text
+      if (data.behind > 0) {
+        badge.textContent = data.behind;
+        badge.classList.remove('hidden');
+        this.checkpointPanel.querySelector('.pull-github-btn').classList.add('has-updates');
+        const word = data.behind === 1 ? 'update' : 'updates';
+        statusEl.innerHTML = `<i class="fa-solid fa-circle-arrow-down"></i> ${data.behind} ${word} available on <strong>${data.branch}</strong>.`;
+        this.checkpointPanel.querySelector('.btn-pull-updates-text').textContent =
+          `Update now (${data.behind})`;
+        updateBtn.classList.remove('hidden');
+      } else {
+        badge.classList.add('hidden');
+        this.checkpointPanel.querySelector('.pull-github-btn').classList.remove('has-updates');
+        statusEl.innerHTML = `<i class="fa-solid fa-circle-check"></i> You're up to date on <strong>${data.branch}</strong>.`;
+        updateBtn.classList.add('hidden');
+      }
+    } catch (error) {
+      console.error('Error checking for updates:', error);
+      statusEl.innerHTML = '<i class="fa-solid fa-circle-exclamation"></i> Couldn\'t check for updates.';
+      updateBtn.classList.add('hidden');
+    }
+  }
+
+  /**
+   * Pull the latest code for the current branch and restart LlamaPress.
+   */
+  async pullFromGitHub() {
+    if (!confirm('Update this app to the latest version? It will restart and the page will reload automatically.')) {
+      return;
+    }
+
+    const updateBtn = this.checkpointPanel.querySelector('.btn-pull-updates');
+    const original = updateBtn.innerHTML;
+    try {
+      updateBtn.disabled = true;
+      updateBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Updating…';
+
+      const response = await fetch('/api/git/pull', {
+        method: 'POST',
+        credentials: 'same-origin'
+      });
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        this.showSuccess(data.message || 'Update applied — restarting.');
+        this.checkpointPanel.querySelector('.pull-updates-panel').classList.add('hidden');
+        this.fetchCheckpoints();
+        await this.checkRemoteStatus();
+        // Give Rails a moment to come back up, then reload the embedded app.
+        if (this.chatApp.iframeManager) {
+          setTimeout(() => {
+            this.chatApp.iframeManager.refreshRailsApp((callback) => this.chatApp.getRailsDebugInfo(callback));
+          }, 4000);
+        }
+      } else {
+        this.showError(data.message || 'Failed to update');
+      }
+    } catch (error) {
+      console.error('Error pulling updates:', error);
+      this.showError('Failed to update: ' + error.message);
+    } finally {
+      updateBtn.disabled = false;
+      updateBtn.innerHTML = original;
+    }
+  }
+
+  /**
+   * Switch to a different branch, pull its latest code, and restart LlamaPress.
+   */
+  async switchBranch(branch) {
+    if (!branch) return;
+    if (!confirm(`Switch this app to branch "${branch}"? It will update and restart, and the page will reload automatically.`)) {
+      this.checkRemoteStatus(); // reset the dropdown to the current branch
+      return;
+    }
+
+    const select = this.checkpointPanel.querySelector('.pull-branch-select');
+    try {
+      select.disabled = true;
+
+      const response = await fetch('/api/git/checkout', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ branch })
+      });
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        this.showSuccess(data.message || `Switched to ${branch} — restarting.`);
+        this.checkpointPanel.querySelector('.pull-updates-panel').classList.add('hidden');
+        this.fetchCheckpoints();
+        await this.checkRemoteStatus();
+        if (this.chatApp.iframeManager) {
+          setTimeout(() => {
+            this.chatApp.iframeManager.refreshRailsApp((callback) => this.chatApp.getRailsDebugInfo(callback));
+          }, 4000);
+        }
+      } else {
+        this.showError(data.message || `Failed to switch to ${branch}`);
+        this.checkRemoteStatus();
+      }
+    } catch (error) {
+      console.error('Error switching branch:', error);
+      this.showError('Failed to switch branch: ' + error.message);
+      this.checkRemoteStatus();
+    } finally {
+      select.disabled = false;
     }
   }
 

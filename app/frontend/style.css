@@ -6534,6 +6534,114 @@ body {
     cursor: not-allowed;
 }
 
+/* Pull-updates button (mirrors .sync-github-btn, with an "updates available" badge) */
+.pull-github-btn {
+    position: relative;
+    background: none;
+    border: none;
+    color: var(--text-secondary, #aaa);
+    font-size: 1.1rem;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+}
+
+.pull-github-btn:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+    color: var(--text-primary, #fff);
+}
+
+.pull-github-btn.has-updates {
+    color: #4caf50;
+}
+
+.pull-updates-badge {
+    position: absolute;
+    top: -2px;
+    right: -2px;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    border-radius: 8px;
+    background: #4caf50;
+    color: #fff;
+    font-size: 0.65rem;
+    line-height: 16px;
+    text-align: center;
+    font-weight: 600;
+}
+
+.pull-updates-badge.hidden {
+    display: none;
+}
+
+/* Updates popover under the panel header */
+.pull-updates-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.pull-updates-panel.hidden {
+    display: none;
+}
+
+.pull-updates-status {
+    font-size: 0.85rem;
+    color: var(--text-secondary, #aaa);
+}
+
+.btn-pull-updates {
+    align-self: flex-start;
+    background: #4caf50;
+    border: none;
+    color: #fff;
+    font-size: 0.85rem;
+    cursor: pointer;
+    padding: 6px 12px;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+}
+
+.btn-pull-updates:hover:not(:disabled) {
+    background: #43a047;
+}
+
+.btn-pull-updates:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.btn-pull-updates.hidden {
+    display: none;
+}
+
+.pull-branch-switcher {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.pull-branch-label {
+    font-size: 0.8rem;
+    color: var(--text-secondary, #aaa);
+}
+
+.pull-branch-select {
+    flex: 1;
+    background: var(--bg-secondary, #1e1e1e);
+    color: var(--text-primary, #fff);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 4px;
+    padding: 4px 6px;
+    font-size: 0.8rem;
+    cursor: pointer;
+}
+
 .github-auth-btn {
     background: none;
     border: none;
