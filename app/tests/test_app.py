@@ -61,6 +61,40 @@ class TestMainEndpoints:
         assert "react_agent" in data["agents"]
 
 
+class TestSearchEngineExclusion:
+    """The app must never be indexed by search engines (noindex everywhere)."""
+
+    @pytest.mark.asyncio
+    async def test_noindex_header_on_every_response(self, async_client):
+        """Every response carries X-Robots-Tag: noindex regardless of route."""
+        response = await async_client.get("/robots.txt")
+        tag = response.headers.get("X-Robots-Tag", "")
+        assert "noindex" in tag
+        assert "nofollow" in tag
+
+    @pytest.mark.asyncio
+    async def test_robots_txt_disallows_all(self, async_client):
+        """robots.txt tells well-behaved crawlers to stay out of the whole site."""
+        response = await async_client.get("/robots.txt")
+        assert response.status_code == 200
+        assert "text/plain" in response.headers.get("content-type", "")
+        body = response.text
+        assert "User-agent: *" in body
+        assert "Disallow: /" in body
+
+    @patch("builtins.open")
+    def test_noindex_header_on_login_page(self, mock_open):
+        """The login/registration screens in particular must not be indexed."""
+        mock_open.return_value.__enter__.return_value.read.return_value = (
+            "<html><head></head><body>login</body></html>"
+        )
+        with patch("app.routers.ui.has_any_users", return_value=True):
+            client = TestClient(app)
+            response = client.get("/login")
+            assert response.status_code == 200
+            assert "noindex" in response.headers.get("X-Robots-Tag", "")
+
+
 class TestThreadsAndHistory:
     """Test threads and chat history endpoints."""
 

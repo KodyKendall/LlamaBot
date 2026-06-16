@@ -144,6 +144,13 @@
             <div data-llamabot="thinking-area" class="thinking-area hidden"></div>
             <!-- File attachments preview area -->
             <div data-llamabot="attachments-preview" class="attachments-preview hidden"></div>
+            <!-- Image auto-switch notice (non-blocking, informational) -->
+            <div class="image-switch-banner hidden" data-llamabot="image-switch-banner">
+                <div class="warning-content">
+                    <i class="fa-solid fa-circle-info"></i>
+                    <span>Sending an image will start a new conversation on an image-capable model.</span>
+                </div>
+            </div>
             <textarea placeholder="Ask Leonardo..." data-llamabot="message-input"></textarea>
             <!-- Floating contextual toolbar (hidden by default) -->
             <div class="tools-toolbar hidden" data-llamabot="tools-toolbar">

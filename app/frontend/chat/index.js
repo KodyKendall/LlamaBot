@@ -29,6 +29,11 @@ import { CheckpointManager } from './checkpoints/CheckpointManager.js';
 import { DiffViewer } from './checkpoints/DiffViewer.js';
 import { FaviconBadgeManager } from './ui/FaviconBadgeManager.js';
 
+// Image auto-switch: when a user attaches an image while on a text-only model,
+// we move them onto an image-capable model so the image is actually seen.
+const IMAGE_MODEL = 'gemini-3.1-flash-lite';   // vision-capable target
+const DEFAULT_TEXT_MODEL = 'deepseek-v4-flash'; // default text model
+
 /**
  * Main application class - LlamaBot Client
  */
@@ -75,6 +80,18 @@ class ChatApp {
 
     // Store element references (will be populated in initComponents)
     this.elements = {};
+
+    // Per-model multimodal capability, mirrored from the backend
+    // (model_capabilities.py). Seeded with the known text-only models so the
+    // image auto-switch works on the very first send, before
+    // /api/available-models resolves. Merged with fetched data in
+    // fetchAvailableModels(). Unknown models default to vision-capable
+    // (matching the backend's permissive default), so we never spuriously
+    // start a new thread for a model we can't classify.
+    this.modelCapabilities = new Map([
+      ['deepseek-v4-flash', { images: false }],
+      ['deepseek-v4-pro', { images: false }],
+    ]);
 
     // Agent running state (for stop button)
     this.isAgentRunning = false;
@@ -334,6 +351,8 @@ class ChatApp {
       this.elements.dropZoneOverlay
     );
     this.fileAttachmentManager.setupPaste(this.elements.messageInput);
+    // Re-evaluate the image-switch banner whenever attachments change.
+    this.fileAttachmentManager.onChange = () => this.updateImageSwitchBanner();
 
 
     // Initialize screen recorder
@@ -467,6 +486,7 @@ class ChatApp {
       this.elements.modelSelect.addEventListener('change', (e) => {
         setCookie('llmModel', e.target.value, this.config.cookieExpiryDays);
         this.updateDropdownLabel(this.elements.modelSelect);
+        this.updateImageSwitchBanner();
       });
       // Initialize with short label
       this.updateDropdownLabel(this.elements.modelSelect);
@@ -595,6 +615,11 @@ class ChatApp {
     // Listen for new thread creation
     window.addEventListener('createNewThread', () => {
       this.threadManager.createNewThread();
+      // A user-initiated new thread resets to the default text model. The
+      // image auto-switch path calls createNewThread() directly (not via this
+      // event), so it keeps the vision model it just selected.
+      this.setModel(DEFAULT_TEXT_MODEL);
+      this.updateImageSwitchBanner();
       // Reset token indicator for new conversation
       if (this.tokenIndicator) {
         this.tokenIndicator.reset();
@@ -873,6 +898,93 @@ class ChatApp {
   }
 
   /**
+   * Programmatically select a model in the dropdown and persist it.
+   * No-ops if the model isn't a valid dropdown option.
+   */
+  setModel(model) {
+    if (!this.elements.modelSelect) return;
+    const isValid = Array.from(this.elements.modelSelect.options)
+      .some(option => option.value === model);
+    if (!isValid) return;
+    this.elements.modelSelect.value = model;
+    setCookie('llmModel', model, this.config.cookieExpiryDays);
+    this.updateDropdownLabel(this.elements.modelSelect);
+  }
+
+  /**
+   * Whether a model can accept image input. Unknown models default to true,
+   * matching the backend's permissive default, so we never spuriously switch
+   * a model we can't classify.
+   */
+  modelSupportsImages(model) {
+    const cap = this.modelCapabilities.get(model);
+    return cap ? cap.images !== false : true;
+  }
+
+  /**
+   * Whether any pending attachment is an inline image (uploaded_file refs are
+   * sent as text, not image blocks, so they don't count).
+   */
+  hasImageAttachment(attachments) {
+    return (attachments || []).some(a =>
+      a.type !== 'uploaded_file' && (a.mime_type || '').startsWith('image/'));
+  }
+
+  /**
+   * Whether the current thread already has user messages. Counts only human
+   * bubbles, so the always-present welcome AI bubble reads as empty.
+   */
+  conversationHasMessages() {
+    const history = this.elements.messageHistory;
+    if (!history) return false;
+    return history.querySelectorAll('[data-llamabot="human-message"]').length > 0;
+  }
+
+  /**
+   * Build a plain-text transcript of the visible conversation, to carry over
+   * when an image forces a fresh thread on a different provider. Soft-capped
+   * to the most recent ~8000 chars to avoid a huge first message.
+   */
+  buildConversationTranscript() {
+    const history = this.elements.messageHistory;
+    if (!history) return '';
+    const bubbles = history.querySelectorAll(
+      '[data-llamabot="human-message"], [data-llamabot="ai-message"]');
+    const lines = [];
+    bubbles.forEach(el => {
+      const isHuman = el.getAttribute('data-llamabot') === 'human-message';
+      const raw = el.getAttribute('data-raw-content');
+      // Skip AI bubbles with no raw content (the boilerplate welcome bubble).
+      if (!isHuman && raw == null) return;
+      const text = (raw != null ? raw : el.textContent || '').trim();
+      if (text) lines.push(`${isHuman ? 'User' : 'Assistant'}: ${text}`);
+    });
+    let transcript = lines.join('\n\n');
+    const CAP = 8000;
+    if (transcript.length > CAP) {
+      transcript = '...(earlier messages truncated)...\n\n' + transcript.slice(-CAP);
+    }
+    return transcript;
+  }
+
+  /**
+   * Show the pre-send banner only when sending the attached image would force
+   * a new conversation: an image is attached, the current model can't see
+   * images, and we're mid-conversation. Hidden otherwise.
+   */
+  updateImageSwitchBanner() {
+    const banner = this.container.querySelector('[data-llamabot="image-switch-banner"]');
+    if (!banner) return;
+    const attachments = this.fileAttachmentManager?.getAttachments() || [];
+    const model = this.elements.modelSelect?.value || DEFAULT_TEXT_MODEL;
+    const shouldShow =
+      this.hasImageAttachment(attachments) &&
+      !this.modelSupportsImages(model) &&
+      this.conversationHasMessages();
+    banner.classList.toggle('hidden', !shouldShow);
+  }
+
+  /**
    * Check for ?welcome_prompt= URL parameter.
    * Same as ?prompt= but also triggers a fade-in on the UI and confetti on completion.
    */
@@ -927,7 +1039,9 @@ class ChatApp {
 
     let message = input.value.trim();
     const agentMode = this.elements.agentModeSelect?.value;
-    const llmModel = this.elements.modelSelect?.value || 'deepseek-v4-flash';
+    const llmModel = this.elements.modelSelect?.value || DEFAULT_TEXT_MODEL;
+    // May be reassigned below if an attached image forces a vision model.
+    let effectiveLlmModel = llmModel;
 
     // Ensure AppState is synchronized with current dropdown value before sending
     // This fixes a race condition where AppState could be stale after page initialization
@@ -975,6 +1089,43 @@ class ChatApp {
       const fileList = uploadedFiles.map(f => `- ${f.filename} (saved to ${f.path})`).join('\n');
       message = `${message}\n\n<UPLOADED_FILES>\nThe user uploaded the following files to the Rails app:\n${fileList}\n</UPLOADED_FILES>`;
     }
+
+    // --- Auto-switch model when an image is attached to a text-only model ---
+    // Cross-provider switches mid-thread are unsafe (provider-specific
+    // reasoning/thinking blocks in the checkpoint), so mid-conversation we move
+    // to a fresh thread and carry the prior conversation over as text. On a
+    // fresh thread we just switch silently for this send. This must run BEFORE
+    // the human bubble renders and BEFORE ensureThreadId() below.
+    if (this.hasImageAttachment(attachments) && !this.modelSupportsImages(llmModel)) {
+      const imageOpt = Array.from(this.elements.modelSelect?.options || [])
+        .find(o => o.value === IMAGE_MODEL);
+      const imageModelAvailable = imageOpt && !imageOpt.disabled;
+
+      if (imageModelAvailable) {
+        if (this.conversationHasMessages()) {
+          // Mid-conversation: switch model, start a new thread, carry transcript.
+          const transcript = this.buildConversationTranscript();
+          this.setModel(IMAGE_MODEL);
+          effectiveLlmModel = IMAGE_MODEL;
+          // Clears the message history and sets the new thread id synchronously.
+          this.threadManager.createNewThread({ isImageSwitch: true });
+          if (transcript) {
+            message = `Previous conversation:\n${transcript}\n\n---\n\n${message}`;
+          }
+          this.slashCommandManager?.showToast(
+            "You attached an image, but your current model can't see images. " +
+            "I switched to Gemini and started a new conversation, carrying your previous messages over.",
+            'info'
+          );
+          this.updateImageSwitchBanner();
+        } else {
+          // Fresh/empty thread: silently switch this send to the vision model.
+          this.setModel(IMAGE_MODEL);
+          effectiveLlmModel = IMAGE_MODEL;
+        }
+      }
+    }
+    // --- end auto-switch ---
 
     // Reset state
     this.appState.resetMessageState();
@@ -1077,7 +1228,7 @@ class ChatApp {
       debug_info: debugInfo,
       agent_name: agentName,
       agent_mode: agentMode,
-      llm_model: llmModel,
+      llm_model: effectiveLlmModel,
       attachments: attachments.filter(a => a.type !== 'uploaded_file'),
       ask_before_edits: executionMode === 'ask'
     };
@@ -1089,7 +1240,7 @@ class ChatApp {
 
     // Call custom callback if provided
     if (this.config.onMessageReceived) {
-      this.config.onMessageReceived({ message, threadId, agentMode, llmModel });
+      this.config.onMessageReceived({ message, threadId, agentMode, llmModel: effectiveLlmModel });
     }
   }
 
@@ -1221,6 +1372,14 @@ class ChatApp {
       const modelAvailability = new Map(
         data.models.map(m => [m.value, { available: m.available, reason: m.reason }])
       );
+
+      // Merge fetched capabilities into the seeded map (don't replace it, so
+      // the static text-only seed survives even if the backend omits the key).
+      data.models.forEach(m => {
+        if (m.capabilities) {
+          this.modelCapabilities.set(m.value, { ...m.capabilities });
+        }
+      });
 
       // Track if current selection becomes unavailable
       let currentValue = this.elements.modelSelect.value;
