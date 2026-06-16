@@ -29,6 +29,8 @@ export class FileAttachmentManager {
     this.attachButton = null;
     this.previewContainer = null;
     this.attachMenu = null;
+    // Optional callback invoked whenever attachments change (add/remove/clear).
+    this.onChange = null;
   }
 
   /**
@@ -602,6 +604,10 @@ export class FileAttachmentManager {
         this.openImagePreview(this.thumbnailSrcFor(att), att.filename);
       });
     });
+
+    // Notify listeners that attachments changed (renderPreview is the single
+    // choke point for every add/remove/clear/paste/drag-drop path).
+    if (this.onChange) this.onChange();
   }
 
   /**

@@ -135,6 +135,7 @@ body {
 .chat-section.collapsed .input-area .token-indicator,
 .chat-section.collapsed .input-area .thinking-area,
 .chat-section.collapsed .input-area .attachments-preview,
+.chat-section.collapsed .input-area .image-switch-banner,
 .chat-section.collapsed .input-area .scroll-to-bottom,
 .chat-section.collapsed .input-area .button-row,
 .chat-section.collapsed .tools-toolbar,
@@ -5189,6 +5190,37 @@ body {
 
 .timeout-warning-banner .continue-btn:hover {
     background: #d97706;
+}
+
+/* Image auto-switch notice: non-blocking, informational, sits above the input */
+.image-switch-banner {
+    background: linear-gradient(135deg, #e0f2fe 0%, #dbeafe 100%);
+    border: 1px solid #93c5fd;
+    border-radius: 8px;
+    padding: 8px 12px;
+    margin: 0 0 8px;
+    display: flex;
+    align-items: center;
+    animation: slideDown 0.2s ease-out;
+    flex-shrink: 0;
+}
+
+.image-switch-banner.hidden {
+    display: none;
+}
+
+.image-switch-banner .warning-content {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #1e40af;
+    font-weight: 500;
+    font-size: 0.82rem;
+}
+
+.image-switch-banner .warning-content i {
+    font-size: 1rem;
+    flex-shrink: 0;
 }
 
 @keyframes slideDown {

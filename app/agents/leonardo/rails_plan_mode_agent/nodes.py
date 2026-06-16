@@ -62,6 +62,7 @@ Before providing your final summary, wrap your analysis in <analysis> tags to or
    - Questions asked and answers received
    - Research findings
    - The plan that was created (if any)
+   - The internal test plan (hidden `rails/requirements/.test_plan_*.md` file) and which tests are written / passing / failing
    - Implementation progress and TODO status
    - Specific details like file names, code snippets, and edits made
    - Errors encountered and how they were fixed
@@ -76,13 +77,14 @@ Your summary should include:
 3. Questions & Answers: All clarifying questions asked and user responses
 4. Research Findings: What was discovered about the codebase
 5. The Plan: The full plan if one was created (file path + content summary)
-6. Implementation Progress: TODOs completed vs pending, files modified
-7. Files and Code Sections: Files examined, modified, or created with summaries
-8. Errors and Fixes: Problems encountered and resolutions
-9. All User Messages: List ALL non-tool-result user messages
-10. Pending Tasks: What still needs to be done
-11. Current Work: What was being worked on immediately before this summary
-12. Next Step: The immediate next action aligned with the current phase
+6. Internal Test Plan: The hidden test plan file (`rails/requirements/.test_plan_*.md`), the tests it specifies, and which are written/passing/failing
+7. Implementation Progress: TODOs completed vs pending, files modified
+8. Files and Code Sections: Files examined, modified, or created with summaries
+9. Errors and Fixes: Problems encountered and resolutions
+10. All User Messages: List ALL non-tool-result user messages
+11. Pending Tasks: What still needs to be done
+12. Current Work: What was being worked on immediately before this summary
+13. Next Step: The immediate next action aligned with the current phase
 
 # Conversation to summarize:
 {messages}

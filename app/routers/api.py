@@ -17,6 +17,7 @@ from app.services.thread_service import get_thread_list
 from app.services.user_service import (
     get_all_users, get_user_by_username, update_user, delete_user
 )
+from app.agents.leonardo.model_capabilities import get_model_capabilities
 
 logger = logging.getLogger(__name__)
 
@@ -521,7 +522,8 @@ async def available_models():
         models.append({
             "value": model_value,
             "available": has_key,
-            "reason": None if has_key else f"{checked_var} not configured in .env"
+            "reason": None if has_key else f"{checked_var} not configured in .env",
+            "capabilities": get_model_capabilities(model_value),
         })
 
     return {"models": models}

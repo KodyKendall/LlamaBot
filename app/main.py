@@ -68,12 +68,32 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+# Keep the entire app out of search engines. Every response — pages, the
+# registration/login screens, API responses, static assets — gets a
+# `X-Robots-Tag: noindex, nofollow` header so crawlers that honor it (Google,
+# Bing, etc.) never index anything we serve, regardless of how the response is
+# produced. Paired with the `/robots.txt` route below.
+@app.middleware("http")
+async def add_noindex_header(request, call_next):
+    response = await call_next(request)
+    response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive, nosnippet"
+    return response
+
 if not os.getenv("LLAMAPRESS_AI_LOGIN_SECRET"):
     logger.warning(
         "LLAMAPRESS_AI_LOGIN_SECRET is not set. Magic-link sign-in "
         "(GET /login?token=...) will return 503 until configured. "
         "POST /login and HTTP Basic Auth still work."
     )
+
+# Tell crawlers to stay out of the whole site (belt-and-suspenders with the
+# X-Robots-Tag header above — robots.txt is what well-behaved crawlers fetch first).
+@app.get("/robots.txt", include_in_schema=False)
+async def robots_txt():
+    from fastapi.responses import PlainTextResponse
+    return PlainTextResponse("User-agent: *\nDisallow: /\n")
+
 
 # Mount static directories
 frontend_dir = Path(__file__).parent / "frontend"

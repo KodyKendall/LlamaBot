@@ -29,6 +29,7 @@ MODEL_CAPABILITIES = {
 
     # DeepSeek - primarily text focused
     'deepseek-v4-flash': {'images': False, 'video': False, 'pdf': False},
+    'deepseek-v4-pro': {'images': False, 'video': False, 'pdf': False},
 }
 
 

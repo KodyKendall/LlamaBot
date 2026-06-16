@@ -447,9 +447,16 @@ export class ThreadManager {
   }
 
   /**
-   * Create a new thread - clears messages and generates new thread ID
+   * Create a new thread - clears messages and generates new thread ID.
+   *
+   * @param {Object} [options]
+   * @param {boolean} [options.isImageSwitch] - true when called by the image
+   *   auto-switch path (vs. the user clicking "New thread"). The model-reset
+   *   behavior lives in the index.js createNewThread event handler, which only
+   *   fires for user-initiated new threads, so this flag is informational and
+   *   keeps the call site self-documenting.
    */
-  createNewThread() {
+  createNewThread({ isImageSwitch = false } = {}) {
     // Clear current messages
     this.messageRenderer.clearMessages();
 
