@@ -497,13 +497,19 @@ class RequestHandler:
                     # Update thread metadata after successful message processing
                     await self._update_thread_metadata(incoming_message)
 
-                    # Clean up intermediate checkpoints for THIS thread only after successful run
-                    # This bounds storage while preserving "continue" functionality for other threads
+                    # Clean up intermediate checkpoints for THIS thread only after successful run.
+                    # SAFETY: this aggressive per-thread trim is only valid for non-DeltaChannel
+                    # agents (every checkpoint is a full snapshot). For DeltaChannel agents it would
+                    # destroy the delta chain (snapshot + ancestor writes) and corrupt the thread, so
+                    # we skip it — DeltaChannel already keeps per-checkpoint storage tiny.
                     if hasattr(self.app.state, 'checkpointer_pool') and self.app.state.checkpointer_pool is not None:
                         try:
-                            from app.services.checkpoint_cleanup import cleanup_thread_checkpoints_except_latest
+                            from app.services.checkpoint_cleanup import (
+                                cleanup_thread_checkpoints_except_latest,
+                                graph_uses_delta_channel,
+                            )
                             thread_id = incoming_message.get('thread_id')
-                            if thread_id:
+                            if thread_id and not graph_uses_delta_channel(app):
                                 await cleanup_thread_checkpoints_except_latest(
                                     self.app.state.checkpointer_pool,
                                     thread_id
