@@ -15,6 +15,10 @@ import logging
 
 from app.agents.leonardo.rails_agent.state import RailsAgentState
 from app.agents.leonardo.llm_factory import get_llm
+from app.agents.leonardo.model_capabilities import (
+    get_model_capabilities,
+    get_file_category,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -194,6 +198,117 @@ class FailureCircuitBreakerMiddleware(AgentMiddleware):
 
 
 # =============================================================================
+# Strip Unsupported Multimodal Content
+# =============================================================================
+
+class StripUnsupportedMultimodalMiddleware(AgentMiddleware):
+    """Remove multimodal blocks the active model can't consume from replayed history.
+
+    A thread can be started on a vision model (e.g. Gemini), which persists
+    ``image_url`` / ``file`` content blocks into the conversation history. If the
+    user then switches to a text-only model (e.g. DeepSeek), that history is
+    replayed and the provider rejects the request with a 400:
+
+        Failed to deserialize the JSON body into the target type:
+        messages[N]: unknown variant `image_url`, expected `text`
+
+    Per-message attachment gating at *send* time (request_handler._build_message_content)
+    can't fix this because the offending blocks are already in state. This
+    middleware scrubs the whole message list right before the LLM call, keyed off
+    the same MODEL_CAPABILITIES table, and replaces each dropped block with a short
+    text note so the model knows something was attached rather than seeing a gap.
+    """
+
+    # content-block type -> capability key it requires
+    _BLOCK_CAPABILITY = {
+        "image_url": "images",
+        "image": "images",
+    }
+
+    def _placeholder(self, capability: str, model_name: str) -> str:
+        kind = {"images": "image", "video": "video", "pdf": "PDF"}.get(capability, "file")
+        return (
+            f"[A {kind} was attached here earlier, but it was removed because the "
+            f"current model ({model_name}) can't see {kind}s.]"
+        )
+
+    def _block_capability(self, block: dict) -> str | None:
+        """Return the capability a content block requires, or None if it's plain text/unknown."""
+        btype = block.get("type")
+        if btype in self._BLOCK_CAPABILITY:
+            return self._BLOCK_CAPABILITY[btype]
+        if btype == "file":
+            # File blocks carry a mime_type; map it to images/video/pdf.
+            mime = block.get("mime_type") or ""
+            category = get_file_category(mime)
+            return category if category != "unknown" else None
+        return None
+
+    def _strip_content(self, content, capabilities: dict, model_name: str):
+        """Strip unsupported blocks from one message's content; collapse to str if only text remains."""
+        if not isinstance(content, list):
+            return content, False
+
+        new_blocks = []
+        changed = False
+        for block in content:
+            if not isinstance(block, dict):
+                new_blocks.append(block)
+                continue
+            capability = self._block_capability(block)
+            if capability is not None and not capabilities.get(capability, False):
+                new_blocks.append({
+                    "type": "text",
+                    "text": self._placeholder(capability, model_name),
+                })
+                changed = True
+            else:
+                new_blocks.append(block)
+
+        if not changed:
+            return content, False
+
+        # Collapse to a plain string when nothing but text blocks survive — the
+        # simplest valid shape for text-only providers.
+        if all(isinstance(b, dict) and b.get("type") == "text" for b in new_blocks):
+            return "\n\n".join(b.get("text", "") for b in new_blocks), True
+        return new_blocks, True
+
+    def _strip_unsupported(self, messages, model_name: str):
+        """Return a message list with content the model can't consume removed."""
+        capabilities = get_model_capabilities(model_name)
+        # Fast path: model supports everything we ever attach.
+        if capabilities.get("images") and capabilities.get("video") and capabilities.get("pdf"):
+            return messages
+
+        modified = []
+        any_changed = False
+        for msg in messages:
+            new_content, changed = self._strip_content(msg.content, capabilities, model_name)
+            if changed:
+                any_changed = True
+                modified.append(msg.model_copy(update={"content": new_content}))
+            else:
+                modified.append(msg)
+
+        return modified if any_changed else messages
+
+    def wrap_model_call(self, request, handler):
+        model_name = request.state.get('llm_model') or 'deepseek-v4-flash'
+        messages = self._strip_unsupported(request.messages, model_name)
+        if messages is not request.messages:
+            return handler(request.override(messages=messages))
+        return handler(request)
+
+    async def awrap_model_call(self, request, handler):
+        model_name = request.state.get('llm_model') or 'deepseek-v4-flash'
+        messages = self._strip_unsupported(request.messages, model_name)
+        if messages is not request.messages:
+            return await handler(request.override(messages=messages))
+        return await handler(request)
+
+
+# =============================================================================
 # DeepSeek Reasoning Content Middleware
 # =============================================================================
 
@@ -300,3 +415,4 @@ class DynamicModelMiddleware(AgentMiddleware):
 inject_view_context = ViewPathContextMiddleware()
 check_failure_limit = FailureCircuitBreakerMiddleware()
 deepseek_reasoning_fix = DeepSeekReasoningMiddleware()
+strip_unsupported_multimodal = StripUnsupportedMultimodalMiddleware()

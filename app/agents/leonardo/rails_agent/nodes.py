@@ -37,6 +37,7 @@ from app.agents.leonardo.rails_agent.middleware import (
     check_failure_limit,
     DynamicModelMiddleware,
     deepseek_reasoning_fix,
+    strip_unsupported_multimodal,
 )
 from app.agents.utils.token_counter import gemini_multimodal_token_counter, SUMMARIZATION_TOKEN_THRESHOLD
 from app.agents.leonardo.rails_agent.sub_agents import delegate_task, delegate_research
@@ -213,15 +214,18 @@ def build_workflow(checkpointer=None, ask_before_edits=False):
         ),
         # 2. Dynamic model selection based on state.llm_model from frontend
         DynamicModelMiddleware(),
-        # 3. DeepSeek reasoning fix - injects reasoning_content for multi-turn tool calls
+        # 3. Strip image/video/PDF blocks from history when the active model can't
+        #    consume them (e.g. switching a vision thread onto text-only DeepSeek).
+        strip_unsupported_multimodal,
+        # 4. DeepSeek reasoning fix - injects reasoning_content for multi-turn tool calls
         deepseek_reasoning_fix,
-        # 4. View path context injection - prepends page context to user messages
+        # 5. View path context injection - prepends page context to user messages
         inject_view_context,
-        # 5. Circuit breaker - stop tool calls after 3 failures
+        # 6. Circuit breaker - stop tool calls after 3 failures
         check_failure_limit,
     ]
 
-    # 6. Optional: Human-in-the-loop approval for destructive tools
+    # 7. Optional: Human-in-the-loop approval for destructive tools
     if ask_before_edits:
         DESTRUCTIVE_TOOLS = ['edit_file', 'write_file', 'bash_command']
         middleware.append(HumanInTheLoopMiddleware(
