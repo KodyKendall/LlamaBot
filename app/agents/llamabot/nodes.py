@@ -10,6 +10,7 @@ from langgraph.graph import START, StateGraph
 from langgraph.prebuilt import tools_condition
 from langgraph.prebuilt import ToolNode
 from langgraph.prebuilt.chat_agent_executor import AgentState
+from app.agents.utils.delta_state import DeltaMessages
 
 
 import asyncio
@@ -39,6 +40,10 @@ _llm_instance = ChatOpenAI(model="gpt-4.1")
 
 # Warning: Brittle - None type will break this when it's injected into the state for the tool call, and it silently fails. So if it doesn't map state types properly from the frontend, it will break. (must be exactly what's defined here).
 class LlamaPressState(AgentState):
+    # DeltaChannel-backed messages (see app/agents/utils/delta_state.py): keeps
+    # checkpoint storage ~O(N). Threads using this state must be excluded from
+    # per-thread partial checkpoint cleanup.
+    messages: DeltaMessages
     api_token: str
     agent_prompt: str
 

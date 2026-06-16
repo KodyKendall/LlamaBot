@@ -303,7 +303,10 @@ async def startup_event():
                     stale_minutes=stale_minutes
                 )
             )
-            logger.info(f"Checkpoint cleanup enabled (post-run + periodic every 24h, stale threshold: {stale_minutes}min)")
+            logger.info(
+                "Checkpoint cleanup enabled (DeltaChannel agents: retain full history; "
+                "non-delta agents: gated post-run trim; periodic orphan sweep every 24h)"
+            )
         except Exception as e:
             logger.warning(f"Failed to start checkpoint cleanup task: {e}")
 
