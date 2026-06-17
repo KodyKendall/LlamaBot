@@ -138,32 +138,30 @@ from app.models import User
 
 @pytest.fixture
 def authed_client():
+    """TestClient whose GET ``/`` is authenticated and DB-free.
+
+    The chat route resolves the user via ``try_authenticate`` and reads a couple
+    of site settings via ``get_site_setting``. We patch both so the test does not
+    depend on a live auth DB / session secret (CI runs without ``AUTH_DB_URI``).
+    With no DB query issued, the route's ``Session(engine)`` is never exercised.
+    """
     from main import app
 
     user = User(id=7, username="leo-modes", password_hash="h", role="engineer",
                 is_admin=False, is_active=True)
 
-    def fake_auth(session, username, password):
-        return user if (username == user.username and password == "pw") else None
-
     patches = [
-        patch("app.routers.ui.authenticate_user", side_effect=fake_auth),
-        patch("app.routers.ui.get_user_by_username", side_effect=lambda s, u: user if u == user.username else None),
-        patch("app.dependencies.authenticate_user", side_effect=fake_auth),
-        patch("app.dependencies.get_user_by_id", side_effect=lambda s, i: user if i == user.id else None),
+        patch("app.routers.ui.try_authenticate", return_value=user),
+        patch("app.routers.api.get_site_setting", return_value="false"),
     ]
     for p in patches:
         p.start()
-    from app.dependencies import get_db_session
-    app.dependency_overrides[get_db_session] = lambda: iter([None])
     try:
         with TestClient(app, base_url="https://testserver") as client:
-            client.post("/login", json={"username": user.username, "password": "pw"})
             yield client
     finally:
         for p in patches:
             p.stop()
-        app.dependency_overrides.pop(get_db_session, None)
 
 
 def test_chat_route_injects_custom_modes_and_extends_visible_agents(authed_client):

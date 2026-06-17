@@ -165,13 +165,17 @@ async def root(request: Request):
 
         # Load per-instance custom agent modes (optional overlay, no image change).
         # Validated against the registered langgraph.json graphs.
-        custom_agent_modes = []
+        graphs = {}
         try:
             with open("langgraph.json", "r", encoding="utf-8") as f:
                 graphs = json.load(f).get("graphs", {})
+        except Exception as e:
+            logger.warning(f"Could not read langgraph.json for custom agent modes: {e}")
+        try:
             custom_agent_modes = load_custom_agent_modes("agent_modes.json", graphs)
         except Exception as e:
             logger.warning(f"Could not load custom agent modes: {e}")
+            custom_agent_modes = []
 
         # Surface custom modes for engineer-role default visibility. We only auto-add
         # to a role-based default list — an explicit per-user visible_agents setting
