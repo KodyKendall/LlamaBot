@@ -534,6 +534,24 @@
             const modeSelect = document.querySelector('[data-llamabot="agent-mode-select"]');
 
             if (modeSelect) {
+                // Inject per-instance custom agent modes (window.LLAMABOT_CUSTOM_AGENT_MODES)
+                // BEFORE the visibility filter runs. The backend only emits modes whose
+                // agent_name is a registered langgraph.json graph, and adds their keys to
+                // the role-default visible_agents, so the freshly-added options survive the
+                // filter below. With no custom modes this is a no-op (back-compatible).
+                const customModes = Array.isArray(window.LLAMABOT_CUSTOM_AGENT_MODES)
+                    ? window.LLAMABOT_CUSTOM_AGENT_MODES : [];
+                customModes.forEach(function (m) {
+                    if (!m || typeof m.key !== 'string' || typeof m.label !== 'string') return;
+                    // Don't duplicate an option that already exists (built-in keys win).
+                    if (modeSelect.querySelector('option[value="' + m.key + '"]')) return;
+                    const opt = document.createElement('option');
+                    opt.value = m.key;
+                    opt.textContent = m.label;
+                    opt.setAttribute('data-short-label', (typeof m.shortLabel === 'string' && m.shortLabel) ? m.shortLabel : m.label);
+                    modeSelect.appendChild(opt);
+                });
+
                 // If user role is 'user' and no visible_agents configured (legacy behavior)
                 if (userRole === 'user' && !visibleAgents) {
                     // Restrict agent mode dropdown to only feedback

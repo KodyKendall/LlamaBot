@@ -80,6 +80,30 @@ export const DEFAULT_CONFIG = {
 };
 
 /**
+ * Resolve the active agent-mode -> agent_name map.
+ *
+ * Built-in modes (DEFAULT_CONFIG.agentModes) are always present and always win.
+ * Per-instance custom modes injected by the backend as
+ * window.LLAMABOT_CUSTOM_AGENT_MODES ([{ key, agent_name, ... }]) are merged in
+ * underneath, so an instance can add its own agent modes without an image
+ * rebuild. With no custom modes injected this returns the built-in map verbatim
+ * (fully back-compatible).
+ */
+export function getAgentModeMap() {
+  const custom = (typeof window !== 'undefined' && Array.isArray(window.LLAMABOT_CUSTOM_AGENT_MODES))
+    ? window.LLAMABOT_CUSTOM_AGENT_MODES
+    : [];
+  const map = {};
+  for (const m of custom) {
+    if (m && typeof m.key === 'string' && typeof m.agent_name === 'string') {
+      map[m.key] = m.agent_name;
+    }
+  }
+  // Built-ins win on key collision.
+  return Object.assign(map, DEFAULT_CONFIG.agentModes);
+}
+
+/**
  * Get Rails URL based on current protocol
  */
 export function getRailsUrl() {

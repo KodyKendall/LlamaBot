@@ -2,7 +2,7 @@
  * Centralized application state management
  */
 
-import { DEFAULT_CONFIG } from '../config.js';
+import { DEFAULT_CONFIG, getAgentModeMap } from '../config.js';
 
 export class AppState {
   constructor() {
@@ -111,7 +111,8 @@ export class AppState {
    * Update agent configuration based on mode
    */
   setAgentMode(mode) {
-    const agentName = DEFAULT_CONFIG.agentModes[mode];
+    // Resolve against built-in modes AND per-instance custom modes (built-ins win).
+    const agentName = getAgentModeMap()[mode];
     if (agentName) {
       this.agentConfig.name = agentName;
     }

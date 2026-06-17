@@ -32,7 +32,84 @@ from app.services.magic_link_service import (
 DEFAULT_VISIBLE_AGENTS_USER = ["feedback"]
 DEFAULT_VISIBLE_AGENTS_ENGINEER = ["ticket", "engineer", "testing", "feedback", "user", "ai_builder", "beginner", "pyxl"]
 
+# Built-in agent-mode dropdown keys baked into the image (chat.html <option>s +
+# config.js agentModes). Per-instance custom modes may NOT shadow these.
+BUILTIN_AGENT_MODE_KEYS = frozenset({
+    "engineer", "ai_builder", "testing", "ticket", "user",
+    "beginner", "pyxl", "plan", "feedback",
+})
+
 logger = logging.getLogger(__name__)
+
+
+def load_custom_agent_modes(overlay_path, graphs):
+    """Load + validate per-instance custom agent modes from an overlay file.
+
+    Custom modes let an instance surface its own LangGraph agent in the chat mode
+    dropdown without rebuilding the image. The overlay file (``agent_modes.json``,
+    mounted next to the editable ``langgraph.json``) is a JSON array of objects::
+
+        [{ "key", "label", "agent_name", "description"?, "shortLabel"?, "icon"? }]
+
+    Validation (this is the brittle part — keep it strict so a broken entry can
+    never reach the dropdown):
+      * file missing / unreadable / invalid JSON / not a list -> [] (stock case)
+      * an entry needs non-empty string ``key``, ``label``, ``agent_name``
+      * ``agent_name`` must be a registered graph in ``langgraph.json`` (else it
+        could never route — drop it rather than show a dead option)
+      * ``key`` must not shadow a built-in mode (back-compat: built-ins win)
+      * duplicate custom keys: first wins
+
+    Returns a sanitized list of dicts safe to JSON-inject into the frontend.
+    """
+    try:
+        with open(overlay_path, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+    except (FileNotFoundError, OSError):
+        return []
+    except json.JSONDecodeError as e:
+        logger.warning(f"Ignoring custom agent modes overlay {overlay_path}: invalid JSON ({e})")
+        return []
+
+    if not isinstance(raw, list):
+        logger.warning(f"Ignoring custom agent modes overlay {overlay_path}: expected a JSON array")
+        return []
+
+    registered = set(graphs or {})
+    out = []
+    seen = set()
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        key = entry.get("key")
+        label = entry.get("label")
+        agent_name = entry.get("agent_name")
+        if not (isinstance(key, str) and key.strip()
+                and isinstance(label, str) and label.strip()
+                and isinstance(agent_name, str) and agent_name.strip()):
+            logger.warning(f"Dropping custom agent mode (missing key/label/agent_name): {entry!r}")
+            continue
+        if key in BUILTIN_AGENT_MODE_KEYS:
+            logger.warning(f"Dropping custom agent mode '{key}': cannot shadow a built-in mode")
+            continue
+        if agent_name not in registered:
+            logger.warning(
+                f"Dropping custom agent mode '{key}': agent_name '{agent_name}' "
+                f"is not registered in langgraph.json graphs"
+            )
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({
+            "key": key,
+            "label": label,
+            "agent_name": agent_name,
+            "description": entry.get("description") if isinstance(entry.get("description"), str) else "",
+            "shortLabel": entry.get("shortLabel") if isinstance(entry.get("shortLabel"), str) and entry.get("shortLabel").strip() else label,
+            "icon": entry.get("icon") if isinstance(entry.get("icon"), str) else None,
+        })
+    return out
 
 
 def _read_leonardo_value(filename: str) -> str | None:
@@ -71,6 +148,7 @@ async def root(request: Request):
 
         # Get visible agents for this user (role-based defaults)
         visible_agents = None
+        visible_from_default = False
         if user.visible_agents:
             try:
                 visible_agents = json.loads(user.visible_agents)
@@ -79,10 +157,29 @@ async def root(request: Request):
 
         # If no custom setting, use role-based defaults
         if not visible_agents:
+            visible_from_default = True
             if getattr(user, "role", "engineer") == "user":
-                visible_agents = DEFAULT_VISIBLE_AGENTS_USER
+                visible_agents = list(DEFAULT_VISIBLE_AGENTS_USER)
             else:
-                visible_agents = DEFAULT_VISIBLE_AGENTS_ENGINEER
+                visible_agents = list(DEFAULT_VISIBLE_AGENTS_ENGINEER)
+
+        # Load per-instance custom agent modes (optional overlay, no image change).
+        # Validated against the registered langgraph.json graphs.
+        custom_agent_modes = []
+        try:
+            with open("langgraph.json", "r", encoding="utf-8") as f:
+                graphs = json.load(f).get("graphs", {})
+            custom_agent_modes = load_custom_agent_modes("agent_modes.json", graphs)
+        except Exception as e:
+            logger.warning(f"Could not load custom agent modes: {e}")
+
+        # Surface custom modes for engineer-role default visibility. We only auto-add
+        # to a role-based default list — an explicit per-user visible_agents setting
+        # is respected as-is (the admin opts the custom key in deliberately).
+        if custom_agent_modes and visible_from_default and getattr(user, "role", "engineer") != "user":
+            for m in custom_agent_modes:
+                if m["key"] not in visible_agents:
+                    visible_agents.append(m["key"])
 
         # Serve the chat.html file with user role and visible agents injected
         with open(frontend_dir / "chat.html") as f:
@@ -108,6 +205,7 @@ window.LLAMAPRESS_USER_ID = {json.dumps(llamapress_user_id) if llamapress_user_i
 window.LLAMAPRESS_EMAIL = {json.dumps(llamapress_email) if llamapress_email else "null"};
 window.ENABLE_GITHUB_BUTTON = {"true" if enable_github_button else "false"};
 window.LLAMABOT_PROACTIVE_BUILD = {"true" if proactive_build else "false"};
+window.LLAMABOT_CUSTOM_AGENT_MODES = {json.dumps(custom_agent_modes)};
 </script>'''
         html = html.replace('</head>', f'{config_script}</head>')
         return HTMLResponse(content=html)
