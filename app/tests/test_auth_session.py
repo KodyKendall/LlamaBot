@@ -248,6 +248,31 @@ class TestGetLoginMagicLink:
         assert resp.headers["location"] == "/"
         assert SESSION_COOKIE_NAME in resp.cookies
 
+    def test_handoff_params_forwarded_through_redirect(
+        self, client_with_user, test_user, magic_link_secret
+    ):
+        # Funnel hand-offs (e.g. the picture-to-html flow) pass prompt + llm_model
+        # through the magic-link /login redirect. All hand-off params — including
+        # llm_model, which pins a vision-capable model — must survive to the chat
+        # page, or the auto-fired build runs on the wrong (default) model.
+        from urllib.parse import urlparse, parse_qs
+
+        token = _make_magic_token(magic_link_secret, test_user.username)
+        resp = client_with_user.get(
+            f"/login?token={token}"
+            "&prompt=clone+this&conversation=42"
+            "&welcome_prompt=hi&llm_model=gemini-3-flash",
+            follow_redirects=False,
+        )
+        assert resp.status_code == 302
+        forwarded = parse_qs(urlparse(resp.headers["location"]).query)
+        assert forwarded.get("prompt") == ["clone this"]
+        assert forwarded.get("conversation") == ["42"]
+        assert forwarded.get("welcome_prompt") == ["hi"]
+        assert forwarded.get("llm_model") == ["gemini-3-flash"]
+        # token must NOT leak into the post-auth URL
+        assert "token" not in forwarded
+
     def test_unknown_user_returns_401(
         self, client_with_user, magic_link_secret
     ):
