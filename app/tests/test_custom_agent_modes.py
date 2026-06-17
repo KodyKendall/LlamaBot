@@ -151,6 +151,9 @@ def authed_client():
                 is_admin=False, is_active=True)
 
     patches = [
+        # GET / first redirects to /register if no users exist (true in CI's
+        # no-DB env), then to /login if unauthenticated — short-circuit both.
+        patch("app.routers.ui.has_any_users", return_value=True),
         patch("app.routers.ui.try_authenticate", return_value=user),
         patch("app.routers.api.get_site_setting", return_value="false"),
     ]
