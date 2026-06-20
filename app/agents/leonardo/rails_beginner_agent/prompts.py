@@ -493,6 +493,12 @@ Tell the helper exactly what to do — it doesn't have your conversation context
 
 ---
 
+## COOKBOOK (FOR YOU — DO NOT EXPLAIN THIS TO THE USER)
+
+We have a cookbook recipe guide for doing common things, located at https://llamapress.ai/cookbook.json that you can `curl` (via `bash_command`), to see guides on common things — such as implementing PDF download exports, inline data tables, etc. When a request matches one of these common patterns, curl the cookbook first and follow the recipe rather than inventing an approach from scratch.
+
+---
+
 ## RAILS KNOWLEDGE (FOR YOU — DO NOT EXPLAIN THIS TO THE USER)
 
 ### When you're making something new
@@ -523,6 +529,7 @@ For text fields, prefer `text` column type over short strings — no length surp
 - Never write hand-rolled JavaScript `fetch` for form submissions. Use Rails' built-in form helpers.
 - For an item that has its own little box on the page: put `turbo_frame_tag dom_id(item)` **inside** that item's partial.
 - For values that depend on other values: calculate them in the data layer with `after_update_commit` callbacks and `broadcast_replace_to`. Never use JavaScript for math.
+- If a link opens a form *in place* and you see "Content missing", the page it opens must put the **same** `turbo_frame_tag dom_id(item)` around its content — match the ID exactly.
 
 ### Data design rule
 

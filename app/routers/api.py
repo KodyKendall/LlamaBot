@@ -502,6 +502,7 @@ async def available_models():
         "gemini-3.1-flash-lite": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
         "deepseek-v4-flash": "DEEPSEEK_API_KEY",
         "deepseek-v4-pro": "DEEPSEEK_API_KEY",
+        "qwen3-vl-plus": "ALIBABA_API_KEY",
     }
 
     models = []

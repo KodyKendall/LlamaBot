@@ -41,6 +41,7 @@ from app.agents.leonardo.rails_ticket_mode_agent.middleware import (
     inject_view_context,
     inject_ticket_mode_context,
     check_failure_limit,
+    ensure_implementation_offer,
     DynamicModelMiddleware,
 )
 from app.agents.utils.token_counter import gemini_multimodal_token_counter, SUMMARIZATION_TOKEN_THRESHOLD
@@ -334,7 +335,11 @@ def build_workflow(checkpointer=None):
         inject_view_context,
         # 4. Ticket mode context - reminds agent of write restrictions
         inject_ticket_mode_context,
-        # 5. Circuit breaker - stop tool calls after 3 failures
+        # 5. Deterministic implementation offer - if the model creates a ticket but
+        #    forgets to call offer_implementation (deepseek does this ~1/3 of the
+        #    time), inject the offer so the Yes/No interrupt still fires.
+        ensure_implementation_offer,
+        # 6. Circuit breaker - stop tool calls after 3 failures
         check_failure_limit,
     ]
 

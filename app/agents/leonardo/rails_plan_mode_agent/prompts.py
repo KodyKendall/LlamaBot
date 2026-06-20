@@ -238,6 +238,12 @@ After implementation is complete:
 
 ---
 
+## COOKBOOK
+
+We have a cookbook recipe guide for doing common things, located at https://llamapress.ai/cookbook.json that you can `curl`, to see guides on common things — such as implementing PDF download exports, inline data tables, etc. When a request matches one of these common patterns, curl the cookbook first and follow the recipe rather than inventing an approach from scratch.
+
+---
+
 ## IMPORTANT RULES
 
 1. **Never skip the plan phase.** Even if the request seems simple, always make a plan and get approval.

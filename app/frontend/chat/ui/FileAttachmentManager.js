@@ -286,6 +286,341 @@ export class FileAttachmentManager {
     this.renderPreview();
   }
 
+  // ---------------------------------------------------------------------------
+  // Asset Library modal — a large, full-screen view of every imported asset with
+  // full file paths and rich previews (images, PDF, and Excel/CSV rendered in the
+  // browser via a lazily-loaded SheetJS bundle from a CDN).
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Wire up the Asset Library modal.
+   * @param {HTMLElement} modal - The .asset-modal root element
+   * @param {HTMLElement} expandBtn - Button in the small file-browser panel that opens the modal
+   */
+  initAssetModal(modal, expandBtn) {
+    this.assetModal = modal;
+    if (!modal) return;
+
+    this.assetModalList = modal.querySelector('[data-llamabot="asset-modal-list"]');
+    this.assetModalPreview = modal.querySelector('[data-llamabot="asset-modal-preview"]');
+    this.assetModalCount = modal.querySelector('[data-llamabot="asset-modal-count"]');
+    this.assetModalFiles = [];
+    this.assetModalSelectedPath = null;
+
+    const closeBtn = modal.querySelector('[data-llamabot="asset-modal-close"]');
+    const refreshBtn = modal.querySelector('[data-llamabot="asset-modal-refresh"]');
+
+    if (expandBtn) {
+      expandBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.hideFileBrowser();
+        this.hideMenu();
+        this.openAssetModal();
+      });
+    }
+    if (closeBtn) closeBtn.addEventListener('click', () => this.hideAssetModal());
+    if (refreshBtn) refreshBtn.addEventListener('click', () => this.openAssetModal());
+
+    // Close on backdrop click (but not when clicking the dialog itself)
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) this.hideAssetModal();
+    });
+
+    // Escape closes the modal
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && this.assetModal && !this.assetModal.classList.contains('hidden')) {
+        this.hideAssetModal();
+      }
+    });
+  }
+
+  hideAssetModal() {
+    if (this.assetModal) this.assetModal.classList.add('hidden');
+  }
+
+  async openAssetModal() {
+    if (!this.assetModal) return;
+    this.assetModal.classList.remove('hidden');
+    this.assetModalList.innerHTML = '<div class="file-browser-loading">Loading…</div>';
+
+    try {
+      const response = await fetch('/api/uploaded-files');
+      if (!response.ok) throw new Error('Failed to load files');
+      const data = await response.json();
+      this.assetModalFiles = data.files || [];
+      this.renderAssetModalList();
+    } catch (err) {
+      console.error('Failed to load assets:', err);
+      this.assetModalList.innerHTML = '<div class="file-browser-empty">Failed to load assets</div>';
+    }
+  }
+
+  renderAssetModalList() {
+    const files = this.assetModalFiles;
+    if (this.assetModalCount) {
+      this.assetModalCount.textContent = files.length ? `${files.length} file${files.length === 1 ? '' : 's'}` : '';
+    }
+    if (files.length === 0) {
+      this.assetModalList.innerHTML = '<div class="file-browser-empty">No assets uploaded yet</div>';
+      return;
+    }
+
+    // Group by folder, same labels as the compact browser
+    const grouped = {};
+    for (const f of files) {
+      if (!grouped[f.folder]) grouped[f.folder] = [];
+      grouped[f.folder].push(f);
+    }
+
+    let html = '';
+    for (const [folder, folderFiles] of Object.entries(grouped)) {
+      const label = folder.includes('images') ? 'Images' : 'Imports';
+      html += `<div class="file-browser-group-label">${label}</div>`;
+      for (const f of folderFiles) {
+        const isImage = folder.includes('images');
+        const previewUrl = `/api/uploaded-files/preview?path=${encodeURIComponent(f.path)}`;
+        const previewable = isImage && f.size <= 50 * 1024 * 1024;
+        const leading = previewable
+          ? `<img class="asset-row-thumb" src="${previewUrl}" alt="" loading="lazy" onerror="this.outerHTML='<i class=\\'fa-solid fa-file-image\\'></i>'">`
+          : `<i class="fa-solid ${this.iconForFile(f.filename, isImage)}"></i>`;
+        const selected = f.path === this.assetModalSelectedPath ? 'asset-row--selected' : '';
+        html += `
+          <div class="asset-row ${selected}" data-path="${f.path}" data-filename="${f.filename}" data-size="${f.size}" data-folder="${f.folder}">
+            ${leading}
+            <div class="asset-row-meta">
+              <span class="asset-row-name" title="${f.filename}">${f.filename}</span>
+              <span class="asset-row-size">${this.formatFileSize(f.size)}</span>
+            </div>
+          </div>
+        `;
+      }
+    }
+    this.assetModalList.innerHTML = html;
+
+    this.assetModalList.querySelectorAll('.asset-row').forEach(row => {
+      row.addEventListener('click', () => {
+        this.assetModalList.querySelectorAll('.asset-row').forEach(r => r.classList.remove('asset-row--selected'));
+        row.classList.add('asset-row--selected');
+        this.assetModalSelectedPath = row.dataset.path;
+        this.renderAssetPreview(row.dataset);
+      });
+    });
+  }
+
+  /**
+   * Render the right-hand preview pane for the selected asset. Images and PDFs
+   * render natively; spreadsheets render via lazily-loaded SheetJS; everything
+   * else offers a download plus an optional Microsoft Office Online preview.
+   */
+  renderAssetPreview(dataset) {
+    const { path, filename, size, folder } = dataset;
+    const ext = (filename.split('.').pop() || '').toLowerCase();
+    const previewUrl = `/api/uploaded-files/preview?path=${encodeURIComponent(path)}`;
+    const downloadUrl = `${previewUrl}&download=1`;
+    const isImage = folder.includes('images') || ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext);
+    const isPdf = ext === 'pdf';
+    const isSheet = ['xlsx', 'xls', 'xlsm', 'xlsb', 'xltx', 'xltm', 'csv', 'tsv'].includes(ext);
+    const alreadyAttached = this.attachments.some(a => a.path === path);
+
+    let bodyHtml;
+    if (isImage) {
+      bodyHtml = `<div class="asset-preview-stage"><img class="asset-preview-img" src="${previewUrl}" alt="${filename}"></div>`;
+    } else if (isPdf) {
+      bodyHtml = `<iframe class="asset-preview-frame" src="${previewUrl}" title="${filename}"></iframe>`;
+    } else if (isSheet) {
+      bodyHtml = `<div class="asset-preview-stage" data-llamabot="asset-sheet-stage"><div class="asset-preview-loading"><i class="fa-solid fa-spinner fa-spin"></i> Rendering spreadsheet…</div></div>`;
+    } else {
+      bodyHtml = `
+        <div class="asset-preview-placeholder">
+          <i class="fa-solid ${this.iconForFile(filename, false)}"></i>
+          <span>No inline preview for .${ext} files</span>
+          <button class="asset-office-btn" data-llamabot="asset-office-btn">
+            <i class="fa-solid fa-cloud"></i> Preview with Microsoft Office Online
+          </button>
+          <span class="asset-office-note">Opens an external viewer — requires this instance to be publicly reachable.</span>
+        </div>`;
+    }
+
+    this.assetModalPreview.innerHTML = `
+      <div class="asset-preview-header">
+        <div class="asset-preview-titlewrap">
+          <i class="fa-solid ${this.iconForFile(filename, isImage)}"></i>
+          <span class="asset-preview-title" title="${filename}">${filename}</span>
+        </div>
+        <div class="asset-preview-actions">
+          <button class="asset-preview-action ${alreadyAttached ? 'asset-preview-action--done' : ''}" data-llamabot="asset-attach-btn" ${alreadyAttached ? 'disabled' : ''}>
+            <i class="fa-solid ${alreadyAttached ? 'fa-check' : 'fa-paperclip'}"></i> ${alreadyAttached ? 'Attached' : 'Attach to message'}
+          </button>
+          <a class="asset-preview-action" href="${downloadUrl}" download="${filename}">
+            <i class="fa-solid fa-download"></i> Download
+          </a>
+        </div>
+      </div>
+      <div class="asset-preview-pathbar">
+        <code class="asset-preview-path" title="Full path">${path}</code>
+        <button class="asset-preview-copy" data-llamabot="asset-copy-path" title="Copy path">
+          <i class="fa-solid fa-copy"></i>
+        </button>
+        <span class="asset-preview-filesize">${this.formatFileSize(parseInt(size, 10))}</span>
+      </div>
+      <div class="asset-preview-body" data-llamabot="asset-preview-body">${bodyHtml}</div>
+    `;
+
+    // Attach-to-message
+    const attachBtn = this.assetModalPreview.querySelector('[data-llamabot="asset-attach-btn"]');
+    if (attachBtn && !alreadyAttached) {
+      attachBtn.addEventListener('click', () => {
+        this.attachUploadedFile({ path, filename, size, folder });
+        attachBtn.disabled = true;
+        attachBtn.classList.add('asset-preview-action--done');
+        attachBtn.innerHTML = '<i class="fa-solid fa-check"></i> Attached';
+      });
+    }
+
+    // Copy full path
+    const copyBtn = this.assetModalPreview.querySelector('[data-llamabot="asset-copy-path"]');
+    if (copyBtn) {
+      copyBtn.addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(path);
+          copyBtn.innerHTML = '<i class="fa-solid fa-check"></i>';
+          setTimeout(() => { copyBtn.innerHTML = '<i class="fa-solid fa-copy"></i>'; }, 1500);
+        } catch (_) { /* clipboard may be unavailable */ }
+      });
+    }
+
+    // Lazy spreadsheet rendering
+    if (isSheet) {
+      const stage = this.assetModalPreview.querySelector('[data-llamabot="asset-sheet-stage"]');
+      this.renderSpreadsheetPreview(previewUrl, stage);
+    }
+
+    // Office Online viewer (lazy iframe, only on click)
+    const officeBtn = this.assetModalPreview.querySelector('[data-llamabot="asset-office-btn"]');
+    if (officeBtn) {
+      officeBtn.addEventListener('click', () => {
+        const publicUrl = `${window.location.origin}${downloadUrl}`;
+        const viewer = `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(publicUrl)}`;
+        const body = this.assetModalPreview.querySelector('[data-llamabot="asset-preview-body"]');
+        body.innerHTML = `<iframe class="asset-preview-frame" src="${viewer}" title="${filename}"></iframe>`;
+      });
+    }
+  }
+
+  /**
+   * Render a spreadsheet/CSV inline by lazily loading SheetJS from a CDN, fetching
+   * the file through the authenticated preview endpoint (the browser sends the
+   * session cookie), and converting the first sheet to an HTML table.
+   */
+  async renderSpreadsheetPreview(previewUrl, stage) {
+    if (!stage) return;
+    try {
+      const XLSX = await this.loadSheetJs();
+      const resp = await fetch(previewUrl);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const buf = await resp.arrayBuffer();
+      const wb = XLSX.read(buf, { type: 'array' });
+
+      const tabs = wb.SheetNames.map((name, i) =>
+        `<button class="asset-sheet-tab ${i === 0 ? 'asset-sheet-tab--active' : ''}" data-sheet="${i}">${this.escapeHtml(name)}</button>`
+      ).join('');
+
+      stage.innerHTML = `
+        ${wb.SheetNames.length > 1 ? `<div class="asset-sheet-tabs">${tabs}</div>` : ''}
+        <div class="asset-sheet-scroll" data-llamabot="asset-sheet-scroll"></div>
+      `;
+
+      const scroll = stage.querySelector('[data-llamabot="asset-sheet-scroll"]');
+      this.renderSheetGrid(XLSX, wb.Sheets[wb.SheetNames[0]], scroll);
+
+      stage.querySelectorAll('.asset-sheet-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+          stage.querySelectorAll('.asset-sheet-tab').forEach(t => t.classList.remove('asset-sheet-tab--active'));
+          tab.classList.add('asset-sheet-tab--active');
+          const idx = parseInt(tab.dataset.sheet, 10);
+          this.renderSheetGrid(XLSX, wb.Sheets[wb.SheetNames[idx]], scroll);
+        });
+      });
+    } catch (err) {
+      console.error('Spreadsheet preview failed:', err);
+      stage.innerHTML = `<div class="asset-preview-placeholder"><i class="fa-solid fa-triangle-exclamation"></i><span>Couldn't render this spreadsheet. Try downloading it instead.</span></div>`;
+    }
+  }
+
+  /**
+   * Render a worksheet as a spreadsheet-style grid: A/B/C column headers, row
+   * numbers, sticky headers, zebra striping, right-aligned numerics. Capped to a
+   * sane number of rows so huge sheets don't lock up the DOM.
+   */
+  renderSheetGrid(XLSX, ws, scroll) {
+    const MAX_ROWS = 500;
+    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', blankrows: false });
+    if (!rows.length) {
+      scroll.innerHTML = `<div class="asset-preview-placeholder"><i class="fa-solid fa-table-cells"></i><span>This sheet is empty</span></div>`;
+      return;
+    }
+
+    const truncated = rows.length > MAX_ROWS;
+    const view = truncated ? rows.slice(0, MAX_ROWS) : rows;
+    const colCount = view.reduce((m, r) => Math.max(m, r.length), 0);
+
+    const colLabel = (n) => {
+      let s = '';
+      n += 1;
+      while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); }
+      return s;
+    };
+
+    let head = '<thead><tr><th class="asset-sheet-corner"></th>';
+    for (let c = 0; c < colCount; c++) head += `<th class="asset-sheet-colhead">${colLabel(c)}</th>`;
+    head += '</tr></thead>';
+
+    let body = '<tbody>';
+    for (let i = 0; i < view.length; i++) {
+      const r = view[i];
+      body += `<tr><th class="asset-sheet-rowhead">${i + 1}</th>`;
+      for (let c = 0; c < colCount; c++) {
+        const v = r[c];
+        const empty = v === '' || v === null || v === undefined;
+        const num = typeof v === 'number';
+        body += `<td class="${num ? 'asset-sheet-num' : ''}">${empty ? '' : this.escapeHtml(String(v))}</td>`;
+      }
+      body += '</tr>';
+    }
+    body += '</tbody>';
+
+    scroll.innerHTML =
+      `<table class="asset-sheet-grid">${head}${body}</table>` +
+      (truncated ? `<div class="asset-sheet-truncated"><i class="fa-solid fa-circle-info"></i> Showing first ${MAX_ROWS} of ${rows.length} rows — download for the full file.</div>` : '');
+  }
+
+  /** Escape a string for safe insertion into HTML. */
+  escapeHtml(s) {
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  /**
+   * Lazily load the SheetJS (xlsx) library from a CDN exactly once. Returns the
+   * global XLSX object.
+   */
+  loadSheetJs() {
+    if (window.XLSX) return Promise.resolve(window.XLSX);
+    if (this._sheetJsPromise) return this._sheetJsPromise;
+    this._sheetJsPromise = new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+      script.async = true;
+      script.onload = () => window.XLSX ? resolve(window.XLSX) : reject(new Error('XLSX failed to initialize'));
+      script.onerror = () => reject(new Error('Failed to load SheetJS from CDN'));
+      document.head.appendChild(script);
+    });
+    return this._sheetJsPromise;
+  }
+
   /**
    * Upload files to the Rails assets/imported folder via API
    * @param {FileList} fileList - Files to upload

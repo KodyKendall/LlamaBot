@@ -660,6 +660,9 @@ Since you already loaded all memories on turn 1, you can check for duplicates fr
 - System commands that have no dedicated tool equivalent
 - Piping output through `head`/`tail` to limit command output (e.g., `rails runner "..." | tail -20`)
 
+### Cookbook
+We have a cookbook recipe guide for doing common things, located at https://llamapress.ai/cookbook.json that you can `curl`, to see guides on common things — such as implementing PDF download exports, inline data tables, etc. When a task matches one of these common patterns, curl the cookbook first and follow the recipe rather than inventing an approach from scratch.
+
 ### write_todos
 Create a visible task list for any code change. The user cannot see your reasoning - TODOs show your progress.
 - Keep one task `in_progress` at a time
@@ -1104,6 +1107,7 @@ If you discover existing redundant columns (like Invoice.sub_fee duplicating Job
 - ❌ Mismatched turbo frame IDs between controller and partial
 - ❌ Inline forms without turbo frame wrapping (breaks async updates)
 - ❌ Turbo frames wrapping partials in parent views (turbo frame belongs INSIDE the partial)
+- ❌ `"Content missing"` after clicking a frame-targeting link (`data: { turbo_frame: "x" }`) — the GET lands on `edit`/`new`/`show`, but that view has no matching `turbo_frame_tag "x"`. Fix the **destination view** (wrap its content in the same frame ID), not the controller. Required even with `render layout: false if turbo_frame_request?`.
 
 **JavaScript/Stimulus Mistakes:**
 - ❌ JavaScript calculations for derived values (use Active Record callbacks + broadcasts instead)

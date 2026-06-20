@@ -24,6 +24,7 @@ from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResu
 from langchain_deepseek import ChatDeepSeek
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
+from langchain_qwq import ChatQwen
 
 
 DEFAULT_LLM_MODEL = "deepseek-v4-flash"
@@ -176,6 +177,23 @@ def get_llm(model_name: str):
             model="gemini-3.1-flash-lite",
             thinking_level="high",
             include_thoughts=True,
+        )
+    if model_name == "qwen3-vl-plus":
+        # Alibaba Cloud Model Studio's Qwen VL, via the dedicated langchain-qwq
+        # ChatQwen client (handles thinking/reasoning_content across multi-turn
+        # tool calls natively, unlike a bare ChatOpenAI). qwen3-vl-plus is the
+        # full/most-capable vision model and is a hybrid thinking model. Defaults
+        # to the US (Virginia) region; region keys are NOT interchangeable, so
+        # the api_base must match the region the ALIBABA_API_KEY was issued in.
+        return ChatQwen(
+            model="qwen3-vl-plus",
+            api_base=os.getenv(
+                "ALIBABA_BASE_URL",
+                "https://dashscope-us.aliyuncs.com/compatible-mode/v1",
+            ),
+            api_key=os.getenv("ALIBABA_API_KEY"),
+            enable_thinking=True,
+            thinking_budget=8192,
         )
 
     return ChatDeepSeekWithReasoning(
