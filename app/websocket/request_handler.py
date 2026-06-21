@@ -38,6 +38,36 @@ from app.agents.leonardo.model_capabilities import (
     get_file_category,
 )
 
+async def _report_tool_messages(*, messages, mothership, thread_id: str, agent_depth: int) -> None:
+    """Report ToolMessage observations to the mothership.
+
+    Called from the update-stream branch for every node update. Iterates the
+    messages list and fires one report_message call per ToolMessage so the
+    mothership can reconstruct full agent trajectories (action → observation).
+    Sub-agent tool outputs are included (unlike assistant turns) but tagged
+    with agent_depth so they can be filtered downstream.
+    """
+    from langchain_core.messages import ToolMessage as LCToolMessage
+    for msg in messages:
+        if not isinstance(msg, LCToolMessage):
+            continue
+        tool_call_id = getattr(msg, "tool_call_id", None)
+        tool_name = getattr(msg, "name", None)
+        await mothership.report_message(
+            thread_id=thread_id,
+            role="tool",
+            content=str(msg.content),
+            sent_at=datetime.now(timezone.utc).isoformat(),
+            model=None,
+            tool_call_id=tool_call_id,
+            tool_calls=[{
+                "name": tool_name,
+                "tool_call_id": tool_call_id,
+                "agent_depth": agent_depth,
+            }],
+        )
+
+
 class RequestHandler:
     def __init__(self, app: FastAPI):
         self.locks: Dict[int, Lock] = {}
@@ -487,7 +517,20 @@ class RequestHandler:
                                                     token_usage=token_usage,
                                                     tool_calls=normalized_tool_calls,
                                                 ))
-                        
+
+                                        # Report ToolMessage observations (tool outputs/observations).
+                                        # Unlike assistant turns, sub-agent tool outputs ARE reported
+                                        # (agent_depth tag lets mothership filter them). No truncation —
+                                        # the mothership receives the raw content verbatim.
+                                        mothership = getattr(self.app.state, "mothership_client", None)
+                                        if mothership is not None:
+                                            asyncio.create_task(_report_tool_messages(
+                                                messages=messages,
+                                                mothership=mothership,
+                                                thread_id=str(incoming_message.get("thread_id", "")),
+                                                agent_depth=agent_depth,
+                                            ))
+
                         # logger.info(f"LangGraph Output (State Update): {chunk}")
 
                         # chunk will look like this:
