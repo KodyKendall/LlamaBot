@@ -11,9 +11,13 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 
 @pytest.fixture(autouse=True)
 def _clear_google_keys(monkeypatch):
-    """Strip both Google key env vars by default; individual tests opt back in."""
+    """Strip Google key env vars by default; individual tests opt back in.
+    Always set a dummy DEEPSEEK_API_KEY so ChatDeepSeekWithReasoning can
+    instantiate in CI (where no real key is present). In production the real
+    key is always configured — this mirrors that assumption in tests."""
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-ci-placeholder")
 
 
 class TestMakeSummarizationModelNoKey:
