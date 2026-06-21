@@ -9,7 +9,7 @@ This module contains:
 
 from langchain.agents.middleware import AgentMiddleware
 from google.api_core.exceptions import ResourceExhausted
-from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 from typing import Any
 import logging
 
@@ -408,6 +408,136 @@ class DynamicModelMiddleware(AgentMiddleware):
 
 
 # =============================================================================
+# Tool Result Image Clearing
+# =============================================================================
+
+class ToolResultImageClearingMiddleware(AgentMiddleware):
+    """Strip images from old browser_inspect tool results to prevent summarization loops.
+
+    Each browser_inspect call stores a base64 PNG screenshot (~25k-50k tokens) as an
+    image_url block inside a ToolMessage. These accumulate in state and keep the
+    conversation above the SummarizationMiddleware threshold on every turn, triggering
+    an infinite summarize-on-every-turn loop.
+
+    This middleware's before_model hook permanently strips image_url blocks from
+    ToolMessages older than `keep_recent`, replacing them with a short placeholder so
+    the model still knows the call was made. The most recent `keep_recent` screenshots
+    are kept so the model can see the current page state.
+
+    Place this FIRST in the middleware list so state is cleaned before
+    SummarizationMiddleware counts tokens.
+    """
+
+    def __init__(self, keep_recent: int = None):
+        from app.agents.utils.token_counter import SCREENSHOT_KEEP_RECENT
+        super().__init__()
+        self.keep_recent = keep_recent if keep_recent is not None else SCREENSHOT_KEEP_RECENT
+
+    def _clear_old_images(self, messages):
+        """Return (modified_messages, changed_flag).
+
+        Strips image_url blocks from all but the last keep_recent ToolMessages
+        that contain them. Returns (original_list, False) if nothing to clear.
+        """
+        from app.agents.utils.token_counter import _strip_old_images
+        stripped = _strip_old_images(messages, keep_recent=self.keep_recent)
+        return stripped, stripped is not messages
+
+    def before_model(self, state, runtime):
+        messages = state["messages"]
+        modified, changed = self._clear_old_images(messages)
+        if not changed:
+            return None
+
+        from langgraph.graph.message import REMOVE_ALL_MESSAGES
+        from langchain_core.messages import RemoveMessage
+        n_cleared = sum(
+            1 for o, m in zip(messages, modified) if o is not m
+        )
+        logger.info(
+            "ToolResultImageClearingMiddleware: cleared screenshots from %d message(s) "
+            "(keeping last %d)", n_cleared, self.keep_recent
+        )
+        return {
+            "messages": [
+                RemoveMessage(id=REMOVE_ALL_MESSAGES),
+                *modified,
+            ]
+        }
+
+    async def abefore_model(self, state, runtime):
+        return self.before_model(state, runtime)
+
+
+# =============================================================================
+# Orphaned Tool Call Repair Middleware
+# =============================================================================
+
+class RepairOrphanedToolCallsMiddleware(AgentMiddleware):
+    """Inject placeholder ToolMessages for AIMessage tool_calls that have no response.
+
+    When a tool raises an unhandled exception (e.g. tavily.InvalidAPIKeyError),
+    LangGraph's ToolNode re-raises it instead of returning a ToolMessage. The
+    conversation state then has an AIMessage with tool_calls but no matching
+    ToolMessages, permanently breaking all future turns in that thread (the
+    provider rejects the history with '400 insufficient tool messages').
+
+    This middleware detects that situation on every model call and injects
+    synthetic placeholder ToolMessages so the history is valid before the model
+    sees it. The placeholders are NOT persisted to state — they exist only for
+    the duration of the LLM call, keeping the fix invisible to the checkpointer.
+    """
+
+    def _repair(self, messages):
+        # Collect all tool_call_ids that already have a ToolMessage in the thread.
+        responded_ids = {
+            msg.tool_call_id
+            for msg in messages
+            if isinstance(msg, ToolMessage) and msg.tool_call_id
+        }
+
+        result = []
+        any_injected = False
+        for msg in messages:
+            result.append(msg)
+            if isinstance(msg, AIMessage) and getattr(msg, "tool_calls", None):
+                missing = [
+                    tc for tc in msg.tool_calls
+                    if tc.get("id") and tc["id"] not in responded_ids
+                ]
+                for tc in missing:
+                    logger.warning(
+                        "RepairOrphanedToolCallsMiddleware: injecting placeholder "
+                        "ToolMessage for orphaned tool_call_id=%s name=%s",
+                        tc["id"], tc.get("name", "?"),
+                    )
+                    result.append(ToolMessage(
+                        content=(
+                            "Tool call did not complete — the tool may have crashed "
+                            "(e.g. missing API key). The operator should check the "
+                            "server logs for the root cause."
+                        ),
+                        tool_call_id=tc["id"],
+                    ))
+                    responded_ids.add(tc["id"])
+                    any_injected = True
+
+        return result if any_injected else messages
+
+    def wrap_model_call(self, request, handler):
+        messages = self._repair(list(request.messages))
+        if messages is not request.messages:
+            return handler(request.override(messages=messages))
+        return handler(request)
+
+    async def awrap_model_call(self, request, handler):
+        messages = self._repair(list(request.messages))
+        if messages is not request.messages:
+            return await handler(request.override(messages=messages))
+        return await handler(request)
+
+
+# =============================================================================
 # Convenience exports (instantiated middleware)
 # =============================================================================
 
@@ -416,3 +546,5 @@ inject_view_context = ViewPathContextMiddleware()
 check_failure_limit = FailureCircuitBreakerMiddleware()
 deepseek_reasoning_fix = DeepSeekReasoningMiddleware()
 strip_unsupported_multimodal = StripUnsupportedMultimodalMiddleware()
+clear_old_tool_images = ToolResultImageClearingMiddleware()
+repair_orphaned_tool_calls = RepairOrphanedToolCallsMiddleware()

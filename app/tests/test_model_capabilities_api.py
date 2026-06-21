@@ -27,6 +27,14 @@ def test_gemini_flash_lite_supports_images():
     assert get_model_capabilities("gemini-3.1-flash-lite")["images"] is True
 
 
+def test_qwen3_7_plus_supports_images_and_video():
+    """Qwen3.7 Plus is a multimodal model — images and video, but not native PDF."""
+    cap = get_model_capabilities("qwen3.7-plus")
+    assert cap["images"] is True
+    assert cap["video"] is True
+    assert cap["pdf"] is False
+
+
 def test_unknown_model_defaults_permissive():
     """Unknown models default to vision-capable so we never spuriously switch."""
     cap = get_model_capabilities("some-future-model")

@@ -29,6 +29,7 @@ from app.agents.leonardo.rails_agent.tools import (
     git_status, git_commit, git_command, github_cli_command, internet_search,
     save_memory, list_memories, delete_memory,
     read_leonardo_md, edit_leonardo_md, write_leonardo_md,
+    browser_inspect,
 )
 from app.agents.leonardo.rails_agent.prompts import RAILS_AGENT_PROMPT
 from app.agents.leonardo.project_context import build_system_prompt_with_project_context
@@ -38,8 +39,13 @@ from app.agents.leonardo.rails_agent.middleware import (
     DynamicModelMiddleware,
     deepseek_reasoning_fix,
     strip_unsupported_multimodal,
+    clear_old_tool_images,
+    repair_orphaned_tool_calls,
 )
-from app.agents.utils.token_counter import gemini_multimodal_token_counter, SUMMARIZATION_TOKEN_THRESHOLD
+from app.agents.utils.token_counter import (
+    gemini_multimodal_token_counter_strip_images,
+    SUMMARIZATION_TOKEN_THRESHOLD,
+)
 from app.agents.leonardo.rails_agent.sub_agents import delegate_task, delegate_research
 
 import logging
@@ -176,6 +182,7 @@ default_tools = [
     delegate_research,  # Read-only sub-agent for codebase investigation
     save_memory, list_memories, delete_memory,  # Long-term memory
     read_leonardo_md, edit_leonardo_md, write_leonardo_md,  # Project context file
+    browser_inspect,  # Headless browser: console logs, DOM checks, screenshot
 ]
 
 def build_workflow(checkpointer=None, ask_before_edits=False):
@@ -203,29 +210,40 @@ def build_workflow(checkpointer=None, ask_before_edits=False):
         temperature=1.0,
     )
     middleware = [
-        # 1. Summarization for long conversations - prevents token limit issues
+        # 1. Repair orphaned tool calls — inject placeholder ToolMessages for any
+        #    AIMessage tool_calls that have no response (e.g. from a Tavily crash).
+        #    Must be first so all subsequent middleware and the model see valid history.
+        repair_orphaned_tool_calls,
+        # 2. Clear old browser_inspect screenshots from state BEFORE token counting.
+        #    Each screenshot is ~25-50k tokens; without this they accumulate and keep the
+        #    context above the summarization threshold on every turn → infinite loop.
+        #    Must be before SummarizationMiddleware's before_model token counting.
+        clear_old_tool_images,
+        # 3. Summarization for long conversations - prevents token limit issues.
+        #    token_counter strips old images before counting to prevent false triggers
+        #    in the same turn that clear_old_tool_images fires.
         SummarizationMiddleware(
             model=summarization_model,
             trigger=("tokens", SUMMARIZATION_TOKEN_THRESHOLD),
             keep=("messages", 15),  # Reduced from 20 for faster context recovery
-            token_counter=gemini_multimodal_token_counter,
+            token_counter=gemini_multimodal_token_counter_strip_images,
             trim_tokens_to_summarize=None,  # KEY FIX: Disable trimming, let Gemini see everything
             summary_prompt=SUMMARIZATION_PROMPT,
         ),
-        # 2. Dynamic model selection based on state.llm_model from frontend
+        # 4. Dynamic model selection based on state.llm_model from frontend
         DynamicModelMiddleware(),
-        # 3. Strip image/video/PDF blocks from history when the active model can't
+        # 5. Strip image/video/PDF blocks from history when the active model can't
         #    consume them (e.g. switching a vision thread onto text-only DeepSeek).
         strip_unsupported_multimodal,
-        # 4. DeepSeek reasoning fix - injects reasoning_content for multi-turn tool calls
+        # 6. DeepSeek reasoning fix - injects reasoning_content for multi-turn tool calls
         deepseek_reasoning_fix,
-        # 5. View path context injection - prepends page context to user messages
+        # 7. View path context injection - prepends page context to user messages
         inject_view_context,
-        # 6. Circuit breaker - stop tool calls after 3 failures
+        # 8. Circuit breaker - stop tool calls after 3 failures
         check_failure_limit,
     ]
 
-    # 7. Optional: Human-in-the-loop approval for destructive tools
+    # Optional: Human-in-the-loop approval for destructive tools
     if ask_before_edits:
         DESTRUCTIVE_TOOLS = ['edit_file', 'write_file', 'bash_command']
         middleware.append(HumanInTheLoopMiddleware(

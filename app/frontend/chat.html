@@ -188,7 +188,7 @@
                 </div>
             </div>
             <input type="file" data-llamabot="file-input" class="hidden-file-input" accept=".pdf,.png,.jpg,.jpeg,.gif,.webp,.webm,.mp4,.xlsx,.xls,.csv,image/png,image/jpeg,image/gif,image/webp,video/webm,video/mp4,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv" multiple>
-            <input type="file" data-llamabot="upload-file-input" class="hidden-file-input" accept=".pdf,.docx,.png,.jpg,.jpeg,.gif,.webp,.svg,.xlsx,.xls,.xlsm,.xlsb,.xltx,.xltm,.csv,.pptx,.ppt,.pptm,.key,.odp,.mp4,.webm" multiple>
+            <input type="file" data-llamabot="upload-file-input" class="hidden-file-input" accept=".pdf,.docx,.png,.jpg,.jpeg,.gif,.webp,.svg,.xlsx,.xls,.xlsm,.xlsb,.xltx,.xltm,.csv,.pptx,.ppt,.pptm,.key,.odp,.mp4,.webm,.xml,.json,.txt,.md,.yaml,.yml,.html,.htm" multiple>
             <!-- Model selector (hidden by default, shown when model toggle clicked) -->
             <div class="model-selector-container hidden" data-llamabot="model-selector-container">
                 <div class="custom-dropdown-container">
@@ -200,6 +200,7 @@
                         <option value="gpt-5-mini" data-short-label="GPT-5">GPT-5 Mini</option>
                         <option value="deepseek-v4-flash" data-short-label="DeepSeek" selected>DeepSeek V4 Flash</option>
                         <option value="deepseek-v4-pro" data-short-label="DeepSeek Pro">DeepSeek V4 Pro</option>
+                        <option value="qwen3.7-plus" data-short-label="Qwen">Qwen3.7 Plus</option>
                     </select>
                 </div>
             </div>
@@ -240,7 +241,12 @@
                         <div data-llamabot="file-browser-panel" class="file-browser-panel hidden">
                             <div class="file-browser-header">
                                 <span>Uploaded Files</span>
-                                <button data-llamabot="file-browser-close" class="file-browser-close">&times;</button>
+                                <div class="file-browser-header-actions">
+                                    <button data-llamabot="file-browser-expand" class="file-browser-expand" title="Open asset library">
+                                        <i class="fa-solid fa-up-right-and-down-left-from-center"></i>
+                                    </button>
+                                    <button data-llamabot="file-browser-close" class="file-browser-close">&times;</button>
+                                </div>
                             </div>
                             <div data-llamabot="file-browser-list" class="file-browser-list"></div>
                         </div>
@@ -626,6 +632,36 @@
           })
         }
     </script>
+
+    <!-- Asset Library modal — a large preview of all imported assets -->
+    <div data-llamabot="asset-modal" class="asset-modal hidden">
+        <div class="asset-modal-content">
+            <div class="asset-modal-header">
+                <div class="asset-modal-title">
+                    <i class="fa-solid fa-folder-open"></i>
+                    <span>Asset Library</span>
+                    <span data-llamabot="asset-modal-count" class="asset-modal-count"></span>
+                </div>
+                <div class="asset-modal-header-actions">
+                    <button data-llamabot="asset-modal-refresh" class="asset-modal-icon-btn" title="Refresh">
+                        <i class="fa-solid fa-rotate"></i>
+                    </button>
+                    <button data-llamabot="asset-modal-close" class="asset-modal-icon-btn" title="Close (Esc)">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="asset-modal-body">
+                <div data-llamabot="asset-modal-list" class="asset-modal-list"></div>
+                <div data-llamabot="asset-modal-preview" class="asset-modal-preview">
+                    <div class="asset-modal-preview-empty">
+                        <i class="fa-solid fa-arrow-left"></i>
+                        <span>Select an asset to preview</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <!-- Link to external JavaScript -->
     <script type="module" src="/frontend/chat/index.js?v=5"></script>

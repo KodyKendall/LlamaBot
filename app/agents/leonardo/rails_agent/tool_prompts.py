@@ -333,6 +333,48 @@ Parameters:
 Returns the demultiplexed log text (stdout + stderr interleaved). Does not write a file.
 """
 
+BROWSER_INSPECT_DESCRIPTION = """Inspect a live page with a headless Chromium browser and return structured diagnostic data.
+
+Use this proactively after EVERY UI change (view, JS, CSS edit) to self-verify the page renders correctly without waiting for the user to test.
+
+Parameters:
+- url: Page to visit. Prefer the internal Docker URL `http://llamapress:3000/your-path` — faster and no internet required. The public URL https://llamapress-dev.llamapress.ai also works.
+- selectors: CSS selectors to check for existence after page load, e.g. ["#editor-mount", ".cm-editor", "[data-controller='sortable']"]. Returns a {selector: true/false} map.
+- js_evaluate: Optional JavaScript expression to evaluate and return, e.g. "typeof CodeMirror" or "document.querySelectorAll('.row').length".
+- capture_screenshot: Include a screenshot in the response (default true). Vision-capable models (Gemini, Qwen, Claude) will see it; text-only models receive a placeholder note instead.
+- timeout_ms: Page load timeout in milliseconds (default 10000).
+
+Returns JSON with:
+- status: HTTP response status code (200, 302, 500, etc.)
+- title: Page title
+- url: Final URL after redirects
+- console_errors: All console.error / console.warn messages
+- all_logs: Full console output including console.log
+- network_failures: Failed network requests — CDN misses, 404s, CORS blocks
+- selectors: {selector: true/false} — did the element exist after load?
+- js_result: Return value of js_evaluate if provided
+- html_preview: First 3000 chars of rendered HTML
+
+Plus a screenshot visible to Gemini / Qwen / Claude vision models.
+
+When to use:
+- After ANY edit to a .html.erb, .js, .css, or importmap-pinned library
+- When debugging "why doesn't this render?" or "is this JS loading?"
+- To check whether a DOM element or Stimulus controller is mounted after page load
+- To catch JS console errors before the user sees a broken page
+- To verify CDN resources (unpkg.com, jsDelivr) loaded correctly
+
+Example calls:
+  # Basic page health check after a view edit
+  url="http://llamapress:3000/dashboard", selectors=["#main-content", ".nav"]
+
+  # Verify CodeMirror editor mounted
+  url="http://llamapress:3000/notes/1/edit", selectors=["#editor-mount", ".cm-editor"], js_evaluate="typeof CodeMirror"
+
+  # Check Stimulus controller is wired up
+  url="http://llamapress:3000/todos", selectors=["[data-controller='sortable']"], js_evaluate="document.querySelectorAll('[data-controller]').length"
+"""
+
 VIEW_CURRENT_PAGE_HTML_DESCRIPTION = """
 The `view_page` tool gives you what the user is seeing, and backend context, as ground truth for all UI-related/exploratory questions.
 

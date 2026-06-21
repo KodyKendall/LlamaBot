@@ -450,6 +450,8 @@ Build a complete technical mental model by researching:
 5. Stimulus controllers (rails/app/javascript/controllers/)
 6. Routes (rails/config/routes.rb)
 
+**COOKBOOK:** We have a cookbook recipe guide for doing common things, located at https://llamapress.ai/cookbook.json that you can `curl`, to see guides on common things — such as implementing PDF download exports, inline data tables, etc. When the ticket matches one of these common patterns, curl the cookbook first and base the technical plan on the recipe rather than inventing an approach from scratch.
+
 **IF THE ISSUE INVOLVES DUPLICATES / UNEXPECTED COUNTS / NON-DETERMINISTIC SELECTION:**
 You MUST also:
 - Query the database to prove the duplication pattern (group by logical key, show counts)
@@ -604,6 +606,7 @@ This ensures:
 - ❌ JavaScript calculations for derived values (should use Active Record callbacks + broadcasts)
 - ❌ Multiple partials for the same model's CRUD operations (should consolidate into one `_model.html.erb`)
 - ❌ Inline forms without turbo frame wrapping (breaks async updates)
+- ❌ `"Content missing"` after clicking a frame-targeting link (`data: { turbo_frame: "x" }`) — the GET lands on `edit`/`new`/`show`, but that view has no matching `turbo_frame_tag "x"`. Fix the destination view (wrap its content in the same frame ID), not the controller. Required even with `render layout: false if turbo_frame_request?`.
 - ❌ Calculations done in JavaScript that should be done server-side with callbacks
 - ❌ Turbo frames wrapping partials in parent views (turbo frame should be INSIDE the partial itself)
 

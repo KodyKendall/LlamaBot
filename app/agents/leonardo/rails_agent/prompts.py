@@ -660,6 +660,9 @@ Since you already loaded all memories on turn 1, you can check for duplicates fr
 - System commands that have no dedicated tool equivalent
 - Piping output through `head`/`tail` to limit command output (e.g., `rails runner "..." | tail -20`)
 
+### Cookbook
+We have a cookbook recipe guide for doing common things, located at https://llamapress.ai/cookbook.json that you can `curl`, to see guides on common things — such as implementing PDF download exports, inline data tables, etc. When a task matches one of these common patterns, curl the cookbook first and follow the recipe rather than inventing an approach from scratch.
+
 ### write_todos
 Create a visible task list for any code change. The user cannot see your reasoning - TODOs show your progress.
 - Keep one task `in_progress` at a time
@@ -1104,6 +1107,7 @@ If you discover existing redundant columns (like Invoice.sub_fee duplicating Job
 - ❌ Mismatched turbo frame IDs between controller and partial
 - ❌ Inline forms without turbo frame wrapping (breaks async updates)
 - ❌ Turbo frames wrapping partials in parent views (turbo frame belongs INSIDE the partial)
+- ❌ `"Content missing"` after clicking a frame-targeting link (`data: { turbo_frame: "x" }`) — the GET lands on `edit`/`new`/`show`, but that view has no matching `turbo_frame_tag "x"`. Fix the **destination view** (wrap its content in the same frame ID), not the controller. Required even with `render layout: false if turbo_frame_request?`.
 
 **JavaScript/Stimulus Mistakes:**
 - ❌ JavaScript calculations for derived values (use Active Record callbacks + broadcasts instead)
@@ -1264,6 +1268,25 @@ The chat interface has a debug recording feature hidden behind the **+** button 
 6. **User hits send** so you can analyze the logs
 
 Tell the user: "Add some `console.log('🪲 DEBUG:', yourVariable)` statements where you think the issue is. Then click the **+** button next to the chat input, click the bug icon 🐛 (it'll turn red), and reproduce the problem. The logs will appear in your message box — just hit send and I'll help debug."
+
+### Self-Verifying UI Changes with browser_inspect (Do This — Don't Wait for the User)
+
+After editing any view, JS, or CSS file, call the `browser_inspect` tool to verify the page renders correctly. You don't need to ask the user to test it — do it yourself.
+
+```
+browser_inspect(
+  url="http://llamapress:3000/dashboard",
+  selectors=["#main-content", ".cm-editor", "[data-controller='sortable']"],
+  js_evaluate="typeof CodeMirror"
+)
+```
+
+Returns: HTTP status, page title, all console errors, network failures (CDN misses), a {selector: true/false} map, and a screenshot. Vision models (Gemini, Qwen, Claude) will see the screenshot directly.
+
+**When to call it:**
+- After any `.html.erb`, `.js`, `.css` edit — confirm the page loads without JS errors
+- When a JS library or Stimulus controller might not have mounted — check with selectors + js_evaluate
+- When the user reports "the page looks broken" or "something isn't working" — see the actual page
 
 ### Viewing Logs Manually
 **Rails logs:** Guide user to run `./bin/rails_logs` in Leonardo terminal

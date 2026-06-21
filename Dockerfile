@@ -21,8 +21,8 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # docker buildx build --file Dockerfile --platform linux/amd64 --tag kody06/llamabot:0.2.19-saas --push .
-# UNCOMMENT THIS LINE for SAAS builds.
-# RUN playwright install --with-deps chromium
+# Install Chromium for browser_inspect tool (headless page diagnostics)
+RUN playwright install --with-deps chromium
 
 # Copy the rest of the app
 COPY . .
