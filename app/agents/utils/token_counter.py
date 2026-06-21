@@ -248,6 +248,25 @@ def gemini_multimodal_token_counter_strip_images(messages) -> int:
     return gemini_multimodal_token_counter(_strip_old_images(list(messages)))
 
 
+def tiktoken_token_counter(messages) -> int:
+    """Text-only token counter using tiktoken (cl100k_base). No external API calls.
+
+    Safe to use when no Google/Gemini API key is available. Images and other
+    media blocks are counted as a fixed estimate instead of via the Gemini API.
+    Use this as the token_counter for SummarizationMiddleware on the DeepSeek
+    fallback path so that graph compilation and summarization triggering work
+    without any Google credentials.
+    """
+    total = 0
+    for msg in messages:
+        total += _count_message_text(msg)
+        parts = _extract_multimodal_parts(msg)
+        # Fixed estimate for any media blocks — no Gemini API call
+        total += len(parts) * _IMAGE_TOKEN_ESTIMATE
+        total += 3  # per-message overhead
+    return total
+
+
 def _count_multimodal(parts: list[types.Part]) -> int:
     """Count multimodal parts via Gemini countTokens. Falls back to fixed estimate."""
     if not parts:
