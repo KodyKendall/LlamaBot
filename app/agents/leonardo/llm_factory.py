@@ -13,6 +13,7 @@ configured LangChain chat model. Used by:
 DO NOT duplicate this logic in agent nodes. Import `get_llm` instead.
 """
 
+import logging
 import os
 from typing import Any
 
@@ -26,6 +27,8 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
 from langchain_qwq import ChatQwen
 
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_LLM_MODEL = "deepseek-v4-flash"
 
@@ -126,6 +129,21 @@ def get_llm(model_name: str):
     """
     if model_name == "fake-llm" and os.getenv("LLAMABOT_ENABLE_FAKE_LLM", "").lower() == "true":
         return FakeTestChatModel()
+
+    # Operator/mothership gate (see model_policy). This is the authoritative
+    # chokepoint: the websocket llm_model is unvalidated user input, so a model
+    # disabled by policy is swapped for an enabled one here, before any client is
+    # built — the dropdown filtering in /api/available-models is only UX on top.
+    # Deferred import avoids a circular import (model_policy reads DEFAULT_LLM_MODEL).
+    from app.agents.leonardo.model_policy import enabled_default_model, is_model_enabled
+    if not is_model_enabled(model_name):
+        replacement = enabled_default_model()
+        logger.warning(
+            "Requested model %r is disabled by policy; using %r instead.",
+            model_name, replacement,
+        )
+        model_name = replacement
+
     if model_name == "deepseek-v4-flash":
         return ChatDeepSeekWithReasoning(
             model="deepseek-v4-flash",
@@ -178,15 +196,16 @@ def get_llm(model_name: str):
             thinking_level="high",
             include_thoughts=True,
         )
-    if model_name == "qwen3-vl-plus":
-        # Alibaba Cloud Model Studio's Qwen VL, via the dedicated langchain-qwq
-        # ChatQwen client (handles thinking/reasoning_content across multi-turn
-        # tool calls natively, unlike a bare ChatOpenAI). qwen3-vl-plus is the
-        # full/most-capable vision model and is a hybrid thinking model. Defaults
-        # to the US (Virginia) region; region keys are NOT interchangeable, so
-        # the api_base must match the region the ALIBABA_API_KEY was issued in.
+    if model_name == "qwen3.7-plus":
+        # Alibaba Cloud Model Studio's Qwen3.7 Plus, via the dedicated
+        # langchain-qwq ChatQwen client (handles thinking/reasoning_content
+        # across multi-turn tool calls natively, unlike a bare ChatOpenAI).
+        # qwen3.7-plus is the low-cost multimodal agent model (text/image/video,
+        # 1M context) and is a hybrid thinking model. Defaults to the US
+        # (Virginia) region; region keys are NOT interchangeable, so the
+        # api_base must match the region the ALIBABA_API_KEY was issued in.
         return ChatQwen(
-            model="qwen3-vl-plus",
+            model="qwen3.7-plus",
             api_base=os.getenv(
                 "ALIBABA_BASE_URL",
                 "https://dashscope-us.aliyuncs.com/compatible-mode/v1",

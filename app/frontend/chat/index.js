@@ -91,11 +91,11 @@ class ChatApp {
     this.modelCapabilities = new Map([
       ['deepseek-v4-flash', { images: false }],
       ['deepseek-v4-pro', { images: false }],
-      // Qwen3-VL Plus is image-capable — seed it so an image upload while it's
+      // Qwen3.7 Plus is image-capable — seed it so an image upload while it's
       // selected is NOT spuriously auto-switched to Gemini before the async
       // /api/available-models fetch resolves (the unknown-model default is
       // permissive, but a stale/missing fetch previously bounced it off Qwen).
-      ['qwen3-vl-plus', { images: true }],
+      ['qwen3.7-plus', { images: true }],
     ]);
 
     // Agent running state (for stop button)

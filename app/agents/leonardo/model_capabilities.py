@@ -31,9 +31,9 @@ MODEL_CAPABILITIES = {
     'deepseek-v4-flash': {'images': False, 'video': False, 'pdf': False},
     'deepseek-v4-pro': {'images': False, 'video': False, 'pdf': False},
 
-    # Qwen VL (Alibaba) - images and video; PDFs are ingested as page-images,
-    # not natively, so we leave pdf off.
-    'qwen3-vl-plus': {'images': True, 'video': True, 'pdf': False},
+    # Qwen3.7 Plus (Alibaba) - multimodal agent model: images and video; PDFs
+    # are ingested as page-images, not natively, so we leave pdf off.
+    'qwen3.7-plus': {'images': True, 'video': True, 'pdf': False},
 }
 
 

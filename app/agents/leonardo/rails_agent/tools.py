@@ -2,8 +2,10 @@ from langchain.tools import tool, ToolRuntime
 from langgraph.types import Command
 from langchain_core.messages import ToolMessage
 from tavily import TavilyClient
+from typing import Optional
 import os
 import time
+import base64
 from bs4 import BeautifulSoup
 
 # Import checkpoint service for auto-checkpointing before file edits
@@ -35,6 +37,7 @@ from app.agents.leonardo.rails_agent.tool_prompts import (
     TAIL_RAILS_LOGS_DESCRIPTION,
     HARD_RESTART_RAILS_DESCRIPTION,
     FIX_PERMISSIONS_DESCRIPTION,
+    BROWSER_INSPECT_DESCRIPTION,
 )
 
 from app.agents.leonardo.project_context import (
@@ -1238,19 +1241,20 @@ def get_tavily_client():
     return _tavily_client
 
 @tool(description=INTERNET_SEARCH_DESCRIPTION)
-# Search tool to use to do research
 def internet_search(
     query: str,
     max_results: int = 5,
     include_raw_content: bool = False,
 ):
-    search_docs = get_tavily_client().search(
-        query,
-        max_results=max_results,
-        include_raw_content=include_raw_content,
-        topic="general",
-    )
-    return search_docs
+    try:
+        return get_tavily_client().search(
+            query,
+            max_results=max_results,
+            include_raw_content=include_raw_content,
+            topic="general",
+        )
+    except Exception as e:
+        return f"Search unavailable: {e}. The TAVILY_API_KEY may be missing or invalid — ask the operator to configure it."
 
 @tool(description=GIT_STATUS_DESCRIPTION)
 def git_status(
@@ -2257,5 +2261,99 @@ def edit_langgraph_json(
     return Command(
         update={
             "messages": [ToolMessage(success_message, artifact=tool_output, tool_call_id=tool_call_id)]
+        }
+    )
+
+
+@tool(description=BROWSER_INSPECT_DESCRIPTION)
+def browser_inspect(
+    url: str,
+    runtime: ToolRuntime,
+    selectors: Optional[list[str]] = None,
+    js_evaluate: str = "",
+    capture_screenshot: bool = True,
+    timeout_ms: int = 10000,
+) -> Command:
+    """Visit a URL with headless Chromium and return console logs, DOM checks, and a screenshot."""
+    from playwright.sync_api import sync_playwright
+
+    tool_call_id = runtime.tool_call_id
+    console_logs: list[dict] = []
+    network_failures: list[dict] = []
+
+    try:
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(headless=True)
+            page = browser.new_page()
+
+            page.on("console", lambda msg: console_logs.append({
+                "level": msg.type,
+                "text": msg.text,
+            }))
+            page.on("requestfailed", lambda req: network_failures.append({
+                "url": req.url,
+                "failure": req.failure,
+            }))
+
+            response = page.goto(url, wait_until="networkidle", timeout=timeout_ms)
+
+            selector_results: dict = {}
+            for sel in (selectors or []):
+                try:
+                    selector_results[sel] = page.query_selector(sel) is not None
+                except Exception:
+                    selector_results[sel] = False
+
+            js_result = None
+            if js_evaluate:
+                try:
+                    js_result = page.evaluate(js_evaluate)
+                except Exception as e:
+                    js_result = f"Error: {e}"
+
+            screenshot_b64 = None
+            if capture_screenshot:
+                try:
+                    screenshot_b64 = base64.b64encode(page.screenshot()).decode()
+                except Exception:
+                    pass
+
+            html_preview = page.content()[:3000]
+            title = page.title()
+            final_url = page.url
+            status = response.status if response else None
+            browser.close()
+
+        diagnostic = {
+            "ok": True,
+            "status": status,
+            "url": final_url,
+            "title": title,
+            "console_errors": [lg for lg in console_logs if lg["level"] in ("error", "warning")],
+            "all_logs": console_logs,
+            "network_failures": network_failures,
+            "selectors": selector_results,
+            "js_result": js_result,
+            "html_preview": html_preview,
+        }
+        text_content = json.dumps(diagnostic, indent=2)
+
+        # Return multimodal content when screenshot was captured.
+        # StripUnsupportedMultimodalMiddleware replaces the image block with a
+        # placeholder note for text-only models (DeepSeek, etc.) automatically.
+        if screenshot_b64:
+            content = [
+                {"type": "text", "text": text_content},
+                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{screenshot_b64}"}},
+            ]
+        else:
+            content = text_content
+
+    except Exception as e:
+        content = json.dumps({"ok": False, "error": str(e)}, indent=2)
+
+    return Command(
+        update={
+            "messages": [ToolMessage(content=content, tool_call_id=tool_call_id)]
         }
     )

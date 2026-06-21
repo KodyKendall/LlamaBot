@@ -13,6 +13,11 @@ causing compaction to never trigger for DeepSeek conversations.
 # This value is used by both backend (SummarizationMiddleware) and frontend (TokenIndicator)
 SUMMARIZATION_TOKEN_THRESHOLD = 100000
 
+# How many recent browser_inspect screenshots to keep in the context window.
+# Older ones are stripped before token counting (and permanently from state via middleware)
+# to prevent the summarization-every-turn loop caused by screenshot accumulation.
+SCREENSHOT_KEEP_RECENT = 2
+
 import tiktoken
 from google import genai
 from google.genai import types
@@ -186,6 +191,61 @@ def _extract_multimodal_parts(msg) -> list[types.Part]:
                 ))
 
     return parts
+
+
+def _strip_old_images(messages, keep_recent: int = SCREENSHOT_KEEP_RECENT):
+    """Return messages with image_url blocks removed from old ToolMessages.
+
+    Keeps the most recent `keep_recent` ToolMessages that contain images intact;
+    replaces image_url blocks in older ones with a text placeholder. Returns the
+    original list unchanged (same object) if nothing needs stripping.
+
+    This prevents the summarization loop caused by browser_inspect screenshots
+    accumulating past the token threshold on every turn.
+    """
+    from langchain_core.messages import ToolMessage
+
+    indices_with_images = [
+        i for i, msg in enumerate(messages)
+        if isinstance(msg, ToolMessage)
+        and isinstance(getattr(msg, "content", None), list)
+        and any(isinstance(b, dict) and b.get("type") == "image_url" for b in msg.content)
+    ]
+
+    if len(indices_with_images) <= keep_recent:
+        return messages
+
+    to_strip = set(indices_with_images[:-keep_recent])
+    result = []
+    for i, msg in enumerate(messages):
+        if i not in to_strip:
+            result.append(msg)
+            continue
+        new_content = []
+        placeholder_added = False
+        for block in msg.content:
+            if isinstance(block, dict) and block.get("type") == "image_url":
+                if not placeholder_added:
+                    new_content.append({
+                        "type": "text",
+                        "text": "[Screenshot removed from context to reduce token usage. "
+                                "Call browser_inspect again if you need to see the current page.]",
+                    })
+                    placeholder_added = True
+            else:
+                new_content.append(block)
+        result.append(msg.model_copy(update={"content": new_content}))
+    return result
+
+
+def gemini_multimodal_token_counter_strip_images(messages) -> int:
+    """Token counter that strips old screenshots before counting.
+
+    Wraps gemini_multimodal_token_counter so that SummarizationMiddleware's
+    trigger check doesn't count old browser_inspect screenshots that will be
+    cleared from state anyway, preventing the summarization-on-every-turn loop.
+    """
+    return gemini_multimodal_token_counter(_strip_old_images(list(messages)))
 
 
 def _count_multimodal(parts: list[types.Part]) -> int:

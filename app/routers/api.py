@@ -18,6 +18,7 @@ from app.services.user_service import (
     get_all_users, get_user_by_username, update_user, delete_user
 )
 from app.agents.leonardo.model_capabilities import get_model_capabilities
+from app.agents.leonardo.model_policy import is_model_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -502,7 +503,7 @@ async def available_models():
         "gemini-3.1-flash-lite": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
         "deepseek-v4-flash": "DEEPSEEK_API_KEY",
         "deepseek-v4-pro": "DEEPSEEK_API_KEY",
-        "qwen3-vl-plus": "ALIBABA_API_KEY",
+        "qwen3.7-plus": "ALIBABA_API_KEY",
     }
 
     models = []
@@ -520,10 +521,21 @@ async def available_models():
                 has_key = True
                 break
 
+        # Operator/mothership policy can disable a model regardless of its key
+        # (see model_policy). A disabled model is greyed out in the dropdown; the
+        # real enforcement is in get_llm, since this endpoint is UX only.
+        enabled = is_model_enabled(model_value)
+        if not enabled:
+            reason = "Disabled by administrator"
+        elif not has_key:
+            reason = f"{checked_var} not configured in .env"
+        else:
+            reason = None
+
         models.append({
             "value": model_value,
-            "available": has_key,
-            "reason": None if has_key else f"{checked_var} not configured in .env",
+            "available": has_key and enabled,
+            "reason": reason,
             "capabilities": get_model_capabilities(model_value),
         })
 
@@ -1149,6 +1161,8 @@ UPLOAD_ALLOWED_EXTENSIONS = {
     '.pptx', '.ppt', '.pptm', '.key', '.odp',
     # Media
     '.mp4', '.webm',
+    # Data / text formats
+    '.xml', '.json', '.txt', '.md', '.yaml', '.yml', '.html', '.htm',
 }
 
 IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'}

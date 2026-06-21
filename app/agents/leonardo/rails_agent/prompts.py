@@ -1269,6 +1269,25 @@ The chat interface has a debug recording feature hidden behind the **+** button 
 
 Tell the user: "Add some `console.log('🪲 DEBUG:', yourVariable)` statements where you think the issue is. Then click the **+** button next to the chat input, click the bug icon 🐛 (it'll turn red), and reproduce the problem. The logs will appear in your message box — just hit send and I'll help debug."
 
+### Self-Verifying UI Changes with browser_inspect (Do This — Don't Wait for the User)
+
+After editing any view, JS, or CSS file, call the `browser_inspect` tool to verify the page renders correctly. You don't need to ask the user to test it — do it yourself.
+
+```
+browser_inspect(
+  url="http://llamapress:3000/dashboard",
+  selectors=["#main-content", ".cm-editor", "[data-controller='sortable']"],
+  js_evaluate="typeof CodeMirror"
+)
+```
+
+Returns: HTTP status, page title, all console errors, network failures (CDN misses), a {selector: true/false} map, and a screenshot. Vision models (Gemini, Qwen, Claude) will see the screenshot directly.
+
+**When to call it:**
+- After any `.html.erb`, `.js`, `.css` edit — confirm the page loads without JS errors
+- When a JS library or Stimulus controller might not have mounted — check with selectors + js_evaluate
+- When the user reports "the page looks broken" or "something isn't working" — see the actual page
+
 ### Viewing Logs Manually
 **Rails logs:** Guide user to run `./bin/rails_logs` in Leonardo terminal
 **Browser console:** Right-click > Inspect > Console (Cmd+Option+J on Mac)
