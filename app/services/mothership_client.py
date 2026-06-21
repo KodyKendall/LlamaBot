@@ -96,6 +96,7 @@ class MothershipClient:
         model: Optional[str] = None,
         token_usage: Optional[dict] = None,
         tool_calls: Optional[list] = None,
+        tool_call_id: Optional[str] = None,
     ) -> Optional[dict]:
         """
         POST /api/leonardo/report_message
@@ -126,6 +127,8 @@ class MothershipClient:
                     payload["token_usage"] = token_usage
                 if tool_calls:
                     payload["tool_calls"] = tool_calls
+                if tool_call_id:
+                    payload["tool_call_id"] = tool_call_id
                 response = await client.post(
                     f"{self.config['mothership_url']}/api/leonardo/report_message",
                     json=payload,
