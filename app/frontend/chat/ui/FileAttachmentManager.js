@@ -420,6 +420,8 @@ export class FileAttachmentManager {
     const isImage = folder.includes('images') || ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext);
     const isPdf = ext === 'pdf';
     const isSheet = ['xlsx', 'xls', 'xlsm', 'xlsb', 'xltx', 'xltm', 'csv', 'tsv'].includes(ext);
+    const isText = ['txt', 'xml', 'json', 'md', 'yaml', 'yml', 'html', 'htm', 'log',
+                    'sh', 'py', 'rb', 'sql', 'css', 'js'].includes(ext);
     const alreadyAttached = this.attachments.some(a => a.path === path);
 
     let bodyHtml;
@@ -428,7 +430,15 @@ export class FileAttachmentManager {
     } else if (isPdf) {
       bodyHtml = `<iframe class="asset-preview-frame" src="${previewUrl}" title="${filename}"></iframe>`;
     } else if (isSheet) {
-      bodyHtml = `<div class="asset-preview-stage" data-llamabot="asset-sheet-stage"><div class="asset-preview-loading"><i class="fa-solid fa-spinner fa-spin"></i> Rendering spreadsheet…</div></div>`;
+      bodyHtml = `
+        <div class="asset-preview-stage" data-llamabot="asset-sheet-stage">
+          <div class="asset-preview-loading"><i class="fa-solid fa-spinner fa-spin"></i> Rendering spreadsheet…</div>
+        </div>`;
+    } else if (isText) {
+      bodyHtml = `
+        <div class="asset-preview-stage" data-llamabot="asset-text-stage">
+          <div class="asset-preview-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading…</div>
+        </div>`;
     } else {
       bodyHtml = `
         <div class="asset-preview-placeholder">
@@ -495,6 +505,12 @@ export class FileAttachmentManager {
       this.renderSpreadsheetPreview(previewUrl, stage);
     }
 
+    // Lazy text rendering
+    if (isText) {
+      const stage = this.assetModalPreview.querySelector('[data-llamabot="asset-text-stage"]');
+      this.renderTextPreview(previewUrl, filename, stage);
+    }
+
     // Office Online viewer (lazy iframe, only on click)
     const officeBtn = this.assetModalPreview.querySelector('[data-llamabot="asset-office-btn"]');
     if (officeBtn) {
@@ -504,6 +520,30 @@ export class FileAttachmentManager {
         const body = this.assetModalPreview.querySelector('[data-llamabot="asset-preview-body"]');
         body.innerHTML = `<iframe class="asset-preview-frame" src="${viewer}" title="${filename}"></iframe>`;
       });
+    }
+  }
+
+  /**
+   * Fetch a text/code file and render it in a scrollable <pre> block.
+   * Caps at 200 KB to avoid locking up the DOM on huge files.
+   */
+  async renderTextPreview(previewUrl, filename, stage) {
+    if (!stage) return;
+    const MAX_CHARS = 200_000;
+    try {
+      const resp = await fetch(previewUrl);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const text = await resp.text();
+      const truncated = text.length > MAX_CHARS;
+      const display = truncated ? text.slice(0, MAX_CHARS) : text;
+      stage.innerHTML = `
+        <div class="asset-text-wrap">
+          <pre class="asset-text-pre">${this.escapeHtml(display)}</pre>
+          ${truncated ? `<div class="asset-sheet-truncated"><i class="fa-solid fa-circle-info"></i> Showing first 200 KB — download for the full file.</div>` : ''}
+        </div>`;
+    } catch (err) {
+      console.error('Text preview failed:', err);
+      stage.innerHTML = `<div class="asset-preview-placeholder"><i class="fa-solid fa-triangle-exclamation"></i><span>Couldn't load this file. Try downloading it instead.</span></div>`;
     }
   }
 

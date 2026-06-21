@@ -660,7 +660,7 @@ export class MessageHandler {
   handleSuggestModeSwitch(data) {
     this.finalizeCurrentThinking();
 
-    const { reason, target_mode, thread_id, agent_name } = data;
+    const { reason, target_mode, thread_id, agent_name, original_message } = data;
     const switchId = `switch-${Date.now()}`;
 
     const html = `
@@ -684,11 +684,8 @@ export class MessageHandler {
       card.querySelector('[data-action="switch"]')?.addEventListener('click', () => {
         card.classList.add('answered');
         card.querySelectorAll('button').forEach(b => b.disabled = true);
-        // Switch execution mode
-        if (window.chatApp) {
-          window.chatApp.setExecutionMode('plan');
-        }
-        // Resume the agent with "yes"
+
+        // 1. Resume beginner agent thread (closes out the interrupted state)
         if (window.chatApp?.webSocketManager) {
           window.chatApp.webSocketManager.send({
             type: 'question_response',
@@ -696,6 +693,25 @@ export class MessageHandler {
             thread_id,
             agent_name,
           });
+        }
+
+        // 2. Switch execution mode to plan
+        if (window.chatApp) {
+          window.chatApp.setExecutionMode('plan');
+        }
+
+        // 3. Create new thread for the plan agent
+        window.dispatchEvent(new CustomEvent('createNewThread'));
+
+        // 4. Auto-send original message to plan agent (300ms delay for thread setup)
+        if (original_message) {
+          setTimeout(() => {
+            const input = window.chatApp?.elements?.messageInput;
+            if (input) {
+              input.value = original_message;
+              window.chatApp.sendMessageWithDebugInfo();
+            }
+          }, 300);
         }
       });
 

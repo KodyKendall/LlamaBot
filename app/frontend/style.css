@@ -5819,6 +5819,30 @@ body {
     border-top: 1px solid #d4d4de;
 }
 
+/* Text / code file preview */
+.asset-text-wrap {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    align-self: stretch;
+    overflow: hidden;
+}
+
+.asset-text-pre {
+    flex: 1;
+    margin: 0;
+    padding: 16px;
+    overflow: auto;
+    font-family: 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+    font-size: 12.5px;
+    line-height: 1.6;
+    white-space: pre;
+    color: #d4d4d8;
+    background: #18181b;
+    tab-size: 2;
+}
+
 @media (max-width: 720px) {
     .asset-modal-list {
         width: 130px;

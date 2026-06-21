@@ -704,6 +704,7 @@ class RequestHandler:
                             "type": "suggest_mode_switch",
                             "target_mode": interrupt_value.get("target_mode", "plan"),
                             "reason": interrupt_value.get("reason", ""),
+                            "original_message": message_data.get('message', ''),
                             "thread_id": message_data.get('thread_id'),
                             "agent_name": message_data.get('agent_name'),
                         })
