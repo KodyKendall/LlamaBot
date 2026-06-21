@@ -19,7 +19,7 @@ langgraph's InjectedState because create_agent provides middleware support.
 """
 
 from langchain_anthropic import ChatAnthropic
-from langchain_google_genai import ChatGoogleGenerativeAI
+from app.agents.leonardo.llm_factory import make_summarization_model
 from langchain.agents import create_agent
 from langchain.agents.middleware import SummarizationMiddleware
 from langchain_core.messages import SystemMessage, ToolMessage
@@ -44,7 +44,7 @@ from app.agents.leonardo.rails_ticket_mode_agent.middleware import (
     ensure_implementation_offer,
     DynamicModelMiddleware,
 )
-from app.agents.utils.token_counter import gemini_multimodal_token_counter, SUMMARIZATION_TOKEN_THRESHOLD
+from app.agents.utils.token_counter import SUMMARIZATION_TOKEN_THRESHOLD
 from app.agents.leonardo.rails_ticket_mode_agent.sub_agents import delegate_task
 from app.agents.leonardo.rails_agent.sub_agents import delegate_research
 
@@ -313,20 +313,15 @@ def build_workflow(checkpointer=None):
     default_model = ChatAnthropic(model="claude-haiku-4-5", max_tokens=16384)
 
     # Configure middleware stack (order matters - executed top to bottom)
-    # Use Gemini 3 Flash for summarization (Google AI Studio, not Vertex)
-    summarization_model = ChatGoogleGenerativeAI(
-        model="gemini-3-flash-preview",
-        vertexai=False,  # Explicitly use Google AI Studio, not Vertex AI
-        temperature=1.0,
-    )
+    summarization_model, summarization_token_counter, trim_tokens_to_summarize = make_summarization_model()
     middleware = [
         # 1. Summarization for long conversations - prevents token limit issues
         SummarizationMiddleware(
             model=summarization_model,
             trigger=("tokens", SUMMARIZATION_TOKEN_THRESHOLD),
             keep=("messages", 20),  # Match Claude Code's default
-            token_counter=gemini_multimodal_token_counter,
-            trim_tokens_to_summarize=None,  # KEY FIX: Disable trimming, let Gemini see everything
+            token_counter=summarization_token_counter,
+            trim_tokens_to_summarize=trim_tokens_to_summarize,
             summary_prompt=SUMMARIZATION_PROMPT,
         ),
         # 2. Dynamic model selection based on state.llm_model from frontend
