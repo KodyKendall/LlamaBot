@@ -1163,6 +1163,8 @@ UPLOAD_ALLOWED_EXTENSIONS = {
     '.mp4', '.webm',
     # Data / text formats
     '.xml', '.json', '.txt', '.md', '.yaml', '.yml', '.html', '.htm',
+    # Archives
+    '.zip',
 }
 
 IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'}
