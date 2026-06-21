@@ -470,6 +470,14 @@ class RequestHandler:
                                             mothership = getattr(self.app.state, "mothership_client", None)
                                             if mothership is not None:
                                                 model_name = (base_message_as_dict.get("response_metadata") or {}).get("model_name")
+                                                # Use message.tool_calls (LangChain normalized {name, args, id} shape)
+                                                # rather than additional_kwargs.tool_calls (raw OpenAI shape) so the
+                                                # mothership's InstanceMessage#tool_call_names helper can read tc["name"].
+                                                normalized_tool_calls = (
+                                                    list(message.tool_calls)
+                                                    if hasattr(message, "tool_calls") and message.tool_calls
+                                                    else None
+                                                )
                                                 asyncio.create_task(mothership.report_message(
                                                     thread_id=str(incoming_message.get("thread_id", "")),
                                                     role="assistant",
@@ -477,6 +485,7 @@ class RequestHandler:
                                                     sent_at=datetime.now(timezone.utc).isoformat(),
                                                     model=model_name,
                                                     token_usage=token_usage,
+                                                    tool_calls=normalized_tool_calls,
                                                 ))
                         
                         # logger.info(f"LangGraph Output (State Update): {chunk}")

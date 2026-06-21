@@ -50,5 +50,8 @@
 - [x] If Leo prompts the user to switch to plan mode, it should auto-continue if the user says yes.
 - [x] Add zip files as allowed to upload
 
-Future: 
+0.5.1m:
+- [x] Fix: assistant messages reported to the mothership were missing `tool_calls` — 0 of 155,343 `InstanceMessage` rows had a non-nil `tool_calls` column, so tool-only turns (empty `content`) rendered as blank rows on the mothership's message-review page. Root cause: `MothershipClient.report_message()` had no `tool_calls` parameter and the call site in `request_handler.py` never passed one. Fix adds the parameter + payload key to `mothership_client.py` and passes `message.tool_calls` (LangChain's already-normalized `{name, args, id}` shape) at the assistant report call site — using `message.tool_calls` instead of `additional_kwargs.tool_calls` (raw OpenAI `{function: {name, arguments}}` shape) so the mothership's `InstanceMessage#tool_call_names` helper can read `tc["name"]` without a Rails-side change. Mothership receiving end was already ready (`tool_calls` jsonb column, `with_tool_calls` scope, `normalized_tool_calls` in the controller). Tests: `app/tests/test_mothership_client.py` (3 unit tests: payload includes key with normalized shape, omitted on None, omitted on empty list).
+
+Future:
 - [ ] Auto set up GitHub repositories through a GitHub application.
