@@ -64,7 +64,8 @@
       "WebSearch",
       "Bash(git -C /Users/kodykendall/SoftEngineering/LLMPress/LlamaBot diff app/agents/leonardo/rails_agent/middleware.py)",
       "Bash(aws route53 *)",
-      "Read(//private/etc/**)"
+      "Read(//private/etc/**)",
+      "WebFetch(domain:leehanchung.github.io)"
     ],
     "deny": [],
     "ask": [],

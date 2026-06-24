@@ -345,6 +345,31 @@ export class ThreadManager {
       // Load messages
       this.loadThreadMessages(threadData);
 
+      // Show an immediate rough estimate (chars/4) so the wheel isn't stuck at
+      // 0% during the server round-trip, then replace it with the accurate
+      // tiktoken count (includes tool calls, tool results, reasoning blocks, etc.)
+      // once the backend responds.
+      const messages = threadData[0]?.messages || [];
+      const roughChars = messages.reduce((sum, msg) => {
+        return sum + this.normalizeHistoricalMessageContent(msg.content).length;
+      }, 0);
+      window.dispatchEvent(new CustomEvent('threadTokensEstimated', {
+        detail: { tokens: Math.round(roughChars / 4) }
+      }));
+
+      // Fetch the accurate count from the backend (same counter the middleware uses)
+      const agentName = window.chatApp?.appState?.agentConfig?.name || 'rails_agent';
+      fetch(`/api/thread-tokens/${threadId}?agent_name=${encodeURIComponent(agentName)}`)
+        .then(r => r.ok ? r.json() : null)
+        .then(data => {
+          if (data && data.token_count != null) {
+            window.dispatchEvent(new CustomEvent('threadTokensEstimated', {
+              detail: { tokens: data.token_count }
+            }));
+          }
+        })
+        .catch(() => {}); // non-fatal — rough estimate already showing
+
       // Close menu
       if (this.menuManager) {
         this.menuManager.closeMenu();

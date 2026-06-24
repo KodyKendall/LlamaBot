@@ -621,6 +621,16 @@ class ChatApp {
       }
     });
 
+    // Update the token wheel after a historical thread finishes loading.
+    // ThreadManager dispatches this once it has computed the character-based
+    // estimate (~4 chars/token) from the fetched message history.
+    window.addEventListener('threadTokensEstimated', (e) => {
+      if (this.tokenIndicator) {
+        const tokens = e.detail.tokens;
+        this.tokenIndicator.update({ input_tokens: tokens, output_tokens: 0, total_tokens: tokens });
+      }
+    });
+
     // Listen for new thread creation
     window.addEventListener('createNewThread', () => {
       this.threadManager.createNewThread();

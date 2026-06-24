@@ -2265,6 +2265,31 @@ def edit_langgraph_json(
     )
 
 
+def browser_inspect_enabled() -> bool:
+    """Whether the headless-browser ``browser_inspect`` tool is enabled for this instance.
+
+    Gated by the ``enable_browser_inspect`` site setting, which defaults to ``"false"``
+    so the Playwright/Chromium path is opt-in (disabled unless explicitly configured).
+    Read when an agent's tool list is built (workflow compile time), so flipping the
+    setting takes effect on the next workflow rebuild / app restart. Fails closed
+    (returns ``False``) when the auth DB is unavailable.
+    """
+    import logging
+    try:
+        from sqlmodel import Session
+        from app.db import engine
+        from app.routers.api import get_site_setting
+        if engine is None:
+            return False
+        with Session(engine) as session:
+            return get_site_setting(session, "enable_browser_inspect", "false") == "true"
+    except Exception as e:
+        logging.getLogger(__name__).warning(
+            f"Could not read enable_browser_inspect setting; tool disabled: {e}"
+        )
+        return False
+
+
 @tool(description=BROWSER_INSPECT_DESCRIPTION)
 def browser_inspect(
     url: str,

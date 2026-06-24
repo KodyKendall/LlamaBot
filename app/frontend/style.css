@@ -128,19 +128,20 @@ body {
 .chat-section.collapsed .chat-header .checkpoint-btn,
 .chat-section.collapsed .chat-header .mobile-view-toggle,
 .chat-section.collapsed .chat-header .hamburger-menu,
+.chat-section.collapsed .chat-header .backup-status,
 .chat-section.collapsed .menu-drawer,
 .chat-section.collapsed .timeout-warning-banner,
-.chat-section.collapsed .message-history,
-.chat-section.collapsed .input-area textarea,
-.chat-section.collapsed .input-area .token-indicator,
-.chat-section.collapsed .input-area .thinking-area,
-.chat-section.collapsed .input-area .attachments-preview,
-.chat-section.collapsed .input-area .image-switch-banner,
-.chat-section.collapsed .input-area .scroll-to-bottom,
-.chat-section.collapsed .input-area .button-row,
-.chat-section.collapsed .tools-toolbar,
-.chat-section.collapsed .model-selector-container,
-.chat-section.collapsed .custom-dropdown-container {
+.chat-section.collapsed .update-banner,
+.chat-section.collapsed .message-history {
+    display: none !important;
+}
+
+/* In collapsed mode, hide everything in the input area except the collapsed
+   toolbar. Using a universal selector here (instead of enumerating each child)
+   also catches dynamically-injected elements — the selected-element badge,
+   slash-command menu, attachment/prompt pills, banners, etc. — so they can
+   never show up scrunched in the 64px rail. */
+.chat-section.collapsed .input-area > *:not(.collapsed-toolbar) {
     display: none !important;
 }
 
@@ -289,7 +290,20 @@ body {
     border-bottom: 1px solid var(--border-color);
     display: flex;
     align-items: center;
-    gap: 0.8rem;
+    gap: 0.6rem;
+    min-width: 0; /* allow children to shrink instead of overflowing the panel */
+}
+
+/* When the panel is resized narrow, the title and backup status absorb the
+   shrink (truncating) while the icon buttons keep their size, so nothing
+   clips past the edge of the panel / resize handle. */
+.chat-header .logo-container,
+.chat-header .hamburger-menu,
+.chat-header .checkpoint-btn,
+.chat-header .settings-btn,
+.chat-header .collapse-sidebar-btn,
+.chat-header .mobile-view-toggle {
+    flex-shrink: 0;
 }
 
 /* Logo container with status dot overlay */
@@ -334,6 +348,12 @@ body {
     font-weight: 600;
     color: var(--text-color);
     flex: 1;
+    min-width: 0; /* let the title shrink so buttons aren't pushed off-screen */
+    white-space: nowrap;
+    /* NOTE: do NOT set overflow:hidden here — the version tooltip is rendered as
+       a `::after` pseudo-element below the title (top:100%), and overflow:hidden
+       would clip it. The visible text is always the short string "Leo", so it
+       never needs truncation anyway. See test_version_tooltip_not_clipped. */
     position: relative;
     cursor: default;
 }
@@ -364,6 +384,9 @@ body {
     transition: opacity 0.3s ease;
     margin-left: -4px;
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0; /* truncate rather than force the header to overflow */
     cursor: pointer;
 }
 
@@ -5485,6 +5508,11 @@ body {
     color: rgba(255, 255, 255, 0.4);
 }
 
+.asset-row-date {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.35);
+}
+
 .asset-modal-preview {
     flex: 1;
     min-width: 0;
@@ -5906,6 +5934,12 @@ body {
 .file-browser-item-size {
     color: rgba(255, 255, 255, 0.35);
     font-size: 11px;
+    flex-shrink: 0;
+}
+
+.file-browser-item-date {
+    color: rgba(255, 255, 255, 0.3);
+    font-size: 10px;
     flex-shrink: 0;
 }
 
