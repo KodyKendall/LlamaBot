@@ -154,6 +154,15 @@ SLASH_COMMANDS = {
         "description": "Install cron job for scheduled agent tasks",
         "dangerous": True,
         "confirm_message": "This will install a cron job that runs every minute to check for scheduled agent tasks. Make sure SCHEDULER_TOKEN is set in your environment. Continue?"
+    },
+    "compact": {
+        "script": None,
+        "command": None,
+        "description": "Compact conversation history by summarizing older messages to free up context",
+        "dangerous": False,
+        "confirm_message": "This will summarize older messages in the current conversation to reduce context size. The last 15 messages will be kept verbatim. Continue?",
+        "client_only": True,
+        "special_handler": "compact"
     }
 }
 
@@ -319,7 +328,8 @@ async def execute_slash_command(
             "success": True,
             "output": "This command is handled by the client",
             "client_only": True,
-            "command": cmd_name
+            "command": cmd_name,
+            "special_handler": cmd_config.get("special_handler")
         }
 
     # Validate /bash command has args

@@ -20,7 +20,7 @@ from app.agents.leonardo.rails_agent.tools import (
     read_leonardo_md, write_leonardo_md, edit_leonardo_md,
     save_memory, list_memories, delete_memory,
     write_personality_file,
-    browser_inspect,
+    browser_inspect, browser_inspect_enabled,
 )
 from app.agents.leonardo.rails_agent.sub_agents import delegate_task, delegate_research
 from app.agents.leonardo.rails_beginner_agent.prompts import BEGINNER_AGENT_PROMPT
@@ -97,11 +97,12 @@ default_tools = [
     write_personality_file,
     delegate_task, delegate_research,
     suggest_plan_mode,
-    browser_inspect,
+    # browser_inspect is appended conditionally in build_workflow() — gated by the
+    # `enable_browser_inspect` site setting (disabled by default).
 ]
 
 
-def leonardo_beginner(state: RailsAgentState) -> Command[Literal["tools"]]:
+def leonardo_beginner(state: RailsAgentState, browser_inspect_on: bool = False) -> Command[Literal["tools"]]:
     llm_model = state.get('llm_model') or 'deepseek-v4-flash'
     logger.info(f"Using LLM model: {llm_model}")
     llm = get_llm(llm_model)
@@ -122,8 +123,9 @@ def leonardo_beginner(state: RailsAgentState) -> Command[Literal["tools"]]:
         write_personality_file,
         delegate_task, delegate_research,
         suggest_plan_mode,
-        browser_inspect,
     ]
+    if browser_inspect_on:
+        tools.append(browser_inspect)
 
     failed_tool_calls_count = state.get("failed_tool_calls_count", 0)
     if failed_tool_calls_count >= 3:
@@ -143,10 +145,21 @@ def leonardo_beginner(state: RailsAgentState) -> Command[Literal["tools"]]:
 
 
 def build_workflow(checkpointer=None):
+    from functools import partial
+
     builder = StateGraph(RailsAgentState)
 
-    builder.add_node("leonardo_beginner", leonardo_beginner)
-    builder.add_node("tools", ToolNode(default_tools))
+    # Browser inspect (headless Chromium) is opt-in: only expose it when the
+    # `enable_browser_inspect` site setting is on. Disabled by default. Read once
+    # here so the node's bound tools and the ToolNode stay in sync.
+    browser_inspect_on = browser_inspect_enabled()
+    tool_list = list(default_tools)
+    if browser_inspect_on:
+        tool_list.append(browser_inspect)
+        logger.info("browser_inspect tool enabled via site setting")
+
+    builder.add_node("leonardo_beginner", partial(leonardo_beginner, browser_inspect_on=browser_inspect_on))
+    builder.add_node("tools", ToolNode(tool_list))
 
     builder.add_edge(START, "leonardo_beginner")
 

@@ -622,6 +622,11 @@ export class SlashCommandManager {
         return;
       }
 
+      if (result.special_handler === 'compact') {
+        this.executeCompact();
+        return;
+      }
+
       if (result.success) {
         this.showSystemMessage(`/${commandName} completed successfully:\n\n${result.output}`, 'success', result);
       } else {
@@ -637,6 +642,28 @@ export class SlashCommandManager {
       console.error('Failed to execute command:', error);
       this.showSystemMessage(`Error executing /${commandName}: ${error.message}`, 'error');
     }
+  }
+
+  /**
+   * Execute /compact by routing it through the normal WebSocket pipeline.
+   * The backend intercepts the "/compact" message before it reaches the agent,
+   * streams a thinking shimmer + the generated summary back as AIMessageChunk
+   * events, updates the checkpoint, and sends a token_usage update so the
+   * context wheel refreshes immediately — identical to the auto-summarization UX.
+   */
+  executeCompact() {
+    if (!this.chatApp) return;
+
+    const threadId = this.chatApp?.appState?.currentThreadId;
+    if (!threadId) {
+      this.showSystemMessage('No active conversation to compact — start chatting first.', 'error');
+      return;
+    }
+
+    // Populate the input and call sendMessage() so the full streaming pipeline fires:
+    // user message shows in chat → WS sends → backend intercepts → thinking + streaming summary → token wheel update
+    this.messageInput.value = '/compact';
+    this.chatApp.sendMessage();
   }
 
   /**

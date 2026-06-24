@@ -255,6 +255,136 @@ class RequestHandler:
             })
         return True
 
+    async def _handle_compact_command(self, message: dict, websocket: WebSocket) -> None:
+        """Stream a context-window compaction through the same WS pipeline as a normal turn.
+
+        Summarises everything older than the last 15 messages using the same model and
+        prompt that SummarizationMiddleware uses automatically.  The summary streams back
+        as AIMessageChunk events so the frontend shows a thinking shimmer and live text —
+        identical to what the user sees when auto-summarization triggers in the middleware.
+        After the checkpoint is updated the new (smaller) token count is sent so the
+        context wheel refreshes immediately.
+        """
+        from app.agents.leonardo.llm_factory import make_summarization_model
+        from app.agents.leonardo.rails_agent.nodes import SUMMARIZATION_PROMPT
+        from langchain.agents.middleware import SummarizationMiddleware
+        from langchain_core.messages import RemoveMessage
+        from langgraph.graph.message import REMOVE_ALL_MESSAGES
+        from langchain_core.messages.utils import get_buffer_string
+
+        thread_id = message.get('thread_id')
+        agent_name = message.get('agent_name', 'rails_agent')
+
+        async def _send(data: dict) -> None:
+            if self._is_websocket_open(websocket):
+                await websocket.send_json(data)
+
+        try:
+            graph = (
+                self.app.state.compiled_graphs.get(agent_name)
+                or self.app.state.compiled_graphs.get('rails_agent')
+                or self.app.state.compiled_graphs.get('llamabot')
+            )
+            if not graph:
+                await _send({"type": "AIMessageChunk", "content": "⚠️ No compiled graph available — try again after the server finishes starting."})
+                await _send({"type": "end"})
+                return
+
+            config = {"configurable": {"thread_id": thread_id}}
+            state_snapshot = await graph.aget_state(config=config)
+            messages = list(state_snapshot.values.get("messages", []))
+            keep_count = 15
+
+            # Kick off the thinking shimmer immediately
+            await _send({
+                "type": "AIMessageChunk",
+                "content": "",
+                "thinking": [{"type": "thinking", "thinking": f"Compacting conversation… analysing {len(messages)} messages, keeping the last {keep_count}."}],
+            })
+
+            if len(messages) <= keep_count:
+                await _send({"type": "AIMessageChunk", "content": f"Nothing to compact — only {len(messages)} messages in context (need more than {keep_count})."})
+                await _send({"type": "end"})
+                return
+
+            model, token_counter, trim_tokens_to_summarize = make_summarization_model()
+
+            middleware = SummarizationMiddleware(
+                model=model,
+                trigger=("tokens", 1),
+                keep=("messages", keep_count),
+                token_counter=token_counter,
+                trim_tokens_to_summarize=trim_tokens_to_summarize,
+                summary_prompt=SUMMARIZATION_PROMPT,
+            )
+
+            middleware._ensure_message_ids(messages)
+            cutoff_index = middleware._determine_cutoff_index(messages)
+
+            if cutoff_index <= 0:
+                await _send({"type": "AIMessageChunk", "content": "Context is already compact — nothing to summarise."})
+                await _send({"type": "end"})
+                return
+
+            messages_to_summarize, preserved_messages = middleware._partition_messages(messages, cutoff_index)
+
+            # Build the prompt the same way SummarizationMiddleware does internally
+            trimmed = middleware._trim_messages_for_summary(messages_to_summarize)
+            formatted = get_buffer_string(trimmed, format="xml")
+            prompt = middleware.summary_prompt.format(messages=formatted).rstrip()
+
+            # Stream the summary as AIMessageChunk events
+            full_summary = ""
+            async for chunk in model.astream(prompt, config={"metadata": {"lc_source": "compact_command"}}):
+                raw = chunk.content
+                if isinstance(raw, str):
+                    text = raw
+                elif isinstance(raw, list):
+                    text = "".join(
+                        b.get("text", "") for b in raw
+                        if isinstance(b, dict) and b.get("type") == "text"
+                    )
+                else:
+                    text = ""
+                if text:
+                    full_summary += text
+                    await _send({"type": "AIMessageChunk", "content": text})
+
+            # Persist compacted state to the checkpoint
+            new_messages = middleware._build_new_messages(full_summary)
+            await graph.aupdate_state(config, {
+                "messages": [
+                    RemoveMessage(id=REMOVE_ALL_MESSAGES),
+                    *new_messages,
+                    *preserved_messages,
+                ]
+            })
+
+            # Recount tokens so the context wheel updates without the user needing to send a message
+            try:
+                refreshed = await graph.aget_state(config=config)
+                new_count = token_counter(list(refreshed.values.get("messages", [])))
+            except Exception:
+                new_count = 0
+
+            logger.info(
+                f"/compact: thread={thread_id} summarised={len(messages_to_summarize)} "
+                f"kept={len(preserved_messages)} new_tokens≈{new_count}"
+            )
+
+            # Empty content chunk carrying the updated token count — updates the wheel
+            await _send({
+                "type": "AIMessageChunk",
+                "content": "",
+                "token_usage": {"input_tokens": new_count, "output_tokens": 0, "total_tokens": new_count},
+            })
+            await _send({"type": "end"})
+
+        except Exception as e:
+            logger.error(f"/compact failed: {e}", exc_info=True)
+            await _send({"type": "AIMessageChunk", "content": f"\n\n⚠️ Compact failed: {e}"})
+            await _send({"type": "end"})
+
     # This is a the main function that handles incoming WebSocket requests. This will build the LangGraph workflow, and invoke it from a checkpointed state.
     async def handle_request(self, incoming_message: dict, websocket: WebSocket):
         """Handle incoming WebSocket requests with proper locking and cancellation"""
@@ -285,6 +415,13 @@ class RequestHandler:
                     }
                     logger.info(f"paywall cache updated: {self.app.state.paywall_credits}")
             asyncio.create_task(_report_user_and_cache_paywall())
+
+        # /compact is a system operation — skip paywall and mothership reporting,
+        # acquire the lock so it can't race with an active agent run.
+        if incoming_message.get('message', '').strip() == '/compact':
+            async with lock:
+                await self._handle_compact_command(incoming_message, websocket)
+            return
 
         async with lock:
             try:

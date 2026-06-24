@@ -181,7 +181,8 @@ export class FileAttachmentManager {
         return;
       }
 
-      // Group by folder
+      // Sort newest first, then group by folder
+      files.sort((a, b) => (b.uploaded_at || 0) - (a.uploaded_at || 0));
       const grouped = {};
       for (const f of files) {
         if (!grouped[f.folder]) grouped[f.folder] = [];
@@ -203,10 +204,12 @@ export class FileAttachmentManager {
             : `<i class="fa-solid ${this.iconForFile(f.filename, isImage)}"></i>`;
           // Check if already attached
           const alreadyAttached = this.attachments.some(a => a.path === f.path);
+          const dateStr = this.formatUploadDate(f.uploaded_at);
           html += `
-            <div class="file-browser-item ${alreadyAttached ? 'file-browser-item--attached' : ''}" data-path="${f.path}" data-filename="${f.filename}" data-size="${f.size}" data-folder="${f.folder}">
+            <div class="file-browser-item ${alreadyAttached ? 'file-browser-item--attached' : ''}" data-path="${f.path}" data-filename="${f.filename}" data-size="${f.size}" data-folder="${f.folder}" data-uploaded-at="${f.uploaded_at || ''}">
               ${leading}
               <span class="file-browser-item-name" title="${f.path}">${f.filename}</span>
+              ${dateStr ? `<span class="file-browser-item-date">${dateStr}</span>` : ''}
               <span class="file-browser-item-size">${sizeStr}</span>
               <a class="file-browser-download-btn" href="${downloadUrl}" download="${f.filename}" title="Download ${f.filename}">
                 <i class="fa-solid fa-download"></i>
@@ -365,7 +368,8 @@ export class FileAttachmentManager {
       return;
     }
 
-    // Group by folder, same labels as the compact browser
+    // Sort newest first, then group by folder
+    files.sort((a, b) => (b.uploaded_at || 0) - (a.uploaded_at || 0));
     const grouped = {};
     for (const f of files) {
       if (!grouped[f.folder]) grouped[f.folder] = [];
@@ -384,11 +388,13 @@ export class FileAttachmentManager {
           ? `<img class="asset-row-thumb" src="${previewUrl}" alt="" loading="lazy" onerror="this.outerHTML='<i class=\\'fa-solid fa-file-image\\'></i>'">`
           : `<i class="fa-solid ${this.iconForFile(f.filename, isImage)}"></i>`;
         const selected = f.path === this.assetModalSelectedPath ? 'asset-row--selected' : '';
+        const dateStr = this.formatUploadDate(f.uploaded_at);
         html += `
-          <div class="asset-row ${selected}" data-path="${f.path}" data-filename="${f.filename}" data-size="${f.size}" data-folder="${f.folder}">
+          <div class="asset-row ${selected}" data-path="${f.path}" data-filename="${f.filename}" data-size="${f.size}" data-folder="${f.folder}" data-uploaded-at="${f.uploaded_at || ''}">
             ${leading}
             <div class="asset-row-meta">
               <span class="asset-row-name" title="${f.filename}">${f.filename}</span>
+              ${dateStr ? `<span class="asset-row-date">${dateStr}</span>` : ''}
               <span class="asset-row-size">${this.formatFileSize(f.size)}</span>
             </div>
           </div>
@@ -1066,6 +1072,21 @@ export class FileAttachmentManager {
     if (bytes < 1024) return `${bytes}B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
     return `${(bytes / 1024 / 1024).toFixed(1)}MB`;
+  }
+
+  formatUploadDate(unixSeconds) {
+    if (!unixSeconds) return '';
+    const date = new Date(unixSeconds * 1000);
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startOfDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    const daysDiff = Math.round((startOfToday - startOfDate) / 86400000);
+    if (daysDiff === 0) return 'Today';
+    if (daysDiff === 1) return 'Yesterday';
+    if (daysDiff < 7) {
+      return 'Last ' + date.toLocaleDateString(undefined, { weekday: 'long' });
+    }
+    return date.toLocaleDateString(undefined, { weekday: 'short', month: 'long', day: 'numeric', year: 'numeric' });
   }
 
   /**

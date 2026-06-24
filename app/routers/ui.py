@@ -1552,6 +1552,7 @@ async def settings_page(
     from app.routers.api import get_site_setting
     show_token_wheel = get_site_setting(session, "show_token_wheel", "false") == "true"
     proactive_build = get_site_setting(session, "proactive_build_after_ticket", "false") == "true"
+    browser_inspect_on = get_site_setting(session, "enable_browser_inspect", "false") == "true"
     is_engineer_or_admin = current_user.role == "engineer" or current_user.is_admin
 
     html = f"""
@@ -1810,6 +1811,23 @@ async def settings_page(
             </div>
         </div>'''}
 
+        {"" if not is_engineer_or_admin else f'''<div class="card">
+            <div class="card-header">Developer Tools</div>
+            <div class="menu-item" style="cursor: default;">
+                <i class="fa-solid fa-magnifying-glass-chart"></i>
+                <span>Browser Inspect Tool</span>
+                <label style="position: relative; display: inline-block; width: 44px; height: 24px;">
+                    <input type="checkbox" id="browserInspectToggle" style="opacity: 0; width: 0; height: 0;"
+                        onchange="toggleBrowserInspect(this.checked)">
+                    <span style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #555; border-radius: 24px; transition: 0.3s;"></span>
+                    <span id="browserInspectSlider" style="position: absolute; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; border-radius: 50%; transition: 0.3s;"></span>
+                </label>
+            </div>
+            <div style="padding: 4px 0 0 36px; font-size: 0.75rem; color: rgba(255,255,255,0.35);">
+                Lets the agent inspect live pages with a headless browser (console logs, DOM, screenshots). Takes effect after the next restart.
+            </div>
+        </div>'''}
+
         <div class="card">
             <button class="logout-btn" onclick="logout()">
                 <i class="fa-solid fa-right-from-bracket"></i>
@@ -1925,6 +1943,38 @@ async def settings_page(
 
         function updateProactiveBuildSlider(enabled) {{
             const slider = document.getElementById('proactiveBuildSlider');
+            if (!slider) return;
+            const track = slider.previousElementSibling;
+            if (enabled) {{
+                track.style.backgroundColor = '#8b5cf6';
+                slider.style.transform = 'translateX(20px)';
+            }} else {{
+                track.style.backgroundColor = '#555';
+                slider.style.transform = 'translateX(0)';
+            }}
+        }}
+
+        // Browser inspect toggle
+        (function() {{
+            const toggle = document.getElementById('browserInspectToggle');
+            const slider = document.getElementById('browserInspectSlider');
+            if (!toggle || !slider) return;
+            const isEnabled = {'true' if browser_inspect_on else 'false'};
+            toggle.checked = isEnabled;
+            updateBrowserInspectSlider(isEnabled);
+        }})();
+
+        function toggleBrowserInspect(enabled) {{
+            updateBrowserInspectSlider(enabled);
+            fetch('/api/site-settings/enable_browser_inspect', {{
+                method: 'PUT',
+                headers: {{ 'Content-Type': 'application/json' }},
+                body: JSON.stringify({{ value: enabled ? 'true' : 'false' }})
+            }});
+        }}
+
+        function updateBrowserInspectSlider(enabled) {{
+            const slider = document.getElementById('browserInspectSlider');
             if (!slider) return;
             const track = slider.previousElementSibling;
             if (enabled) {{
