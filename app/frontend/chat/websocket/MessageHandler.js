@@ -118,6 +118,8 @@ export class MessageHandler {
       this.handleApprovalRequest(data);
     } else if (data.type === 'question_request') {
       this.handleQuestionRequest(data);
+    } else if (data.type === 'uiux_question_request') {
+      this.handleUiuxQuestionRequest(data);
     } else if (data.type === 'suggest_mode_switch') {
       this.handleSuggestModeSwitch(data);
     } else if (data.type === 'implement_ticket') {
@@ -652,6 +654,105 @@ export class MessageHandler {
 
     // Show thinking indicator since agent will resume
     window.chatApp?.setAgentRunning(true);
+  }
+
+  /**
+   * Handle UI/UX question request (plan mode — agent asks the user to pick between
+   * visual options via interrupt). Each option carries an HTML snippet rendered as a
+   * live preview inside a sandboxed iframe. Single-select: the chosen option resumes
+   * the agent over the existing question_response channel.
+   */
+  handleUiuxQuestionRequest(data) {
+    this.finalizeCurrentThinking();
+
+    const { question, options, context, thread_id, agent_name } = data;
+    const questionId = `uiux-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
+
+    const html = this._buildUiuxCardHtml(questionId, question, options || [], context || '', thread_id, agent_name);
+    this.messageRenderer.addMessage(html, 'uiux_question_request', null);
+
+    // Set iframe previews and wire up selection after the DOM renders.
+    setTimeout(() => this._attachUiuxListeners(questionId, options || [], thread_id, agent_name), 0);
+  }
+
+  /**
+   * Wrap a raw Tailwind/DaisyUI snippet in a self-contained document for the sandboxed
+   * preview iframe. Tailwind (JIT) + DaisyUI load from CDN so the snippet renders with
+   * realistic styling without depending on the chat or target-app CSS.
+   */
+  _buildUiuxPreviewDoc(snippet) {
+    return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+    <link href="https://cdn.jsdelivr.net/npm/daisyui@4.12.23/dist/full.min.css" rel="stylesheet" type="text/css">
+  </head>
+  <body class="p-4 bg-base-100">${snippet || ''}</body>
+</html>`;
+  }
+
+  _buildUiuxCardHtml(questionId, question, options, context, threadId, agentName) {
+    const optionCards = options.map((opt, i) => {
+      const optId = (opt && opt.id != null) ? String(opt.id) : String(i);
+      const label = (opt && opt.label != null) ? String(opt.label) : optId;
+      return `
+        <label class="uiux-option-card" data-option-index="${i}">
+          <div class="uiux-option-header">
+            <input type="radio" name="uiux-${questionId}" value="${this._escapeHtml(optId)}"
+                   data-option-label="${this._escapeHtml(label)}">
+            <span class="uiux-option-label">${this._escapeHtml(label)}</span>
+          </div>
+          <iframe class="uiux-option-preview" data-option-index="${i}"
+                  sandbox="allow-scripts" title="Preview: ${this._escapeHtml(label)}"></iframe>
+        </label>`;
+    }).join('');
+
+    return `
+      <div class="uiux-question-card plan-question-card" data-question-id="${questionId}"
+           data-thread-id="${threadId}" data-agent-name="${agentName}">
+        <div class="plan-question-text">${this._escapeHtml(question)}</div>
+        ${context ? `<div class="plan-question-context">${this._escapeHtml(context)}</div>` : ''}
+        <div class="uiux-option-grid">${optionCards}</div>
+        <button class="plan-continue-btn uiux-send-btn" style="display: none;">Send choice</button>
+      </div>
+    `;
+  }
+
+  _attachUiuxListeners(questionId, options, threadId, agentName) {
+    const card = document.querySelector(`[data-question-id="${questionId}"]`);
+    if (!card) return;
+
+    // Populate each preview iframe via srcdoc (set as a property so no attribute escaping
+    // is needed; the snippet is rendered as HTML inside the sandboxed document).
+    card.querySelectorAll('.uiux-option-preview').forEach(iframe => {
+      const idx = parseInt(iframe.dataset.optionIndex, 10);
+      const opt = options[idx];
+      iframe.srcdoc = this._buildUiuxPreviewDoc(opt && opt.html ? opt.html : '');
+    });
+
+    const sendBtn = card.querySelector('.uiux-send-btn');
+
+    // Reveal Send button + highlight the selected card on radio change.
+    card.querySelectorAll(`input[name="uiux-${questionId}"]`).forEach(radio => {
+      radio.addEventListener('change', () => {
+        card.querySelectorAll('.uiux-option-card').forEach(c => c.classList.remove('selected'));
+        radio.closest('.uiux-option-card')?.classList.add('selected');
+        if (sendBtn) sendBtn.style.display = 'block';
+      });
+    });
+
+    sendBtn?.addEventListener('click', () => {
+      const checked = card.querySelector(`input[name="uiux-${questionId}"]:checked`);
+      if (!checked) return;
+      const answer = `${checked.value}: ${checked.dataset.optionLabel || ''}`.trim();
+      this._submitQuestionAnswer(card, answer, threadId, agentName);
+    });
+
+    // Scroll question into view
+    card.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    setTimeout(() => card.scrollIntoView({ behavior: 'smooth', block: 'end' }), 150);
   }
 
   /**

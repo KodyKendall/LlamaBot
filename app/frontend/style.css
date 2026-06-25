@@ -2285,6 +2285,72 @@ body {
     padding: 4px 0;
 }
 
+/* ===== UI/UX visual question (ask_user_uiux_question) ===== */
+.uiux-option-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+    margin-top: 12px;
+}
+
+@media (min-width: 900px) {
+    .uiux-option-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+.uiux-option-card {
+    display: block;
+    border: 1px solid rgba(139, 92, 246, 0.3);
+    border-radius: 10px;
+    padding: 10px;
+    cursor: pointer;
+    background: rgba(139, 92, 246, 0.06);
+    transition: all 0.15s ease;
+}
+
+.uiux-option-card:hover {
+    border-color: rgba(139, 92, 246, 0.55);
+    background: rgba(139, 92, 246, 0.12);
+}
+
+.uiux-option-card.selected {
+    border-color: #8b5cf6;
+    background: rgba(139, 92, 246, 0.18);
+    box-shadow: 0 0 8px rgba(139, 92, 246, 0.3);
+}
+
+.uiux-option-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.uiux-option-header input[type="radio"] {
+    accent-color: #8b5cf6;
+    cursor: pointer;
+}
+
+.uiux-option-label {
+    font-size: 13px;
+    font-weight: 500;
+    color: #c4b5fd;
+}
+
+.uiux-option-preview {
+    width: 100%;
+    height: 12rem;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    background: #ffffff;
+    display: block;
+}
+
+.uiux-send-btn {
+    margin-top: 12px;
+}
+
 /* System message */
 [data-llamabot="system-message"] {
     text-align: center;

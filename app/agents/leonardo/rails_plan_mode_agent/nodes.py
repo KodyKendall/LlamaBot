@@ -25,6 +25,7 @@ from langchain.agents.middleware import SummarizationMiddleware
 from langchain_core.messages import SystemMessage, ToolMessage
 from langchain.tools import tool, ToolRuntime
 from langgraph.types import Command, interrupt
+from typing_extensions import TypedDict
 from datetime import date
 
 from app.agents.leonardo.rails_agent.state import RailsAgentState
@@ -159,6 +160,72 @@ def ask_user_question(
     )
 
 
+class UIUXOption(TypedDict):
+    """One visual option the user can pick from in ask_user_uiux_question.
+
+    Attributes:
+        id: Stable identifier returned (with the label) when this option is chosen.
+        label: Short human-readable label shown next to the radio button.
+        html: A self-contained Tailwind/DaisyUI HTML snippet rendered as a live
+            preview inside a sandboxed iframe (e.g. '<button class="btn btn-primary">Save</button>').
+    """
+
+    id: str
+    label: str
+    html: str
+
+
+ASK_USER_UIUX_QUESTION_DESCRIPTION = """Ask the user to choose between VISUAL UI/UX options by showing them live previews.
+
+Use this instead of ask_user_question whenever the choice is about how something LOOKS —
+e.g. picking between layouts, components, button styles, card designs, color treatments, or
+section arrangements. Each option is rendered as a live, isolated preview the user picks by sight.
+
+IMPORTANT: Ask ONE question per tool call. Wait for the answer before asking the next.
+
+Parameters:
+- question: The question to ask, in plain non-technical language (e.g. "Which hero layout do you prefer?").
+- options: A list of 2-4 visual options. Each option is an object with:
+    - id: a short stable identifier (e.g. "centered", "split", "minimal")
+    - label: a short human label shown next to the radio (e.g. "Centered hero")
+    - html: a SELF-CONTAINED Tailwind + DaisyUI HTML snippet for the preview. It must rely
+      ONLY on Tailwind/DaisyUI utility classes — NO <script> tags, NO external images, fonts,
+      or stylesheets, and no app-specific CSS. Those will not render in the sandboxed preview.
+      Keep snippets small and focused on the visual decision being made.
+- context: (Optional) Brief context about why you're asking (shown as a subtitle).
+
+This tool freezes execution and waits. The user's chosen option (id and label) is returned as the tool result."""
+
+
+@tool(description=ASK_USER_UIUX_QUESTION_DESCRIPTION)
+def ask_user_uiux_question(
+    question: str,
+    options: list[UIUXOption],
+    runtime: ToolRuntime,
+    context: str = "",
+) -> Command:
+    """Ask the user to pick a visual option, freeze execution, and resume with their choice."""
+    tool_call_id = runtime.tool_call_id
+
+    # interrupt() freezes the agent here. The value is sent to the frontend as a
+    # uiux_question_request. When the user picks an option, interrupt() returns their choice.
+    user_answer = interrupt({
+        "type": "uiux_question",
+        "question": question,
+        "options": options or [],
+        "context": context,
+    })
+
+    return Command(
+        update={
+            "messages": [ToolMessage(
+                content=f"User selected: {user_answer}",
+                tool_call_id=tool_call_id
+            )]
+        }
+    )
+
+
 # =============================================================================
 # Tool list and workflow
 # =============================================================================
@@ -166,6 +233,7 @@ def ask_user_question(
 default_tools = [
     # Plan mode specific
     ask_user_question,
+    ask_user_uiux_question,
     # Standard tools (same as beginner + search_file)
     write_todos,
     ls, read_file, write_file, edit_file, search_file, bash_command,

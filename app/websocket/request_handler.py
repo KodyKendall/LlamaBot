@@ -887,6 +887,18 @@ class RequestHandler:
                         })
                         logger.info("Graph interrupted for plan mode question")
 
+                    # Plan mode visual (UI/UX) question interrupt — options carry HTML previews
+                    elif isinstance(interrupt_value, dict) and interrupt_value.get("type") == "uiux_question":
+                        await websocket.send_json({
+                            "type": "uiux_question_request",
+                            "question": interrupt_value.get("question", ""),
+                            "options": interrupt_value.get("options", []),
+                            "context": interrupt_value.get("context", ""),
+                            "thread_id": message_data.get('thread_id'),
+                            "agent_name": message_data.get('agent_name'),
+                        })
+                        logger.info("Graph interrupted for plan mode UI/UX question")
+
                     # Suggest plan mode interrupt
                     elif isinstance(interrupt_value, dict) and interrupt_value.get("type") == "suggest_mode_switch":
                         await websocket.send_json({
