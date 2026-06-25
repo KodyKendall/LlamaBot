@@ -10,6 +10,7 @@
       "rails_user_mode_agent": "./agents/leonardo/rails_user_mode_agent/nodes.py:build_workflow",
       "rails_beginner_agent": "./agents/leonardo/rails_beginner_agent/nodes.py:build_workflow",
       "rails_plan_mode_agent": "./agents/leonardo/rails_plan_mode_agent/nodes.py:build_workflow",
+      "rails_engineer_plan_mode_agent": "./agents/leonardo/rails_engineer_plan_mode_agent/nodes.py:build_workflow",
       "pyxl_agent": "./agents/leonardo/pyxl_agent/nodes.py:build_workflow"
     }
   }

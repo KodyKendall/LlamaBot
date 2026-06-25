@@ -84,6 +84,35 @@ class RequestHandler:
         """Check if the WebSocket connection is still open"""
         return websocket.client_state == WebSocketState.CONNECTED
 
+    # Interrupt types raised by "ask the user" tools whose interrupt() expects a plain
+    # text answer (which the tool wraps into a ToolMessage). A normal chat message sent
+    # while one of these is pending should resume the interrupt with that text — NOT be
+    # appended as a new HumanMessage ahead of the unanswered tool call.
+    _QUESTION_INTERRUPT_TYPES = ("user_question", "uiux_question")
+
+    async def _pending_question_interrupt(self, app, config):
+        """Return the interrupt payload if the thread is paused on a question-type
+        interrupt (ask_user_question / ask_user_uiux_question), else None.
+
+        Used to detect the "user typed in the main chat box instead of answering the
+        inline ask_user_question control" case so we can route their text in as the
+        tool answer. Approval (HITL) interrupts expect structured decisions, not free
+        text, so they are intentionally excluded. Never raises — a state-read failure
+        falls through to the normal request path.
+        """
+        try:
+            state_snapshot = await app.aget_state(config)
+        except Exception as e:
+            logger.warning(f"Could not read state for pending-interrupt check: {e}")
+            return None
+
+        for task in getattr(state_snapshot, "tasks", None) or []:
+            for intr in getattr(task, "interrupts", None) or []:
+                value = getattr(intr, "value", None)
+                if isinstance(value, dict) and value.get("type") in self._QUESTION_INTERRUPT_TYPES:
+                    return value
+        return None
+
     async def _repair_thread_state_if_needed(self, app, config):
         """
         Detect and repair two shapes of corrupted thread state that violate
@@ -446,11 +475,28 @@ class RequestHandler:
                     "recursion_limit": recursion_limit
                 }
 
-                # Auto-repair corrupted thread state (dangling tool_calls without ToolMessages)
-                # This can happen when a previous task was cancelled mid-tool-execution
-                await self._repair_thread_state_if_needed(app, config)
+                # If the graph is paused on an ask_user_question / ask_user_uiux_question
+                # interrupt and the user typed into the main chat box instead of using the
+                # inline control, route their message in as the tool answer (resume). Appending
+                # a normal HumanMessage ahead of the unanswered tool call violates the tool-call
+                # protocol (assistant tool_calls must be followed by tool messages) and 400s the
+                # next model call. See SupportIncident #106.
+                from langgraph.types import Command
+                pending_question = await self._pending_question_interrupt(app, config)
+                if pending_question is not None:
+                    resume_value = incoming_message.get('message', '')
+                    logger.info(
+                        f"Main-chat message received while '{pending_question.get('type')}' interrupt "
+                        f"pending on thread {incoming_message.get('thread_id')}; routing it as the tool answer."
+                    )
+                    stream_input = Command(resume=resume_value)
+                else:
+                    # Auto-repair corrupted thread state (dangling tool_calls without ToolMessages)
+                    # This can happen when a previous task was cancelled mid-tool-execution
+                    await self._repair_thread_state_if_needed(app, config)
+                    stream_input = state
 
-                async for chunk in app.astream(state, config=config, stream_mode=["updates", "messages"], subgraphs=True):
+                async for chunk in app.astream(stream_input, config=config, stream_mode=["updates", "messages"], subgraphs=True):
 
                     # If the WS died mid-stream (e.g., uvicorn keepalive ping
                     # timeout), stop here. Continuing would let the graph keep
@@ -886,6 +932,18 @@ class RequestHandler:
                             "agent_name": message_data.get('agent_name'),
                         })
                         logger.info("Graph interrupted for plan mode question")
+
+                    # Plan mode visual (UI/UX) question interrupt — options carry HTML previews
+                    elif isinstance(interrupt_value, dict) and interrupt_value.get("type") == "uiux_question":
+                        await websocket.send_json({
+                            "type": "uiux_question_request",
+                            "question": interrupt_value.get("question", ""),
+                            "options": interrupt_value.get("options", []),
+                            "context": interrupt_value.get("context", ""),
+                            "thread_id": message_data.get('thread_id'),
+                            "agent_name": message_data.get('agent_name'),
+                        })
+                        logger.info("Graph interrupted for plan mode UI/UX question")
 
                     # Suggest plan mode interrupt
                     elif isinstance(interrupt_value, dict) and interrupt_value.get("type") == "suggest_mode_switch":

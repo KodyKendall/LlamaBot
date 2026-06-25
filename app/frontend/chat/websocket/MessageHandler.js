@@ -118,6 +118,8 @@ export class MessageHandler {
       this.handleApprovalRequest(data);
     } else if (data.type === 'question_request') {
       this.handleQuestionRequest(data);
+    } else if (data.type === 'uiux_question_request') {
+      this.handleUiuxQuestionRequest(data);
     } else if (data.type === 'suggest_mode_switch') {
       this.handleSuggestModeSwitch(data);
     } else if (data.type === 'implement_ticket') {
@@ -651,6 +653,276 @@ export class MessageHandler {
     }
 
     // Show thinking indicator since agent will resume
+    window.chatApp?.setAgentRunning(true);
+  }
+
+  /**
+   * Handle UI/UX question request (plan mode — agent asks the user to pick between
+   * visual options via interrupt). Renders an inline carousel in the transcript showing
+   * ONE option preview at a time (click through with ‹ ›). "Choose this" picks the
+   * current option; "See all" opens the full modal to compare and add a message. The
+   * answer resumes the agent over the existing question_response channel.
+   */
+  handleUiuxQuestionRequest(data) {
+    this.finalizeCurrentThinking();
+
+    const { question, options, context, thread_id, agent_name } = data;
+    const opts = Array.isArray(options) ? options : [];
+    const id = `uiux-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
+
+    const frames = opts.map((opt, i) =>
+      `<iframe class="uiux-car-frame${i === 0 ? ' active' : ''}" data-i="${i}" sandbox="" title="Preview ${i + 1}"></iframe>`
+    ).join('');
+
+    const card = `
+      <div class="uiux-carousel" data-uiux-id="${id}">
+        <div class="uiux-car-question">${this._escapeHtml(question)}</div>
+        <div class="uiux-car-stage">
+          <button class="uiux-car-nav uiux-car-prev" title="Previous">&lsaquo;</button>
+          <div class="uiux-car-frames">${frames}</div>
+          <button class="uiux-car-nav uiux-car-next" title="Next">&rsaquo;</button>
+        </div>
+        <div class="uiux-car-foot">
+          <span class="uiux-car-meta"><strong class="uiux-car-label"></strong> <span class="uiux-car-count"></span></span>
+          <div class="uiux-car-actions">
+            <button class="uiux-car-seeall">Expand</button>
+            <button class="uiux-car-choose">Choose this</button>
+          </div>
+        </div>
+      </div>`;
+    this.messageRenderer.addMessage(card, 'uiux_question_request', null);
+
+    setTimeout(() => this._attachUiuxCarousel({
+      id, question, context: context || '', options: opts, threadId: thread_id, agentName: agent_name,
+    }), 0);
+  }
+
+  /**
+   * Wire the inline carousel: click-through previews + "Choose this" / "See all".
+   */
+  _attachUiuxCarousel({ id, question, context, options, threadId, agentName }) {
+    const card = document.querySelector(`.uiux-carousel[data-uiux-id="${id}"]`);
+    if (!card) return;
+
+    const n = options.length;
+    const labelFor = (i) => (options[i] && options[i].label != null) ? String(options[i].label) : String(i);
+    const idFor = (i) => (options[i] && options[i].id != null) ? String(options[i].id) : String(i);
+
+    card.querySelectorAll('.uiux-car-frame').forEach(f => {
+      const opt = options[+f.dataset.i];
+      f.srcdoc = this._buildUiuxPreviewDoc(opt && opt.html ? opt.html : '');
+    });
+
+    let idx = 0;
+    const labelEl = card.querySelector('.uiux-car-label');
+    const countEl = card.querySelector('.uiux-car-count');
+    const setActive = (i) => {
+      if (n === 0) return;
+      idx = ((i % n) + n) % n;
+      card.querySelectorAll('.uiux-car-frame').forEach(f => f.classList.toggle('active', +f.dataset.i === idx));
+      if (labelEl) labelEl.textContent = labelFor(idx);
+      if (countEl) countEl.textContent = `(${idx + 1} of ${n})`;
+    };
+    setActive(0);
+
+    card.querySelector('.uiux-car-prev')?.addEventListener('click', () => setActive(idx - 1));
+    card.querySelector('.uiux-car-next')?.addEventListener('click', () => setActive(idx + 1));
+
+    card.querySelector('.uiux-car-choose')?.addEventListener('click', () => {
+      const answer = `Selected option "${idFor(idx)}: ${labelFor(idx)}".`;
+      this._answerUiuxQuestion(answer, threadId, agentName, card, labelFor(idx));
+    });
+
+    card.querySelector('.uiux-car-seeall')?.addEventListener('click', () =>
+      this._openUiuxModal({ id, question, context, options, threadId, agentName, chipEl: card, initialIndex: idx }));
+  }
+
+  /**
+   * Wrap a raw snippet in a self-contained document for the sandboxed preview iframe.
+   * Loads the SAME Tailwind (v2) stylesheet the target app itself uses, so previews look
+   * like the real page (plain — no DaisyUI component theming). Pure CSS, no scripts, so
+   * the iframe can run fully locked down (sandbox="").
+   */
+  _buildUiuxPreviewDoc(snippet) {
+    return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  </head>
+  <body class="p-4 bg-white text-gray-900">${snippet || ''}</body>
+</html>`;
+  }
+
+  /**
+   * Open the full-screen UI/UX option modal: tab bar + large sandboxed preview per
+   * option, a free-text area, and a submit button that resumes the agent.
+   */
+  _openUiuxModal({ id, question, context, options, threadId, agentName, chipEl, initialIndex = 0 }) {
+    // Only one modal at a time.
+    document.querySelector('.uiux-modal')?.remove();
+
+    const labelFor = (i) => (options[i] && options[i].label != null) ? String(options[i].label) : String(i);
+    const idFor = (i) => (options[i] && options[i].id != null) ? String(options[i].id) : String(i);
+
+    const tabs = options.map((opt, i) =>
+      `<button class="uiux-tab${i === 0 ? ' active' : ''}" data-i="${i}">${this._escapeHtml(labelFor(i))}</button>`
+    ).join('');
+    const frames = options.map((opt, i) =>
+      `<iframe class="uiux-modal-frame" data-i="${i}" sandbox="" title="Preview: ${this._escapeHtml(labelFor(i))}"></iframe>`
+    ).join('');
+
+    const overlay = document.createElement('div');
+    overlay.className = 'uiux-modal';
+    overlay.setAttribute('data-uiux-modal-for', id);
+    overlay.innerHTML = `
+      <div class="uiux-modal-content" role="dialog" aria-modal="true">
+        <div class="uiux-modal-header">
+          <div class="uiux-modal-titles">
+            <h3 class="uiux-modal-title">${this._escapeHtml(question)}</h3>
+            ${context ? `<div class="uiux-modal-context">${this._escapeHtml(context)}</div>` : ''}
+          </div>
+          <button class="uiux-modal-close" title="Close (Esc)">&times;</button>
+        </div>
+        <div class="uiux-modal-tabs">${tabs}</div>
+        <div class="uiux-modal-stage">
+          <button class="uiux-nav uiux-nav-prev" title="Previous (←)">&lsaquo;</button>
+          <div class="uiux-modal-frames">${frames}</div>
+          <button class="uiux-nav uiux-nav-next" title="Next (→)">&rsaquo;</button>
+        </div>
+        <div class="uiux-modal-footer">
+          <div class="uiux-modal-selectrow">
+            <button class="uiux-use-option" type="button">Use this option</button>
+            <span class="uiux-modal-selected">No option selected — optional</span>
+          </div>
+          <textarea class="uiux-modal-textarea" rows="3" placeholder="Write a message or instructions for Leo…"></textarea>
+          <div class="uiux-modal-actions">
+            <span class="uiux-modal-hint">Pick an option, write a message, or both · ⌘/Ctrl+Enter to send</span>
+            <button class="uiux-modal-send" disabled>Send response</button>
+          </div>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+
+    // Populate iframe previews via srcdoc (set as a property — no attribute escaping;
+    // sandbox="" fully isolates the snippet: no scripts, no same-origin access).
+    overlay.querySelectorAll('.uiux-modal-frame').forEach(f => {
+      const opt = options[+f.dataset.i];
+      f.srcdoc = this._buildUiuxPreviewDoc(opt && opt.html ? opt.html : '');
+    });
+
+    let activeIndex = 0;
+    let selectedIndex = null; // no option selected by default — selecting is optional
+    const n = options.length;
+    const selectedEl = overlay.querySelector('.uiux-modal-selected');
+    const useBtn = overlay.querySelector('.uiux-use-option');
+    const sendBtn = overlay.querySelector('.uiux-modal-send');
+    const textarea = overlay.querySelector('.uiux-modal-textarea');
+
+    const refreshSelectionUI = () => {
+      const hasText = (textarea?.value?.trim()?.length || 0) > 0;
+      const usingActive = selectedIndex === activeIndex;
+      if (useBtn) {
+        useBtn.textContent = usingActive ? '✓ Using this option' : 'Use this option';
+        useBtn.classList.toggle('active', usingActive);
+      }
+      if (selectedEl) {
+        selectedEl.textContent = selectedIndex === null
+          ? 'No option selected — optional'
+          : `Selected: ${labelFor(selectedIndex)}`;
+      }
+      // Can send if an option is selected OR a message was typed.
+      if (sendBtn) sendBtn.disabled = (selectedIndex === null && !hasText);
+    };
+
+    const setActive = (i) => {
+      if (n === 0) return;
+      activeIndex = ((i % n) + n) % n; // wrap around
+      overlay.querySelectorAll('.uiux-tab').forEach(t => t.classList.toggle('active', +t.dataset.i === activeIndex));
+      overlay.querySelectorAll('.uiux-modal-frame').forEach(f => f.classList.toggle('active', +f.dataset.i === activeIndex));
+      refreshSelectionUI();
+    };
+    setActive(initialIndex);
+
+    overlay.querySelectorAll('.uiux-tab').forEach(t =>
+      t.addEventListener('click', () => setActive(+t.dataset.i)));
+    overlay.querySelector('.uiux-nav-prev')?.addEventListener('click', () => setActive(activeIndex - 1));
+    overlay.querySelector('.uiux-nav-next')?.addEventListener('click', () => setActive(activeIndex + 1));
+
+    // Explicitly select/deselect the option currently being viewed.
+    useBtn?.addEventListener('click', () => {
+      selectedIndex = (selectedIndex === activeIndex) ? null : activeIndex;
+      refreshSelectionUI();
+    });
+    textarea?.addEventListener('input', refreshSelectionUI);
+
+    const close = () => {
+      document.removeEventListener('keydown', onKey);
+      overlay.remove();
+    };
+    const submit = () => {
+      const text = textarea?.value?.trim() || '';
+      const hasSel = selectedIndex !== null;
+      if (!hasSel && !text) return; // nothing to send
+      let answer, display;
+      if (hasSel && text) {
+        answer = `Selected option "${idFor(selectedIndex)}: ${labelFor(selectedIndex)}". Message: ${text}`;
+        display = `${labelFor(selectedIndex)} — ${text}`;
+      } else if (hasSel) {
+        answer = `Selected option "${idFor(selectedIndex)}: ${labelFor(selectedIndex)}".`;
+        display = labelFor(selectedIndex);
+      } else {
+        answer = text;
+        display = text;
+      }
+      close();
+      this._answerUiuxQuestion(answer, threadId, agentName, chipEl, display);
+    };
+
+    // Keyboard: arrows switch tabs (unless typing), Esc closes, Cmd/Ctrl+Enter submits.
+    const onKey = (e) => {
+      const inText = e.target?.classList?.contains('uiux-modal-textarea');
+      if (e.key === 'Escape') { e.preventDefault(); close(); }
+      else if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); submit(); }
+      else if (!inText && e.key === 'ArrowRight') { e.preventDefault(); setActive(activeIndex + 1); }
+      else if (!inText && e.key === 'ArrowLeft') { e.preventDefault(); setActive(activeIndex - 1); }
+    };
+    document.addEventListener('keydown', onKey);
+
+    overlay.querySelector('.uiux-modal-close')?.addEventListener('click', close);
+    overlay.querySelector('.uiux-modal-send')?.addEventListener('click', submit);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  }
+
+  /**
+   * Resume the agent with the user's UI/UX choice + optional message, mark the chip
+   * answered, and echo the choice into the transcript. Reuses the question_response
+   * channel that handle_question_response already consumes on the backend.
+   */
+  _answerUiuxQuestion(answer, threadId, agentName, chipEl, displayChoice) {
+    // Close the modal if it's open (answer may come from inline "Choose this").
+    document.querySelector('.uiux-modal')?.remove();
+
+    if (chipEl) {
+      chipEl.classList.add('answered');
+      chipEl.querySelectorAll('button').forEach(b => b.disabled = true);
+    }
+
+    if (displayChoice) {
+      const answerHtml = `<div class="plan-user-answer">${this._escapeHtml(displayChoice)}</div>`;
+      this.messageRenderer.addMessage(answerHtml, 'human', null);
+    }
+
+    if (window.chatApp?.webSocketManager) {
+      window.chatApp.webSocketManager.send({
+        type: 'question_response',
+        answer: answer,
+        thread_id: threadId,
+        agent_name: agentName,
+      });
+    }
+
     window.chatApp?.setAgentRunning(true);
   }
 

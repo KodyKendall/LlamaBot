@@ -382,7 +382,7 @@ async def login_get(
     # Preserve ?prompt= and ?conversation= params through the redirect
     from urllib.parse import urlencode
     forward_params = {}
-    for key in ("prompt", "conversation", "welcome_prompt", "llm_model"):
+    for key in ("prompt", "conversation", "welcome_prompt", "llm_model", "agent_mode"):
         val = request.query_params.get(key)
         if val:
             forward_params[key] = val

@@ -253,15 +253,17 @@ class TestGetLoginMagicLink:
     ):
         # Funnel hand-offs (e.g. the picture-to-html flow) pass prompt + llm_model
         # through the magic-link /login redirect. All hand-off params — including
-        # llm_model, which pins a vision-capable model — must survive to the chat
-        # page, or the auto-fired build runs on the wrong (default) model.
+        # llm_model, which pins a vision-capable model, and agent_mode, which pins
+        # the agent persona (e.g. the excel-to-app funnel handing off in 'engineer')
+        # — must survive to the chat page, or the auto-fired build runs on the wrong
+        # (default) model/mode.
         from urllib.parse import urlparse, parse_qs
 
         token = _make_magic_token(magic_link_secret, test_user.username)
         resp = client_with_user.get(
             f"/login?token={token}"
             "&prompt=clone+this&conversation=42"
-            "&welcome_prompt=hi&llm_model=gemini-3-flash",
+            "&welcome_prompt=hi&llm_model=gemini-3-flash&agent_mode=engineer",
             follow_redirects=False,
         )
         assert resp.status_code == 302
@@ -270,6 +272,7 @@ class TestGetLoginMagicLink:
         assert forwarded.get("conversation") == ["42"]
         assert forwarded.get("welcome_prompt") == ["hi"]
         assert forwarded.get("llm_model") == ["gemini-3-flash"]
+        assert forwarded.get("agent_mode") == ["engineer"]
         # token must NOT leak into the post-auth URL
         assert "token" not in forwarded
 
