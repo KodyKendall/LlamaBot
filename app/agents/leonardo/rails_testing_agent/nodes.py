@@ -25,6 +25,7 @@ from langchain_anthropic import ChatAnthropic
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.agents import create_agent
 from langchain.agents.middleware import SummarizationMiddleware
+from app.agents.leonardo.summarization import make_summarization_middleware
 from langchain_core.messages import SystemMessage
 from datetime import date
 
@@ -201,22 +202,11 @@ def build_workflow(checkpointer=None):
     default_model = ChatAnthropic(model="claude-haiku-4-5", max_tokens=16384)
 
     # Configure middleware stack (order matters - executed top to bottom)
-    # Use Gemini 3 Flash for summarization (Google AI Studio, not Vertex)
-    summarization_model = ChatGoogleGenerativeAI(
-        model="gemini-3-flash-preview",
-        vertexai=False,  # Explicitly use Google AI Studio, not Vertex AI
-        temperature=1.0,
-    )
     middleware = [
-        # 1. Summarization for long conversations - prevents token limit issues
-        SummarizationMiddleware(
-            model=summarization_model,
-            trigger=("tokens", SUMMARIZATION_TOKEN_THRESHOLD),
-            keep=("messages", 20),  # Match Claude Code's default
-            token_counter=gemini_multimodal_token_counter,
-            trim_tokens_to_summarize=None,  # KEY FIX: Disable trimming, let Gemini see everything
-            summary_prompt=SUMMARIZATION_PROMPT,
-        ),
+        # 1. Summarization for long conversations (shared factory: provider
+        #    fallback model, token-budgeted keep, first-user-messages + todo
+        #    preservation; REMOVE_ALL honored by the DeltaChannel reducer).
+        make_summarization_middleware(summary_prompt=SUMMARIZATION_PROMPT),
         # 2. Dynamic model selection based on state.llm_model from frontend
         DynamicModelMiddleware(),
         # 3. View path context injection - prepends page context to user messages

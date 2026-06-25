@@ -2,8 +2,44 @@
 
 **Date**: 2026-02-14  
 **Trace ID**: [019c5d80-663c-7f51-ac78-4489f830a94d](ls://runs/019c5d80-cc02-7290-9631-1a51a38134d8)  
-**Status**: Under Investigation  
+**Status**: RESOLVED (2026-06-25, 0.5.2a) — see "Resolution" below  
 **Severity**: Medium - Causes 6-8 second delays on every turn and loses conversation context prematurely
+
+---
+
+## Resolution (2026-06-25, SupportIncident #106)
+
+The recurring "summarize on every turn" loop (later reproduced on `mbc-preceptors`
+thread `c77fce95`, where checkpoint history raced from step ~193 to ~435) had a
+**single root cause distinct from the hypotheses below**: the DeltaChannel
+`messages` reducer (`_messages_delta_reducer`) does **not** implement
+`REMOVE_ALL_MESSAGES`. `SummarizationMiddleware` clears history by writing
+`[RemoveMessage(REMOVE_ALL_MESSAGES), summary, *preserved]`, but the marker was
+silently dropped, so the summary was appended on top of the full history. The
+post-summary token count never dropped, so summarization re-fired every turn.
+
+Fixes shipped:
+
+1. **`app/agents/utils/delta_state.py`** — `messages_delta_reducer` wraps the
+   upstream reducer and honors `RemoveMessage(REMOVE_ALL_MESSAGES)` while staying
+   batching-invariant (required by DeltaChannel). Core fix; also repairs
+   `ToolResultImageClearingMiddleware` and `/compact`, which emit the same marker.
+2. **`app/agents/leonardo/summarization.py`** — centralized
+   `make_summarization_middleware()` + `RailsSummarizationMiddleware`:
+   token-budgeted `keep=("tokens", 30000)` (auto-trimmed recent tail), preserves
+   the first user messages verbatim, and re-injects the last `write_todos` list
+   into the summary with a restore instruction. All Rails agents use it.
+3. **`make_summarization_model()`** — provider fallback
+   DeepSeek → Gemini 3 Flash → OpenAI → Anthropic (compile-safe with no keys).
+4. **`checkpoint_cleanup.py`** — periodic sweep no longer references the
+   nonexistent `checkpoint_blobs.checkpoint_id`.
+5. **`request_handler._normalize_messages`** — repair path unwraps `_DeltaSnapshot`.
+
+Regression tests: `test_delta_reducer_remove_all.py`,
+`test_rails_summarization_middleware.py`, `test_summarization_fallback.py`,
+`test_checkpoint_cleanup_sql.py`, `test_repair_delta_snapshot.py`.
+
+The original 2026-02-14 hypotheses below are retained for history.
 
 ---
 
