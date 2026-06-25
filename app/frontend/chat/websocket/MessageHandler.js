@@ -130,11 +130,11 @@ export class MessageHandler {
   }
 
   /**
-   * Check if current mode is beginner or plan (hides sub-agent content)
+   * Check if current mode is beginner, engineer, or plan (hides sub-agent content)
    */
   _isSimplifiedMode() {
     const modeSelect = document.querySelector('[data-llamabot="agent-mode-select"]');
-    const isBeginnerAgent = modeSelect?.value === 'beginner';
+    const isBeginnerAgent = modeSelect?.value === 'beginner' || modeSelect?.value === 'engineer';
     const savedMode = document.cookie.split(';').find(c => c.trim().startsWith('executionMode='));
     const isPlanExec = savedMode?.split('=')?.[1]?.trim() === 'plan';
     return isBeginnerAgent || isPlanExec;
@@ -652,8 +652,10 @@ export class MessageHandler {
       });
     }
 
-    // Show thinking indicator since agent will resume
+    // Show thinking indicator since agent will resume — restart the llama
+    // loading verbs that renderInterruptMessage() stopped when the card appeared.
     window.chatApp?.setAgentRunning(true);
+    window.chatApp?.showThinkingIndicator();
   }
 
   /**
@@ -923,7 +925,9 @@ export class MessageHandler {
       });
     }
 
+    // Restart the llama thinking verbs that renderInterruptMessage() stopped.
     window.chatApp?.setAgentRunning(true);
+    window.chatApp?.showThinkingIndicator();
   }
 
   /**

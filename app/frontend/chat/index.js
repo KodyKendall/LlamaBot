@@ -790,6 +790,24 @@ class ChatApp {
   }
 
   /**
+   * Show the llama thinking indicator and start cycling the loading verbs.
+   * Used both when sending a message and when resuming after a question/interrupt.
+   */
+  showThinkingIndicator() {
+    if (!this.elements.thinkingArea) return;
+    const verb = this.loadingVerbs.getRandomVerb();
+    this.elements.thinkingArea.innerHTML = `<div class="typing-indicator">🦙 ${verb}...</div>`;
+    this.elements.thinkingArea.classList.remove('hidden');
+    const thinkingDiv = this.elements.thinkingArea.querySelector('.typing-indicator');
+    if (thinkingDiv) {
+      this.loadingVerbs.startCycling(thinkingDiv);
+    }
+    if (this.faviconBadgeManager) {
+      this.faviconBadgeManager.startThinking();
+    }
+  }
+
+  /**
    * Update execution mode UI and state
    */
   setExecutionMode(mode) {
@@ -1185,9 +1203,9 @@ class ChatApp {
     this.streamingState.reset();
     this.iframeManager.removeStreamingOverlay();
 
-    // Show building overlay for beginner and plan modes
+    // Show building overlay for beginner, engineer, and plan modes
     const executionModeForOverlay = this.appState.getExecutionMode();
-    if (agentMode === 'beginner' || executionModeForOverlay === 'plan') {
+    if (agentMode === 'beginner' || agentMode === 'engineer' || executionModeForOverlay === 'plan') {
       this.iframeManager.createStreamingOverlay({ showCloseButton: true, text: 'Your App is Building!' });
     }
 

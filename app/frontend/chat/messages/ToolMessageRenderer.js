@@ -260,12 +260,12 @@ export class ToolMessageRenderer {
   }
 
   /**
-   * Check if the current agent mode is beginner
+   * Check if the current agent mode uses the simplified UX (beginner or engineer)
    */
   _isBeginnerMode() {
     const modeSelect = document.querySelector('[data-llamabot="agent-mode-select"]');
     console.log('[ToolRenderer] mode select value:', modeSelect?.value);
-    return modeSelect?.value === 'beginner';
+    return modeSelect?.value === 'beginner' || modeSelect?.value === 'engineer';
   }
 
   /**
