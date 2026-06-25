@@ -18,6 +18,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.agents import create_agent
 from langchain.agents.middleware import SummarizationMiddleware
 from langchain.agents.middleware.human_in_the_loop import HumanInTheLoopMiddleware
+from app.agents.leonardo.summarization import make_summarization_middleware
 from langchain_core.messages import SystemMessage
 
 from app.agents.leonardo.rails_agent.state import RailsAgentState
@@ -218,12 +219,6 @@ def build_workflow(checkpointer=None, ask_before_edits=False):
     default_model = ChatAnthropic(model="claude-haiku-4-5", max_tokens=16384)
 
     # Configure middleware stack (order matters - executed top to bottom)
-    # Use Gemini 3 Flash for summarization (Google AI Studio, not Vertex)
-    summarization_model = ChatGoogleGenerativeAI(
-        model="gemini-3-flash-preview",
-        vertexai=False,  # Explicitly use Google AI Studio, not Vertex AI
-        temperature=1.0,
-    )
     middleware = [
         # 1. Repair orphaned tool calls — inject placeholder ToolMessages for any
         #    AIMessage tool_calls that have no response (e.g. from a Tavily crash).
@@ -234,17 +229,13 @@ def build_workflow(checkpointer=None, ask_before_edits=False):
         #    context above the summarization threshold on every turn → infinite loop.
         #    Must be before SummarizationMiddleware's before_model token counting.
         clear_old_tool_images,
-        # 3. Summarization for long conversations - prevents token limit issues.
-        #    token_counter strips old images before counting to prevent false triggers
-        #    in the same turn that clear_old_tool_images fires.
-        SummarizationMiddleware(
-            model=summarization_model,
-            trigger=("tokens", SUMMARIZATION_TOKEN_THRESHOLD),
-            keep=("messages", 15),  # Reduced from 20 for faster context recovery
-            token_counter=gemini_multimodal_token_counter_strip_images,
-            trim_tokens_to_summarize=None,  # KEY FIX: Disable trimming, let Gemini see everything
-            summary_prompt=SUMMARIZATION_PROMPT,
-        ),
+        # 3. Summarization for long conversations. The shared factory wires the
+        #    provider fallback model (DeepSeek->Gemini->OpenAI->Anthropic), a
+        #    token-budgeted keep policy, screenshot-stripping token counting, and
+        #    preservation of the first user messages + the live todo list. The
+        #    REMOVE_ALL it emits only clears history because of the DeltaChannel
+        #    reducer in app/agents/utils/delta_state.py (SupportIncident #106).
+        make_summarization_middleware(summary_prompt=SUMMARIZATION_PROMPT),
         # 4. Dynamic model selection based on state.llm_model from frontend
         DynamicModelMiddleware(),
         # 5. Strip image/video/PDF blocks from history when the active model can't

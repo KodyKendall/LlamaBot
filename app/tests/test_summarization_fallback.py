@@ -1,71 +1,88 @@
-"""Tests for make_summarization_model() — DeepSeek fallback when no Gemini key.
+"""Tests for make_summarization_model() — provider fallback chain.
 
-Regression guard for the fleet-wide graph-compile failure that occurred when
-GOOGLE_API_KEY / GEMINI_API_KEY were absent (SupportIncident #93).
+Priority: DeepSeek -> Gemini 3 Flash -> OpenAI -> Anthropic (first key present
+wins). Also a fleet-wide graph-compile guard: compilation must never raise just
+because a key is missing (SupportIncident #93).
 """
 import pytest
 
 from app.agents.leonardo.llm_factory import ChatDeepSeekWithReasoning, make_summarization_model
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_openai import ChatOpenAI
+from langchain_anthropic import ChatAnthropic
 
 
 @pytest.fixture(autouse=True)
-def _clear_google_keys(monkeypatch):
-    """Strip Google key env vars by default; individual tests opt back in.
-    Always set a dummy DEEPSEEK_API_KEY so ChatDeepSeekWithReasoning can
-    instantiate in CI (where no real key is present). In production the real
-    key is always configured — this mirrors that assumption in tests."""
-    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-ci-placeholder")
+def _clear_all_provider_keys(monkeypatch):
+    """Strip every provider key by default; each test opts the ones it needs
+    back in. This lets us assert the exact priority order of the fallback chain."""
+    for var in ("DEEPSEEK_API_KEY", "GOOGLE_API_KEY", "GEMINI_API_KEY",
+                "OPENAI_API_KEY", "ANTHROPIC_API_KEY"):
+        monkeypatch.delenv(var, raising=False)
 
 
-class TestMakeSummarizationModelNoKey:
-    def test_returns_deepseek_model_when_no_google_key(self):
-        model, token_counter, trim = make_summarization_model()
+class TestFallbackPriority:
+    def test_deepseek_wins_when_all_keys_present(self, monkeypatch):
+        for var in ("DEEPSEEK_API_KEY", "GOOGLE_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"):
+            monkeypatch.setenv(var, "k")
+        model, _, _ = make_summarization_model()
         assert isinstance(model, ChatDeepSeekWithReasoning)
 
-    def test_no_raise_when_no_google_key(self):
-        # Must not raise — this is the fleet-wide compile-time guard
-        make_summarization_model()
+    def test_gemini_when_no_deepseek(self, monkeypatch):
+        monkeypatch.setenv("GOOGLE_API_KEY", "k")
+        monkeypatch.setenv("OPENAI_API_KEY", "k")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+        model, _, _ = make_summarization_model()
+        assert isinstance(model, ChatGoogleGenerativeAI)
 
-    def test_token_counter_is_callable(self):
-        _, token_counter, _ = make_summarization_model()
+    def test_gemini_api_key_alias(self, monkeypatch):
+        monkeypatch.setenv("GEMINI_API_KEY", "k")
+        model, _, _ = make_summarization_model()
+        assert isinstance(model, ChatGoogleGenerativeAI)
+
+    def test_openai_when_no_deepseek_or_gemini(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "k")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+        model, _, _ = make_summarization_model()
+        assert isinstance(model, ChatOpenAI)
+
+    def test_anthropic_when_only_anthropic(self, monkeypatch):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+        model, _, _ = make_summarization_model()
+        assert isinstance(model, ChatAnthropic)
+
+
+class TestCompileGuard:
+    def test_no_raise_when_no_key_at_all(self):
+        # Fleet-wide compile-time guard: must return a model, never raise.
+        model, token_counter, trim = make_summarization_model()
+        assert isinstance(model, ChatDeepSeekWithReasoning)
         assert callable(token_counter)
 
-    def test_token_counter_does_not_call_gemini_api(self, monkeypatch):
-        """tiktoken-only path must work without any Google API call."""
-        from app.agents.utils import token_counter as tc_module
-        called = []
-        monkeypatch.setattr(tc_module, "_get_genai_client", lambda: called.append(1) or (_ for _ in ()).throw(AssertionError("Gemini API called on DeepSeek path")))
-        from langchain_core.messages import HumanMessage
-        _, token_counter, _ = make_summarization_model()
-        count = token_counter([HumanMessage(content="hello world")])
-        assert count > 0
-        assert called == [], "tiktoken_token_counter must not call Gemini API"
-
-    def test_trim_tokens_is_set_for_deepseek(self):
+    def test_deepseek_path_trim_is_set(self, monkeypatch):
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "k")
         _, _, trim = make_summarization_model()
-        assert trim is not None
-        assert isinstance(trim, int)
-        assert trim > 0
+        assert isinstance(trim, int) and trim > 0
 
-
-class TestMakeSummarizationModelWithGeminiKey:
-    def test_returns_gemini_model_when_google_api_key_set(self, monkeypatch):
-        monkeypatch.setenv("GOOGLE_API_KEY", "fake-key-for-test")
-        model, token_counter, trim = make_summarization_model()
-        assert isinstance(model, ChatGoogleGenerativeAI)
-
-    def test_returns_gemini_model_when_gemini_api_key_set(self, monkeypatch):
-        monkeypatch.setenv("GEMINI_API_KEY", "fake-key-for-test")
-        model, token_counter, trim = make_summarization_model()
-        assert isinstance(model, ChatGoogleGenerativeAI)
-
-    def test_trim_is_none_for_gemini_path(self, monkeypatch):
-        monkeypatch.setenv("GOOGLE_API_KEY", "fake-key-for-test")
+    def test_gemini_path_trim_is_none(self, monkeypatch):
+        monkeypatch.setenv("GOOGLE_API_KEY", "k")
         _, _, trim = make_summarization_model()
         assert trim is None
+
+    def test_token_counter_does_not_call_gemini_api_on_deepseek_path(self, monkeypatch):
+        """tiktoken-only path must work without any Google API call."""
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "k")
+        from app.agents.utils import token_counter as tc_module
+        called = []
+        monkeypatch.setattr(
+            tc_module, "_get_genai_client",
+            lambda: called.append(1) or (_ for _ in ()).throw(
+                AssertionError("Gemini API called on DeepSeek path")),
+        )
+        from langchain_core.messages import HumanMessage
+        _, token_counter, _ = make_summarization_model()
+        assert token_counter([HumanMessage(content="hello world")]) > 0
+        assert called == []
 
 
 class TestAgentGraphCompileNoGeminiKey:

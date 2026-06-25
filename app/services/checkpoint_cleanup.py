@@ -133,6 +133,19 @@ async def cleanup_stale_thread_checkpoints(pool, stale_minutes: int = 30):
         stale_minutes: accepted for signature/backwards compatibility. Orphan
             collection is always safe, so it no longer gates deletion.
     """
+    # SCHEMA NOTE (LangGraph PostgresSaver):
+    #   checkpoint_blobs  PK (thread_id, checkpoint_ns, channel, version)  — NO checkpoint_id column
+    #   checkpoint_writes PK (thread_id, checkpoint_ns, checkpoint_id, task_id, idx)
+    #   checkpoints       PK (thread_id, checkpoint_ns, checkpoint_id)
+    #
+    # The previous query joined blobs on a per-checkpoint id column, which does
+    # not exist on checkpoint_blobs, so the whole sweep crashed with a
+    # missing-column error (SupportIncident #106). Blobs are versioned per channel, not per checkpoint,
+    # so the only orphan check that is both valid AND DeltaChannel-safe is at
+    # thread/ns granularity: a blob is debris only when its entire thread has no
+    # surviving checkpoint at all (a thread that was fully deleted or never
+    # committed). That can never delete a blob belonging to a live delta chain.
+    # Writes keep the precise per-checkpoint orphan check (they DO have checkpoint_id).
     async with pool.connection() as conn:
         # Count orphaned rows before cleanup (for logging)
         result = await conn.execute("""
@@ -140,7 +153,7 @@ async def cleanup_stale_thread_checkpoints(pool, stale_minutes: int = 30):
                 (SELECT COUNT(*) FROM checkpoint_blobs b
                  WHERE NOT EXISTS (
                      SELECT 1 FROM checkpoints c
-                     WHERE c.thread_id = b.thread_id AND c.checkpoint_id = b.checkpoint_id
+                     WHERE c.thread_id = b.thread_id AND c.checkpoint_ns = b.checkpoint_ns
                  )) AS orphan_blobs,
                 (SELECT COUNT(*) FROM checkpoint_writes w
                  WHERE NOT EXISTS (
@@ -150,16 +163,16 @@ async def cleanup_stale_thread_checkpoints(pool, stale_minutes: int = 30):
         """)
         orphan_blobs, orphan_writes = await result.fetchone()
 
-        # Delete orphaned blobs (the BIG storage consumers)
+        # Delete orphaned blobs: only blobs whose entire thread/ns has no checkpoint.
         await conn.execute("""
             DELETE FROM checkpoint_blobs b
             WHERE NOT EXISTS (
                 SELECT 1 FROM checkpoints c
-                WHERE c.thread_id = b.thread_id AND c.checkpoint_id = b.checkpoint_id
+                WHERE c.thread_id = b.thread_id AND c.checkpoint_ns = b.checkpoint_ns
             )
         """)
 
-        # Delete orphaned writes
+        # Delete orphaned writes: writes whose specific checkpoint no longer exists.
         await conn.execute("""
             DELETE FROM checkpoint_writes w
             WHERE NOT EXISTS (

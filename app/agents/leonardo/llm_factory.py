@@ -224,19 +224,42 @@ def get_llm(model_name: str):
 def make_summarization_model():
     """Build (model, token_counter, trim_tokens_to_summarize) for SummarizationMiddleware.
 
-    Prefers Gemini 3 Flash (cheap, large multimodal context). Falls back to
-    DeepSeek when no Google/Gemini key is set so that graph compilation never
-    raises at startup due to a missing/rotated Gemini key (SupportIncident #93).
+    Fallback chain, in priority order, picking the first provider whose API key is
+    present in the environment:
 
-    Returns a 3-tuple so callers can configure the surrounding SummarizationMiddleware
-    correctly — the middleware args differ between Gemini (multimodal, no trim limit)
-    and DeepSeek (text-only, tiktoken counter, explicit trim guard).
+        DeepSeek v4 Flash  ->  Gemini 3 Flash  ->  OpenAI gpt-5-mini  ->  Anthropic Haiku
+
+    DeepSeek is first because it is the project default LLM (model policy), so the
+    summarizer matches the conversation model and stays on the provider we
+    actually pay for. Gemini is the strongest fallback (cheap, 1M multimodal
+    context). OpenAI then Anthropic are last-resort so summarization keeps working
+    on instances configured with only those keys.
+
+    Graph compilation must NEVER raise here just because a key is missing
+    (fleet-wide compile guard, SupportIncident #93) — every branch is gated on its
+    own key, and the final fallback returns DeepSeek so a compiled graph always
+    has *a* summarizer (it only errors at call time if literally no key exists).
+
+    Returns a 3-tuple so the caller can configure the surrounding middleware:
+    the token_counter and trim limit differ between the multimodal Gemini path
+    (no trim — let it see everything) and the text-only providers (tiktoken
+    counter + explicit trim guard to stay inside their context windows).
     """
     from app.agents.utils.token_counter import (
         gemini_multimodal_token_counter,
         tiktoken_token_counter,
     )
 
+    # 1) DeepSeek — project default; text-only, tiktoken counter, explicit cap so
+    #    the summarizer input stays inside DeepSeek's smaller context window.
+    if os.getenv("DEEPSEEK_API_KEY"):
+        return (
+            ChatDeepSeekWithReasoning(model="deepseek-v4-flash", timeout=180),
+            tiktoken_token_counter,
+            60000,
+        )
+
+    # 2) Gemini 3 Flash — large multimodal context, can see the full conversation.
     if os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY"):
         return (
             ChatGoogleGenerativeAI(
@@ -245,12 +268,36 @@ def make_summarization_model():
                 temperature=1.0,
             ),
             gemini_multimodal_token_counter,
-            None,  # let Gemini see the full conversation
+            None,
         )
 
-    # DeepSeek fallback: text-only model, tiktoken counter, explicit context cap
+    # 3) OpenAI — large context; tiktoken counts cleanly without an external call.
+    if os.getenv("OPENAI_API_KEY"):
+        return (
+            ChatOpenAI(model="gpt-5-mini"),
+            tiktoken_token_counter,
+            None,
+        )
+
+    # 4) Anthropic — last resort.
+    if os.getenv("ANTHROPIC_API_KEY"):
+        return (
+            ChatAnthropic(model="claude-haiku-4-5", max_tokens=8192),
+            tiktoken_token_counter,
+            None,
+        )
+
+    # Nothing configured: still return a (DeepSeek) model so graph compilation
+    # succeeds (fleet-wide compile guard). ChatDeepSeek validates that an api_key
+    # exists at *construction* time, so we pass a placeholder — the graph compiles
+    # and only a summarization that actually fires would error, the same failure
+    # surface as the chat model with no key.
     return (
-        ChatDeepSeekWithReasoning(model="deepseek-v4-flash", timeout=180),
+        ChatDeepSeekWithReasoning(
+            model="deepseek-v4-flash",
+            timeout=180,
+            api_key="missing-deepseek-api-key-placeholder",
+        ),
         tiktoken_token_counter,
-        60000,  # keep summarizer input well inside DeepSeek's context window
+        60000,
     )

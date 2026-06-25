@@ -1,3 +1,23 @@
 0.5.2:
 - [x] Improve UI/UX for engineer mode with animation and condensed tool messages similar to beginner mode
 - [x] improve thinking verb experience when asking and answering questions
+
+0.5.2a:
+- [.] Add the active todo list on the "Your App is Building" animation screen.
+- [x] Fix summarization/compaction bug, swap order of summarization LLM to go DeepSeek -> Gemini -> OpenAI -> Anthropic
+      Root cause: DeltaChannel's _messages_delta_reducer silently dropped
+      RemoveMessage(REMOVE_ALL_MESSAGES), so SummarizationMiddleware never cleared
+      history and re-fired every turn past ~100k tokens (SupportIncident #106).
+      Fixed the reducer (app/agents/utils/delta_state.py), centralized summarization
+      into app/agents/leonardo/summarization.py with a token-budgeted keep policy
+      that preserves the first user messages + recent tail, and rewrote
+      make_summarization_model() to the DeepSeek->Gemini->OpenAI->Anthropic chain.
+- [x] Have summarization/compaction prompt include the last TODO item
+      RailsSummarizationMiddleware extracts the most recent write_todos payload and
+      appends an "ACTIVE TODO LIST — RESTORE IMMEDIATELY" block to the summary,
+      instructing the agent to re-call write_todos first so todos survive compaction.
+- [x] Fix our delta blobs issue to try and make tool repair thread better.
+      checkpoint_cleanup periodic sweep no longer references the nonexistent
+      checkpoint_blobs.checkpoint_id column (orphan-blob check is now thread/ns
+      scoped, DeltaChannel-safe). Repair path normalizes _DeltaSnapshot message
+      values (.value) so dangling-tool_call repair fires on delta threads.
