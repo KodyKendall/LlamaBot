@@ -32,7 +32,8 @@ export const DEFAULT_CONFIG = {
     user: 'rails_user_mode_agent',
     beginner: 'rails_beginner_agent',
     pyxl: 'pyxl_agent',
-    plan: 'rails_plan_mode_agent'
+    plan: 'rails_plan_mode_agent',
+    engineer_plan: 'rails_engineer_plan_mode_agent'
   },
 
   // Streaming configuration

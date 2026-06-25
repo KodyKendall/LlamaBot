@@ -389,6 +389,11 @@ class ChatApp {
     // model); overrides the cookie and must run before any auto-send below.
     this.checkModelParam();
 
+    // Check for ?agent_mode= URL param (e.g. the excel-to-app funnel handing off in
+    // 'engineer'); overrides the cookie and must run before the auto-prompt below so
+    // the first message routes to the chosen agent, not the Beginner-mode default.
+    this.checkAgentModeParam();
+
     // Fetch available models and disable unavailable ones
     this.fetchAvailableModels();
 
@@ -917,6 +922,35 @@ class ChatApp {
   }
 
   /**
+   * Check for ?agent_mode= URL parameter and pin the agent persona for this session.
+   * Used by the excel-to-app funnel to hand off in 'engineer' (rails_agent) so Leo
+   * builds a real app instead of the Beginner-mode default. Mirrors checkModelParam:
+   * validates against the dropdown options, persists to the agentMode cookie so the
+   * whole session stays in that mode, and strips the param so a refresh can't re-apply
+   * it after a manual switch. Ignores unknown keys (incl. per-instance custom modes
+   * not present in this dropdown), matching the cookie-restore guard.
+   */
+  checkAgentModeParam() {
+    const params = new URLSearchParams(window.location.search);
+    const mode = params.get('agent_mode');
+    if (!mode) return;
+
+    // Remove the param so a refresh doesn't re-apply it after a manual switch
+    const url = new URL(window.location);
+    url.searchParams.delete('agent_mode');
+    window.history.replaceState({}, '', url);
+
+    if (!this.elements.agentModeSelect) return;
+    const isValid = Array.from(this.elements.agentModeSelect.options).some(option => option.value === mode);
+    if (!isValid) return;
+
+    this.elements.agentModeSelect.value = mode;
+    this.appState.setAgentMode(mode);
+    setCookie('agentMode', mode, this.config.cookieExpiryDays);
+    this.updateDropdownLabel(this.elements.agentModeSelect);
+  }
+
+  /**
    * Programmatically select a model in the dropdown and persist it.
    * No-ops if the model isn't a valid dropdown option.
    */
@@ -1236,7 +1270,11 @@ class ChatApp {
     const executionMode = this.appState.getExecutionMode();
     let agentName = this.appState.getAgentConfig().name;
     if (executionMode === 'plan') {
-      agentName = 'rails_plan_mode_agent'; // Plan mode uses plan agent
+      // Engineer mode gets its own plan agent (retains engineering depth);
+      // every other mode uses the beginner-flavored plan agent.
+      agentName = (agentMode === 'engineer')
+        ? 'rails_engineer_plan_mode_agent'
+        : 'rails_plan_mode_agent';
     }
 
     // Send message
