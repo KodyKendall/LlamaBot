@@ -44,17 +44,29 @@ async def test_cleanup_runs_against_real_schema_without_error():
 
     from psycopg_pool import AsyncConnectionPool
 
-    pool = AsyncConnectionPool(uri, open=False)
-    await pool.open()
+    # Short connect timeout: a URI may be set in env (e.g. CI's DB_URI) yet point
+    # at a host that isn't reachable from the test container. We want a clean,
+    # fast skip in that case — not a 30s hang followed by a PoolTimeout failure.
+    pool = AsyncConnectionPool(
+        uri, open=False, min_size=0, max_size=1, timeout=5,
+        kwargs={"connect_timeout": 5},
+    )
     try:
-        # Confirm this DB actually has the PostgresSaver tables; otherwise skip
-        # (this URI might point at a non-checkpoint database).
-        async with pool.connection() as conn:
-            res = await conn.execute(
-                "SELECT to_regclass('public.checkpoint_blobs'), "
-                "to_regclass('public.checkpoints')"
-            )
-            blobs_tbl, ckpt_tbl = await res.fetchone()
+        # Confirm we can reach the DB and that it actually has the PostgresSaver
+        # tables; skip cleanly otherwise (unreachable host, or a URI that points
+        # at a non-checkpoint database). The cleanup call below is deliberately
+        # left OUTSIDE this guard so a real regression still fails loudly.
+        try:
+            await pool.open(wait=True, timeout=5)
+            async with pool.connection() as conn:
+                res = await conn.execute(
+                    "SELECT to_regclass('public.checkpoint_blobs'), "
+                    "to_regclass('public.checkpoints')"
+                )
+                blobs_tbl, ckpt_tbl = await res.fetchone()
+        except Exception as exc:  # connection/pool failure → nothing to guard here
+            pytest.skip(f"checkpoint DB not reachable: {exc}")
+
         if blobs_tbl is None or ckpt_tbl is None:
             pytest.skip("checkpoint tables not present in this DB")
 
