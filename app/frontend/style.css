@@ -2533,27 +2533,6 @@ body {
     margin-bottom: 8px;
 }
 
-.uiux-use-option {
-    flex-shrink: 0;
-    background: transparent;
-    border: 1px solid rgba(139, 92, 246, 0.4);
-    color: #c4b5fd;
-    border-radius: 8px;
-    padding: 6px 14px;
-    font-size: 13px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.15s ease;
-}
-
-.uiux-use-option:hover { background: rgba(139, 92, 246, 0.15); }
-
-.uiux-use-option.active {
-    background: rgba(139, 92, 246, 0.3);
-    border-color: #8b5cf6;
-    color: #fff;
-}
-
 .uiux-modal-selected {
     font-size: 13px;
     color: #94a3b8;
@@ -2819,6 +2798,12 @@ body {
 
 .tab-text {
     flex: 1;
+    white-space: nowrap; /* never wrap — wrapping changes the tab box height */
+}
+
+/* Short label only shows on narrow widths (see media query below) */
+.tab-text-short {
+    display: none;
 }
 
 .tab-external-link {
@@ -3096,7 +3081,7 @@ body {
     padding: 20px;
 }
 
-.browser-content.mobile-view #liveSiteFrame {
+.browser-content.mobile-view .content-iframe.active {
     width: 375px;
     height: 667px;
     border-radius: 20px;
@@ -4013,6 +3998,15 @@ body {
         flex-shrink: 0;
         font-size: 0.9rem;
         padding: 6px 12px;
+    }
+
+    /* Shorten multi-word tab labels so they don't wrap/overflow when narrow */
+    .tab-text-full {
+        display: none;
+    }
+
+    .tab-text-short {
+        display: inline;
     }
 
     /* Keep browser addressbar visible on mobile to show refresh button */

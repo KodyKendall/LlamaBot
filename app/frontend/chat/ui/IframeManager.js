@@ -201,8 +201,11 @@ export class IframeManager {
     overlay.style.display = 'flex';
     overlay.style.flexDirection = 'column';
     overlay.style.alignItems = 'center';
+    overlay.style.justifyContent = 'flex-start';
     overlay.style.zIndex = '10';
     overlay.style.borderRadius = '8px';
+    overlay.style.overflow = 'hidden';
+    overlay.style.paddingTop = '24px';
 
     // Add close button if requested
     if (showCloseButton) {
@@ -230,30 +233,42 @@ export class IframeManager {
       overlay.appendChild(closeBtn);
     }
 
-    // Create text
+    // Create text. Keep it on a single line (no ugly wrap in a narrow preview):
+    // if the title starts with "Your ", that prefix lives in its own span so we
+    // can drop just "Your" when the pane is too small, restoring it when it fits.
     const overlayText = document.createElement('div');
-    overlayText.textContent = text;
     overlayText.style.color = 'white';
-    overlayText.style.fontSize = '2.5rem';
+    overlayText.style.fontSize = '1.8rem';
     overlayText.style.fontWeight = 'bold';
     overlayText.style.fontFamily = 'Arial, sans-serif';
     overlayText.style.textShadow = '2px 2px 4px rgba(0,0,0,0.5)';
+    overlayText.style.whiteSpace = 'nowrap';
+
+    const titlePrefix = 'Your ';
+    if (text.startsWith(titlePrefix)) {
+      const prefixSpan = document.createElement('span');
+      prefixSpan.className = 'overlay-title-prefix';
+      prefixSpan.textContent = titlePrefix;
+      overlayText.appendChild(prefixSpan);
+      overlayText.appendChild(document.createTextNode(text.slice(titlePrefix.length)));
+    } else {
+      overlayText.textContent = text;
+    }
 
     const textContainer = document.createElement('div');
-    textContainer.style.padding = '30px';
-    textContainer.style.width = '100%';
+    textContainer.style.width = 'auto';
     textContainer.style.textAlign = 'center';
+    textContainer.style.overflow = 'hidden';
     textContainer.appendChild(overlayText);
 
-    // Create Lottie container
+    // Create Lottie container. The animation is big & centered before a plan
+    // exists, then shrinks to the top once the todo list takes over the pane.
     const lottieContainer = document.createElement('div');
     lottieContainer.id = 'lottieAnimation';
-    lottieContainer.style.width = '300px';
-    lottieContainer.style.height = '300px';
-    lottieContainer.style.position = 'absolute';
-    lottieContainer.style.top = '50%';
-    lottieContainer.style.left = '50%';
-    lottieContainer.style.transform = 'translate(-50%, -50%)';
+    lottieContainer.style.width = '100%';
+    lottieContainer.style.display = 'flex';
+    lottieContainer.style.alignItems = 'center';
+    lottieContainer.style.justifyContent = 'center';
 
     // Load Lottie script if needed
     if (!document.querySelector('script[src*="lottie-player"]')) {
@@ -267,23 +282,254 @@ export class IframeManager {
     lottiePlayer.src = "https://llamapress-ai-image-uploads.s3.us-west-2.amazonaws.com/hffa8kqjfn9yzfx28pogpvqhn7cd";
     lottiePlayer.background = "transparent";
     lottiePlayer.speed = "1";
-    lottiePlayer.style.width = "300px";
-    lottiePlayer.style.height = "300px";
     lottiePlayer.setAttribute("autoplay", "");
     lottiePlayer.setAttribute("loop", "");
-
     lottieContainer.appendChild(lottiePlayer);
-    overlay.appendChild(textContainer);
+
+    // Cycling tips under the title while Leo gets started (pre-plan only). One at
+    // a time, fading between three short hints, ~35% of the title size. Icons are
+    // the real toolbar icons (Font Awesome 6.5.1, loaded globally) so they match.
+    const tipsContainer = document.createElement('div');
+    tipsContainer.style.width = 'auto';
+    tipsContainer.style.maxWidth = '100%';
+    tipsContainer.style.textAlign = 'center';
+    tipsContainer.style.padding = '4px 0 0';
+    tipsContainer.style.boxSizing = 'border-box';
+    tipsContainer.style.color = 'rgba(255, 255, 255, 0.8)';
+    tipsContainer.style.fontFamily = 'Arial, sans-serif';
+    tipsContainer.style.fontSize = '0.7rem';
+    tipsContainer.style.fontWeight = 'bold';
+    tipsContainer.style.textShadow = '1px 1px 2px rgba(0,0,0,0.5)';
+
+    const tips = [
+      { icon: 'fa-mouse-pointer', text: 'Help Leo by pointing to an element' },
+      { icon: 'fa-paperclip', text: 'Upload files to include in your app' },
+      { icon: 'fa-forward', text: "Switching to Plan Mode can improve Leo's performance" },
+      { icon: 'fa-lightbulb', text: 'view more tips', href: 'https://llamapress.ai/wiki' },
+    ];
+    const tipEl = document.createElement('div');
+    tipEl.style.display = 'inline-flex';
+    tipEl.style.alignItems = 'center';
+    tipEl.style.gap = '6px';
+    tipEl.style.transition = 'opacity 0.4s ease';
+    tipEl.style.opacity = '1';
+    const renderTip = (i) => {
+      const t = tips[i];
+      // Each tip is prefixed with "Tip:" so the user knows it's a tip.
+      const body = t.href
+        ? `<a href="${t.href}" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline;">${t.text}</a>`
+        : t.text;
+      tipEl.innerHTML = `<i class="fa-solid ${t.icon}"></i><span>Tip: ${body}</span>`;
+    };
+    tipsContainer.appendChild(tipEl);
+
+    // Cycle the tips in a shuffled order so it's different every time; reshuffle
+    // each pass (avoiding an immediate repeat) so every tip still gets shown.
+    const shuffle = (arr) => {
+      const a = arr.slice();
+      for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [a[i], a[j]] = [a[j], a[i]];
+      }
+      return a;
+    };
+    let order = shuffle(tips.map((_, i) => i));
+    let pos = 0;
+    renderTip(order[pos]);
+
+    this._overlayTipInterval = setInterval(() => {
+      tipEl.style.opacity = '0';
+      setTimeout(() => {
+        pos++;
+        if (pos >= order.length) {
+          const last = order[order.length - 1];
+          order = shuffle(order);
+          if (order.length > 1 && order[0] === last) {
+            [order[0], order[order.length - 1]] = [order[order.length - 1], order[0]];
+          }
+          pos = 0;
+        }
+        renderTip(order[pos]);
+        tipEl.style.opacity = '1';
+      }, 400);
+    }, 20000);
+
+    // Cloned todo list panel (#0d0d1a box) — only shown once a plan exists.
+    const todoContainer = document.createElement('div');
+    todoContainer.id = 'overlayTodoList';
+    todoContainer.style.flex = '1 1 auto';
+    todoContainer.style.width = '100%';
+    todoContainer.style.maxWidth = '480px';
+    todoContainer.style.minHeight = '0';
+    todoContainer.style.overflowY = 'auto';
+    todoContainer.style.marginTop = '8px';
+    todoContainer.style.marginBottom = '16px';
+    todoContainer.style.boxSizing = 'border-box';
+    todoContainer.style.background = '#0d0d1a';
+    todoContainer.style.borderRadius = '10px';
+    todoContainer.style.border = '1px solid rgba(255, 255, 255, 0.08)';
+    todoContainer.style.padding = '16px 20px';
+    todoContainer.style.display = 'none';
+
+    // Toggle the two overlay layouts:
+    //   building → big centered animation + cycling tips, no box
+    //   plan     → small animation up top + the cloned todo list box
+    const setOverlayMode = (mode) => {
+      const isPlan = mode === 'plan';
+      // Building: title + tips + ball are centered as a group (animation doesn't
+      // grow). Plan: top-aligned with the todo box filling the space below.
+      overlay.style.justifyContent = isPlan ? 'flex-start' : 'center';
+      lottieContainer.style.flex = '0 0 auto';
+      // Title is large while building, then shrinks once the todo list takes over.
+      overlayText.style.fontSize = isPlan ? '1.8rem' : '2.5rem';
+      // Tips track ~35% of the current title size (bigger pre-plan, smaller after).
+      tipsContainer.style.fontSize = isPlan ? '0.63rem' : '0.875rem';
+      lottiePlayer.style.width = isPlan ? '140px' : '240px';
+      lottiePlayer.style.height = isPlan ? '140px' : '240px';
+      // Tips keep cycling in the pill in both states (incl. after the todo list).
+      tipsContainer.style.display = 'block';
+      todoContainer.style.display = isPlan ? 'block' : 'none';
+      // Re-evaluate the "Your " drop since the title size just changed.
+      this._fitOverlayTitle?.();
+    };
+    this._setOverlayMode = setOverlayMode;
+    setOverlayMode('building'); // start in the building state
+
+    // Wrap the title + tips in a semi-opaque "pill" so the white text reads
+    // clearly over the live site behind the overlay, without darkening the rest.
+    const headerBox = document.createElement('div');
+    headerBox.style.flex = '0 0 auto';
+    headerBox.style.display = 'flex';
+    headerBox.style.flexDirection = 'column';
+    headerBox.style.alignItems = 'center';
+    headerBox.style.maxWidth = '92%';
+    headerBox.style.boxSizing = 'border-box';
+    headerBox.style.padding = '12px 26px';
+    headerBox.style.borderRadius = '14px';
+    headerBox.style.background = 'rgba(0, 0, 0, 0.45)';
+    headerBox.appendChild(textContainer);
+    headerBox.appendChild(tipsContainer);
+
+    overlay.appendChild(headerBox);
     overlay.appendChild(lottieContainer);
+    overlay.appendChild(todoContainer);
     browserContent.appendChild(overlay);
 
     this.overlayElement = overlay;
+
+    // Keep the title on one line: drop the "Your " prefix when the pane is too
+    // narrow to fit the full title, and restore it when there's room again.
+    const prefixSpan = overlayText.querySelector('.overlay-title-prefix');
+    if (prefixSpan) {
+      const fitTitle = () => {
+        prefixSpan.style.display = 'inline';            // try the full title first
+        // Measure against the pane width (minus the pill's padding/margins), not
+        // the now content-hugging title container.
+        const available = browserContent.clientWidth - 70;
+        if (overlayText.scrollWidth > available) {
+          prefixSpan.style.display = 'none';            // too tight — drop "Your"
+        }
+      };
+      this._fitOverlayTitle = fitTitle; // let setOverlayMode re-fit after size changes
+      requestAnimationFrame(fitTitle); // measure once layout is settled
+      const titleObserver = new ResizeObserver(fitTitle);
+      titleObserver.observe(browserContent);
+      this._overlayTitleObserver = titleObserver;
+    }
+
+    // Mirror the chat's plan into the overlay and switch from the building layout
+    // to the todo-list layout the moment a plan is created.
+    this._startOverlayPlanMirror();
+  }
+
+  /**
+   * Keep the building overlay in sync with the chat:
+   *   • No plan yet → building layout (big centered animation + cycling tips).
+   *   • Plan (todo list) exists → clone the real chat plan node into the box,
+   *     which guarantees identical styling and syncs regardless of streaming path.
+   */
+  _startOverlayPlanMirror() {
+    const history = document.querySelector('[data-llamabot="message-history"]');
+    if (!history) return;
+
+    let scheduled = false;
+    let lastHtml = '';
+
+    const doMirror = () => {
+      scheduled = false;
+      const container = document.getElementById('overlayTodoList');
+      if (!container) return; // overlay gone
+
+      // Latest plan in the chat (exclude any clone living in the overlay itself)
+      const plans = Array.from(history.querySelectorAll('.plan-modern'));
+      const latest = plans[plans.length - 1];
+
+      if (!latest) {
+        // No plan yet → building layout; clear any stale clone.
+        if (lastHtml !== '') { lastHtml = ''; container.innerHTML = ''; }
+        this._setOverlayMode?.('building');
+        return;
+      }
+
+      // Plan exists → swap to the todo-list layout and clone the real plan node.
+      this._setOverlayMode?.('plan');
+      const html = latest.outerHTML;
+      if (html === lastHtml) return; // unchanged, skip redundant DOM write
+      lastHtml = html;
+
+      const clone = latest.cloneNode(true);
+      // Neutralize interactive bits so the read-only clone can't collide with the
+      // chat copy (duplicate ids) or toggle the wrong plan when clicked.
+      clone.removeAttribute('data-plan-id');
+      clone.querySelectorAll('[id]').forEach(el => el.removeAttribute('id'));
+      clone.querySelectorAll('[onclick]').forEach(el => el.removeAttribute('onclick'));
+      // Always show the full task list in the overlay, even if collapsed in chat.
+      clone.querySelectorAll('.plan-tasks-list').forEach(el => { el.style.display = 'block'; });
+
+      container.innerHTML = '';
+      container.appendChild(clone);
+    };
+
+    const schedule = () => {
+      if (scheduled) return;
+      scheduled = true;
+      requestAnimationFrame(doMirror);
+    };
+
+    this._overlayObservers = [];
+    const planObserver = new MutationObserver(schedule);
+    planObserver.observe(history, { childList: true, subtree: true, characterData: true, attributes: true });
+    this._overlayObservers.push(planObserver);
+
+    // Mirror immediately in case a plan already exists when the overlay opens.
+    doMirror();
+  }
+
+  /**
+   * Stop mirroring the chat into the overlay.
+   */
+  _stopOverlayPlanMirror() {
+    if (this._overlayObservers) {
+      this._overlayObservers.forEach(o => o.disconnect());
+      this._overlayObservers = null;
+    }
   }
 
   /**
    * Remove streaming overlay
    */
   removeStreamingOverlay() {
+    this._stopOverlayPlanMirror();
+    if (this._overlayTitleObserver) {
+      this._overlayTitleObserver.disconnect();
+      this._overlayTitleObserver = null;
+    }
+    this._fitOverlayTitle = null;
+    if (this._overlayTipInterval) {
+      clearInterval(this._overlayTipInterval);
+      this._overlayTipInterval = null;
+    }
+    this._setOverlayMode = null;
     const overlay = document.getElementById('streamingOverlay');
     if (overlay) {
       overlay.remove();

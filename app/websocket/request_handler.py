@@ -113,6 +113,26 @@ class RequestHandler:
                     return value
         return None
 
+    @staticmethod
+    def _normalize_messages(raw):
+        """Return a plain message list from a possibly DeltaChannel-wrapped value.
+
+        DeltaChannel-backed `messages` can surface as a `_DeltaSnapshot` whose
+        actual list lives at `.value` (seen on production thread c77fce95,
+        SupportIncident #106) instead of a resolved list. Scanning that object
+        directly would silently see zero messages and skip a needed repair, or
+        crash. Unwrap `.value` when present; otherwise pass the list through.
+        """
+        if raw is None:
+            return []
+        # `_DeltaSnapshot` is a NamedTuple (a `tuple` subclass) whose real message
+        # list lives at `.value`, so this check MUST come before the list/tuple
+        # coercion below — `isinstance(snapshot, tuple)` is True and would
+        # otherwise wrap the whole snapshot into a one-element list.
+        if not isinstance(raw, list) and hasattr(raw, "value"):
+            return list(raw.value) if raw.value is not None else []
+        return list(raw) if isinstance(raw, (list, tuple)) else raw
+
     async def _repair_thread_state_if_needed(self, app, config):
         """
         Detect and repair two shapes of corrupted thread state that violate
@@ -139,7 +159,7 @@ class RequestHandler:
             if not state_snapshot or not state_snapshot.values:
                 return
 
-            messages = state_snapshot.values.get("messages", [])
+            messages = self._normalize_messages(state_snapshot.values.get("messages", []))
             if not messages:
                 return
 

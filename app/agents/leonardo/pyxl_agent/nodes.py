@@ -14,6 +14,7 @@ circuit breaker.
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.agents import create_agent
 from langchain.agents.middleware import SummarizationMiddleware
+from app.agents.leonardo.summarization import make_summarization_middleware
 from langchain_core.messages import SystemMessage
 
 from app.agents.leonardo.rails_agent.state import RailsAgentState
@@ -107,20 +108,11 @@ def build_workflow(checkpointer=None):
         temperature=0.2,
     )
 
-    summarization_model = ChatGoogleGenerativeAI(
-        model="gemini-3-flash-preview",
-        vertexai=False,
-        temperature=1.0,
-    )
     middleware = [
-        SummarizationMiddleware(
-            model=summarization_model,
-            trigger=("tokens", SUMMARIZATION_TOKEN_THRESHOLD),
-            keep=("messages", 15),
-            token_counter=gemini_multimodal_token_counter,
-            trim_tokens_to_summarize=None,
-            summary_prompt=SUMMARIZATION_PROMPT,
-        ),
+        # Summarization for long conversations (shared factory: provider fallback
+        # model, token-budgeted keep, first-user-messages + todo preservation;
+        # REMOVE_ALL honored by the DeltaChannel reducer).
+        make_summarization_middleware(summary_prompt=SUMMARIZATION_PROMPT),
         DynamicModelMiddleware(),
         deepseek_reasoning_fix,
         check_failure_limit,

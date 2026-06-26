@@ -22,6 +22,7 @@ from langchain_anthropic import ChatAnthropic
 from app.agents.leonardo.llm_factory import make_summarization_model
 from langchain.agents import create_agent
 from langchain.agents.middleware import SummarizationMiddleware
+from app.agents.leonardo.summarization import make_summarization_middleware
 from langchain_core.messages import SystemMessage, ToolMessage
 from langchain.tools import tool, ToolRuntime
 from langgraph.types import Command, interrupt
@@ -166,8 +167,14 @@ class UIUXOption(TypedDict):
     Attributes:
         id: Stable identifier returned (with the label) when this option is chosen.
         label: Short human-readable label shown next to the radio button.
-        html: A self-contained Tailwind/DaisyUI HTML snippet rendered as a live
-            preview inside a sandboxed iframe (e.g. '<button class="btn btn-primary">Save</button>').
+        html: A self-contained HTML snippet rendered as a live preview inside a
+            sandboxed iframe. Style it with INLINE styles for anything visual — colors,
+            fonts, sizes, spacing (e.g. '<button style="background:#BE0000;color:#fff;
+            padding:8px 16px;border-radius:6px;">Save</button>'). See
+            ASK_USER_UIUX_QUESTION_DESCRIPTION for the full styling rules of thumb. 
+            Do NOT include emojis unless explicitly asked, instead use icons.
+            Try to use the existing branding, and look/feel of the current page they're on, unless they explicitly
+            are asking for something different.
     """
 
     id: str
@@ -188,16 +195,38 @@ Parameters:
 - options: A list of 2-4 visual options. Each option is an object with:
     - id: a short stable identifier (e.g. "centered", "split", "minimal")
     - label: a short human label for the option (e.g. "Centered hero")
-    - html: a SELF-CONTAINED HTML snippet for the preview, styled with PLAIN Tailwind
-      utility classes only. The preview is rendered with the SAME Tailwind (v2) the app
-      itself loads, so it looks like the real page. Keep it plain and simple — match the
-      app's understated style, do NOT use DaisyUI or other component-library classes
-      (no `btn`, `card`, `hero`, `badge`, `bg-base-*`, etc.; those won't render and look
-      out of place). NO <script> tags, NO external images/fonts/stylesheets, no app-specific
-      CSS. Keep snippets small and focused on the one visual decision being made.
+    - html: a SELF-CONTAINED HTML snippet for the preview (see styling rules below).
+  Do NOT add your own "none"/"other"/"something else" option — the UI automatically appends
+  a "None of these" choice the user can pick (and explain). Only provide the real designs.
 - context: (Optional) Brief context about why you're asking (shown as a subtitle).
 
-This tool freezes execution and waits. The user's chosen option (id and label) is returned as the tool result."""
+STYLING RULES OF THUMB (the preview iframe is locked-down and does NOT behave like the
+real app — these are hard-won, follow them or the preview renders blank/unstyled):
+- PREFER PLAIN INLINE STYLES for everything visual. Colors, fonts, sizes, spacing, borders
+  must go in a `style="..."` attribute (e.g. style="background:#BE0000;color:#fff;
+  font-family:sans-serif;padding:8px 16px"). Inline styles are the only thing guaranteed
+  to render. When in doubt, inline it.
+- DO NOT rely on Tailwind utility classes — especially arbitrary-value classes like
+  `bg-[#BE0000]`, `text-[20px]`, `w-[300px]`, `p-[12px]`. The preview only has a
+  precompiled Tailwind v2 stylesheet; v3-style bracket/arbitrary-value classes do NOT
+  exist in it and render as nothing. Use inline styles instead.
+- NO DaisyUI or other component-library classes (`btn`, `card`, `hero`, `badge`,
+  `bg-base-*`, etc.) — they won't render.
+- NO <script> tags, NO external images/fonts/stylesheets, no app-specific CSS. A small
+  inline <style> block (plain CSS) is fine if inline attributes get unwieldy.
+- FOR ICONS, write INLINE <svg> directly into the snippet — do NOT load an icon font
+  (Font Awesome, Material Icons, etc.) from a CDN; external fonts/stylesheets don't load
+  in this iframe and the icons render blank. Inline SVG is plain text the browser draws
+  with no loading. (In the REAL app you can still use the `fas fa-*` classes already on
+  the page — inline SVG is only needed for the preview.)
+- Keep snippets small, self-contained, and focused on the one visual decision being made.
+- Do NOT include emojis unless explicitly asked, instead use icons.
+- Try to use the existing branding, and look/feel of the current page they're on, unless they explicitly are asking for something different.
+
+(If you discover another preview-rendering quirk, add it to this list — these accumulate.)
+
+This tool freezes execution and waits. The user's chosen option (id and label) is returned as the tool result.
+"""
 
 
 @tool(description=ASK_USER_UIUX_QUESTION_DESCRIPTION)
@@ -263,17 +292,11 @@ def build_workflow(checkpointer=None):
     default_model = ChatAnthropic(model="claude-haiku-4-5", max_tokens=16384)
 
     # Configure middleware stack (order matters - executed top to bottom)
-    summarization_model, summarization_token_counter, trim_tokens_to_summarize = make_summarization_model()
     middleware = [
-        # 1. Summarization for long conversations
-        SummarizationMiddleware(
-            model=summarization_model,
-            trigger=("tokens", SUMMARIZATION_TOKEN_THRESHOLD),
-            keep=("messages", 20),
-            token_counter=summarization_token_counter,
-            trim_tokens_to_summarize=trim_tokens_to_summarize,
-            summary_prompt=SUMMARIZATION_PROMPT,
-        ),
+        # 1. Summarization for long conversations (shared factory: provider
+        #    fallback model, token-budgeted keep, first-user-messages + todo
+        #    preservation; REMOVE_ALL honored by the DeltaChannel reducer).
+        make_summarization_middleware(summary_prompt=SUMMARIZATION_PROMPT),
         # 2. Dynamic model selection based on state.llm_model from frontend
         DynamicModelMiddleware(),
         # 3. View path context injection
