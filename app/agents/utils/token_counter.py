@@ -13,6 +13,15 @@ causing compaction to never trigger for DeepSeek conversations.
 # This value is used by both backend (SummarizationMiddleware) and frontend (TokenIndicator)
 SUMMARIZATION_TOKEN_THRESHOLD = 100000
 
+# Token budget for the recent-message tail kept verbatim AFTER a summarization.
+# SummarizationMiddleware is configured with keep=("tokens", SUMMARIZATION_KEEP_TOKENS)
+# so the preserved suffix is bounded by token count (and auto-trimmed via the
+# middleware's binary-search cutoff), not a fixed message count. Sized well under
+# SUMMARIZATION_TOKEN_THRESHOLD (~30%) so that summary + first user messages +
+# this tail leaves wide headroom and cannot immediately re-trigger summarization
+# on the next turn — the failure mode behind the production loop (SupportIncident #106).
+SUMMARIZATION_KEEP_TOKENS = 30000
+
 # How many recent browser_inspect screenshots to keep in the context window.
 # Older ones are stripped before token counting (and permanently from state via middleware)
 # to prevent the summarization-every-turn loop caused by screenshot accumulation.

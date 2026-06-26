@@ -235,14 +235,18 @@ class ChatApp {
     // error when retries are exhausted.
     window.addEventListener('websocketReconnectFailed', () => {
       this.pendingResendData = null;
+      this.webSocketManager?.clearQueue();
       this.hideThinkingIndicator();
       this.setAgentRunning(false);
     });
 
     // If the WS drops while the agent is running, queue the last payload for
-    // resend on the next successful (re)connect.
+    // resend on the next successful (re)connect — unless the manager's outbox
+    // already holds it (i.e. it never made it out in the first place), in which
+    // case the outbox will deliver it and we'd otherwise double-send.
     window.addEventListener('websocketDisconnected', () => {
-      if (this.isAgentRunning && this.lastSentMessageData) {
+      if (this.isAgentRunning && this.lastSentMessageData
+          && !this.webSocketManager?.hasQueued(this.lastSentMessageData)) {
         this.pendingResendData = this.lastSentMessageData;
       }
     });
@@ -811,10 +815,9 @@ class ChatApp {
    * Update execution mode UI and state
    */
   setExecutionMode(mode) {
-    const labels = { auto: 'Auto', ask: 'Ask', plan: 'Plan' };
+    const labels = { auto: 'Auto', plan: 'Plan' };
     const iconClasses = {
       auto: 'fa-solid fa-forward',
-      ask: 'fa-solid fa-shield-halved',
       plan: 'fa-solid fa-pause',
     };
     this.appState.setExecutionMode(mode);
@@ -1414,7 +1417,7 @@ class ChatApp {
 
     // Restore execution mode from cookie
     const savedExecMode = getCookie('executionMode');
-    if (savedExecMode && ['auto', 'ask', 'plan'].includes(savedExecMode)) {
+    if (savedExecMode && ['auto', 'plan'].includes(savedExecMode)) {
       this.setExecutionMode(savedExecMode);
     }
 

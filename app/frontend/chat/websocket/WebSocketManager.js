@@ -7,6 +7,12 @@ import { getWebSocketUrl, getRailsUrl } from '../config.js';
 import { ActionCableAdapter } from './ActionCableAdapter.js';
 import { TokenManager } from '../auth/TokenManager.js';
 
+// Control messages that must NOT be queued for replay after a reconnect:
+//  - `auth` tokens are regenerated fresh on every (re)connect, so a stale one is useless.
+//  - `cancel` only means something for the run that was live when it was issued;
+//    replaying it after reconnect could cancel a brand-new run.
+const NON_QUEUEABLE_TYPES = new Set(['auth', 'cancel']);
+
 export class WebSocketManager {
   constructor(messageHandler, config = {}, elements = {}) {
     this.messageHandler = messageHandler;
@@ -18,6 +24,11 @@ export class WebSocketManager {
     this.isAuthenticated = false;
     this.reconnectAttempts = 0;
     this.maxReconnectAttempts = config.maxReconnectAttempts ?? 5;
+    // Messages sent while the socket is down wait here and are delivered once we
+    // reconnect & re-authenticate. Bounded so a runaway producer can't grow it
+    // without limit.
+    this.outbox = [];
+    this.maxQueueSize = config.maxQueueSize ?? 25;
   }
 
   /**
@@ -98,7 +109,12 @@ export class WebSocketManager {
     // Send authentication token (for native WebSocket connections only)
     // ActionCable connections handle auth via the Rails gem
     if (!this.isActionCable) {
+      // Native sockets authenticate first; the queued outbox is flushed on
+      // `auth_success` so user messages are never sent ahead of the handshake.
       this.sendAuthMessage();
+    } else {
+      // ActionCable is authenticated by the Rails gem, so it's ready immediately.
+      this.flushOutbox();
     }
   }
 
@@ -188,6 +204,9 @@ export class WebSocketManager {
     if (data.type === 'auth_success') {
       this.isAuthenticated = true;
       console.log('WebSocket authenticated as:', data.user);
+      // Now that we're live & authenticated, deliver anything that was queued
+      // while the connection was down.
+      this.flushOutbox();
       return;
     }
 
@@ -213,15 +232,91 @@ export class WebSocketManager {
   }
 
   /**
-   * Send message via WebSocket
+   * Send a message over the socket.
+   *
+   * If the socket is open, the message goes out immediately. If it's down, a
+   * user-meaningful message is queued and delivered automatically once we
+   * reconnect (and a reconnect is nudged into motion), so a transient drop
+   * never silently loses what the user sent. Ephemeral control messages
+   * (auth/cancel) are dropped instead — replaying them after reconnect is wrong.
    */
   send(data) {
     if (this.socket && this.socket.readyState === WebSocket.OPEN) {
       this.socket.send(JSON.stringify(data));
       return true;
     }
-    console.error('WebSocket is not connected');
-    return false;
+
+    if (data && NON_QUEUEABLE_TYPES.has(data.type)) {
+      console.warn(`WebSocket not connected; dropping "${data.type}" message`);
+      return false;
+    }
+
+    this.queueMessage(data);
+    this.ensureConnecting();
+    return true; // accepted — will be delivered on reconnect
+  }
+
+  /**
+   * Buffer an outbound message to deliver after we reconnect. Deduped by
+   * reference so the same payload can't be queued twice, and bounded so the
+   * oldest message is dropped if the queue overflows.
+   */
+  queueMessage(data) {
+    if (this.outbox.includes(data)) return;
+
+    this.outbox.push(data);
+    if (this.outbox.length > this.maxQueueSize) {
+      this.outbox.shift();
+      console.warn('Outbound WebSocket queue full; dropped oldest message');
+    } else {
+      console.warn(`WebSocket not connected; queued message (${this.outbox.length} pending)`);
+    }
+  }
+
+  /**
+   * True if this exact payload (by reference) is already waiting in the outbox.
+   * Lets the higher-level resume logic avoid double-sending a message the
+   * outbox already owns.
+   */
+  hasQueued(data) {
+    return this.outbox.includes(data);
+  }
+
+  /** Drop every queued message — used when we've given up reconnecting. */
+  clearQueue() {
+    this.outbox = [];
+  }
+
+  /**
+   * Nudge a reconnect when a send lands on a dead socket. An active user action
+   * is a strong signal to keep trying, so we refresh the retry budget even if
+   * earlier automatic attempts had been exhausted. ActionCable self-heals via
+   * the Rails gem, so we leave its reconnection alone.
+   */
+  ensureConnecting() {
+    if (this.isActionCable) return;
+
+    const state = this.socket ? this.socket.readyState : WebSocket.CLOSED;
+    if (state === WebSocket.OPEN || state === WebSocket.CONNECTING || this.reconnectTimer) {
+      return;
+    }
+
+    this.reconnectAttempts = 0; // user is actively trying — give a full budget
+    this.scheduleReconnect();
+  }
+
+  /**
+   * Deliver any queued messages once the connection is live and authenticated.
+   * Re-uses send(), so if the socket dies again mid-flush the remaining
+   * messages simply re-queue for the next reconnect.
+   */
+  flushOutbox() {
+    if (!this.outbox.length) return;
+
+    const pending = this.outbox;
+    this.outbox = [];
+    console.log(`Flushing ${pending.length} queued WebSocket message(s) after reconnect`);
+    pending.forEach((data) => this.send(data));
   }
 
   /**
@@ -296,6 +391,8 @@ export class WebSocketManager {
    * Disconnect WebSocket
    */
   disconnect() {
+    this.clearQueue();
+
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;

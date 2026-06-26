@@ -669,7 +669,11 @@ export class MessageHandler {
     this.finalizeCurrentThinking();
 
     const { question, options, context, thread_id, agent_name } = data;
-    const opts = Array.isArray(options) ? options : [];
+    // Always append a synthetic "None of these" choice so the user can reject every
+    // suggestion (and optionally explain). It flows through to both the inline carousel
+    // and the expanded modal, since both render whatever is in `opts`.
+    const baseOpts = Array.isArray(options) ? options : [];
+    const opts = [...baseOpts, this._noneOfTheseOption()];
     const id = `uiux-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
 
     const frames = opts.map((opt, i) =>
@@ -708,7 +712,6 @@ export class MessageHandler {
 
     const n = options.length;
     const labelFor = (i) => (options[i] && options[i].label != null) ? String(options[i].label) : String(i);
-    const idFor = (i) => (options[i] && options[i].id != null) ? String(options[i].id) : String(i);
 
     card.querySelectorAll('.uiux-car-frame').forEach(f => {
       const opt = options[+f.dataset.i];
@@ -731,8 +734,8 @@ export class MessageHandler {
     card.querySelector('.uiux-car-next')?.addEventListener('click', () => setActive(idx + 1));
 
     card.querySelector('.uiux-car-choose')?.addEventListener('click', () => {
-      const answer = `Selected option "${idFor(idx)}: ${labelFor(idx)}".`;
-      this._answerUiuxQuestion(answer, threadId, agentName, card, labelFor(idx));
+      const { answer, display } = this._uiuxAnswerForOption(options[idx]);
+      this._answerUiuxQuestion(answer, threadId, agentName, card, display);
     });
 
     card.querySelector('.uiux-car-seeall')?.addEventListener('click', () =>
@@ -740,10 +743,49 @@ export class MessageHandler {
   }
 
   /**
+   * The synthetic "None of these" choice appended to every UI/UX question so the user can
+   * reject all suggestions. Styled with plain inline styles (the preview iframe can't load
+   * Tailwind utility classes / external fonts — see _buildUiuxPreviewDoc).
+   */
+  _noneOfTheseOption() {
+    return {
+      id: 'none',
+      label: 'None of these',
+      html: `<div style="display:flex;align-items:center;justify-content:center;min-height:140px;font-family:sans-serif;text-align:center;color:#64748b">
+        <div>
+          <div style="font-size:15px;font-weight:bold;color:#475569">None of these</div>
+          <div style="font-size:12px;margin-top:6px">I'd like something different — I'll explain</div>
+        </div>
+      </div>`,
+    };
+  }
+
+  /**
+   * Build the resume answer + transcript display for a chosen UI/UX option, handling the
+   * synthetic "None of these" choice and an optional free-text message. Shared by the
+   * inline carousel ("Choose this") and the expanded modal ("Send response").
+   */
+  _uiuxAnswerForOption(option, text = '') {
+    const id = (option && option.id != null) ? String(option.id) : '';
+    const label = (option && option.label != null) ? String(option.label) : '';
+    const msg = (text || '').trim();
+    if (id === 'none') {
+      return msg
+        ? { answer: `User chose none of the provided options. Message: ${msg}`, display: `None of these — ${msg}` }
+        : { answer: 'User chose none of the provided options.', display: 'None of these' };
+    }
+    return msg
+      ? { answer: `Selected option "${id}: ${label}". Message: ${msg}`, display: `${label} — ${msg}` }
+      : { answer: `Selected option "${id}: ${label}".`, display: label };
+  }
+
+  /**
    * Wrap a raw snippet in a self-contained document for the sandboxed preview iframe.
-   * Loads the SAME Tailwind (v2) stylesheet the target app itself uses, so previews look
-   * like the real page (plain — no DaisyUI component theming). Pure CSS, no scripts, so
-   * the iframe can run fully locked down (sandbox="").
+   * Loads a precompiled Tailwind v2 stylesheet, but snippets should rely on INLINE styles
+   * (style="...") for anything visual: v3-style arbitrary-value classes (bg-[#hex],
+   * text-[20px], etc.) do NOT exist in the v2 build and render as nothing. See the
+   * ask_user_uiux_question tool description for the full styling rules of thumb.
+   * Pure CSS, no scripts, so the iframe can run fully locked down (sandbox="").
    */
   _buildUiuxPreviewDoc(snippet) {
     return `<!doctype html>
@@ -766,7 +808,6 @@ export class MessageHandler {
     document.querySelector('.uiux-modal')?.remove();
 
     const labelFor = (i) => (options[i] && options[i].label != null) ? String(options[i].label) : String(i);
-    const idFor = (i) => (options[i] && options[i].id != null) ? String(options[i].id) : String(i);
 
     const tabs = options.map((opt, i) =>
       `<button class="uiux-tab${i === 0 ? ' active' : ''}" data-i="${i}">${this._escapeHtml(labelFor(i))}</button>`
@@ -795,13 +836,12 @@ export class MessageHandler {
         </div>
         <div class="uiux-modal-footer">
           <div class="uiux-modal-selectrow">
-            <button class="uiux-use-option" type="button">Use this option</button>
-            <span class="uiux-modal-selected">No option selected — optional</span>
+            <span class="uiux-modal-selected"></span>
           </div>
-          <textarea class="uiux-modal-textarea" rows="3" placeholder="Write a message or instructions for Leo…"></textarea>
+          <textarea class="uiux-modal-textarea" rows="3" placeholder="Add a message or instructions for Leo (optional)…"></textarea>
           <div class="uiux-modal-actions">
-            <span class="uiux-modal-hint">Pick an option, write a message, or both · ⌘/Ctrl+Enter to send</span>
-            <button class="uiux-modal-send" disabled>Send response</button>
+            <span class="uiux-modal-hint">Browse with ← → — the option you're viewing is selected · ⌘/Ctrl+Enter to send</span>
+            <button class="uiux-modal-send">Send response</button>
           </div>
         </div>
       </div>`;
@@ -814,28 +854,15 @@ export class MessageHandler {
       f.srcdoc = this._buildUiuxPreviewDoc(opt && opt.html ? opt.html : '');
     });
 
+    // The option currently being viewed IS the selected one — navigating the tabs/arrows
+    // auto-selects it, so the user just hits "Send response". (Includes "None of these".)
     let activeIndex = 0;
-    let selectedIndex = null; // no option selected by default — selecting is optional
     const n = options.length;
     const selectedEl = overlay.querySelector('.uiux-modal-selected');
-    const useBtn = overlay.querySelector('.uiux-use-option');
-    const sendBtn = overlay.querySelector('.uiux-modal-send');
     const textarea = overlay.querySelector('.uiux-modal-textarea');
 
     const refreshSelectionUI = () => {
-      const hasText = (textarea?.value?.trim()?.length || 0) > 0;
-      const usingActive = selectedIndex === activeIndex;
-      if (useBtn) {
-        useBtn.textContent = usingActive ? '✓ Using this option' : 'Use this option';
-        useBtn.classList.toggle('active', usingActive);
-      }
-      if (selectedEl) {
-        selectedEl.textContent = selectedIndex === null
-          ? 'No option selected — optional'
-          : `Selected: ${labelFor(selectedIndex)}`;
-      }
-      // Can send if an option is selected OR a message was typed.
-      if (sendBtn) sendBtn.disabled = (selectedIndex === null && !hasText);
+      if (selectedEl) selectedEl.textContent = `Selected: ${labelFor(activeIndex)}`;
     };
 
     const setActive = (i) => {
@@ -852,32 +879,13 @@ export class MessageHandler {
     overlay.querySelector('.uiux-nav-prev')?.addEventListener('click', () => setActive(activeIndex - 1));
     overlay.querySelector('.uiux-nav-next')?.addEventListener('click', () => setActive(activeIndex + 1));
 
-    // Explicitly select/deselect the option currently being viewed.
-    useBtn?.addEventListener('click', () => {
-      selectedIndex = (selectedIndex === activeIndex) ? null : activeIndex;
-      refreshSelectionUI();
-    });
-    textarea?.addEventListener('input', refreshSelectionUI);
-
     const close = () => {
       document.removeEventListener('keydown', onKey);
       overlay.remove();
     };
     const submit = () => {
       const text = textarea?.value?.trim() || '';
-      const hasSel = selectedIndex !== null;
-      if (!hasSel && !text) return; // nothing to send
-      let answer, display;
-      if (hasSel && text) {
-        answer = `Selected option "${idFor(selectedIndex)}: ${labelFor(selectedIndex)}". Message: ${text}`;
-        display = `${labelFor(selectedIndex)} — ${text}`;
-      } else if (hasSel) {
-        answer = `Selected option "${idFor(selectedIndex)}: ${labelFor(selectedIndex)}".`;
-        display = labelFor(selectedIndex);
-      } else {
-        answer = text;
-        display = text;
-      }
+      const { answer, display } = this._uiuxAnswerForOption(options[activeIndex], text);
       close();
       this._answerUiuxQuestion(answer, threadId, agentName, chipEl, display);
     };
