@@ -207,30 +207,66 @@ export class IframeManager {
     overlay.style.overflow = 'hidden';
     overlay.style.paddingTop = '24px';
 
-    // Add close button if requested
+    // Add close control if requested. A bare "×" reads as "cancel", which made
+    // users unsure whether hitting it would stop Leo. Instead we show a labeled
+    // "Hide" pill, and reveal a "Leo keeps building" reassurance on hover so the
+    // user learns it's safe to dismiss the loading screen.
     if (showCloseButton) {
+      const closeWrap = document.createElement('div');
+      closeWrap.style.position = 'absolute';
+      closeWrap.style.top = '10px';
+      closeWrap.style.right = '10px';
+      closeWrap.style.zIndex = '11';
+      closeWrap.style.display = 'flex';
+      closeWrap.style.flexDirection = 'column';
+      closeWrap.style.alignItems = 'flex-end';
+      closeWrap.style.gap = '4px';
+
       const closeBtn = document.createElement('button');
-      closeBtn.innerHTML = '&times;';
-      closeBtn.style.position = 'absolute';
-      closeBtn.style.top = '10px';
-      closeBtn.style.right = '10px';
+      closeBtn.innerHTML = 'Hide <span style="font-size:1.2rem;line-height:1;">&times;</span>';
+      closeBtn.title = 'Leo will continue building';
+      closeBtn.style.display = 'flex';
+      closeBtn.style.alignItems = 'center';
+      closeBtn.style.gap = '6px';
       closeBtn.style.background = 'rgba(255, 255, 255, 0.2)';
       closeBtn.style.border = 'none';
       closeBtn.style.color = 'white';
-      closeBtn.style.fontSize = '2rem';
+      closeBtn.style.fontSize = '0.9rem';
+      closeBtn.style.fontWeight = 'bold';
+      closeBtn.style.fontFamily = 'Arial, sans-serif';
       closeBtn.style.cursor = 'pointer';
-      closeBtn.style.borderRadius = '50%';
-      closeBtn.style.width = '40px';
-      closeBtn.style.height = '40px';
-      closeBtn.style.display = 'flex';
-      closeBtn.style.alignItems = 'center';
-      closeBtn.style.justifyContent = 'center';
+      closeBtn.style.borderRadius = '20px';
+      closeBtn.style.padding = '6px 12px';
       closeBtn.style.lineHeight = '1';
-      closeBtn.style.zIndex = '11';
-      closeBtn.addEventListener('mouseenter', () => { closeBtn.style.background = 'rgba(255, 255, 255, 0.4)'; });
-      closeBtn.addEventListener('mouseleave', () => { closeBtn.style.background = 'rgba(255, 255, 255, 0.2)'; });
+
+      // Reassurance hint, hidden until the user hovers the pill.
+      const closeHint = document.createElement('div');
+      closeHint.textContent = 'Leo will continue building';
+      closeHint.style.color = 'rgba(255, 255, 255, 0.9)';
+      closeHint.style.fontSize = '0.7rem';
+      closeHint.style.fontFamily = 'Arial, sans-serif';
+      closeHint.style.textShadow = '1px 1px 2px rgba(0,0,0,0.5)';
+      closeHint.style.background = 'rgba(0, 0, 0, 0.35)';
+      closeHint.style.borderRadius = '6px';
+      closeHint.style.padding = '3px 8px';
+      closeHint.style.whiteSpace = 'nowrap';
+      closeHint.style.opacity = '0';
+      closeHint.style.transition = 'opacity 0.2s ease';
+      closeHint.style.pointerEvents = 'none';
+
+      closeBtn.addEventListener('mouseenter', () => {
+        closeBtn.style.background = 'rgba(255, 255, 255, 0.4)';
+        closeHint.style.opacity = '1';
+      });
+      closeBtn.addEventListener('mouseleave', () => {
+        closeBtn.style.background = 'rgba(255, 255, 255, 0.2)';
+        closeHint.style.opacity = '0';
+      });
       closeBtn.addEventListener('click', () => this.removeStreamingOverlay());
-      overlay.appendChild(closeBtn);
+
+      closeWrap.appendChild(closeBtn);
+      closeWrap.appendChild(closeHint);
+      overlay.appendChild(closeWrap);
     }
 
     // Create text. Keep it on a single line (no ugly wrap in a narrow preview):
@@ -244,16 +280,25 @@ export class IframeManager {
     overlayText.style.textShadow = '2px 2px 4px rgba(0,0,0,0.5)';
     overlayText.style.whiteSpace = 'nowrap';
 
-    const titlePrefix = 'Your ';
-    if (text.startsWith(titlePrefix)) {
-      const prefixSpan = document.createElement('span');
-      prefixSpan.className = 'overlay-title-prefix';
-      prefixSpan.textContent = titlePrefix;
-      overlayText.appendChild(prefixSpan);
-      overlayText.appendChild(document.createTextNode(text.slice(titlePrefix.length)));
-    } else {
-      overlayText.textContent = text;
-    }
+    // Render a title, keeping the optional "Your " prefix in its own span so the
+    // fit logic can drop just that word in a narrow pane. Reused when the title
+    // changes (e.g. to "Question from Leo" while Leo waits on the user, then back).
+    const renderTitle = (titleText) => {
+      overlayText.textContent = '';
+      const titlePrefix = 'Your ';
+      if (titleText.startsWith(titlePrefix)) {
+        const prefixSpan = document.createElement('span');
+        prefixSpan.className = 'overlay-title-prefix';
+        prefixSpan.textContent = titlePrefix;
+        overlayText.appendChild(prefixSpan);
+        overlayText.appendChild(document.createTextNode(titleText.slice(titlePrefix.length)));
+      } else {
+        overlayText.textContent = titleText;
+      }
+    };
+    renderTitle(text);
+    this._overlayBaseTitle = text; // restore target after a question is answered
+    this._setOverlayTitle = (t) => { renderTitle(t); this._fitOverlayTitle?.(); };
 
     const textContainer = document.createElement('div');
     textContainer.style.width = 'auto';
@@ -305,7 +350,7 @@ export class IframeManager {
       { icon: 'fa-mouse-pointer', text: 'Help Leo by pointing to an element' },
       { icon: 'fa-paperclip', text: 'Upload files to include in your app' },
       { icon: 'fa-forward', text: "Switching to Plan Mode can improve Leo's performance" },
-      { icon: 'fa-lightbulb', text: 'view more tips', href: 'https://llamapress.ai/wiki' },
+      { icon: 'fa-lightbulb', text: 'View Our Wiki for Guides & Tips to Use Leo', href: 'https://llamapress.ai/wiki' },
     ];
     const tipEl = document.createElement('div');
     tipEl.style.display = 'inline-flex';
@@ -371,24 +416,49 @@ export class IframeManager {
     todoContainer.style.padding = '16px 20px';
     todoContainer.style.display = 'none';
 
-    // Toggle the two overlay layouts:
+    // Holds a live clone of the chat's question card while Leo is blocked waiting
+    // on the user (AskUserQuestion / AskUserUIUXQuestion). Same #0d0d1a styling as
+    // the todo box; only shown in 'question' mode.
+    const questionContainer = document.createElement('div');
+    questionContainer.id = 'overlayQuestionList';
+    questionContainer.style.flex = '1 1 auto';
+    questionContainer.style.width = '100%';
+    questionContainer.style.maxWidth = '480px';
+    questionContainer.style.minHeight = '0';
+    questionContainer.style.overflowY = 'auto';
+    questionContainer.style.marginTop = '12px';
+    questionContainer.style.marginBottom = '16px';
+    questionContainer.style.boxSizing = 'border-box';
+    questionContainer.style.background = '#0d0d1a';
+    questionContainer.style.borderRadius = '10px';
+    questionContainer.style.border = '1px solid rgba(255, 255, 255, 0.08)';
+    questionContainer.style.padding = '16px 20px';
+    questionContainer.style.display = 'none';
+
+    // Toggle the overlay layouts:
     //   building → big centered animation + cycling tips, no box
     //   plan     → small animation up top + the cloned todo list box
+    //   question → animation/tips stopped; the cloned question card takes the pane
     const setOverlayMode = (mode) => {
       const isPlan = mode === 'plan';
+      const isQuestion = mode === 'question';
       // Building: title + tips + ball are centered as a group (animation doesn't
-      // grow). Plan: top-aligned with the todo box filling the space below.
-      overlay.style.justifyContent = isPlan ? 'flex-start' : 'center';
+      // grow). Plan/question: top-aligned with the box filling the space below.
+      overlay.style.justifyContent = (isPlan || isQuestion) ? 'flex-start' : 'center';
       lottieContainer.style.flex = '0 0 auto';
+      // Stop the animation entirely while a question is up — it's the cue that Leo
+      // has paused and needs an answer (rather than still working).
+      lottieContainer.style.display = isQuestion ? 'none' : 'flex';
       // Title is large while building, then shrinks once the todo list takes over.
       overlayText.style.fontSize = isPlan ? '1.8rem' : '2.5rem';
       // Tips track ~35% of the current title size (bigger pre-plan, smaller after).
       tipsContainer.style.fontSize = isPlan ? '0.63rem' : '0.875rem';
       lottiePlayer.style.width = isPlan ? '140px' : '240px';
       lottiePlayer.style.height = isPlan ? '140px' : '240px';
-      // Tips keep cycling in the pill in both states (incl. after the todo list).
-      tipsContainer.style.display = 'block';
+      // Tips keep cycling in building/plan, but are hidden while a question is up.
+      tipsContainer.style.display = isQuestion ? 'none' : 'block';
       todoContainer.style.display = isPlan ? 'block' : 'none';
+      questionContainer.style.display = isQuestion ? 'block' : 'none';
       // Re-evaluate the "Your " drop since the title size just changed.
       this._fitOverlayTitle?.();
     };
@@ -413,29 +483,30 @@ export class IframeManager {
     overlay.appendChild(headerBox);
     overlay.appendChild(lottieContainer);
     overlay.appendChild(todoContainer);
+    overlay.appendChild(questionContainer);
     browserContent.appendChild(overlay);
 
     this.overlayElement = overlay;
 
     // Keep the title on one line: drop the "Your " prefix when the pane is too
-    // narrow to fit the full title, and restore it when there's room again.
-    const prefixSpan = overlayText.querySelector('.overlay-title-prefix');
-    if (prefixSpan) {
-      const fitTitle = () => {
-        prefixSpan.style.display = 'inline';            // try the full title first
-        // Measure against the pane width (minus the pill's padding/margins), not
-        // the now content-hugging title container.
-        const available = browserContent.clientWidth - 70;
-        if (overlayText.scrollWidth > available) {
-          prefixSpan.style.display = 'none';            // too tight — drop "Your"
-        }
-      };
-      this._fitOverlayTitle = fitTitle; // let setOverlayMode re-fit after size changes
-      requestAnimationFrame(fitTitle); // measure once layout is settled
-      const titleObserver = new ResizeObserver(fitTitle);
-      titleObserver.observe(browserContent);
-      this._overlayTitleObserver = titleObserver;
-    }
+    // narrow to fit the full title, and restore it when there's room again. The
+    // prefix span is looked up fresh each call since the title can change.
+    const fitTitle = () => {
+      const prefixSpan = overlayText.querySelector('.overlay-title-prefix');
+      if (!prefixSpan) return;                          // current title has no "Your "
+      prefixSpan.style.display = 'inline';              // try the full title first
+      // Measure against the pane width (minus the pill's padding/margins), not
+      // the now content-hugging title container.
+      const available = browserContent.clientWidth - 70;
+      if (overlayText.scrollWidth > available) {
+        prefixSpan.style.display = 'none';              // too tight — drop "Your"
+      }
+    };
+    this._fitOverlayTitle = fitTitle; // let setOverlayMode re-fit after size changes
+    requestAnimationFrame(fitTitle); // measure once layout is settled
+    const titleObserver = new ResizeObserver(fitTitle);
+    titleObserver.observe(browserContent);
+    this._overlayTitleObserver = titleObserver;
 
     // Mirror the chat's plan into the overlay and switch from the building layout
     // to the todo-list layout the moment a plan is created.
@@ -457,6 +528,9 @@ export class IframeManager {
 
     const doMirror = () => {
       scheduled = false;
+      // While a question is up, the overlay belongs to the question card — don't
+      // let chat mutations flip the layout back to building/plan underneath it.
+      if (this._overlayQuestionActive) return;
       const container = document.getElementById('overlayTodoList');
       if (!container) return; // overlay gone
 
@@ -496,6 +570,10 @@ export class IframeManager {
       requestAnimationFrame(doMirror);
     };
 
+    // Exposed so clearQuestionFromOverlay() can recompute building-vs-plan once a
+    // question is answered (revert to whatever the overlay was showing before).
+    this._overlayDoMirror = doMirror;
+
     this._overlayObservers = [];
     const planObserver = new MutationObserver(schedule);
     planObserver.observe(history, { childList: true, subtree: true, characterData: true, attributes: true });
@@ -516,6 +594,39 @@ export class IframeManager {
   }
 
   /**
+   * Surface a question inside the building overlay: drop the prebuilt (and already
+   * wired) clone into the overlay box, stop the animation, and switch the heading
+   * to "Question from Leo" so the user knows Leo is waiting on them. The clone is
+   * created/wired by MessageHandler; this only manages the overlay chrome.
+   * No-op (returns false) when there's no overlay on screen.
+   */
+  showQuestionInOverlay(cloneEl) {
+    const container = document.getElementById('overlayQuestionList');
+    if (!this.overlayElement || !container || !cloneEl) return false;
+    container.innerHTML = '';
+    container.appendChild(cloneEl);
+    this._overlayQuestionActive = true;
+    this._setOverlayTitle?.('Question from Leo');
+    this._setOverlayMode?.('question');
+    return true;
+  }
+
+  /**
+   * Tear down the in-overlay question and revert the overlay to whatever it was
+   * showing before (building, or the mirrored todo list if a plan exists).
+   * Safe to call unconditionally — no-ops when no question is active.
+   */
+  clearQuestionFromOverlay() {
+    if (!this._overlayQuestionActive) return;
+    this._overlayQuestionActive = false;
+    const container = document.getElementById('overlayQuestionList');
+    if (container) container.innerHTML = '';
+    this._setOverlayTitle?.(this._overlayBaseTitle || 'Your App is Building!');
+    // Recompute building-vs-plan from the current chat state.
+    this._overlayDoMirror?.();
+  }
+
+  /**
    * Remove streaming overlay
    */
   removeStreamingOverlay() {
@@ -530,6 +641,12 @@ export class IframeManager {
       this._overlayTipInterval = null;
     }
     this._setOverlayMode = null;
+    // Drop the question state too — the real card still lives in the chat; only the
+    // throwaway overlay clone dies with the overlay, so nothing needs rescuing.
+    this._overlayQuestionActive = false;
+    this._overlayDoMirror = null;
+    this._setOverlayTitle = null;
+    this._overlayBaseTitle = null;
     const overlay = document.getElementById('streamingOverlay');
     if (overlay) {
       overlay.remove();

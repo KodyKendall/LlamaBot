@@ -17,26 +17,87 @@ SECRET_KEY = os.getenv("WS_SECRET_KEY", os.getenv("SECRET_KEY", "fallback-dev-ke
 EXPIRY_MINUTES = int(os.getenv("WS_TOKEN_EXPIRY_MINUTES", "30"))
 
 
+# Key under which the durable session secret is stored in the auth DB
+# (site_settings). Kept out of VALID_SITE_SETTINGS so it is never readable or
+# settable through the public /api/site-settings surface — it's a secret.
+SESSION_SECRET_DB_KEY = "session_secret"
+
+
+def _session_secret_from_db() -> Optional[str]:
+    """Read (or generate + persist) the session secret from the auth DB.
+
+    Stored as a row in ``site_settings``. The postgres volume survives container
+    recreates, so the secret is STABLE across a ``bin/update`` restart — which is
+    exactly what keeps browser session cookies valid afterwards. Returns ``None``
+    if the auth DB is unavailable so the caller can fall back to an ephemeral key.
+    """
+    try:
+        from app.db import engine
+        if engine is None:
+            return None
+        from sqlmodel import Session, SQLModel
+        from app.models import SiteSetting
+        # token_service can be imported before init_db() runs, so the table may
+        # not exist yet — create just this one defensively (idempotent).
+        try:
+            SQLModel.metadata.create_all(engine, tables=[SiteSetting.__table__])
+        except Exception:
+            pass
+        with Session(engine) as session:
+            row = session.get(SiteSetting, SESSION_SECRET_DB_KEY)
+            if row and row.value:
+                return row.value
+            new_secret = secrets.token_hex(32)
+            session.add(SiteSetting(key=SESSION_SECRET_DB_KEY, value=new_secret))
+            try:
+                session.commit()
+                return new_secret
+            except Exception:
+                # Lost the insert race with another worker/boot — re-read the winner.
+                session.rollback()
+                row = session.get(SiteSetting, SESSION_SECRET_DB_KEY)
+                return row.value if row and row.value else None
+    except Exception as e:
+        logger.warning(f"Could not load SESSION_SECRET from auth DB: {e}")
+        return None
+
+
 def _ensure_session_secret() -> str:
-    """Return SESSION_SECRET, auto-generating + persisting to .env if missing.
+    """Return a STABLE SESSION_SECRET that survives container recreates.
+
+    Resolution order:
+      1. ``SESSION_SECRET`` env var — explicit operator override.
+      2. The auth DB (``site_settings`` row) — durable across ``bin/update``
+         restarts because the postgres volume persists. Generated once, reused
+         forever after.
+      3. An ephemeral in-memory key — last resort when no auth DB is configured
+         (CI, tests). Sessions won't survive a restart, but the app still boots.
 
     Browser session cookies use a key independent from the WS token key so a
     leaked WS token cannot mint browser sessions, and vice versa.
+
+    History: this used to persist to ``.env``, but on the fleet the app's CWD
+    ``.env`` lives in the container's ephemeral layer (not the host ``env_file``),
+    so every ``docker compose up -d`` recreate minted a NEW secret and silently
+    logged every user out. Users arrive via a LlamaPress.ai magic-link and have
+    no local password, so an invalidated session locked them out entirely. The
+    DB is the durable store that fixes this.
     """
     existing = os.getenv("SESSION_SECRET")
     if existing:
         return existing
-    # Lazy import to avoid a hard dep on init_pg_checkpointer at module import time
-    try:
-        from init_pg_checkpointer import ensure_env_variable
-        return ensure_env_variable("SESSION_SECRET", secrets.token_hex(32))
-    except Exception as e:
-        # Fallback: generate in-memory only. Sessions won't survive restarts but
-        # the app keeps working in environments where .env is read-only (CI, tests).
-        logger.warning(f"Could not persist SESSION_SECRET to .env ({e}); using ephemeral key")
-        ephemeral = secrets.token_hex(32)
-        os.environ["SESSION_SECRET"] = ephemeral
-        return ephemeral
+
+    from_db = _session_secret_from_db()
+    if from_db:
+        return from_db
+
+    logger.warning(
+        "SESSION_SECRET not set and auth DB unavailable; using an ephemeral key — "
+        "browser sessions will NOT survive a restart."
+    )
+    ephemeral = secrets.token_hex(32)
+    os.environ["SESSION_SECRET"] = ephemeral
+    return ephemeral
 
 
 SESSION_SECRET = _ensure_session_secret()

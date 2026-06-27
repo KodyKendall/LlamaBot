@@ -1351,6 +1351,267 @@ body {
     opacity: 1;
 }
 
+/* ===================== Update flow modal ===================== */
+.update-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(3px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+    padding: 16px;
+}
+
+.update-modal-overlay.hidden {
+    display: none;
+}
+
+.update-modal-card {
+    background: #241f3d;
+    border: 1px solid var(--border-color);
+    border-radius: 14px;
+    width: 100%;
+    max-width: 440px;
+    padding: 24px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    color: var(--text-color);
+    animation: update-modal-in 0.18s ease-out;
+}
+
+@keyframes update-modal-in {
+    from { opacity: 0; transform: translateY(8px) scale(0.98); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.update-modal-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 14px;
+}
+
+.update-modal-head h2 {
+    font-size: 1.15rem;
+    font-weight: 600;
+    margin: 0;
+}
+
+.update-modal-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: #22c55e;
+    color: #fff;
+    font-size: 0.85rem;
+    flex-shrink: 0;
+}
+
+.update-modal-badge.success { background: #22c55e; }
+.update-modal-badge.warn { background: #f59e0b; }
+
+.update-modal-sub {
+    font-size: 0.9rem;
+    color: #b8b3cc;
+    margin: 0 0 12px;
+    line-height: 1.45;
+}
+
+.update-modal-notes {
+    background: rgba(139, 92, 246, 0.08);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin-bottom: 14px;
+    max-height: 220px;
+    overflow-y: auto;
+}
+
+.update-note-block + .update-note-block { margin-top: 10px; }
+
+.update-note-title {
+    font-size: 0.9rem;
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+
+.update-note-ver {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #fff;
+    background: rgba(139, 92, 246, 0.4);
+    padding: 1px 7px;
+    border-radius: 999px;
+    margin-left: 4px;
+}
+
+.update-modal-notes ul {
+    margin: 4px 0 0;
+    padding-left: 18px;
+}
+
+.update-modal-notes li {
+    font-size: 0.83rem;
+    color: #cfcae0;
+    line-height: 1.5;
+    margin-bottom: 2px;
+}
+
+.update-modal-reassure {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    font-size: 0.8rem;
+    color: #9d98b3;
+    line-height: 1.45;
+    margin: 0 0 18px;
+}
+
+.update-modal-reassure i {
+    margin-top: 2px;
+    color: var(--accent-color);
+}
+
+.update-modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+}
+
+.update-modal-btn {
+    border: none;
+    border-radius: 8px;
+    padding: 9px 18px;
+    font-size: 0.88rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s, opacity 0.15s;
+}
+
+.update-modal-btn.primary {
+    background: var(--accent-color);
+    color: #fff;
+}
+
+.update-modal-btn.primary:hover { background: var(--button-hover); }
+
+.update-modal-btn.ghost {
+    background: transparent;
+    color: #b8b3cc;
+    border: 1px solid var(--border-color);
+}
+
+.update-modal-btn.ghost:hover { background: rgba(255, 255, 255, 0.05); }
+
+/* Step list */
+.update-steps {
+    list-style: none;
+    margin: 6px 0 16px;
+    padding: 0;
+}
+
+.update-steps li {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 0.88rem;
+    color: #6f6a85;
+    padding: 6px 0;
+    transition: color 0.2s;
+}
+
+.update-steps li .step-dot {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    border: 2px solid #4a4560;
+    flex-shrink: 0;
+    transition: all 0.2s;
+}
+
+.update-steps li.active {
+    color: var(--text-color);
+}
+
+.update-steps li.active .step-dot {
+    border-color: var(--accent-color);
+    border-top-color: transparent;
+    animation: update-spin 0.7s linear infinite;
+}
+
+.update-steps li.done {
+    color: #cfcae0;
+}
+
+.update-steps li.done .step-dot {
+    border-color: #22c55e;
+    background: #22c55e;
+}
+
+/* Spinner shared by the modal header + pill */
+.update-modal-spinner {
+    width: 22px;
+    height: 22px;
+    border: 3px solid rgba(139, 92, 246, 0.3);
+    border-top-color: var(--accent-color);
+    border-radius: 50%;
+    flex-shrink: 0;
+    animation: update-spin 0.8s linear infinite;
+}
+
+.update-modal-spinner.small {
+    width: 14px;
+    height: 14px;
+    border-width: 2px;
+}
+
+@keyframes update-spin {
+    to { transform: rotate(360deg); }
+}
+
+/* Minimized corner pill */
+.update-pill {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    background: #241f3d;
+    border: 1px solid var(--border-color);
+    color: var(--text-color);
+    padding: 9px 15px;
+    border-radius: 999px;
+    font-size: 0.83rem;
+    font-weight: 500;
+    cursor: pointer;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.update-pill:hover { border-color: var(--accent-color); }
+
+.update-pill.hidden { display: none; }
+
+.update-pill.ready {
+    background: linear-gradient(135deg, #065f46, #047857);
+    border-color: #047857;
+    color: #fff;
+}
+
+.update-pill.ready .update-modal-spinner { display: none; }
+
+.update-pill.ready::before {
+    content: "\f021";
+    font-family: "Font Awesome 6 Free";
+    font-weight: 900;
+    font-size: 0.8rem;
+}
+
 .new-thread-btn {
     width: 32px;
     height: 32px;
@@ -2120,10 +2381,24 @@ body {
 }
 
 .plan-question-text {
-    font-family: Georgia, "Times New Roman", serif;
-    font-size: 1.1rem;
-    line-height: 1.7;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 0.875rem;
+    line-height: 1.4;
     color: #e2e8f0;
+}
+
+/* Markdown rendered inside the question text shouldn't add outer spacing */
+.plan-question-text p {
+    margin: 0.5em 0;
+    line-height: 1.5;
+}
+
+.plan-question-text p:first-child {
+    margin-top: 0;
+}
+
+.plan-question-text p:last-child {
+    margin-bottom: 0;
 }
 
 .plan-question-context {
@@ -2166,6 +2441,38 @@ body {
 .plan-option-btn:disabled {
     opacity: 0.5;
     cursor: default;
+}
+
+/* "See visual options" chip — subtle UI/UX request on a ui_related question.
+   Quieter than a real answer option (it re-asks the question visually, it isn't an answer). */
+.plan-uiux-request-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    background: transparent;
+    border: 1px dashed rgba(139, 92, 246, 0.4);
+    color: rgba(196, 181, 253, 0.75);
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.plan-uiux-request-btn svg {
+    opacity: 0.85;
+    flex-shrink: 0;
+}
+
+.plan-uiux-request-btn:hover:not(:disabled) {
+    background: rgba(139, 92, 246, 0.12);
+    border-color: rgba(139, 92, 246, 0.55);
+    color: #c4b5fd;
+}
+
+.plan-uiux-request-btn.selected {
+    background: rgba(139, 92, 246, 0.3);
+    border-style: solid;
+    border-color: #8b5cf6;
+    color: #ede9fe;
+    box-shadow: 0 0 8px rgba(139, 92, 246, 0.3);
 }
 
 /* Skip button */

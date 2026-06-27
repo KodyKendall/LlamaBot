@@ -5,6 +5,7 @@ load_dotenv()
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.responses import Response as _StarletteResponse
 
 import os
 import logging
@@ -95,9 +96,24 @@ async def robots_txt():
     return PlainTextResponse("User-agent: *\nDisallow: /\n")
 
 
-# Mount static directories
+# Mount static directories.
+#
+# NoCacheStaticFiles forces the browser to revalidate every frontend asset on each load.
+# The app is shipped as ES modules: chat.html loads index.js?v=N (cache-busted), but
+# index.js statically imports sub-modules (e.g. websocket/MessageHandler.js) by plain URL
+# with no version query. Without an explicit Cache-Control, browsers serve those cached
+# sub-modules without revalidating, so edits to them silently fail to reach users until a
+# hard refresh. "no-cache" (revalidate-always) keeps responses cheap — ETag/Last-Modified
+# return 304 when unchanged — while guaranteeing a changed file ships on the next reload.
+class NoCacheStaticFiles(StaticFiles):
+    def file_response(self, *args, **kwargs) -> _StarletteResponse:
+        resp = super().file_response(*args, **kwargs)
+        resp.headers["Cache-Control"] = "no-cache"
+        return resp
+
+
 frontend_dir = Path(__file__).parent / "frontend"
-app.mount("/frontend", StaticFiles(directory=str(frontend_dir)), name="frontend")
+app.mount("/frontend", NoCacheStaticFiles(directory=str(frontend_dir)), name="frontend")
 
 # This is responsible for holding and managing all active websocket connections.
 manager = WebSocketConnectionManager(app)
@@ -254,6 +270,19 @@ async def startup_event():
     # Migrate auth.json if it exists
     with Session(engine) as session:
         migrate_auth_json(session, LEGACY_AUTH_FILE)
+
+    # Fetch any mothership-delivered system prompts BEFORE graphs compile, so the
+    # Pattern-A agents (rails_agent, testing, ticket, user) bake the current prompt
+    # at build_workflow time. Fail-open: a disabled client (no instance.json, e.g.
+    # the dev box) or an unreachable mothership is a silent no-op.
+    try:
+        mothership = app.state.mothership_client
+        if mothership.enabled:
+            from app.routers.api import get_container_version, get_llamapress_version
+            await mothership.check_updates(get_container_version(), get_llamapress_version())
+            logger.info("Startup system-prompt prefetch complete")
+    except Exception as e:
+        logger.warning(f"Startup system-prompt prefetch skipped: {e}")
 
     # Compile all LangGraph workflows once at startup (singleton pattern)
     logger.info("Compiling LangGraph workflows...")

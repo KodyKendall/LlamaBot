@@ -181,11 +181,18 @@ class MothershipClient:
 
         Check mothership for newer stable versions of llamabot and llamapress.
         Returns {"updates_available": bool, "latest_versions": {...}} or None on error.
+
+        Also carries the versioned-system-prompt round-trip: we send the versions
+        we have cached (keyed by agent_mode == langgraph graph key) and persist any
+        prompt bodies the mothership returns under `system_prompts`. Fully fail-open
+        and backwards-compatible — an old mothership simply omits `system_prompts`.
         """
         if not self.enabled:
             return None
 
         try:
+            from app.services import system_prompt_cache
+
             async with httpx.AsyncClient(timeout=5.0) as client:
                 response = await client.post(
                     f"{self.config['mothership_url']}/api/leonardo/check_updates",
@@ -194,13 +201,22 @@ class MothershipClient:
                         "current_versions": {
                             "llamabot": current_llamabot,
                             "llamapress": current_llamapress,
-                        }
+                        },
+                        "prompt_versions": system_prompt_cache.cached_versions(),
                     },
                     headers={"Authorization": f"Bearer {self.config['mothership_api_token']}"},
                 )
                 response.raise_for_status()
                 body = response.json()
                 logger.info(f"check_updates response: {body}")
+
+                # Persist any delivered system prompts (only changed/new modes are sent).
+                for mode, payload in (body.get("system_prompts") or {}).items():
+                    version = (payload or {}).get("version")
+                    text = (payload or {}).get("body")
+                    if version and text:
+                        system_prompt_cache.upsert(mode, version, text)
+
                 return body
         except Exception as e:
             logger.warning(f"Update check failed: {e}")

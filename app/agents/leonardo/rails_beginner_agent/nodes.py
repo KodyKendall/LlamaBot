@@ -36,7 +36,7 @@ APP_DIR = PROJECT_ROOT / 'app'
 
 
 def get_sys_msg():
-    full_prompt = build_beginner_system_prompt(BEGINNER_AGENT_PROMPT)
+    full_prompt = build_beginner_system_prompt(BEGINNER_AGENT_PROMPT, agent_mode="rails_beginner_agent")
     return {
         "role": "system",
         "content": [

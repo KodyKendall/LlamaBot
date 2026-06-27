@@ -47,7 +47,7 @@ def get_sys_msg():
 
     Loads LEONARDO.md if it exists and appends it to the base prompt.
     """
-    full_prompt = build_system_prompt_with_project_context(RAILS_AI_BUILDER_AGENT_PROMPT)
+    full_prompt = build_system_prompt_with_project_context(RAILS_AI_BUILDER_AGENT_PROMPT, agent_mode="rails_ai_builder_agent")
     return {
         "role": "system",
         "content": [

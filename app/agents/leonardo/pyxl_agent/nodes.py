@@ -32,6 +32,7 @@ from app.agents.leonardo.pyxl_agent.tools import (
     read_tech_spec, write_tech_spec,
 )
 from app.agents.leonardo.pyxl_agent.prompts import EXCEL_ANALYSIS_PROMPT
+from app.agents.leonardo.project_context import resolve_base_prompt
 from app.agents.leonardo.rails_agent.middleware import (
     check_failure_limit,
     DynamicModelMiddleware,
@@ -45,11 +46,12 @@ logger = logging.getLogger(__name__)
 
 def get_cached_system_prompt():
     """Build the system message with Anthropic prompt caching enabled."""
+    base_prompt = resolve_base_prompt(EXCEL_ANALYSIS_PROMPT, agent_mode="pyxl_agent")
     return SystemMessage(
         content=[
             {
                 "type": "text",
-                "text": EXCEL_ANALYSIS_PROMPT,
+                "text": base_prompt,
                 "cache_control": {"type": "ephemeral"},
             }
         ]

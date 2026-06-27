@@ -58,7 +58,7 @@ def get_cached_system_prompt():
     Loads LEONARDO.md if it exists and appends it to the base prompt.
     Uses Anthropic's ephemeral cache control for cost reduction (~90% input token savings).
     """
-    full_prompt = build_system_prompt_with_project_context(RAILS_AGENT_PROMPT)
+    full_prompt = build_system_prompt_with_project_context(RAILS_AGENT_PROMPT, agent_mode="rails_agent")
     return SystemMessage(
         content=[
             {
