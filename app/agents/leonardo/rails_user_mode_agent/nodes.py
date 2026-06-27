@@ -100,7 +100,8 @@ def get_cached_system_prompt():
     date_suffix = f"\n\n---\n**Today's Date:** {current_date}"
     full_prompt = build_system_prompt_with_project_context(
         USER_MODE_AGENT_PROMPT,
-        suffix=date_suffix
+        suffix=date_suffix,
+        agent_mode="rails_user_mode_agent",
     )
 
     return SystemMessage(

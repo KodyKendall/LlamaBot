@@ -948,6 +948,7 @@ class RequestHandler:
                             "question": interrupt_value.get("question", ""),
                             "options": interrupt_value.get("options", []),
                             "context": interrupt_value.get("context", ""),
+                            "ui_related": interrupt_value.get("ui_related", False),
                             "thread_id": message_data.get('thread_id'),
                             "agent_name": message_data.get('agent_name'),
                         })

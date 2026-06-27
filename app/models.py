@@ -58,6 +58,25 @@ class Prompt(ActiveRecordMixin, SQLModel, table=True):
     usage_count: int = Field(default=0)
 
 
+class AgentSystemPrompt(ActiveRecordMixin, SQLModel, table=True):
+    """Mothership-delivered, versioned agent system prompt cache.
+
+    One row per ``agent_mode`` (the LangGraph graph key). Populated at runtime
+    from the ``check_updates`` round-trip so prompt edits ship without an image
+    rebuild. Fail-open: absence of a row → the agent uses its baked-in static
+    prompt. ``version`` is a content hash the mothership computes; LlamaBot only
+    stores and echoes it back — it never hashes.
+    """
+
+    __tablename__ = "agent_system_prompts"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    agent_mode: str = Field(max_length=100, index=True, unique=True)  # langgraph graph key
+    version: str = Field(max_length=64)                               # mothership content hash
+    body: str = Field(sa_type=sa.Text)                                # full prompt text
+    fetched_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
 class Skill(ActiveRecordMixin, SQLModel, table=True):
     """A reusable skill prompt that can be stacked with other prompts.
 

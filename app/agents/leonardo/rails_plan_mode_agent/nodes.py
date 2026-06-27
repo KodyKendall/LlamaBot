@@ -99,7 +99,8 @@ def get_cached_system_prompt():
     date_suffix = f"\n\n---\n**Today's Date:** {current_date}"
     full_prompt = build_beginner_system_prompt(
         PLAN_MODE_AGENT_PROMPT,
-        suffix=date_suffix
+        suffix=date_suffix,
+        agent_mode="rails_plan_mode_agent",
     )
 
     return SystemMessage(
@@ -128,6 +129,12 @@ Parameters:
 - question: The question to ask, in plain non-technical language
 - options: (Optional) A list of suggested answers the user can pick from. The user can also type their own answer. Use this to make it easy for non-technical users to respond.
 - context: (Optional) Brief context about why you're asking (shown as a subtitle)
+- ui_related: (Optional, default false) Set to true when the question involves a VISUAL or
+  UI/UX decision (layout, colors, components, button/card styling, section arrangement, etc.).
+  When true, the user is shown one extra subtle "See visual options" choice alongside your
+  options. If they pick it, the tool result will explicitly ask you to follow up by calling
+  ask_user_uiux_question with 2-4 concrete live HTML previews for this decision. Leave it
+  false for non-visual questions.
 
 This tool will freeze execution and wait for the user to respond. The user's answer is returned as the tool result."""
 
@@ -138,17 +145,21 @@ def ask_user_question(
     runtime: ToolRuntime,
     options: list[str] = None,
     context: str = "",
+    ui_related: bool = False,
 ) -> Command:
     """Ask the user a question, freeze execution, and resume with their answer."""
     tool_call_id = runtime.tool_call_id
 
     # interrupt() freezes the agent here. The value is sent to the frontend
     # as a question_request. When the user answers, interrupt() returns the answer.
+    # ui_related toggles an extra "See visual options" choice on the frontend card; if
+    # the user picks it the resumed answer asks us to call ask_user_uiux_question next.
     user_answer = interrupt({
         "type": "user_question",
         "question": question,
         "options": options or [],
         "context": context,
+        "ui_related": ui_related,
     })
 
     return Command(

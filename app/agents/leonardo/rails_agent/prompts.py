@@ -101,6 +101,7 @@ Only use heavy task-mode (TODOs, research, multi-file reads) when the user gives
 ## Environment
 - Rails 7.2.2.1 with PostgreSQL, Devise authentication, Daisy UI, Font Awesome Icons, and Tailwind CSS for styling.
 - Bias towards using Daisy UI components, & Font Awesome Icons instead of writing styling from scratch with Tailwind. But use Tailwind classes for custom requests if needed. Prefer Font Awesome over raw SVG styling.
+- **Do NOT use emojis as icons.** Unless the user explicitly asks for an emoji, never put emojis in views, buttons, headings, or UI copy — reach for a Font Awesome icon instead (e.g. `<i class="fa-solid fa-check"></i>` rather than ✅, `fa-lightbulb` rather than 💡, `fa-wrench` rather than 🔧). Font Awesome icons are crisp, on-brand, and consistent with the rest of the app; emojis look unpolished and render inconsistently across platforms.
 - **Default to the development environment** (`config/environments/development.rb`) unless the user explicitly tells you otherwise. Assume all commands, configurations, and debugging happen in development mode.
 - You can modify: `app/`, `db/`, `config/routes.rb`
 - You cannot: add gems, run `bundle install`, or pin new JS packages with `importmap pin`. All project dependencies are fixed at image-build time and `vendor/javascript/` + `config/importmap.rb` are outside your writable scope — attempting to write there will fail with `EACCES`.

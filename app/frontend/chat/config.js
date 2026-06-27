@@ -59,6 +59,11 @@ export const DEFAULT_CONFIG = {
 
   // WebSocket reconnection
   reconnectDelay: 3000, // ms
+  // Keep retrying long enough to ride out a full container recreate (e.g. the
+  // "Update now" flow restarts llamabot, which can take 30-60s to come back).
+  // At 3s/attempt this covers ~90s so the socket self-heals instead of going
+  // permanently red and stranding a user who chose to keep working.
+  maxReconnectAttempts: 30,
 
   // Custom renderers (can be overridden)
   toolRenderers: {},

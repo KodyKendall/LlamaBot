@@ -4,6 +4,14 @@
 
 const PAYWALL_UPGRADE_URL = 'https://llamapress.ai/pricing';
 
+// Submitted as the answer when the user picks the "See visual options" choice on a
+// UI/UX-related ask_user_question. It instructs Leo to re-ask the question visually via
+// ask_user_uiux_question rather than treating this as a normal text answer.
+const UIUX_REQUEST_DIRECTIVE =
+  'The user would like to see visual UI/UX options for this. Please call the ' +
+  'ask_user_uiux_question tool with 2-4 concrete example designs (live HTML previews) ' +
+  'for this decision instead of answering in text.';
+
 export class MessageHandler {
   constructor(appState, streamingState, messageRenderer, iframeManager, scrollManager, tokenIndicator, config) {
     this.appState = appState;
@@ -463,6 +471,8 @@ export class MessageHandler {
    */
   handleApprovalRequest(data) {
     this.finalizeCurrentThinking();
+    // Same notification as a question — an approval card also needs the user's attention.
+    this._playAskUserQuestionSound();
 
     const actionRequests = data.action_requests || [];
     const threadId = data.thread_id;
@@ -533,34 +543,108 @@ export class MessageHandler {
   /**
    * Handle question request (plan mode — agent asks the user a question via interrupt)
    */
-  handleQuestionRequest(data) {
-    this.finalizeCurrentThinking();
-
-    const { question, options, context, thread_id, agent_name } = data;
-    const questionId = `question-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
-
-    const html = this._buildQuestionCardHtml(questionId, question, options || [], context || '', thread_id, agent_name);
-    this.messageRenderer.addMessage(html, 'question_request', null);
-
-    // Attach interactive event listeners after DOM render
-    setTimeout(() => this._attachQuestionListeners(questionId, thread_id, agent_name), 0);
+  /**
+   * Play the notification sound when Leo asks the user a question (normal or UI/UX).
+   * Best-effort: autoplay restrictions may block it until the user has interacted.
+   */
+  _playAskUserQuestionSound() {
+    const sound = document.getElementById('askUserQuestionSound');
+    if (sound) {
+      sound.currentTime = 0;
+      sound.play().catch(() => {
+        // Sound playback failed (likely due to autoplay restrictions)
+      });
+    }
   }
 
-  _buildQuestionCardHtml(questionId, question, options, context, threadId, agentName) {
+  handleQuestionRequest(data) {
+    this.finalizeCurrentThinking();
+    this._playAskUserQuestionSound();
+
+    const { question, options, context, thread_id, agent_name, ui_related } = data;
+    const questionId = `question-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
+
+    const html = this._buildQuestionCardHtml(questionId, question, options || [], context || '', thread_id, agent_name, !!ui_related);
+    this.messageRenderer.addMessage(html, 'question_request', null);
+
+    // Attach interactive event listeners after DOM render, then (if the building
+    // overlay is up) surface a live copy of the question inside it too.
+    setTimeout(() => {
+      this._attachQuestionListeners(questionId, thread_id, agent_name);
+      const chatCard = document.querySelector(`[data-question-id="${questionId}"]`);
+      this._mirrorQuestionToOverlay(chatCard, (clone) =>
+        this._attachQuestionListeners(questionId, thread_id, agent_name, clone));
+    }, 0);
+  }
+
+  /**
+   * If the building overlay is on screen, clone the just-rendered chat question
+   * card into it and wire the clone with the same listeners (cloneNode copies
+   * markup but not event handlers). Tracks the chat/clone pair so a submit from
+   * either copy resolves the question once and disables both. No-op when there's
+   * no overlay — the question simply stays in the chat as usual.
+   */
+  _mirrorQuestionToOverlay(chatCard, wireClone) {
+    this._activeOverlayQuestion = null;
+    if (!chatCard || !this.iframeManager?.overlayElement) return;
+    const clone = chatCard.cloneNode(true);
+    if (!this.iframeManager.showQuestionInOverlay(clone)) return;
+    wireClone(clone);
+    this._activeOverlayQuestion = { chatCard, clone, answered: false };
+  }
+
+  /** Mark a question/uiux card answered and lock its controls. */
+  _markQuestionCardAnswered(cardEl) {
+    if (!cardEl) return;
+    cardEl.classList.add('answered');
+    cardEl.querySelectorAll('button, textarea').forEach(el => { el.disabled = true; });
+  }
+
+  /**
+   * Shared teardown once a question is answered from either copy: disable the twin
+   * card and revert the overlay to building/plan. Returns false if this question was
+   * already answered (the caller should bail to avoid a duplicate question_response).
+   */
+  _finishOverlayQuestion(submittedCard) {
+    const pair = this._activeOverlayQuestion;
+    if (pair) {
+      if (pair.answered) return false;
+      pair.answered = true;
+      const twin = submittedCard === pair.clone ? pair.chatCard : pair.clone;
+      this._markQuestionCardAnswered(twin);
+    }
+    this.iframeManager?.clearQuestionFromOverlay?.();
+    this._activeOverlayQuestion = null;
+    return true;
+  }
+
+  _buildQuestionCardHtml(questionId, question, options, context, threadId, agentName, uiRelated = false) {
     const optionButtons = options.map(opt =>
       `<button class="plan-option-btn" data-option="${this._escapeHtml(opt)}">${this._escapeHtml(opt)}</button>`
     ).join('');
+
+    // When the agent flags the question as UI/UX-related, offer one subtle extra choice.
+    // Selecting it submits a directive (see _attachQuestionListeners) that asks Leo to
+    // follow up with ask_user_uiux_question — i.e. show real visual previews.
+    const uiuxOptionBtn = uiRelated ? `
+      <button class="plan-option-btn plan-uiux-request-btn" data-uiux-request="true"
+              title="Have Leo show you visual UI/UX options to pick from">
+        <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor" aria-hidden="true">
+          <path d="M12 2C6.49 2 2 6.49 2 12s4.49 10 10 10c1.38 0 2.5-1.12 2.5-2.5 0-.61-.23-1.2-.64-1.67-.08-.1-.13-.21-.13-.33 0-.28.22-.5.5-.5H16c3.31 0 6-2.69 6-6 0-4.96-4.49-9-10-9zm-5.5 9c-.83 0-1.5-.67-1.5-1.5S5.67 8 6.5 8 8 8.67 8 9.5 7.33 11 6.5 11zm3-4C8.67 7 8 6.33 8 5.5S8.67 4 9.5 4s1.5.67 1.5 1.5S10.33 7 9.5 7zm5 0c-.83 0-1.5-.67-1.5-1.5S13.67 4 14.5 4s1.5.67 1.5 1.5S15.33 7 14.5 7zm3 4c-.83 0-1.5-.67-1.5-1.5S16.67 8 17.5 8s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/>
+        </svg>See visual options
+      </button>` : '';
 
     const skipBtn = `<button class="plan-skip-btn">Skip</button>`;
 
     return `
       <div class="plan-question-card" data-question-id="${questionId}"
            data-thread-id="${threadId}" data-agent-name="${agentName}">
-        <div class="plan-question-text">${this._escapeHtml(question)}</div>
+        <div class="plan-question-text">${this.messageRenderer.markdownParser.parse(question)}</div>
         ${context ? `<div class="plan-question-context">${this._escapeHtml(context)}</div>` : ''}
-        ${options.length > 0 ? `
+        ${(options.length > 0 || uiRelated) ? `
           <div class="plan-question-options">
             ${optionButtons}
+            ${uiuxOptionBtn}
             ${skipBtn}
           </div>
         ` : ''}
@@ -573,28 +657,53 @@ export class MessageHandler {
     `;
   }
 
-  _attachQuestionListeners(questionId, threadId, agentName) {
-    const card = document.querySelector(`[data-question-id="${questionId}"]`);
+  // cardEl lets us wire a specific node (e.g. the overlay clone, which shares the
+  // chat card's data-question-id); falls back to looking it up by id in the chat.
+  _attachQuestionListeners(questionId, threadId, agentName, cardEl = null) {
+    const card = cardEl || document.querySelector(`[data-question-id="${questionId}"]`);
     if (!card) return;
     let selectedOptions = [];
+    // Tracked separately from selectedOptions: this choice doesn't answer the question,
+    // it asks Leo to re-ask it visually (ask_user_uiux_question).
+    let uiuxRequested = false;
 
     const updateContinueBtn = () => {
       const continueBtn = card.querySelector('.plan-continue-btn');
       const input = card.querySelector('.plan-question-input');
-      const hasSelection = selectedOptions.length > 0;
+      const hasSelection = selectedOptions.length > 0 || uiuxRequested;
       const hasText = input?.value?.trim()?.length > 0;
       continueBtn.style.display = (hasSelection || hasText) ? 'block' : 'none';
     };
 
-    // Option toggle (multi-select)
+    // Build the answer that resumes the agent (real directive) plus a friendly version
+    // to show in the user's own chat bubble. For the UI/UX request we send Leo an explicit
+    // instruction but only show "See visual options" to the user.
+    const buildSubmission = () => {
+      const freeText = card.querySelector('.plan-question-input')?.value?.trim();
+      const parts = [...selectedOptions];
+      const displayParts = [...selectedOptions];
+      if (freeText) { parts.push(freeText); displayParts.push(freeText); }
+      if (uiuxRequested) {
+        parts.push(UIUX_REQUEST_DIRECTIVE);
+        displayParts.push('See visual options');
+      }
+      return { answer: parts.join(', '), display: displayParts.join(', ') };
+    };
+
+    // Option toggle (multi-select). The UI/UX request chip toggles its own flag rather
+    // than contributing an option string.
     card.querySelectorAll('.plan-option-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         btn.classList.toggle('selected');
-        const opt = btn.dataset.option;
-        if (selectedOptions.includes(opt)) {
-          selectedOptions = selectedOptions.filter(o => o !== opt);
+        if (btn.dataset.uiuxRequest === 'true') {
+          uiuxRequested = btn.classList.contains('selected');
         } else {
-          selectedOptions.push(opt);
+          const opt = btn.dataset.option;
+          if (selectedOptions.includes(opt)) {
+            selectedOptions = selectedOptions.filter(o => o !== opt);
+          } else {
+            selectedOptions.push(opt);
+          }
         }
         updateContinueBtn();
       });
@@ -607,10 +716,8 @@ export class MessageHandler {
 
     // Continue button
     card.querySelector('.plan-continue-btn')?.addEventListener('click', () => {
-      const freeText = card.querySelector('.plan-question-input')?.value?.trim();
-      const parts = [...selectedOptions];
-      if (freeText) parts.push(freeText);
-      this._submitQuestionAnswer(card, parts.join(', '), threadId, agentName);
+      const { answer, display } = buildSubmission();
+      this._submitQuestionAnswer(card, answer, threadId, agentName, display);
     });
 
     // Input handling
@@ -618,11 +725,9 @@ export class MessageHandler {
     const sendBtn = card.querySelector('.plan-send-btn');
     input?.addEventListener('input', updateContinueBtn);
     sendBtn?.addEventListener('click', () => {
-      const freeText = input?.value?.trim();
-      const parts = [...selectedOptions];
-      if (freeText) parts.push(freeText);
-      if (parts.length > 0) {
-        this._submitQuestionAnswer(card, parts.join(', '), threadId, agentName);
+      const { answer, display } = buildSubmission();
+      if (answer.length > 0) {
+        this._submitQuestionAnswer(card, answer, threadId, agentName, display);
       }
     });
 
@@ -631,14 +736,21 @@ export class MessageHandler {
     setTimeout(() => card.scrollIntoView({ behavior: 'smooth', block: 'end' }), 150);
   }
 
-  _submitQuestionAnswer(card, answer, threadId, agentName) {
-    // Disable the card
-    card.classList.add('answered');
-    card.querySelectorAll('button, textarea').forEach(el => el.disabled = true);
+  // displayAnswer (optional) is what's shown in the user's chat bubble; `answer` is what
+  // resumes the agent. They differ for the UI/UX request, where the agent receives a full
+  // directive but the user only sees "See visual options".
+  _submitQuestionAnswer(card, answer, threadId, agentName, displayAnswer = null) {
+    // Dedup across the chat card + overlay clone, disable the twin, and revert the
+    // overlay. Bail if this question was already answered from the other copy.
+    if (this._finishOverlayQuestion(card) === false) return;
+
+    // Disable the submitted card
+    this._markQuestionCardAnswered(card);
 
     // Show user answer as a right-aligned message
-    if (answer && answer !== 'skip') {
-      const answerHtml = `<div class="plan-user-answer">${this._escapeHtml(answer)}</div>`;
+    const shown = displayAnswer != null ? displayAnswer : answer;
+    if (shown && shown !== 'skip') {
+      const answerHtml = `<div class="plan-user-answer">${this._escapeHtml(shown)}</div>`;
       this.messageRenderer.addMessage(answerHtml, 'human', null);
     }
 
@@ -667,6 +779,7 @@ export class MessageHandler {
    */
   handleUiuxQuestionRequest(data) {
     this.finalizeCurrentThinking();
+    this._playAskUserQuestionSound();
 
     const { question, options, context, thread_id, agent_name } = data;
     // Always append a synthetic "None of these" choice so the user can reject every
@@ -698,16 +811,23 @@ export class MessageHandler {
       </div>`;
     this.messageRenderer.addMessage(card, 'uiux_question_request', null);
 
-    setTimeout(() => this._attachUiuxCarousel({
-      id, question, context: context || '', options: opts, threadId: thread_id, agentName: agent_name,
-    }), 0);
+    setTimeout(() => {
+      const attachArgs = { id, question, context: context || '', options: opts, threadId: thread_id, agentName: agent_name };
+      this._attachUiuxCarousel(attachArgs);
+      // If the building overlay is up, mirror a live copy of the carousel into it.
+      const chatCard = document.querySelector(`.uiux-carousel[data-uiux-id="${id}"]`);
+      this._mirrorQuestionToOverlay(chatCard, (clone) =>
+        this._attachUiuxCarousel({ ...attachArgs, cardEl: clone }));
+    }, 0);
   }
 
   /**
    * Wire the inline carousel: click-through previews + "Choose this" / "See all".
    */
-  _attachUiuxCarousel({ id, question, context, options, threadId, agentName }) {
-    const card = document.querySelector(`.uiux-carousel[data-uiux-id="${id}"]`);
+  // cardEl lets us wire a specific node (e.g. the overlay clone, which shares the
+  // chat carousel's data-uiux-id); falls back to looking it up by id in the chat.
+  _attachUiuxCarousel({ id, question, context, options, threadId, agentName, cardEl = null }) {
+    const card = cardEl || document.querySelector(`.uiux-carousel[data-uiux-id="${id}"]`);
     if (!card) return;
 
     const n = options.length;
@@ -914,10 +1034,11 @@ export class MessageHandler {
     // Close the modal if it's open (answer may come from inline "Choose this").
     document.querySelector('.uiux-modal')?.remove();
 
-    if (chipEl) {
-      chipEl.classList.add('answered');
-      chipEl.querySelectorAll('button').forEach(b => b.disabled = true);
-    }
+    // Dedup across the chat carousel + overlay clone, disable the twin, and revert
+    // the overlay. Bail if this question was already answered from the other copy.
+    if (this._finishOverlayQuestion(chipEl) === false) return;
+
+    this._markQuestionCardAnswered(chipEl);
 
     if (displayChoice) {
       const answerHtml = `<div class="plan-user-answer">${this._escapeHtml(displayChoice)}</div>`;
@@ -943,6 +1064,8 @@ export class MessageHandler {
    */
   handleSuggestModeSwitch(data) {
     this.finalizeCurrentThinking();
+    // Attention card (e.g. "Switch to Plan mode?") — notify the user like a question.
+    this._playAskUserQuestionSound();
 
     const { reason, target_mode, thread_id, agent_name, original_message } = data;
     const switchId = `switch-${Date.now()}`;
@@ -1020,6 +1143,8 @@ export class MessageHandler {
    */
   handleImplementTicket(data) {
     this.finalizeCurrentThinking();
+    // Attention card (offer to implement the ticket) — notify the user like a question.
+    this._playAskUserQuestionSound();
     const { ticket_id, ticket_title, ticket_content, thread_id, agent_name } = data;
 
     // Helper: perform the actual switch to engineer mode and start building

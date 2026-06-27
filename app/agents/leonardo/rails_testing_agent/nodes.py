@@ -158,7 +158,8 @@ def get_cached_system_prompt():
     date_suffix = f"\n\n---\n**Today's Date:** {current_date}\n(Use this date for regression test naming: bug_{current_date}_description_spec.rb)"
     full_prompt = build_system_prompt_with_project_context(
         RAILS_TESTING_AGENT_PROMPT,
-        suffix=date_suffix
+        suffix=date_suffix,
+        agent_mode="rails_testing_agent",
     )
 
     return SystemMessage(

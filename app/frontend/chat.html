@@ -15,7 +15,7 @@
     <!-- Font Awesome for icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <!-- Link to external CpSS -->
-    <link rel="stylesheet" href="/frontend/style.css?v=10">
+    <link rel="stylesheet" href="/frontend/style.css?v=11">
 </head>
 <style>
     .welcome-fade-in {
@@ -394,6 +394,11 @@
         <source src="/frontend/Leonardo-Task-Error.mp3" type="audio/mpeg">
     </audio>
 
+    <!-- Audio element for ask-user-question sound -->
+    <audio id="askUserQuestionSound" preload="auto">
+        <source src="/frontend/Leonardo-Ask-User-Question-Sound.mp3" type="audio/mpeg">
+    </audio>
+
     <!-- Set document title to current URL and fetch version -->
     <script>
         // Set title to current URL (hostname + port)
@@ -408,6 +413,10 @@
                     const data = await notesResponse.json();
                     const version = data.version;
                     const notes = data.notes || [];
+
+                    // Remember the running version so the update flow can detect
+                    // when the NEW version has come back online after a restart.
+                    window.__llamabotCurrentVersion = version;
 
                     if (version) {
                         console.log(`LlamaBot v${version}`);
@@ -483,46 +492,212 @@
             }
         });
 
-        // Update Now button handler (banner or version badge click)
-        document.addEventListener('click', async function(e) {
-            const updateBtn = e.target.closest('[data-llamabot="update-now-btn"]');
-            const badgeClick = e.target.closest('[data-llamabot="version-badge"].update-available');
-            const indicatorClick = e.target.closest('[data-llamabot="update-indicator"]');
+        // ===================== Update flow (modal + live status) =====================
+        // Replaces the old blocking confirm() + dead "Updating..." button. Clicking
+        // any update affordance opens a modal that: (1) shows what's new and asks to
+        // confirm, (2) streams step-by-step status while the update runs — the user
+        // can minimize it and keep working, (3) detects when the NEW version is back
+        // online by polling /api/version-notes, then offers a one-click hard refresh.
+        //
+        // The session secret is now durable across restarts (DB-backed), so the user
+        // is NOT signed out mid-update — the refresh just reloads the new front-end.
+        (function() {
+            const qs = (name) => document.querySelector(`[data-llamabot="${name}"]`);
+            const wait = (ms) => new Promise(r => setTimeout(r, ms));
 
-            if (!updateBtn && !badgeClick && !indicatorClick) return;
-            if (!window.__llamabotUpdateData) return;
+            const overlay = qs('update-modal');
+            const pill = qs('update-pill');
+            let updateInProgress = false;
+            let updateComplete = false;
 
-            const data = window.__llamabotUpdateData;
-            const lb = data.latest_versions.llamabot;
-            const lp = data.latest_versions.llamapress;
+            function showState(state) {
+                ['confirm', 'progress', 'complete', 'error'].forEach(s => {
+                    const el = qs(`update-modal-${s}`);
+                    if (el) el.classList.toggle('hidden', s !== state);
+                });
+            }
+            function openModal() { if (overlay) overlay.classList.remove('hidden'); }
+            function closeModal() { if (overlay) overlay.classList.add('hidden'); }
+            function modalOpen() { return overlay && !overlay.classList.contains('hidden'); }
+            function setPill(text, ready) {
+                if (!pill) return;
+                const t = qs('update-pill-text');
+                if (t) t.textContent = text;
+                pill.classList.toggle('ready', !!ready);
+                pill.classList.remove('hidden');
+            }
+            function hidePill() { if (pill) pill.classList.add('hidden'); }
 
-            let msg = 'Update available!\n\n';
-            if (lb && lb.version) msg += `LlamaBot: ${lb.version}${lb.notes ? ' - ' + lb.notes : ''}\n`;
-            if (lp && lp.version) msg += `LlamaPress: ${lp.version}${lp.notes ? ' - ' + lp.notes : ''}\n`;
-            msg += '\nThis will pull new images and restart. You may lose your connection briefly.\n\nProceed?';
-
-            if (!confirm(msg)) return;
-
-            // Disable button to prevent double-click
-            const btn = document.querySelector('[data-llamabot="update-now-btn"]');
-            if (btn) {
-                btn.disabled = true;
-                btn.textContent = 'Updating...';
+            function setStep(step, status) {
+                const li = document.querySelector(`[data-llamabot="update-steps"] [data-step="${step}"]`);
+                if (li) { li.classList.remove('active', 'done'); if (status) li.classList.add(status); }
             }
 
-            try {
-                await fetch('/api/update', {
+            // Render "what's new" from the update payload (notes may be string or array).
+            function renderNotes() {
+                const box = qs('update-modal-notes');
+                if (!box) return;
+                const data = window.__llamabotUpdateData || {};
+                const versions = data.latest_versions || {};
+                const fmtNotes = (n) => {
+                    if (!n) return [];
+                    return Array.isArray(n) ? n : String(n).split('\n');
+                };
+                let html = '';
+                [['LlamaBot', versions.llamabot], ['LlamaPress', versions.llamapress]].forEach(([label, v]) => {
+                    if (!v || !v.version) return;
+                    const lines = fmtNotes(v.notes).map(l => l.trim()).filter(Boolean);
+                    html += `<div class="update-note-block">`;
+                    html += `<div class="update-note-title">${label} <span class="update-note-ver">${v.version}</span></div>`;
+                    if (lines.length) {
+                        html += '<ul>' + lines.map(l => `<li>${l.replace(/^[•\-\*]\s*/, '')}</li>`).join('') + '</ul>';
+                    }
+                    html += `</div>`;
+                });
+                box.innerHTML = html || '<div class="update-note-block">A new version is available.</div>';
+            }
+
+            // Poll until the server is reachable again on the expected version.
+            async function waitForReady(targetLb, expectRestart) {
+                const deadline = Date.now() + 180000; // give the restart up to 3 minutes
+                // Brief grace so we don't immediately read the OLD server before it goes down.
+                await wait(expectRestart ? 2500 : 500);
+                while (Date.now() < deadline) {
+                    try {
+                        const r = await fetch('/api/version-notes', { cache: 'no-store' });
+                        if (r.ok) {
+                            const j = await r.json();
+                            // Done when: nothing was expected to change, or the new version answers.
+                            if (!expectRestart || (j && j.version === targetLb)) {
+                                window.__llamabotCurrentVersion = j.version;
+                                return true;
+                            }
+                        }
+                    } catch (e) {
+                        // Server is down mid-restart — expected; keep polling.
+                    }
+                    await wait(2500);
+                }
+                return false;
+            }
+
+            function onComplete(targetLb) {
+                updateInProgress = false;
+                updateComplete = true;
+                const txt = qs('update-complete-text');
+                if (txt) txt.textContent = `You're now on the latest version${targetLb ? ' (' + targetLb + ')' : ''}. Refresh to load the new features.`;
+                if (modalOpen()) { showState('complete'); }
+                else { setPill('Update ready — click to refresh', true); }
+            }
+
+            function onTimeout() {
+                updateInProgress = false;
+                if (modalOpen()) { showState('error'); }
+                else { setPill('Update may need a refresh', true); }
+            }
+
+            async function startUpdate() {
+                if (updateInProgress) return;
+                updateInProgress = true;
+                updateComplete = false;
+
+                const data = window.__llamabotUpdateData || {};
+                const versions = data.latest_versions || {};
+                const lb = versions.llamabot || {};
+                const lp = versions.llamapress || {};
+                const targetLb = lb.version;
+                const currentLb = window.__llamabotCurrentVersion;
+                // llamabot only restarts (and drops the websocket) if its tag actually changes.
+                const expectRestart = !!targetLb && currentLb !== targetLb;
+
+                // Hide the banner so it can't be re-triggered; move to the progress view.
+                const banner = qs('update-banner');
+                if (banner) banner.classList.add('hidden');
+                showState('progress');
+                setStep('sync', 'active');
+                setPill('Updating…', false);
+
+                // Fire the update. POST runs sync + image pull synchronously (server is
+                // still alive), THEN schedules a detached recreate and returns — so the
+                // request usually resolves right as the container restarts. A dropped
+                // connection here is expected, not an error.
+                let pullDone = false;
+                const postPromise = fetch('/api/update', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        llamabot_version: lb.version,
-                        llamapress_version: lp.version
-                    })
-                });
-            } catch (e) {
-                // Expected - server restarts and connection drops
+                    body: JSON.stringify({ llamabot_version: targetLb, llamapress_version: lp.version })
+                }).then(() => { pullDone = true; }).catch(() => { pullDone = true; });
+
+                // Advance optimistic steps while the pull is in flight.
+                await wait(1800);
+                if (!pullDone) { setStep('sync', 'done'); setStep('pull', 'active'); }
+                await postPromise;
+                setStep('sync', 'done');
+                setStep('pull', 'done');
+                setStep('restart', 'active');
+                setPill('Restarting…', false);
+
+                const ok = await waitForReady(targetLb, expectRestart);
+                if (ok) {
+                    setStep('restart', 'done');
+                    setStep('ready', 'done');
+                    onComplete(targetLb);
+                } else {
+                    onTimeout();
+                }
             }
-        });
+
+            // ---- wiring ----
+            document.addEventListener('click', function(e) {
+                // Open / re-open the modal from any update affordance.
+                if (e.target.closest('[data-llamabot="update-now-btn"]') ||
+                    e.target.closest('[data-llamabot="version-badge"].update-available') ||
+                    e.target.closest('[data-llamabot="update-indicator"]')) {
+                    if (!window.__llamabotUpdateData) return;
+                    if (updateComplete) { showState('complete'); openModal(); return; }
+                    if (updateInProgress) { showState('progress'); openModal(); return; }
+                    renderNotes();
+                    showState('confirm');
+                    openModal();
+                    return;
+                }
+                // Confirm → start.
+                if (e.target.closest('[data-llamabot="update-modal-confirm-btn"]')) {
+                    startUpdate();
+                    return;
+                }
+                // "Not now" → just close (banner stays for later).
+                if (e.target.closest('[data-llamabot="update-modal-cancel"]')) {
+                    closeModal();
+                    return;
+                }
+                // "Continue working" → minimize to the corner pill.
+                if (e.target.closest('[data-llamabot="update-modal-minimize"]')) {
+                    closeModal();
+                    setPill('Updating…', false);
+                    return;
+                }
+                // Pill click → reopen the relevant modal state.
+                if (e.target.closest('[data-llamabot="update-pill"]')) {
+                    if (updateComplete) { showState('complete'); }
+                    else if (updateInProgress) { showState('progress'); }
+                    else { showState('error'); }
+                    openModal();
+                    return;
+                }
+                // Refresh → hard reload to pick up the new front-end (revalidates JS/CSS).
+                if (e.target.closest('[data-llamabot="update-modal-refresh"]')) {
+                    window.location.reload();
+                    return;
+                }
+                // Dismiss the timeout notice.
+                if (e.target.closest('[data-llamabot="update-modal-dismiss-error"]')) {
+                    closeModal();
+                    setPill('Update may need a refresh', true);
+                    return;
+                }
+            });
+        })();
     </script>
 
     <!-- Role-based mode and tab restriction -->
@@ -659,7 +834,82 @@
         </div>
     </div>
 
+    <!-- ===================== Update flow modal + minimized pill ===================== -->
+    <div class="update-modal-overlay hidden" data-llamabot="update-modal">
+        <div class="update-modal-card">
+            <!-- STATE: confirm -->
+            <div data-llamabot="update-modal-confirm">
+                <div class="update-modal-head">
+                    <span class="update-modal-badge"><i class="fa-solid fa-arrow-up"></i></span>
+                    <h2>Update available</h2>
+                </div>
+                <p class="update-modal-sub">Here's what you'll get:</p>
+                <div class="update-modal-notes" data-llamabot="update-modal-notes"></div>
+                <p class="update-modal-reassure">
+                    <i class="fa-solid fa-circle-info"></i>
+                    <span>Takes about a minute. You can keep working while it runs — you stay signed in, and we'll tell you the moment it's ready.</span>
+                </p>
+                <div class="update-modal-actions">
+                    <button class="update-modal-btn ghost" data-llamabot="update-modal-cancel">Not now</button>
+                    <button class="update-modal-btn primary" data-llamabot="update-modal-confirm-btn">Update now</button>
+                </div>
+            </div>
+
+            <!-- STATE: progress -->
+            <div class="hidden" data-llamabot="update-modal-progress">
+                <div class="update-modal-head">
+                    <span class="update-modal-spinner"></span>
+                    <h2>Updating…</h2>
+                </div>
+                <ul class="update-steps" data-llamabot="update-steps">
+                    <li data-step="sync"><span class="step-dot"></span> Syncing platform files</li>
+                    <li data-step="pull"><span class="step-dot"></span> Downloading the new version</li>
+                    <li data-step="restart"><span class="step-dot"></span> Restarting services</li>
+                    <li data-step="ready"><span class="step-dot"></span> Bringing everything back online</li>
+                </ul>
+                <p class="update-modal-reassure">
+                    <i class="fa-solid fa-circle-info"></i>
+                    <span>The connection may blink offline for a few seconds while services restart — that's expected, and you won't be signed out.</span>
+                </p>
+                <div class="update-modal-actions">
+                    <button class="update-modal-btn ghost" data-llamabot="update-modal-minimize">Continue working</button>
+                </div>
+            </div>
+
+            <!-- STATE: complete -->
+            <div class="hidden" data-llamabot="update-modal-complete">
+                <div class="update-modal-head">
+                    <span class="update-modal-badge success"><i class="fa-solid fa-check"></i></span>
+                    <h2>Update complete</h2>
+                </div>
+                <p class="update-modal-sub" data-llamabot="update-complete-text">You're now on the latest version. Refresh to load the new features.</p>
+                <div class="update-modal-actions">
+                    <button class="update-modal-btn primary" data-llamabot="update-modal-refresh">Refresh now</button>
+                </div>
+            </div>
+
+            <!-- STATE: timeout / error -->
+            <div class="hidden" data-llamabot="update-modal-error">
+                <div class="update-modal-head">
+                    <span class="update-modal-badge warn"><i class="fa-solid fa-triangle-exclamation"></i></span>
+                    <h2>Taking longer than expected</h2>
+                </div>
+                <p class="update-modal-sub" data-llamabot="update-error-text">The update was started but we couldn't confirm it finished. Your work is safe — keep using the app and refresh in a minute.</p>
+                <div class="update-modal-actions">
+                    <button class="update-modal-btn ghost" data-llamabot="update-modal-dismiss-error">Dismiss</button>
+                    <button class="update-modal-btn primary" data-llamabot="update-modal-refresh">Refresh now</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Minimized progress pill (click to reopen the modal) -->
+    <div class="update-pill hidden" data-llamabot="update-pill" title="Update status">
+        <span class="update-modal-spinner small"></span>
+        <span data-llamabot="update-pill-text">Updating…</span>
+    </div>
+
     <!-- Link to external JavaScript -->
-    <script type="module" src="/frontend/chat/index.js?v=5"></script>
+    <script type="module" src="/frontend/chat/index.js?v=6"></script>
 </body>
 </html>

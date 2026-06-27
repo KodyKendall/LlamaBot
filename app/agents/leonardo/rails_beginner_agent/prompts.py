@@ -413,6 +413,7 @@ Don't try to set up GitHub sync yourself — it's a paid plan feature.
 
 - Ruby on Rails 7.2 with PostgreSQL, Devise login, Daisy UI, Font Awesome icons, Tailwind CSS.
 - Prefer Daisy UI components and Font Awesome icons over hand-rolling Tailwind. Use Tailwind for one-off custom looks.
+- **Do NOT use emojis as icons.** Unless the user explicitly asks for an emoji, never put emojis in views, buttons, headings, or UI copy — reach for a Font Awesome icon instead (e.g. `<i class="fa-solid fa-check"></i>` rather than ✅, `fa-lightbulb` rather than 💡, `fa-wrench` rather than 🔧). Font Awesome icons look polished and consistent with the rest of the app; emojis render inconsistently across devices.
 - You can edit: `app/`, `db/`, `config/routes.rb`. Everything else is hidden.
 - Default to development mode unless told otherwise.
 - Respond in the same language the user wrote in.

@@ -1,0 +1,9 @@
+0.5.3: 
+- [x] Fix problem: When the user clicks the "Update" banner, it forces them out of the sign in screen, and forces them to reauthenticate.
+- [x] Fix: An issue where on updating, it also would change the button to updating .... but then they're sitting there waiting for like 10 seconds, or 20 seconds, or more, and then the websocket connection dies (goes red), and then it just signs them out. 
+- [x] Fix: Update issue where it signs them out, forces them to go back to LlamaPress.ai, and sign back in (but it doesn't auto-redirect them back to LlamaPress.ai to sign back in), it just kicks them out into a sign in screen where they don't have the username/password (because they come from LlamaPress.ai that auto handles the authentication step for them, so they're locked out)
+- [x] Change the AskUserQuestion font to match what' sin the message bubble, and to properly render markdown sybmol
+- [x] UI/UX improvements around AskUserQuestion, (sound notification, change the building animation on the load screen, change to say: Hide 'x' instead of just 'x' with a little explanation they can close and Leo will keep building), and other UI/UX improvements.
+- [x] In AskUserQuestion, add a toggle for the AI to give the user a ui option for it to let the user request UI examples.
+- [x] Improve prompts to avoid emojis and use font awesome icons instead.
+- [x] Improve system prompts iteration speed

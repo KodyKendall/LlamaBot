@@ -206,6 +206,71 @@ def client_with_user(test_user):
         app.dependency_overrides.pop(get_db_session, None)
 
 
+class TestDurableSessionSecret:
+    """The session-cookie secret MUST survive a container restart.
+
+    Regression for the update-banner lockout: SESSION_SECRET used to be
+    persisted to the container's ephemeral .env, so every `bin/update` recreate
+    minted a new secret and silently invalidated every session cookie. Users
+    arrive via a LlamaPress.ai magic-link and have no local password, so an
+    invalidated session locked them out entirely. The secret is now stored in
+    the auth DB (site_settings), which persists across restarts.
+    """
+
+    @staticmethod
+    def _shared_sqlite_engine():
+        # A single shared in-memory DB so a fresh Session() per call sees the
+        # same rows (mirrors a real DB persisting across restarts).
+        from sqlmodel import create_engine
+        from sqlalchemy.pool import StaticPool
+        return create_engine(
+            "sqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+
+    def test_env_var_overrides_everything(self, monkeypatch):
+        monkeypatch.setenv("SESSION_SECRET", "explicit-operator-secret")
+        from app.services import token_service
+        assert token_service._ensure_session_secret() == "explicit-operator-secret"
+
+    def test_secret_is_stable_across_restarts(self, monkeypatch):
+        # No env override → resolves via the DB. Two calls (= two boots) against
+        # the same DB must return the SAME secret, or every cookie is invalidated.
+        monkeypatch.delenv("SESSION_SECRET", raising=False)
+        eng = self._shared_sqlite_engine()
+        monkeypatch.setattr("app.db.engine", eng)
+        from app.services import token_service
+
+        first = token_service._ensure_session_secret()
+        assert first and len(first) >= 32
+
+        monkeypatch.delenv("SESSION_SECRET", raising=False)  # simulate a fresh boot
+        second = token_service._ensure_session_secret()
+        assert second == first
+
+    def test_secret_is_actually_persisted_to_db(self, monkeypatch):
+        monkeypatch.delenv("SESSION_SECRET", raising=False)
+        eng = self._shared_sqlite_engine()
+        monkeypatch.setattr("app.db.engine", eng)
+        from app.services import token_service
+        from sqlmodel import Session
+        from app.models import SiteSetting
+
+        secret = token_service._ensure_session_secret()
+        with Session(eng) as session:
+            row = session.get(SiteSetting, token_service.SESSION_SECRET_DB_KEY)
+        assert row is not None and row.value == secret
+
+    def test_no_db_falls_back_to_ephemeral_without_crashing(self, monkeypatch):
+        # CI / tests with no auth DB must still boot (ephemeral, non-persistent key).
+        monkeypatch.delenv("SESSION_SECRET", raising=False)
+        monkeypatch.setattr("app.db.engine", None)
+        from app.services import token_service
+        secret = token_service._ensure_session_secret()
+        assert secret and len(secret) >= 32
+
+
 class TestPostLogin:
     def test_valid_credentials_set_cookie(self, client_with_user, test_user):
         resp = client_with_user.post(

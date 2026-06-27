@@ -138,3 +138,124 @@ class TestCheckAndSendInterruptsUiuxQuestion:
         assert sent["question"] == ""
         assert sent["options"] == []
         assert sent["context"] == ""
+
+
+class TestAskUserQuestionUiRelated:
+    """Test the ui_related flag on ask_user_question (offers a 'See visual options' choice
+    that asks Leo to follow up with ask_user_uiux_question)."""
+
+    def test_ui_related_passed_through_interrupt(self):
+        """ask_user_question forwards ui_related=True in the interrupt payload."""
+        from app.agents.leonardo.rails_plan_mode_agent.nodes import ask_user_question
+
+        with patch(
+            "app.agents.leonardo.rails_plan_mode_agent.nodes.interrupt"
+        ) as mock_interrupt:
+            mock_interrupt.return_value = "See visual options"
+
+            mock_runtime = MagicMock()
+            mock_runtime.tool_call_id = "tool_call_xyz"
+
+            ask_user_question.func(
+                question="How should the hero look?",
+                runtime=mock_runtime,
+                options=["Big and bold", "Minimal"],
+                context="Phase 1: Clarify",
+                ui_related=True,
+            )
+
+            mock_interrupt.assert_called_once_with({
+                "type": "user_question",
+                "question": "How should the hero look?",
+                "options": ["Big and bold", "Minimal"],
+                "context": "Phase 1: Clarify",
+                "ui_related": True,
+            })
+
+    def test_ui_related_defaults_to_false(self):
+        """ui_related defaults to False when the agent omits it."""
+        from app.agents.leonardo.rails_plan_mode_agent.nodes import ask_user_question
+
+        with patch(
+            "app.agents.leonardo.rails_plan_mode_agent.nodes.interrupt"
+        ) as mock_interrupt:
+            mock_interrupt.return_value = "Big and bold"
+
+            mock_runtime = MagicMock()
+            mock_runtime.tool_call_id = "tool_call_xyz"
+
+            ask_user_question.func(
+                question="What should we name it?",
+                runtime=mock_runtime,
+            )
+
+            assert mock_interrupt.call_args[0][0]["ui_related"] is False
+
+    @pytest.mark.asyncio
+    async def test_ui_related_forwarded_to_frontend(self):
+        """A user_question interrupt forwards ui_related in the question_request."""
+        from app.websocket.request_handler import RequestHandler
+
+        handler = RequestHandler.__new__(RequestHandler)
+        handler._connection_locks = {}
+        handler._is_websocket_open = MagicMock(return_value=True)
+
+        mock_interrupt = MagicMock()
+        mock_interrupt.value = {
+            "type": "user_question",
+            "question": "How should the hero look?",
+            "options": ["Big and bold", "Minimal"],
+            "context": "Phase 1: Clarify",
+            "ui_related": True,
+        }
+
+        mock_task = MagicMock()
+        mock_task.interrupts = [mock_interrupt]
+
+        mock_state_snapshot = MagicMock()
+        mock_state_snapshot.tasks = [mock_task]
+
+        mock_app = AsyncMock()
+        mock_app.aget_state = AsyncMock(return_value=mock_state_snapshot)
+
+        mock_websocket = AsyncMock()
+        message_data = {"thread_id": "thread_123", "agent_name": "rails_plan_mode_agent"}
+
+        result = await handler._check_and_send_interrupts(
+            mock_app, {}, message_data, mock_websocket
+        )
+
+        assert result is True
+        sent = mock_websocket.send_json.call_args[0][0]
+        assert sent["type"] == "question_request"
+        assert sent["ui_related"] is True
+
+    @pytest.mark.asyncio
+    async def test_ui_related_defaults_false_when_missing(self):
+        """A user_question interrupt without ui_related forwards ui_related=False."""
+        from app.websocket.request_handler import RequestHandler
+
+        handler = RequestHandler.__new__(RequestHandler)
+        handler._connection_locks = {}
+        handler._is_websocket_open = MagicMock(return_value=True)
+
+        mock_interrupt = MagicMock()
+        mock_interrupt.value = {"type": "user_question", "question": "Name?"}
+
+        mock_task = MagicMock()
+        mock_task.interrupts = [mock_interrupt]
+
+        mock_state_snapshot = MagicMock()
+        mock_state_snapshot.tasks = [mock_task]
+
+        mock_app = AsyncMock()
+        mock_app.aget_state = AsyncMock(return_value=mock_state_snapshot)
+
+        mock_websocket = AsyncMock()
+        message_data = {"thread_id": "t1", "agent_name": "rails_plan_mode_agent"}
+
+        await handler._check_and_send_interrupts(mock_app, {}, message_data, mock_websocket)
+
+        sent = mock_websocket.send_json.call_args[0][0]
+        assert sent["type"] == "question_request"
+        assert sent["ui_related"] is False
