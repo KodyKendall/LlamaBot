@@ -1351,6 +1351,83 @@ body {
     opacity: 1;
 }
 
+/* ===================== Session feedback banner ===================== */
+.session-feedback-banner {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 0 0 8px;
+    padding: 8px 12px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    font-size: 0.85rem;
+    color: rgba(255, 255, 255, 0.85);
+    animation: session-feedback-in 0.25s ease;
+}
+
+.session-feedback-banner.hidden {
+    display: none;
+}
+
+@keyframes session-feedback-in {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+.session-feedback-prompt {
+    flex: 1;
+}
+
+.session-feedback-choices {
+    display: flex;
+    gap: 8px;
+}
+
+.session-feedback-choices.hidden {
+    display: none;
+}
+
+.session-feedback-choice {
+    background: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.9);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    padding: 4px 12px;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: background-color 0.15s, border-color 0.15s;
+}
+
+.session-feedback-choice:hover {
+    background: rgba(255, 255, 255, 0.18);
+    border-color: rgba(255, 255, 255, 0.3);
+}
+
+.session-feedback-thanks {
+    flex: 1;
+    text-align: right;
+    color: #4ade80;
+}
+
+.session-feedback-thanks.hidden {
+    display: none;
+}
+
+.session-feedback-dismiss {
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 1.1rem;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 2px;
+}
+
+.session-feedback-dismiss:hover {
+    color: rgba(255, 255, 255, 0.9);
+}
+
 /* ===================== Update flow modal ===================== */
 .update-modal-overlay {
     position: fixed;
@@ -1756,11 +1833,12 @@ body {
     border-bottom-left-radius: 4px;
 }
 
-/* Copy button for AI messages */
-[data-llamabot="copy-btn"] {
+/* Copy + feedback (👍/👎) buttons for AI messages — shared control row, top-right */
+[data-llamabot="copy-btn"],
+[data-llamabot="thumb-up-btn"],
+[data-llamabot="thumb-down-btn"] {
     position: absolute;
     top: 4px;
-    right: 4px;
     background: transparent;
     border: none;
     color: rgba(255, 255, 255, 0.4);
@@ -1772,14 +1850,32 @@ body {
     transition: opacity 0.2s, color 0.2s, background-color 0.2s;
 }
 
+[data-llamabot="copy-btn"]       { right: 4px; }
+[data-llamabot="thumb-down-btn"] { right: 32px; }
+[data-llamabot="thumb-up-btn"]   { right: 60px; }
+
 [data-llamabot="ai-message"]:hover [data-llamabot="copy-btn"],
-[data-llamabot="human-message"]:hover [data-llamabot="copy-btn"] {
+[data-llamabot="human-message"]:hover [data-llamabot="copy-btn"],
+[data-llamabot="ai-message"]:hover [data-llamabot="thumb-up-btn"],
+[data-llamabot="ai-message"]:hover [data-llamabot="thumb-down-btn"] {
     opacity: 1;
 }
 
-[data-llamabot="copy-btn"]:hover {
+[data-llamabot="copy-btn"]:hover,
+[data-llamabot="thumb-up-btn"]:hover,
+[data-llamabot="thumb-down-btn"]:hover {
     background-color: rgba(255, 255, 255, 0.1);
     color: rgba(255, 255, 255, 0.8);
+}
+
+/* A chosen thumb stays visible (solid icon) even after the cursor leaves */
+[data-llamabot="thumb-up-btn"] .fa-solid,
+[data-llamabot="thumb-down-btn"] .fa-solid {
+    color: rgba(255, 255, 255, 0.85);
+}
+[data-llamabot="ai-message"] [data-llamabot="thumb-up-btn"]:has(.fa-solid),
+[data-llamabot="ai-message"] [data-llamabot="thumb-down-btn"]:has(.fa-solid) {
+    opacity: 1;
 }
 
 [data-llamabot="tool-message"] {

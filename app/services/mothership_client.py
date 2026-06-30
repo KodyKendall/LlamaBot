@@ -148,6 +148,62 @@ class MothershipClient:
             logger.warning(f"Message report unexpected error: {e}")
             return None
 
+    async def submit_feedback(
+        self,
+        *,
+        thread_id: str,
+        rating: str,
+        scope: str = "message",
+        note: Optional[str] = None,
+        content: Optional[str] = None,
+        sent_at: Optional[str] = None,
+    ) -> Optional[dict]:
+        """
+        POST /api/leonardo/submit_feedback
+
+        End-user 👍/👎 on a single AI message (scope="message") or the whole
+        session (scope="session"). Lands on the mothership as an
+        InstanceMessageAnnotation tagged source="end_user".
+
+        Best-effort, exactly like report_message: never raises, returns None on
+        any failure so a reporting hiccup never blocks the chat.
+        """
+        if not self.enabled:
+            return None
+
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                payload = {
+                    "instance_name": self.config["instance_name"],
+                    "thread_id": thread_id,
+                    "rating": rating,
+                    "scope": scope,
+                }
+                if note:
+                    payload["note"] = note
+                if content:
+                    payload["content"] = content
+                if sent_at:
+                    payload["sent_at"] = sent_at
+                response = await client.post(
+                    f"{self.config['mothership_url']}/api/leonardo/submit_feedback",
+                    json=payload,
+                    headers={"Authorization": f"Bearer {self.config['mothership_api_token']}"},
+                )
+                response.raise_for_status()
+                body = response.json()
+                logger.info(f"submit_feedback response (scope={scope}, rating={rating}): {body}")
+                return body
+        except httpx.HTTPStatusError as e:
+            logger.warning(f"submit_feedback failed (HTTP {e.response.status_code}): {e.response.text}")
+            return None
+        except httpx.RequestError as e:
+            logger.warning(f"submit_feedback request failed: {e}")
+            return None
+        except Exception as e:
+            logger.warning(f"submit_feedback unexpected error: {e}")
+            return None
+
     async def check_paywall(self) -> Optional[dict]:
         """
         POST /api/leonardo/check_paywall

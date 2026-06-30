@@ -245,6 +245,172 @@ class TestWebSocketDisconnectScenarios:
                 "Handler is looping on error instead of exiting gracefully."
 
 
+class TestWebSocketIdempotency:
+    """Reproduces the 0.5.3a duplicate-restart bug at the handler level."""
+
+    @pytest.mark.asyncio
+    async def test_resent_message_with_same_client_id_is_not_reprocessed(self):
+        """
+        Reproduces: a WebSocket drop causes the browser to re-send the same chat
+        message on reconnect. With no idempotency guard the backend cancels the
+        in-flight run and starts a brand-new one, restarting the agent from
+        scratch ("Let me start by reading...").
+
+        The identical message arrives twice (same client_message_id); the agent
+        run must be started exactly ONCE. The second arrival is a reconnect
+        resend and must be ignored.
+        """
+        from app.websocket.message_deduplicator import MessageDeduplicator
+
+        mock_websocket = AsyncMock()
+        mock_websocket.client_state = WebSocketState.CONNECTED
+        mock_manager = AsyncMock()
+        mock_manager.connect = AsyncMock()
+        mock_manager.disconnect = MagicMock()
+        mock_manager.send_personal_message = AsyncMock()
+        mock_manager.deduplicator = MessageDeduplicator()
+
+        payload = {
+            "message": "build me an app from this spreadsheet",
+            "thread_id": "thread-1",
+            "client_message_id": "msg-abc",
+        }
+        # Same message twice (reconnect resend), then disconnect to end the loop.
+        events = [dict(payload), dict(payload),
+                  WebSocketDisconnect(code=1000, reason="bye")]
+
+        async def fake_receive_json():
+            item = events.pop(0)
+            if isinstance(item, Exception):
+                raise item
+            return item
+
+        mock_websocket.receive_json = fake_receive_json
+        from app.websocket.run_manager import RunManager
+        mock_manager.app = MagicMock()
+        mock_manager.app.state.run_manager = RunManager()
+
+        handler = WebSocketHandler(mock_websocket, mock_manager)
+        handler.authenticated = True
+
+        # Patch start_chat_run (the background-run entry) so we assert the
+        # idempotency guard's decision directly, independent of run timing.
+        with patch.object(handler.request_handler, "start_chat_run",
+                          new=AsyncMock()) as mock_start, \
+             patch.object(handler.request_handler, "cleanup_connection",
+                          MagicMock()):
+            await handler.handle_websocket()
+
+        assert mock_start.call_count == 1, (
+            f"Expected one run to start, got {mock_start.call_count} — the "
+            f"resent message was reprocessed (no idempotency guard)."
+        )
+
+    @pytest.mark.asyncio
+    async def test_distinct_messages_both_start_a_run(self):
+        """Two genuinely different messages (distinct ids) must both pass the guard."""
+        from app.websocket.message_deduplicator import MessageDeduplicator
+
+        mock_websocket = AsyncMock()
+        mock_websocket.client_state = WebSocketState.CONNECTED
+        mock_manager = AsyncMock()
+        mock_manager.connect = AsyncMock()
+        mock_manager.disconnect = MagicMock()
+        mock_manager.send_personal_message = AsyncMock()
+        mock_manager.deduplicator = MessageDeduplicator()
+
+        events = [
+            {"message": "first", "thread_id": "t", "client_message_id": "id-1"},
+            {"message": "second", "thread_id": "t", "client_message_id": "id-2"},
+            WebSocketDisconnect(code=1000, reason="bye"),
+        ]
+
+        async def fake_receive_json():
+            item = events.pop(0)
+            if isinstance(item, Exception):
+                raise item
+            return item
+
+        mock_websocket.receive_json = fake_receive_json
+        from app.websocket.run_manager import RunManager
+        mock_manager.app = MagicMock()
+        mock_manager.app.state.run_manager = RunManager()
+
+        handler = WebSocketHandler(mock_websocket, mock_manager)
+        handler.authenticated = True
+
+        with patch.object(handler.request_handler, "start_chat_run",
+                          new=AsyncMock()) as mock_start, \
+             patch.object(handler.request_handler, "cleanup_connection",
+                          MagicMock()):
+            await handler.handle_websocket()
+
+        assert mock_start.call_count == 2
+
+
+class TestWebSocketLayer2Attach:
+    """Handler-level wiring for attach/replay (Layer 2 background runs)."""
+
+    def _make_handler(self):
+        from app.websocket.run_manager import RunManager
+        mock_websocket = AsyncMock()
+        mock_websocket.client_state = WebSocketState.CONNECTED
+        mock_manager = AsyncMock()
+        mock_manager.app = MagicMock()
+        mock_manager.app.state.run_manager = RunManager()
+        mock_manager.send_personal_message = AsyncMock()
+        handler = WebSocketHandler(mock_websocket, mock_manager)
+        handler.authenticated = True
+        return handler, mock_manager
+
+    @pytest.mark.asyncio
+    async def test_attach_replays_missed_messages_then_attached(self):
+        from app.websocket.run_manager import RunHandle, ThreadOutputLog
+        handler, mock_manager = self._make_handler()
+        rm = mock_manager.app.state.run_manager
+
+        handle = RunHandle("t1", ThreadOutputLog())
+        for i in range(3):
+            handle.log.append({"type": "ai", "content": f"c{i}"})  # seqs 1,2,3
+        rm._runs["t1"] = handle
+
+        await handler._handle_attach({"thread_id": "t1", "last_seq": 1})
+
+        sent = [c.args[0] for c in mock_manager.send_personal_message.call_args_list]
+        # Replays seq 2 and 3 (not seq 1), then an "attached" control frame.
+        assert [m.get("seq") for m in sent[:2]] == [2, 3]
+        assert sent[-1]["type"] == "attached"
+        assert sent[-1]["status"] == "running"
+        assert sent[-1]["last_seq"] == 3
+        # The socket is now the live subscriber.
+        assert handle.attached_ws is handler.websocket
+
+    @pytest.mark.asyncio
+    async def test_attach_no_active_run(self):
+        handler, mock_manager = self._make_handler()
+        await handler._handle_attach({"thread_id": "ghost", "last_seq": 0})
+        sent = [c.args[0] for c in mock_manager.send_personal_message.call_args_list]
+        assert sent[-1]["type"] == "no_active_run"
+
+    @pytest.mark.asyncio
+    async def test_attach_signals_gap_when_window_evicted(self):
+        from app.websocket.run_manager import RunHandle, ThreadOutputLog
+        handler, mock_manager = self._make_handler()
+        rm = mock_manager.app.state.run_manager
+
+        handle = RunHandle("t1", ThreadOutputLog(maxlen=2))
+        for i in range(5):
+            handle.log.append({"type": "ai", "content": i})  # only seqs 4,5 retained
+        rm._runs["t1"] = handle
+
+        # Client last saw seq 1 → 2,3 evicted → gap, must reload from checkpoint.
+        await handler._handle_attach({"thread_id": "t1", "last_seq": 1})
+        sent = [c.args[0] for c in mock_manager.send_personal_message.call_args_list]
+        assert any(m["type"] == "replay_gap" for m in sent)
+        # No raw message entries were replayed (only control frames).
+        assert all(m.get("type") in ("replay_gap", "attached") for m in sent)
+
+
 class TestWebSocketIntegration:
     """Integration tests for WebSocket functionality."""
     

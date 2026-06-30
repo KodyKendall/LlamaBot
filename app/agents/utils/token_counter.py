@@ -11,7 +11,7 @@ causing compaction to never trigger for DeepSeek conversations.
 
 # Summarization threshold configuration
 # This value is used by both backend (SummarizationMiddleware) and frontend (TokenIndicator)
-SUMMARIZATION_TOKEN_THRESHOLD = 100000
+SUMMARIZATION_TOKEN_THRESHOLD = 150000
 
 # Token budget for the recent-message tail kept verbatim AFTER a summarization.
 # SummarizationMiddleware is configured with keep=("tokens", SUMMARIZATION_KEEP_TOKENS)

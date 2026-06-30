@@ -33,6 +33,11 @@ class WebSocketHandler:
         self.authenticated = not WS_AUTH_REQUIRED  # Auto-auth if auth not required
         self.auth_user = None
 
+        # Threads this connection has driven/subscribed to. Background runs are
+        # owned by the app-level RunManager, not this connection — on disconnect
+        # we DETACH from these (so the run keeps going), we do not cancel them.
+        self._attached_threads: set = set()
+
     def _is_websocket_open(self, websocket: WebSocket) -> bool:
         """Check if the WebSocket connection is still open"""
         return websocket.client_state == WebSocketState.CONNECTED
@@ -95,10 +100,56 @@ class WebSocketHandler:
 
         return False
 
+    async def _handle_attach(self, json_data: dict) -> None:
+        """Resume a background run after (re)connect: replay missed output, then live-tail.
+
+        The client sends ``{type:"attach", thread_id, last_seq}`` with the
+        highest seq it has already rendered. We mark this socket as the run's
+        live subscriber and replay everything after ``last_seq``. If the missed
+        window was evicted (gap) or there's no run for the thread (finished long
+        ago / process restarted), we tell the client to reload thread history.
+        The client dedupes by seq, so any overlap between this replay and the
+        live tail is harmless.
+        """
+        thread_id = str(json_data.get("thread_id"))
+        try:
+            last_seq = int(json_data.get("last_seq") or 0)
+        except (TypeError, ValueError):
+            last_seq = 0
+
+        self._attached_threads.add(thread_id)
+        run_manager = self.request_handler._run_manager()
+        handle = run_manager.attach(thread_id, self.websocket)
+
+        if handle is None:
+            await self.manager.send_personal_message({
+                "type": "no_active_run",
+                "thread_id": thread_id,
+            }, self.websocket)
+            return
+
+        log = handle.log
+        if log.has_gap(last_seq):
+            # Missed messages were evicted — client must reload from checkpoint.
+            await self.manager.send_personal_message({
+                "type": "replay_gap",
+                "thread_id": thread_id,
+                "min_seq": log.min_seq,
+            }, self.websocket)
+        else:
+            for entry in log.since(last_seq):
+                await self.manager.send_personal_message(entry, self.websocket)
+
+        await self.manager.send_personal_message({
+            "type": "attached",
+            "thread_id": thread_id,
+            "status": log.status,
+            "last_seq": log.last_seq,
+        }, self.websocket)
+
     async def handle_websocket(self):
         logger.info(f"New WebSocket connection attempt from {self.websocket.client}")
         await self.manager.connect(self.websocket)
-        current_task = None
 
         # Track if we've sent an auth warning (only send once)
         auth_warning_sent = False
@@ -135,33 +186,47 @@ class WebSocketHandler:
                             break
                         continue
 
-                    # Handle cancel (always allowed)
+                    # Handle cancel (always allowed) — stop the background run(s)
+                    # for the target thread (explicit user "stop").
                     if isinstance(json_data, dict) and json_data.get("type") == "cancel":
                         logger.info("CANCEL RECV")
-                        if current_task and not current_task.done():
-                            current_task.cancel()
-                            # Only send if WebSocket is still open
-                            if self._is_websocket_open(self.websocket):
-                                await self.manager.send_personal_message({
-                                    "type": "system_message",
-                                    "content": "Previous task has been cancelled"
-                                }, self.websocket)
+                        run_manager = self.request_handler._run_manager()
+                        target = json_data.get("thread_id")
+                        targets = [str(target)] if target else list(self._attached_threads)
+                        cancelled_any = False
+                        for tid in targets:
+                            if await run_manager.cancel(tid):
+                                cancelled_any = True
+                        if cancelled_any and self._is_websocket_open(self.websocket):
+                            await self.manager.send_personal_message({
+                                "type": "system_message",
+                                "content": "Previous task has been cancelled"
+                            }, self.websocket)
+                        continue
+
+                    # Handle attach — a (re)connecting client resuming a background
+                    # run. Replays missed output then live-tails. See run_manager.py.
+                    if isinstance(json_data, dict) and json_data.get("type") == "attach":
+                        logger.info("ATTACH RECV")
+                        await self._handle_attach(json_data)
                         continue
 
                     # Handle approval response (user approved/rejected a HITL tool call)
                     if isinstance(json_data, dict) and json_data.get("type") == "approval_response":
                         logger.info("APPROVAL_RESPONSE RECV")
-                        current_task = asyncio.create_task(
-                            self.request_handler.handle_approval_response(json_data, self.websocket)
-                        )
+                        tid = json_data.get("thread_id")
+                        if tid:
+                            self._attached_threads.add(str(tid))
+                        await self.request_handler.start_resume_run(json_data, self.websocket, "approval")
                         continue
 
                     # Handle question response (user answered a plan mode question)
                     if isinstance(json_data, dict) and json_data.get("type") == "question_response":
                         logger.info("QUESTION_RESPONSE RECV")
-                        current_task = asyncio.create_task(
-                            self.request_handler.handle_question_response(json_data, self.websocket)
-                        )
+                        tid = json_data.get("thread_id")
+                        if tid:
+                            self._attached_threads.add(str(tid))
+                        await self.request_handler.start_resume_run(json_data, self.websocket, "question")
                         continue
 
                     # For all other messages, check authentication
@@ -183,23 +248,41 @@ class WebSocketHandler:
                                 logger.info(f"Unauthenticated WebSocket from {self.websocket.client} (auth not required)")
                                 auth_warning_sent = True
 
-                    # Cancel any in-flight task so the new message interrupts the agent.
-                    # Thread state corruption from mid-tool cancellation is repaired on the
-                    # next run by _repair_thread_state_if_needed in RequestHandler.
-                    if current_task and not current_task.done():
-                        logger.info("Cancelling previous task")
-                        current_task.cancel()
-                        try:
-                            await current_task
-                        except asyncio.CancelledError:
-                            logger.info("Previous task was cancelled successfully")
+                    # Idempotency guard (Layer 1 seatbelt): a dropped socket can
+                    # make the browser re-send a message it already delivered
+                    # (see resend-on-reconnect in frontend/chat/index.js). Without
+                    # this guard the re-send would cancel the in-flight run and
+                    # restart the agent from scratch. Recognize the duplicate by
+                    # (thread_id, client_message_id), ACK it, and ignore it.
+                    # Clients that don't send client_message_id (Rails gem, older
+                    # browsers) are always treated as new.
+                    client_message_id = json_data.get("client_message_id")
+                    thread_id = json_data.get("thread_id")
+                    is_new_message = self.manager.deduplicator.register(thread_id, client_message_id)
+                    if client_message_id and self._is_websocket_open(self.websocket):
+                        await self.manager.send_personal_message({
+                            "type": "ack",
+                            "client_message_id": client_message_id,
+                            "status": "accepted" if is_new_message else "duplicate",
+                        }, self.websocket)
+                    if not is_new_message:
+                        logger.info(
+                            f"Ignoring duplicate message {client_message_id} on thread "
+                            f"{thread_id} (idempotency guard); leaving in-flight run intact."
+                        )
+                        continue
 
                     message = ChatMessage(**json_data)
+                    if thread_id:
+                        self._attached_threads.add(str(thread_id))
 
                     logger.info(f"Received message: {message}")
-                    current_task = asyncio.create_task(
-                        self.request_handler.handle_request(message, self.websocket)
-                    )
+                    # Start the turn as a background run owned by the per-thread
+                    # RunManager (decoupled from this socket, which is attached as
+                    # a live subscriber). A new message supersedes any in-flight
+                    # run for the thread; that cancellation + thread-state repair
+                    # is handled inside RunManager / _repair_thread_state_if_needed.
+                    await self.request_handler.start_chat_run(message, self.websocket)
                 except WebSocketDisconnect as e:
                     if e.code == 1000:
                         logger.info(f"WebSocket connection closed gracefully by client: {e.reason}")
@@ -226,13 +309,13 @@ class WebSocketHandler:
                     "content": f"Error 253: {str(e)}"
                 }, self.websocket)
         finally:
-            if current_task and not current_task.done():
-                current_task.cancel()
-                try:
-                    logger.info("Cancelling current task")
-                    await current_task
-                except asyncio.CancelledError:
-                    logger.info("Current task was cancelled successfully")
-                    pass
+            # Detach from any background runs this connection subscribed to — but
+            # DO NOT cancel them. A dropped browser must not kill an in-progress
+            # build; the run keeps going and the client replays it on reconnect
+            # via `attach`. Explicit cancellation only happens on a `cancel`
+            # message or when a new message supersedes the run.
+            run_manager = self.request_handler._run_manager()
+            for tid in self._attached_threads:
+                run_manager.detach(tid, self.websocket)
             self.manager.disconnect(self.websocket)
             self.request_handler.cleanup_connection(self.websocket)

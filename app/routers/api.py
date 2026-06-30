@@ -761,6 +761,45 @@ async def update_activity(request: Request, username: str = Depends(auth)):
     return {"timestamp": request.app.state.timestamp.isoformat()}
 
 
+class FeedbackRequest(BaseModel):
+    thread_id: str
+    rating: str
+    scope: str = "message"
+    note: str | None = None
+    content: str | None = None
+    sent_at: str | None = None
+
+
+@router.post("/api/feedback", response_class=JSONResponse)
+async def api_submit_feedback(request: Request, body: FeedbackRequest, username: str = Depends(auth)):
+    """
+    Forward an end-user 👍/👎 to the mothership.
+
+    Thin same-origin passthrough (the browser is already authed to this box),
+    mirroring /api/update-activity. Best-effort: a reporting hiccup must never
+    500 the browser, so any failure returns {"success": False}.
+    """
+    if body.rating not in ("good", "bad"):
+        return {"success": False, "error": "rating must be 'good' or 'bad'"}
+
+    mothership = getattr(request.app.state, "mothership_client", None)
+    if mothership is None:
+        from app.services.mothership_client import MothershipClient
+        mothership = MothershipClient()
+    if not mothership.enabled:
+        return {"success": False, "reason": "mothership_not_configured"}
+
+    result = await mothership.submit_feedback(
+        thread_id=body.thread_id,
+        rating=body.rating,
+        scope=body.scope,
+        note=body.note,
+        content=body.content,
+        sent_at=body.sent_at,
+    )
+    return {"success": bool(result and result.get("success"))}
+
+
 @router.get("/api/lease-status", response_class=JSONResponse)
 async def get_lease_status(request: Request):
     """Debug endpoint: show lease manager status."""

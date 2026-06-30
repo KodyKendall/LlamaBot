@@ -30,6 +30,7 @@ from app.agents.leonardo.rails_agent.sub_agents import delegate_research
 from app.agents.leonardo.rails_ai_builder_agent.prompts import RAILS_AI_BUILDER_AGENT_PROMPT
 from app.agents.leonardo.project_context import build_system_prompt_with_project_context
 from app.agents.leonardo.llm_factory import get_llm
+from app.agents.leonardo.agent_factory import repair_orphaned_tool_calls_in_messages
 
 import logging
 logger = logging.getLogger(__name__)
@@ -83,6 +84,13 @@ def leonardo_ai_builder(state: RailsAgentState) -> Command[Literal["tools"]]:
 
    if view_path:
       messages = messages + [HumanMessage(content="<NOTE_FROM_SYSTEM> The user is currently viewing their Ruby on Rails webpage route at: " + view_path + " </NOTE_FROM_SYSTEM>")]
+
+   # Repair orphaned tool calls before any .invoke() below. This raw StateGraph
+   # node never runs AgentMiddleware, so it can't rely on the repair middleware —
+   # without this a dangling AIMessage tool_call 400s every later turn
+   # ('insufficient tool messages'). SI#112. Covers all cache_control/tools
+   # branches since only HumanMessages are appended after this point.
+   messages = repair_orphaned_tool_calls_in_messages(messages)
 
    # Tools
    tools = [

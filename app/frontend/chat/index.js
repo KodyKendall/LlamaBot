@@ -102,11 +102,10 @@ class ChatApp {
     this.isAgentRunning = false;
     this.cancelPressCount = 0;
 
-    // Resume-on-reconnect: if the WS drops while the agent is running, we
-    // stash the last payload and re-send it once the socket reconnects so
-    // the user gets a response without having to retype.
+    // Last payload we sent (carries its client_message_id). Kept so the backend
+    // idempotency guard has a stable key; resume-on-reconnect no longer re-sends
+    // it — Layer 2 attaches to the still-running background run instead.
     this.lastSentMessageData = null;
-    this.pendingResendData = null;
 
     // Activity tracking for lease management
     this.lastActivitySync = 0;
@@ -200,7 +199,8 @@ class ChatApp {
       this.config,
       this.container,
       this.elements,
-      this.faviconBadgeManager
+      this.faviconBadgeManager,
+      this.appState
     );
 
     // Initialize thread manager
@@ -230,39 +230,39 @@ class ChatApp {
     this.appState.setSocket(socket);
 
     // On transient disconnects, leave the thinking indicator running — the
-    // backend agent task is cancelled but we'll re-send the last message on
-    // reconnect (see resume-on-reconnect below). Only show the lost-connection
-    // error when retries are exhausted.
+    // backend run keeps going (Layer 2: it's a background run, not bound to this
+    // socket) and we re-attach on reconnect to replay what we missed. Only show
+    // the lost-connection error when retries are exhausted.
     window.addEventListener('websocketReconnectFailed', () => {
-      this.pendingResendData = null;
       this.webSocketManager?.clearQueue();
       this.hideThinkingIndicator();
       this.setAgentRunning(false);
     });
 
-    // If the WS drops while the agent is running, queue the last payload for
-    // resend on the next successful (re)connect — unless the manager's outbox
-    // already holds it (i.e. it never made it out in the first place), in which
-    // case the outbox will deliver it and we'd otherwise double-send.
-    window.addEventListener('websocketDisconnected', () => {
-      if (this.isAgentRunning && this.lastSentMessageData
-          && !this.webSocketManager?.hasQueued(this.lastSentMessageData)) {
-        this.pendingResendData = this.lastSentMessageData;
-      }
-    });
-
-    // On (re)connect, flush any queued resend. The small delay lets the auth
-    // message go first (sendAuthMessage is async; see checkAutoPrompt for the
-    // same pattern).
+    // On (re)connect, if a run is in progress, ATTACH to the background run for
+    // the active thread and replay anything we missed while disconnected — we do
+    // NOT re-send the user message (that's what caused the duplicate-restart
+    // bug). The client_message_id idempotency guard remains a backstop. The
+    // small delay lets the auth message go first (sendAuthMessage is async).
     window.addEventListener('websocketConnected', () => {
-      if (!this.pendingResendData) return;
-      const payload = this.pendingResendData;
-      this.pendingResendData = null;
+      if (!this.isAgentRunning) return;
+      const threadId = this.appState.getThreadId?.();
+      if (!threadId) return;
+      const lastSeq = this.messageHandler?.getLastSeq?.(threadId) || 0;
       setTimeout(() => {
-        if (this.webSocketManager?.send(payload)) {
-          console.log('Resumed: re-sent last message after reconnect');
+        if (this.webSocketManager?.send({ type: 'attach', thread_id: threadId, last_seq: lastSeq })) {
+          console.log(`Resumed: attached to background run (thread=${threadId}, last_seq=${lastSeq})`);
         }
       }, 300);
+    });
+
+    // Layer 2: the background run for this thread is gone (server restarted, or
+    // the replay window was evicted). We can't replay live output; stop the
+    // spinner so the UI isn't stuck. The thread's final state is in the
+    // checkpointer and shows on the next load/refresh.
+    window.addEventListener('websocketReplayUnavailable', () => {
+      this.hideThinkingIndicator();
+      this.setAgentRunning(false);
     });
 
     // Listen for agent task completion to stop duration timer and show elapsed time
@@ -271,12 +271,14 @@ class ChatApp {
       this.stopDurationTimerDisplay();
       this.setAgentRunning(false);
       this.lastSentMessageData = null;
-      this.pendingResendData = null;
 
       // Update any completed plan badges with the elapsed time
       if (elapsedTime) {
         this.updateCompletedPlanBadges(elapsedTime);
       }
+
+      // Maybe surface the "How is Leo doing this session?" banner.
+      this.maybeShowSessionFeedback();
     });
 
     // Listen for HITL approval decisions and send via WebSocket
@@ -461,7 +463,96 @@ class ChatApp {
   /**
    * Initialize event listeners
    */
+  /**
+   * Wire the bottom "How is Leo doing this session?" banner. The banner itself is
+   * surfaced by maybeShowSessionFeedback() after a few turns on a thread; here we
+   * just bind Good / Bad (POST scope:"session") and the dismiss (×) button.
+   * Per-thread state ('answered' | 'dismissed') is persisted in localStorage so we
+   * never nag the same thread twice.
+   */
+  setupSessionFeedback() {
+    const q = (sel) => this.container.querySelector(`[data-llamabot="${sel}"]`);
+    const banner = q('session-feedback-banner');
+    if (!banner) return;
+    this._feedbackBanner = banner;
+    this._feedbackTurns = new Map();       // threadId -> completed turns this page-load
+    this._feedbackThresholds = new Map();  // threadId -> randomized trigger point
+    this._feedbackShown = new Set();       // threadIds already surfaced this page-load
+
+    const choices = banner.querySelector('.session-feedback-choices');
+    const thanks = q('session-feedback-thanks');
+
+    const stateKey = () => {
+      const tid = this.appState.getThreadId?.();
+      return tid ? `leo_session_feedback_${tid}` : null;
+    };
+    const remember = (state) => {
+      const key = stateKey();
+      if (key) { try { localStorage.setItem(key, state); } catch (e) { /* ignore */ } }
+    };
+    const hide = () => banner.classList.add('hidden');
+
+    const submit = (rating) => {
+      const threadId = this.appState.getThreadId?.();
+      if (threadId) {
+        fetch('/api/feedback', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ thread_id: threadId, rating, scope: 'session' }),
+        }).catch((err) => console.warn('session feedback failed', err));
+      }
+      remember('answered');
+      choices?.classList.add('hidden');
+      thanks?.classList.remove('hidden');
+      setTimeout(hide, 1500);
+    };
+
+    q('session-feedback-good')?.addEventListener('click', () => submit('good'));
+    q('session-feedback-bad')?.addEventListener('click', () => submit('bad'));
+    q('session-feedback-dismiss')?.addEventListener('click', () => { remember('dismissed'); hide(); });
+  }
+
+  /**
+   * Called after each completed assistant turn. Surfaces the session-feedback
+   * banner once per thread, after a randomized ~10-turn warm-up, unless the thread
+   * was already answered/dismissed (persisted) or the banner is already showing.
+   */
+  maybeShowSessionFeedback() {
+    const banner = this._feedbackBanner;
+    if (!banner) return;
+    const threadId = this.appState.getThreadId?.();
+    if (!threadId) return;
+
+    // Already answered/dismissed on this thread (survives reloads)?
+    try {
+      if (localStorage.getItem(`leo_session_feedback_${threadId}`)) return;
+    } catch (e) { /* ignore */ }
+    if (this._feedbackShown.has(threadId)) return;
+    if (!banner.classList.contains('hidden')) return;  // currently visible
+
+    const turns = (this._feedbackTurns.get(threadId) || 0) + 1;
+    this._feedbackTurns.set(threadId, turns);
+
+    let threshold = this._feedbackThresholds.get(threadId);
+    if (threshold == null) {
+      // ~10 messages in: a "turn" here is one user→assistant exchange (≈2 messages),
+      // so 5–7 turns ≈ 10–14 messages. Randomized so it doesn't feel mechanical.
+      threshold = 5 + Math.floor(Math.random() * 3);  // 5–7
+      this._feedbackThresholds.set(threadId, threshold);
+    }
+    if (turns < threshold) return;
+
+    this._feedbackShown.add(threadId);
+    banner.querySelector('.session-feedback-choices')?.classList.remove('hidden');
+    this.container.querySelector('[data-llamabot="session-feedback-thanks"]')?.classList.add('hidden');
+    banner.classList.remove('hidden');
+  }
+
   initEventListeners() {
+    // "How is Leo doing this session?" bottom banner (Good/Bad + dismiss)
+    this.setupSessionFeedback();
+
     // Send button (doubles as stop button when agent is running)
     if (this.elements.sendButton) {
       this.elements.sendButton.addEventListener('click', () => {
@@ -762,10 +853,10 @@ class ChatApp {
    */
   handleStopClick() {
     if (!this.webSocketManager) return;
-    this.webSocketManager.send({ type: 'cancel' });
+    // Include thread_id so the backend cancels the right background run.
+    this.webSocketManager.send({ type: 'cancel', thread_id: this.appState.getThreadId?.() });
     this.cancelPressCount++;
     this.lastSentMessageData = null;
-    this.pendingResendData = null;
   }
 
   /**
@@ -1291,17 +1382,28 @@ class ChatApp {
     const executionMode = this.appState.getExecutionMode();
     let agentName = this.appState.getAgentConfig().name;
     if (executionMode === 'plan') {
-      // Engineer mode gets its own plan agent (retains engineering depth);
-      // every other mode uses the beginner-flavored plan agent.
-      agentName = (agentMode === 'engineer')
-        ? 'rails_engineer_plan_mode_agent'
-        : 'rails_plan_mode_agent';
+      // Each base mode that has its own plan-flavored agent keeps it (so toggling
+      // Plan ON preserves that mode's flow); everything else uses the beginner plan agent.
+      // - engineer -> retains engineering depth
+      // - ticket   -> retains the ticket flow but grounds the story with questions first
+      const planAgentByMode = {
+        engineer: 'rails_engineer_plan_mode_agent',
+        ticket: 'rails_ticket_plan_mode_agent',
+      };
+      agentName = planAgentByMode[agentMode] || 'rails_plan_mode_agent';
     }
 
-    // Send message
+    // Send message. The client_message_id is the idempotency key: it stays
+    // constant across reconnect resends so the backend can recognize and ignore
+    // a duplicate instead of restarting the agent. crypto.randomUUID needs a
+    // secure context (these pages are https); fall back to a random string.
+    const clientMessageId = (window.crypto && window.crypto.randomUUID)
+      ? window.crypto.randomUUID()
+      : `cmid-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const messageData = {
       message: message,
       thread_id: threadId,
+      client_message_id: clientMessageId,
       origin: window.location.host,
       debug_info: debugInfo,
       agent_name: agentName,
@@ -1313,7 +1415,6 @@ class ChatApp {
 
     this.webSocketManager.send(messageData);
     this.lastSentMessageData = messageData;
-    this.pendingResendData = null;
     this.setAgentRunning(true);
 
     // Call custom callback if provided

@@ -3,6 +3,9 @@ from starlette.websockets import WebSocketState
 import asyncio
 import logging
 from typing import Union
+
+from app.websocket.message_deduplicator import MessageDeduplicator
+
 logger = logging.getLogger(__name__)
 
 class WebSocketConnectionManager:
@@ -11,6 +14,10 @@ class WebSocketConnectionManager:
         self.active_connections: list[WebSocket] = []
         self.active_tasks: set = set()
         self._connection_ids: set = set()  # Track unique connections
+        # Shared across every connection so a reconnect (which creates a fresh
+        # handler) still recognizes a re-sent message registered by the previous
+        # connection. See message_deduplicator.py for the invariant.
+        self.deduplicator = MessageDeduplicator()
 
     def _is_websocket_open(self, websocket: WebSocket) -> bool:
         """Check if the WebSocket connection is still open"""
