@@ -6,7 +6,7 @@ import { MarkdownParser } from './MarkdownParser.js';
 import { ToolMessageRenderer } from './ToolMessageRenderer.js';
 
 export class MessageRenderer {
-  constructor(messageHistoryElement, iframeManager = null, getRailsDebugInfoCallback = null, scrollManager = null, loadingVerbs = null, config = {}, container = null, elements = {}, faviconBadgeManager = null) {
+  constructor(messageHistoryElement, iframeManager = null, getRailsDebugInfoCallback = null, scrollManager = null, loadingVerbs = null, config = {}, container = null, elements = {}, faviconBadgeManager = null, appState = null) {
     this.messageHistory = messageHistoryElement;
     this.markdownParser = new MarkdownParser();
     this.toolRenderer = new ToolMessageRenderer(iframeManager, getRailsDebugInfoCallback);
@@ -16,9 +16,12 @@ export class MessageRenderer {
     this.container = container;
     this.elements = elements;
     this.faviconBadgeManager = faviconBadgeManager;
+    this.appState = appState;
 
     // Set up event delegation for code block copy buttons
     this.setupCodeBlockCopyHandler();
+    // Set up event delegation for per-message 👍/👎 feedback buttons
+    this.setupFeedbackHandler();
   }
 
   /**
@@ -233,6 +236,75 @@ export class MessageRenderer {
       });
     };
     messageDiv.appendChild(copyBtn);
+
+    // 👍 / 👎 end-user feedback, in the same control row as copy.
+    const thumbUp = document.createElement('button');
+    thumbUp.setAttribute('data-llamabot', 'thumb-up-btn');
+    thumbUp.innerHTML = '<i class="fa-regular fa-thumbs-up"></i>';
+    thumbUp.title = 'Good response';
+    messageDiv.appendChild(thumbUp);
+
+    const thumbDown = document.createElement('button');
+    thumbDown.setAttribute('data-llamabot', 'thumb-down-btn');
+    thumbDown.innerHTML = '<i class="fa-regular fa-thumbs-down"></i>';
+    thumbDown.title = 'Bad response';
+    messageDiv.appendChild(thumbDown);
+  }
+
+  /**
+   * Event delegation for per-message 👍/👎 buttons.
+   * 👍 sends immediately; 👎 prompts for an optional one-line note first.
+   * Idempotent — re-clicking just re-sends (the mothership upserts).
+   */
+  setupFeedbackHandler() {
+    this.messageHistory.addEventListener('click', (e) => {
+      const upBtn = e.target.closest('[data-llamabot="thumb-up-btn"]');
+      const downBtn = e.target.closest('[data-llamabot="thumb-down-btn"]');
+      if (!upBtn && !downBtn) return;
+
+      e.stopPropagation();
+      const btn = upBtn || downBtn;
+      const rating = upBtn ? 'good' : 'bad';
+      const messageDiv = btn.closest('[data-llamabot="ai-message"], [data-raw-content]');
+      const content = messageDiv?.getAttribute('data-raw-content') || '';
+
+      let note = null;
+      if (rating === 'bad') {
+        // Optional one-line note for 👎; cancel (null) still sends the rating.
+        note = window.prompt('What went wrong? (optional)') || null;
+      }
+
+      this.submitMessageFeedback({ rating, content, note });
+
+      // Visual confirmation: solid-fill the chosen thumb, reset its sibling.
+      const row = messageDiv || btn.parentElement;
+      const up = row.querySelector('[data-llamabot="thumb-up-btn"] i');
+      const down = row.querySelector('[data-llamabot="thumb-down-btn"] i');
+      if (up) up.className = rating === 'good' ? 'fa-solid fa-thumbs-up' : 'fa-regular fa-thumbs-up';
+      if (down) down.className = rating === 'bad' ? 'fa-solid fa-thumbs-down' : 'fa-regular fa-thumbs-down';
+    });
+  }
+
+  /**
+   * POST a per-message rating to the local box, which forwards it to the mothership.
+   * Best-effort: failures are logged, never surfaced to the user or blocking the chat.
+   */
+  submitMessageFeedback({ rating, content, note = null }) {
+    const threadId = this.appState?.getThreadId?.();
+    if (!threadId) return;
+    fetch('/api/feedback', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        thread_id: threadId,
+        rating,
+        scope: 'message',
+        content: content || undefined,
+        note: note || undefined,
+        sent_at: new Date().toISOString(),
+      }),
+    }).catch((err) => console.warn('message feedback failed', err));
   }
 
   /**

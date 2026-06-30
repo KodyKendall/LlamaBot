@@ -26,6 +26,11 @@ export class MessageHandler {
     this.activePlanId = null;
     this.planStepMapping = new Map(); // Maps step content to step DOM IDs
 
+    // Layer 2 replay cursor: highest background-run `seq` rendered per thread.
+    // Lets attach-on-reconnect ask for only what we missed, and lets us ignore
+    // any message we've already seen (replay/live-tail overlap).
+    this._lastSeqByThread = {};
+
     // Track current thinking message for inline display
     this.currentThinkingId = null;
     this.currentThinkingBuffer = '';
@@ -112,7 +117,31 @@ export class MessageHandler {
   /**
    * Handle incoming WebSocket message
    */
+  /** Highest background-run seq already rendered for a thread (for attach). */
+  getLastSeq(threadId) {
+    return this._lastSeqByThread[threadId || '_'] || 0;
+  }
+
   handleMessage(data) {
+    // Layer 2: messages from a background run carry a monotonic per-thread `seq`.
+    // Ignore any we've already rendered so replay-on-reconnect and the live tail
+    // can overlap harmlessly. Control frames (no seq) always pass through.
+    if (typeof data.seq === 'number') {
+      const tid = this.appState.getThreadId?.() || '_';
+      if (data.seq <= (this._lastSeqByThread[tid] || 0)) return;
+      this._lastSeqByThread[tid] = data.seq;
+    }
+
+    // Attach/replay control frames (Layer 2). `attached` is informational — the
+    // run's own messages (incl. the `end` frame) are delivered via replay/tail.
+    if (data.type === 'attached') {
+      return;
+    }
+    if (data.type === 'no_active_run' || data.type === 'replay_gap') {
+      window.dispatchEvent(new CustomEvent('websocketReplayUnavailable', { detail: data }));
+      return;
+    }
+
     // Update token indicator if token usage data is present
     if (data.token_usage && this.tokenIndicator) {
       this.tokenIndicator.update(data.token_usage);

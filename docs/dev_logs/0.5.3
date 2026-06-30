@@ -7,3 +7,9 @@
 - [x] In AskUserQuestion, add a toggle for the AI to give the user a ui option for it to let the user request UI examples.
 - [x] Improve prompts to avoid emojis and use font awesome icons instead.
 - [x] Improve system prompts iteration speed
+
+0.5.3a:
+- [x] Fix websocket bug - needs to be invariant & not resend the same message.
+- [x] Add noise for the ticket mode proactive yes/no thing.
+- [x] Fix recurring 400 "tool_calls must be followed by tool messages": orphaned-tool-call repair was wired into rails_agent only. Extracted the repair into a shared app/agents/leonardo/agent_factory.py (build_leonardo_agent wraps create_agent to prepend the repair middleware for all 9 create_agent agents; pure repair_orphaned_tool_calls_in_messages() called before .invoke() in the 2 raw-StateGraph agents) + a parametrized backstop test so a new agent can't forget the wiring. (SI#112)
+- [x] Add end-user feedback reporting to the mothership: per-message 👍/👎 next to the copy button, plus a "How is Leo doing this session?" banner that auto-appears once per thread after ~10 messages (Good/Bad + dismiss). New MothershipClient.submit_feedback() + POST /api/feedback forward to /api/leonardo/submit_feedback (best-effort, never blocks chat); lands as source:"end_user" InstanceMessageAnnotation rows.

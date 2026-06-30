@@ -20,7 +20,7 @@ langgraph's InjectedState because create_agent provides middleware support.
 
 from langchain_anthropic import ChatAnthropic
 from app.agents.leonardo.llm_factory import make_summarization_model
-from langchain.agents import create_agent
+from app.agents.leonardo.agent_factory import build_leonardo_agent
 from langchain.agents.middleware import SummarizationMiddleware
 from app.agents.leonardo.summarization import make_summarization_middleware
 from langchain_core.messages import SystemMessage, ToolMessage
@@ -335,7 +335,7 @@ def build_workflow(checkpointer=None):
     ]
 
     # Create and return the agent
-    return create_agent(
+    return build_leonardo_agent(
         model=default_model,
         tools=default_tools,
         system_prompt=get_cached_system_prompt(),

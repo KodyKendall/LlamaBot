@@ -7,6 +7,7 @@
       "rails_ai_builder_agent": "./agents/leonardo/rails_ai_builder_agent/nodes.py:build_workflow",
       "rails_testing_agent": "./agents/leonardo/rails_testing_agent/nodes.py:build_workflow",
       "rails_ticket_mode_agent": "./agents/leonardo/rails_ticket_mode_agent/nodes.py:build_workflow",
+      "rails_ticket_plan_mode_agent": "./agents/leonardo/rails_ticket_plan_mode_agent/nodes.py:build_workflow",
       "rails_user_mode_agent": "./agents/leonardo/rails_user_mode_agent/nodes.py:build_workflow",
       "rails_beginner_agent": "./agents/leonardo/rails_beginner_agent/nodes.py:build_workflow",
       "rails_plan_mode_agent": "./agents/leonardo/rails_plan_mode_agent/nodes.py:build_workflow",

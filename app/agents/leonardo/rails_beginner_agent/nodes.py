@@ -26,6 +26,7 @@ from app.agents.leonardo.rails_agent.sub_agents import delegate_task, delegate_r
 from app.agents.leonardo.rails_beginner_agent.prompts import BEGINNER_AGENT_PROMPT
 from app.agents.leonardo.project_context import build_beginner_system_prompt
 from app.agents.leonardo.llm_factory import get_llm
+from app.agents.leonardo.agent_factory import repair_orphaned_tool_calls_in_messages
 
 import logging
 logger = logging.getLogger(__name__)
@@ -114,6 +115,14 @@ def leonardo_beginner(state: RailsAgentState, browser_inspect_on: bool = False) 
         messages = messages + [HumanMessage(
             content="<NOTE_FROM_SYSTEM> The user is currently viewing their Ruby on Rails webpage route at: " + view_path + " </NOTE_FROM_SYSTEM>"
         )]
+
+    # Repair orphaned tool calls before EITHER .invoke() below. This raw
+    # StateGraph node never runs AgentMiddleware, so it can't rely on
+    # RepairOrphanedToolCallsMiddleware — without this an interrupted/crashed
+    # tool call leaves a dangling AIMessage tool_call and every later turn 400s
+    # ('insufficient tool messages'). SI#112. Only appends HumanMessages follow,
+    # so one repair here covers the failure-limit and main invoke branches.
+    messages = repair_orphaned_tool_calls_in_messages(messages)
 
     tools = [
         write_todos,

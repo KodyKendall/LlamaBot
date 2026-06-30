@@ -73,12 +73,55 @@ class RequestHandler:
         self.locks: Dict[int, Lock] = {}
         self.app = app
     
-    def _get_lock(self, websocket: WebSocket) -> Lock:
-        """Get or create a lock for a specific websocket connection"""
-        ws_id = id(websocket)
-        if ws_id not in self.locks:
-            self.locks[ws_id] = Lock()
-        return self.locks[ws_id]
+    def _get_lock(self, websocket) -> Lock:
+        """Get or create a lock for a run.
+
+        A background run is driven through a RunSink (which carries a
+        ``thread_id``), so key the lock by thread there — this serializes turns
+        for the same thread regardless of which connection drove them. For a raw
+        websocket (legacy / direct calls) fall back to per-connection keying.
+        """
+        thread_id = getattr(websocket, "thread_id", None)
+        key = ("thread", str(thread_id)) if thread_id is not None else id(websocket)
+        if key not in self.locks:
+            self.locks[key] = Lock()
+        return self.locks[key]
+
+    def _run_manager(self):
+        """The shared app-level RunManager (lazily created)."""
+        rm = getattr(self.app.state, "run_manager", None)
+        if rm is None:
+            from app.websocket.run_manager import RunManager
+            rm = RunManager()
+            self.app.state.run_manager = rm
+        return rm
+
+    async def start_chat_run(self, message: dict, websocket: WebSocket):
+        """Start a chat turn as a background run, decoupled from the live socket.
+
+        The run is owned by the per-thread RunManager, not the connection, so it
+        survives a disconnect; the socket is attached as a live subscriber. A new
+        message for the same thread supersedes (cancels) the prior run.
+        """
+        thread_id = str(message.get("thread_id"))
+
+        async def factory(sink):
+            await self.handle_request(message, sink)
+
+        await self._run_manager().start(thread_id, factory, websocket)
+
+    async def start_resume_run(self, response_message: dict, websocket: WebSocket, kind: str):
+        """Resume after an approval/question answer as a background run."""
+        thread_id = str(response_message.get("thread_id"))
+
+        if kind == "approval":
+            async def factory(sink):
+                await self.handle_approval_response(response_message, sink)
+        else:
+            async def factory(sink):
+                await self.handle_question_response(response_message, sink)
+
+        await self._run_manager().start(thread_id, factory, websocket)
 
     def _is_websocket_open(self, websocket: WebSocket) -> bool:
         """Check if the WebSocket connection is still open"""
@@ -518,22 +561,13 @@ class RequestHandler:
 
                 async for chunk in app.astream(stream_input, config=config, stream_mode=["updates", "messages"], subgraphs=True):
 
-                    # If the WS died mid-stream (e.g., uvicorn keepalive ping
-                    # timeout), stop here. Continuing would let the graph keep
-                    # advancing through tool nodes and writing checkpoints with
-                    # no observer, producing orphan ToolMessages that corrupt
-                    # the thread.
-                    if not self._is_websocket_open(websocket):
-                        logger.warning(
-                            f"WS closed mid-stream for thread {incoming_message.get('thread_id')}; "
-                            f"aborting astream consumer."
-                        )
-                        if mothership is not None:
-                            asyncio.create_task(mothership.report_disconnect(
-                                thread_id=str(incoming_message.get("thread_id", "")),
-                                reason="ws_closed_mid_stream",
-                            ))
-                        break
+                    # Layer 2: this loop runs inside a background run (RunManager)
+                    # writing to a RunSink, NOT bound to the live socket. We do
+                    # NOT abort when the browser drops — the run is the observer
+                    # that drives the graph to completion (so no orphan
+                    # ToolMessages) and every chunk is logged for replay when the
+                    # client reconnects. `websocket` here is the sink, whose
+                    # client_state is always CONNECTED. See run_manager.py.
 
                     # NOTE: In LangGraph 0.5, they introduced this "subgraphs" parameter, that changes the datashape if you set it to True.
                     # if subgraph=True, it returns a tuple with 3 elements, instead of 2 elements.

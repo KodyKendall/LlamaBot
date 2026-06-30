@@ -360,11 +360,37 @@ export class IframeManager {
     tipEl.style.opacity = '1';
     const renderTip = (i) => {
       const t = tips[i];
-      // Each tip is prefixed with "Tip:" so the user knows it's a tip.
-      const body = t.href
-        ? `<a href="${t.href}" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline;">${t.text}</a>`
-        : t.text;
-      tipEl.innerHTML = `<i class="fa-solid ${t.icon}"></i><span>Tip: ${body}</span>`;
+      // Each tip is prefixed with "Tip:" so the user knows it's a tip. Build the
+      // node tree explicitly (rather than an innerHTML string) so the link is a
+      // real <a> we can wire a click handler to. The anchor opens in a new tab
+      // via target=_blank, and an explicit window.open() fallback guarantees the
+      // new tab even if the default navigation is swallowed (e.g. when the chat
+      // is embedded in another page).
+      tipEl.innerHTML = '';
+      const icon = document.createElement('i');
+      icon.className = `fa-solid ${t.icon}`;
+      const span = document.createElement('span');
+      if (t.href) {
+        span.appendChild(document.createTextNode('Tip: '));
+        const link = document.createElement('a');
+        link.href = t.href;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.textContent = t.text;
+        link.style.color = 'inherit';
+        link.style.textDecoration = 'underline';
+        link.style.cursor = 'pointer';
+        link.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          window.open(t.href, '_blank', 'noopener,noreferrer');
+        });
+        span.appendChild(link);
+      } else {
+        span.textContent = `Tip: ${t.text}`;
+      }
+      tipEl.appendChild(icon);
+      tipEl.appendChild(span);
     };
     tipsContainer.appendChild(tipEl);
 

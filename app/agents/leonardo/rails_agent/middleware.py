@@ -473,68 +473,15 @@ class ToolResultImageClearingMiddleware(AgentMiddleware):
 # Orphaned Tool Call Repair Middleware
 # =============================================================================
 
-class RepairOrphanedToolCallsMiddleware(AgentMiddleware):
-    """Inject placeholder ToolMessages for AIMessage tool_calls that have no response.
-
-    When a tool raises an unhandled exception (e.g. tavily.InvalidAPIKeyError),
-    LangGraph's ToolNode re-raises it instead of returning a ToolMessage. The
-    conversation state then has an AIMessage with tool_calls but no matching
-    ToolMessages, permanently breaking all future turns in that thread (the
-    provider rejects the history with '400 insufficient tool messages').
-
-    This middleware detects that situation on every model call and injects
-    synthetic placeholder ToolMessages so the history is valid before the model
-    sees it. The placeholders are NOT persisted to state — they exist only for
-    the duration of the LLM call, keeping the fix invisible to the checkpointer.
-    """
-
-    def _repair(self, messages):
-        # Collect all tool_call_ids that already have a ToolMessage in the thread.
-        responded_ids = {
-            msg.tool_call_id
-            for msg in messages
-            if isinstance(msg, ToolMessage) and msg.tool_call_id
-        }
-
-        result = []
-        any_injected = False
-        for msg in messages:
-            result.append(msg)
-            if isinstance(msg, AIMessage) and getattr(msg, "tool_calls", None):
-                missing = [
-                    tc for tc in msg.tool_calls
-                    if tc.get("id") and tc["id"] not in responded_ids
-                ]
-                for tc in missing:
-                    logger.warning(
-                        "RepairOrphanedToolCallsMiddleware: injecting placeholder "
-                        "ToolMessage for orphaned tool_call_id=%s name=%s",
-                        tc["id"], tc.get("name", "?"),
-                    )
-                    result.append(ToolMessage(
-                        content=(
-                            "Tool call did not complete — the tool may have crashed "
-                            "(e.g. missing API key). The operator should check the "
-                            "server logs for the root cause."
-                        ),
-                        tool_call_id=tc["id"],
-                    ))
-                    responded_ids.add(tc["id"])
-                    any_injected = True
-
-        return result if any_injected else messages
-
-    def wrap_model_call(self, request, handler):
-        messages = self._repair(list(request.messages))
-        if messages is not request.messages:
-            return handler(request.override(messages=messages))
-        return handler(request)
-
-    async def awrap_model_call(self, request, handler):
-        messages = self._repair(list(request.messages))
-        if messages is not request.messages:
-            return await handler(request.override(messages=messages))
-        return await handler(request)
+# RepairOrphanedToolCallsMiddleware (and its pure helper
+# repair_orphaned_tool_calls_in_messages) now live in the shared
+# app.agents.leonardo.agent_factory module so EVERY Leonardo graph can share one
+# implementation — not just rails_agent (SupportIncident #112). Re-exported here
+# for back-compat with existing imports.
+from app.agents.leonardo.agent_factory import (  # noqa: E402
+    RepairOrphanedToolCallsMiddleware,
+    repair_orphaned_tool_calls_in_messages,
+)
 
 
 # =============================================================================

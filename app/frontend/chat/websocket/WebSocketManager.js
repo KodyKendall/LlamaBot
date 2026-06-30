@@ -11,7 +11,9 @@ import { TokenManager } from '../auth/TokenManager.js';
 //  - `auth` tokens are regenerated fresh on every (re)connect, so a stale one is useless.
 //  - `cancel` only means something for the run that was live when it was issued;
 //    replaying it after reconnect could cancel a brand-new run.
-const NON_QUEUEABLE_TYPES = new Set(['auth', 'cancel']);
+//  - `attach` carries a point-in-time last_seq; it's only ever sent on a live
+//    (re)connect, and replaying a stale one would mis-replay the run.
+const NON_QUEUEABLE_TYPES = new Set(['auth', 'cancel', 'attach']);
 
 export class WebSocketManager {
   constructor(messageHandler, config = {}, elements = {}) {
@@ -222,6 +224,16 @@ export class WebSocketManager {
       console.warn('WebSocket auth warning:', data.content);
       // Try to authenticate again
       this.sendAuthMessage();
+      return;
+    }
+
+    // Server acknowledged receipt of a user message. Surface the
+    // client_message_id so the resume-on-reconnect logic knows the server
+    // already has it and must not re-send it (which would duplicate the turn).
+    if (data.type === 'ack') {
+      window.dispatchEvent(new CustomEvent('websocketMessageAcked', {
+        detail: { client_message_id: data.client_message_id, status: data.status }
+      }));
       return;
     }
 

@@ -124,6 +124,12 @@ app.state.async_checkpointer = None
 app.state.timestamp = datetime.now(timezone.utc)
 app.state.compiled_graphs = {}  # Cache for pre-compiled LangGraph workflows
 
+# Layer 2: background LangGraph runs survive socket drops; the live socket is a
+# subscriber that replays on reconnect. Shared across all connections. See
+# app/websocket/run_manager.py and docs/dev/websocket_background_runs.md.
+from app.websocket.run_manager import RunManager
+app.state.run_manager = RunManager()
+
 # Mothership integration for lease management
 app.state.mothership_client = MothershipClient()
 app.state.lease_manager = LeaseManager(app, app.state.mothership_client)
