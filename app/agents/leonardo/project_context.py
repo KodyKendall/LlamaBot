@@ -4,6 +4,7 @@ Loads .leonardo/ workspace files and appends them to system prompts.
 """
 
 import os
+import json
 import logging
 from typing import Optional
 
@@ -21,6 +22,13 @@ MEMORY_MD_PATH = ".leonardo/MEMORY.md"
 SOUL_MD_PATH = ".leonardo/SOUL.md"
 USER_MD_PATH = ".leonardo/USER.md"
 IDENTITY_MD_PATH = ".leonardo/IDENTITY.md"
+BRAND_MD_PATH = ".leonardo/BRAND.md"
+BRAND_JSON_PATH = ".leonardo/brand.json"
+
+# Below this many chars we inline the whole brand guide into the prompt; above
+# it we inject only a compact palette summary and point the agent at the
+# ``brand-guidelines`` skill for the full guide (progressive disclosure).
+BRAND_INLINE_THRESHOLD = 1500
 
 
 def _load_md_file(path: str, label: str) -> Optional[str]:
@@ -59,6 +67,82 @@ def get_identity_md_content() -> Optional[str]:
     return _load_md_file(IDENTITY_MD_PATH, "IDENTITY.md")
 
 
+def get_brand_md_content() -> Optional[str]:
+    return _load_md_file(BRAND_MD_PATH, "BRAND.md")
+
+
+def _get_brand_json() -> Optional[dict]:
+    """Load the structured brand guide (brand.json) if present."""
+    if not os.path.exists(BRAND_JSON_PATH):
+        return None
+    try:
+        with open(BRAND_JSON_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        logger.warning(f"Error reading brand.json: {e}")
+        return None
+
+
+def _compact_brand_summary() -> Optional[str]:
+    """A tiny, always-bounded palette + logo list built from brand.json.
+
+    Used when the full BRAND.md is too long to inline — the colors are the
+    high-frequency, high-value part an agent needs on every styling turn, so we
+    keep them in-prompt and push the long-form guidance to the skill.
+    """
+    data = _get_brand_json()
+    if not data:
+        return None
+    lines = []
+    colors = [c for c in (data.get("colors") or []) if (c.get("hex") or "").strip()]
+    if colors:
+        palette = ", ".join(
+            f"{(c.get('name') or 'Color').strip()} {(c.get('hex') or '').strip()}"
+            for c in colors
+        )
+        lines.append(f"Colors: {palette}")
+    logos = data.get("logos") or []
+    if logos:
+        names = ", ".join(
+            (lg.get("name") or lg.get("path") or "logo").strip() for lg in logos
+        )
+        lines.append(f"Logos: {names}")
+    return "\n".join(lines) if lines else None
+
+
+def build_brand_context() -> Optional[str]:
+    """Return the brand-guide body to inject into a model call, or None.
+
+    Progressive disclosure: a short guide is inlined whole; a long guide is
+    reduced to the compact palette plus a pointer to the ``brand-guidelines``
+    skill (which ``use_skill`` loads on demand).
+    """
+    md = get_brand_md_content()
+    if not md:
+        return None
+    if len(md) <= BRAND_INLINE_THRESHOLD:
+        return md
+    summary = _compact_brand_summary() or "(brand guide available)"
+    return (
+        summary
+        + "\n\nThe full brand guidelines are long — load them on demand with the "
+        "`brand-guidelines` skill (call use_skill) before doing any visual, "
+        "design, or theming work."
+    )
+
+
+def brand_context_section() -> str:
+    """Full markdown section (with heading) to append to a system prompt, or ''.
+
+    Used by the two raw-``StateGraph`` agents, which rebuild their system prompt
+    every turn (so this stays live). ``create_agent`` agents instead receive the
+    brand context per-request from ``BrandContextMiddleware`` because their
+    compiled graph — and thus its baked system prompt — is cached at startup.
+    """
+    body = build_brand_context()
+    if not body:
+        return ""
+    return "\n\n---\n\n# Brand Guide (from BRAND.md)\n\n" + body
 
 
 def resolve_base_prompt(static_default: str, agent_mode: Optional[str]) -> str:

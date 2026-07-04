@@ -22,6 +22,7 @@ from app.agents.leonardo.rails_agent.tools import (
     write_todos,
     internet_search,
     save_memory, list_memories, delete_memory,
+    build_use_skill_tool, list_skills, read_skill, write_skill, edit_skill, delete_skill,
 )
 from app.agents.leonardo.pyxl_agent.tools import (
     list_spreadsheets,
@@ -95,6 +96,7 @@ default_tools = [
     write_todos,
     internet_search,
     save_memory, list_memories, delete_memory,
+    list_skills, read_skill, write_skill, edit_skill, delete_skill,  # Skill library
     read_tech_spec, write_tech_spec,
 ]
 
@@ -122,7 +124,7 @@ def build_workflow(checkpointer=None):
 
     return build_leonardo_agent(
         model=default_model,
-        tools=default_tools,
+        tools=[*default_tools, build_use_skill_tool()],
         system_prompt=get_cached_system_prompt(),
         state_schema=RailsAgentState,
         middleware=middleware,

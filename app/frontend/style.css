@@ -1040,30 +1040,69 @@ body {
 }
 
 /* Tooltip for toolbar tools */
-.toolbar-tool::before {
-    content: attr(title);
+/* ============================================================
+   Unified fast tooltips
+   ------------------------------------------------------------
+   Driven by data-tooltip="..." instead of the native `title`
+   attribute. Native title tooltips are held back by the browser
+   for ~1s and can't be sped up; these appear after ~150ms and
+   fade in. Pair data-tooltip with aria-label so screen readers
+   still announce the control.
+
+   Default: tooltip sits ABOVE the control (good for the input
+   toolbar at the bottom of the panel). Add
+   data-tooltip-pos="bottom" for controls near the top edge
+   (header buttons, browser tab bar) so the bubble drops below.
+   ============================================================ */
+[data-tooltip] {
+    position: relative;
+}
+
+[data-tooltip]::before {
+    content: attr(data-tooltip);
     position: absolute;
     bottom: calc(100% + 8px);
     left: 50%;
-    transform: translateX(-50%) scale(0.9);
+    transform: translateX(-50%) translateY(4px);
+    width: max-content;
+    max-width: 220px;
     padding: 6px 10px;
-    background: rgba(20, 20, 25, 0.95);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(20, 20, 25, 0.97);
+    border: 1px solid rgba(255, 255, 255, 0.12);
     border-radius: 6px;
-    color: rgba(255, 255, 255, 0.9);
+    color: rgba(255, 255, 255, 0.92);
     font-size: 0.75rem;
-    white-space: nowrap;
+    font-weight: 500;
+    line-height: 1.35;
+    text-align: center;
+    white-space: normal;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
     opacity: 0;
     visibility: hidden;
-    transition: all 0.15s ease;
     pointer-events: none;
-    z-index: 100;
+    z-index: 1000;
+    transition: opacity 0.12s ease, transform 0.12s ease, visibility 0.12s;
+    transition-delay: 0s;
 }
 
-.toolbar-tool:hover::before {
+[data-tooltip]:hover::before,
+[data-tooltip]:focus-visible::before {
     opacity: 1;
     visibility: visible;
-    transform: translateX(-50%) scale(1);
+    transform: translateX(-50%) translateY(0);
+    transition-delay: 0.15s;
+}
+
+/* Drop the bubble below the control (top-edge buttons) */
+[data-tooltip][data-tooltip-pos="bottom"]::before {
+    bottom: auto;
+    top: calc(100% + 8px);
+    transform: translateX(-50%) translateY(-4px);
+}
+
+[data-tooltip][data-tooltip-pos="bottom"]:hover::before,
+[data-tooltip][data-tooltip-pos="bottom"]:focus-visible::before {
+    transform: translateX(-50%) translateY(0);
 }
 
 /* Model selector container */
@@ -1084,6 +1123,350 @@ body {
     background: rgba(45, 40, 60, 0.95);
     border-color: rgba(139, 92, 246, 0.3);
 }
+
+/* ===== Brand Guide (opened from the tools toolbar) ===== */
+.brand-guide-container {
+    margin-bottom: 10px;
+    animation: toolbar-slide-in 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.brand-guide-container.hidden {
+    display: none;
+}
+
+.brand-guide {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 14px;
+    max-height: 52vh;
+    overflow-y: auto;
+    background: linear-gradient(135deg, rgba(45, 40, 60, 0.97) 0%, rgba(35, 30, 50, 0.99) 100%);
+    border: 1px solid rgba(139, 92, 246, 0.2);
+    border-radius: 12px;
+    box-shadow:
+        0 8px 32px rgba(0, 0, 0, 0.4),
+        inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(20px);
+}
+
+.brand-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.brand-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.95);
+}
+
+.brand-title i { color: #A78BFA; }
+
+.brand-save-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0.4rem 0.7rem;
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: #fff;
+    background: linear-gradient(135deg, #8B5CF6 0%, #6366F1 100%);
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: filter 0.15s ease, transform 0.1s ease;
+}
+
+.brand-save-btn:hover { filter: brightness(1.08); }
+.brand-save-btn:active { transform: scale(0.98); }
+.brand-save-btn:disabled { opacity: 0.7; cursor: default; }
+
+.brand-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.brand-section-title {
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.45);
+}
+
+.brand-colors,
+.brand-logos {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+/* --- Color rows --- */
+.brand-color-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.brand-swatch-wrap {
+    position: relative;
+    width: 30px;
+    height: 30px;
+    flex-shrink: 0;
+    cursor: pointer;
+}
+
+.brand-swatch {
+    display: block;
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.2);
+}
+
+.brand-native {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    padding: 0;
+    border: none;
+    opacity: 0;
+    cursor: pointer;
+}
+
+.brand-color-name {
+    flex: 1 1 40%;
+    min-width: 0;
+}
+
+.brand-color-hex {
+    flex: 0 0 90px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.brand-color-name,
+.brand-color-hex,
+.brand-logo-name,
+.brand-notes {
+    font-size: 0.82rem;
+    padding: 0.42rem 0.55rem;
+    color: rgba(255, 255, 255, 0.95);
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid rgba(139, 92, 246, 0.25);
+    border-radius: 8px;
+    outline: none;
+}
+
+.brand-color-name:focus,
+.brand-color-hex:focus,
+.brand-logo-name:focus,
+.brand-notes:focus {
+    border-color: rgba(139, 92, 246, 0.7);
+}
+
+.brand-row-actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex-shrink: 0;
+}
+
+.brand-icon-btn {
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.55);
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.brand-icon-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.95);
+}
+
+.brand-icon-btn.brand-remove:hover {
+    background: rgba(239, 68, 68, 0.18);
+    color: #F87171;
+}
+
+/* --- Logo rows --- */
+.brand-logo-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.brand-logo-thumb {
+    width: 34px;
+    height: 34px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    overflow: hidden;
+}
+
+.brand-logo-thumb img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+}
+
+.brand-logo-name { flex: 1; min-width: 0; }
+
+.brand-empty {
+    font-size: 0.78rem;
+    color: rgba(255, 255, 255, 0.4);
+    padding: 4px 2px;
+}
+
+.brand-notes {
+    width: 100%;
+    min-height: 66px;
+    resize: vertical;
+    font-family: inherit;
+    line-height: 1.4;
+}
+
+/* --- Add buttons --- */
+.brand-add-btn {
+    align-self: flex-start;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0.35rem 0.6rem;
+    font-size: 0.76rem;
+    color: rgba(255, 255, 255, 0.7);
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px dashed rgba(139, 92, 246, 0.35);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.brand-add-btn:hover {
+    background: rgba(139, 92, 246, 0.15);
+    color: rgba(255, 255, 255, 0.95);
+    border-color: rgba(139, 92, 246, 0.6);
+}
+
+.brand-add-btn:disabled { opacity: 0.6; cursor: default; }
+
+.brand-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.brand-close-btn {
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.6);
+    background: rgba(255, 255, 255, 0.06);
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.brand-close-btn:hover {
+    background: rgba(239, 68, 68, 0.18);
+    color: #F87171;
+}
+
+/* Logo thumbnail is a button now (click to open the full-size preview) */
+button.brand-logo-thumb {
+    position: relative;
+    padding: 0;
+    cursor: zoom-in;
+}
+
+.brand-logo-zoom {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    color: #fff;
+    background: rgba(0, 0, 0, 0.45);
+    opacity: 0;
+    border-radius: 8px;
+    transition: opacity 0.15s ease;
+}
+
+button.brand-logo-thumb:hover .brand-logo-zoom {
+    opacity: 1;
+}
+
+/* ===== Standalone color attach (toolbar) ===== */
+/* Attached color chips (above the input, like image attachments) */
+.color-attach-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.color-attach-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 6px 3px 4px;
+    background: rgba(139, 92, 246, 0.12);
+    border: 1px solid rgba(139, 92, 246, 0.3);
+    border-radius: 999px;
+    font-size: 0.76rem;
+}
+
+.color-attach-chip-swatch {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+.color-attach-chip-hex {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    letter-spacing: 0.4px;
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.color-attach-chip-close {
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.55);
+    cursor: pointer;
+    font-size: 15px;
+    line-height: 1;
+    padding: 0 2px;
+}
+
+.color-attach-chip-close:hover { color: #F87171; }
 
 /* Mobile responsive for toolbar */
 @media screen and (max-width: 480px) {
@@ -3012,12 +3395,18 @@ body {
 }
 
 /* Selected element badge */
+.selected-elements-container {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    margin-bottom: 0.5rem;
+}
+
 .selected-element-badge {
     display: flex;
     align-items: center;
     gap: 0.5rem;
     padding: 0.5rem 0.75rem;
-    margin-bottom: 0.5rem;
     background: rgba(76, 175, 80, 0.15);
     border: 1px solid rgba(76, 175, 80, 0.3);
     border-radius: 8px;
@@ -7083,6 +7472,54 @@ body {
 .slash-command-item .command-warning {
     color: #fbbf24;
     font-size: 0.9rem;
+}
+
+/* Section headers ("Commands" / "Skills") in the slash menu. */
+.slash-command-group-header {
+    padding: 6px 14px 4px;
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: rgba(255, 255, 255, 0.4);
+    position: sticky;
+    top: 0;
+    background: inherit;
+}
+
+/* Agent Skill entries in the slash menu — visually distinct from host commands. */
+.slash-command-item.skill-command .command-name {
+    color: #38bdf8;
+}
+
+/* The "/skills" meta entry that lists all skills. */
+.slash-command-item.skills-meta .command-name {
+    color: #38bdf8;
+}
+
+/* Empty-state note shown for "/skills" when nothing is installed. */
+.slash-command-empty {
+    padding: 10px 14px;
+    font-size: 0.85rem;
+    color: rgba(255, 255, 255, 0.55);
+    font-style: italic;
+}
+
+.slash-command-item .command-skill-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: 8px;
+    padding: 1px 7px;
+    border-radius: 999px;
+    background: rgba(56, 189, 248, 0.15);
+    color: #38bdf8;
+    font-family: -apple-system, system-ui, sans-serif;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    vertical-align: middle;
 }
 
 /* ============== Slash Command Confirmation Modal ============== */

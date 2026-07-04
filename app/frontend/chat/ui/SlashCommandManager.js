@@ -12,6 +12,8 @@ export class SlashCommandManager {
     this.messageInput = null;
     this.dropdown = null;
     this.commands = [];
+    this.hostCommands = [];   // privileged host slash commands (/api/slash-commands)
+    this.skillCommands = [];  // filesystem Agent Skills (/api/skills), shown to all users
     this.isOpen = false;
     this.selectedIndex = -1;
     this.confirmModal = null;
@@ -404,6 +406,17 @@ export class SlashCommandManager {
     if (value.startsWith('/') && !value.includes(' ')) {
       const query = value.slice(1).toLowerCase();
       this.showDropdown(query);
+
+      // On menu open (value === "/") refresh skills so newly authored ones
+      // appear without a page reload, then re-render if still open.
+      if (value === '/') {
+        this.refreshSkills().then(() => {
+          const v = this.messageInput.value;
+          if (v.startsWith('/') && !v.includes(' ')) {
+            this.showDropdown(v.slice(1).toLowerCase());
+          }
+        });
+      }
     } else {
       this.hideDropdown();
     }
@@ -413,40 +426,117 @@ export class SlashCommandManager {
    * Fetch available commands from API
    */
   async fetchCommands() {
+    await Promise.all([this.fetchHostCommands(), this.refreshSkills()]);
+    this.rebuildCommandList();
+  }
+
+  /**
+   * Fetch privileged host slash commands. This endpoint is engineer/admin gated,
+   * so it returns 403 (→ []) for regular users — that's fine, they still get skills.
+   */
+  async fetchHostCommands() {
     try {
       const response = await fetch('/api/slash-commands');
-      if (response.ok) {
-        this.commands = await response.json();
-      } else {
-        console.error('Failed to fetch slash commands:', response.status);
-        this.commands = [];
-      }
+      this.hostCommands = response.ok ? await response.json() : [];
     } catch (error) {
       console.error('Failed to fetch slash commands:', error);
-      this.commands = [];
+      this.hostCommands = [];
     }
+    this.rebuildCommandList();
+  }
+
+  /**
+   * Fetch installed Agent Skills and expose each as a slash command. Unlike host
+   * commands, picking a skill does NOT run anything on the host — it evokes the
+   * skill in the chat (see evokeSkill). Refetched when the menu opens so a newly
+   * authored skill shows up without a reload.
+   */
+  async refreshSkills() {
+    try {
+      const response = await fetch('/api/skills');
+      const skills = response.ok ? await response.json() : [];
+      this.skillCommands = skills.map(s => ({
+        name: s.slug,
+        description: s.description || 'Skill',
+        is_skill: true,
+        skill_slug: s.slug,
+        skill_name: s.name,
+      }));
+    } catch (error) {
+      console.error('Failed to fetch skills:', error);
+      this.skillCommands = [];
+    }
+    this.rebuildCommandList();
+  }
+
+  /** Merge host commands + the /skills entry + skills into the dropdown list. */
+  rebuildCommandList() {
+    // `/skills` is a meta entry (Claude-style): selecting it — or typing the full
+    // word — lists every installed skill. Sits at the top of the Skills section.
+    const meta = [{
+      name: 'skills',
+      description: 'List all available skills',
+      is_meta: true,
+    }];
+    this.commands = [...(this.hostCommands || []), ...meta, ...(this.skillCommands || [])];
+  }
+
+  /** Escape user-authored text before injecting into the dropdown HTML. */
+  _esc(text) {
+    const div = document.createElement('div');
+    div.textContent = text == null ? '' : String(text);
+    return div.innerHTML;
   }
 
   /**
    * Show dropdown with filtered commands
    */
   showDropdown(query = '') {
-    const filtered = this.commands.filter(cmd =>
-      cmd.name.toLowerCase().includes(query)
-    );
+    // Typing "/skills" (or picking the /skills entry) lists EVERY installed skill,
+    // even ones whose slug doesn't contain the word "skills".
+    const listAllSkills = query === 'skills';
+    const filtered = listAllSkills
+      ? this.commands.filter(cmd => cmd.is_skill)
+      : this.commands.filter(cmd => cmd.name.toLowerCase().includes(query));
 
     if (filtered.length === 0) {
+      if (listAllSkills) {
+        // /skills with nothing installed — friendly, non-selectable note.
+        this.dropdown.innerHTML =
+          '<div class="slash-command-group-header">Skills</div>' +
+          '<div class="slash-command-empty">No skills installed yet — ask me to create one.</div>';
+        this.dropdown.classList.remove('hidden');
+        this.isOpen = true;
+        this.selectedIndex = -1;
+        this.filteredCommands = [];
+        return;
+      }
       this.hideDropdown();
       return;
     }
 
-    this.dropdown.innerHTML = filtered.map((cmd, index) => `
-      <div class="slash-command-item ${index === 0 ? 'selected' : ''}" data-command="${cmd.name}" data-index="${index}">
-        <span class="command-name">/${cmd.name}</span>
-        <span class="command-description">${cmd.description}</span>
+    // Render grouped, with a header before each section. Items stay in the SAME
+    // order as `filtered` (commands, then the /skills entry + skills — see
+    // rebuildCommandList), so the `.slash-command-item` NodeList index still lines
+    // up with filteredCommands for keyboard nav / execute. Headers are not items.
+    let html = '';
+    let lastGroup = null;
+    filtered.forEach((cmd, index) => {
+      const inSkills = cmd.is_skill || cmd.is_meta;
+      const group = inSkills ? 'skills' : 'commands';
+      if (group !== lastGroup) {
+        html += `<div class="slash-command-group-header">${inSkills ? 'Skills' : 'Commands'}</div>`;
+        lastGroup = group;
+      }
+      const badge = cmd.is_skill ? '<span class="command-skill-badge"><i class="fa-solid fa-bolt"></i> skill</span>' : '';
+      html += `
+      <div class="slash-command-item${index === 0 ? ' selected' : ''}${cmd.is_skill ? ' skill-command' : ''}${cmd.is_meta ? ' skills-meta' : ''}" data-command="${this._esc(cmd.name)}" data-index="${index}">
+        <span class="command-name">/${this._esc(cmd.name)}${badge}</span>
+        <span class="command-description">${this._esc(cmd.description)}</span>
         ${cmd.dangerous ? '<span class="command-warning"><i class="fa-solid fa-exclamation-triangle"></i></span>' : ''}
-      </div>
-    `).join('');
+      </div>`;
+    });
+    this.dropdown.innerHTML = html;
 
     // Add click handlers
     this.dropdown.querySelectorAll('.slash-command-item').forEach((item, index) => {
@@ -533,19 +623,72 @@ export class SlashCommandManager {
 
     const cmd = this.filteredCommands[this.selectedIndex];
 
-    if (cmd) {
-      // Handle /history specially - show history modal directly
-      if (cmd.name === 'history') {
-        this.showHistoryModal();
-      } else if (cmd.name === 'gh') {
-        this.openGitHubAuthModal();
-      } else {
-        this.showConfirmModal(cmd);
-      }
+    if (!cmd) {
+      this.hideDropdown();
+      return;
+    }
+
+    // The /skills entry lists every skill instead of executing anything.
+    if (cmd.is_meta && cmd.name === 'skills') {
+      this.showAllSkills();
+      return;
+    }
+
+    // Skills do NOT execute like host commands — they evoke the skill in the chat.
+    // Keep the input (evokeSkill fills it with a directive) rather than clearing it.
+    if (cmd.is_skill) {
+      this.evokeSkill(cmd);
+      return;
+    }
+
+    // Handle /history specially - show history modal directly
+    if (cmd.name === 'history') {
+      this.showHistoryModal();
+    } else if (cmd.name === 'gh') {
+      this.openGitHubAuthModal();
+    } else {
+      this.showConfirmModal(cmd);
     }
 
     this.hideDropdown();
     this.messageInput.value = '';
+  }
+
+  /**
+   * Evoke a skill from the slash menu. Does NOT send anything — it drops the
+   * skill's slash token "/<slug> " into the input and focuses it, so the user
+   * can add their own context before sending. The agent recognizes a leading
+   * "/<slug>" (that matches an installed skill) as a request to call use_skill
+   * for that slug — see the "User-invoked skills" section of the agent prompt.
+   */
+  evokeSkill(cmd) {
+    this.hideDropdown();
+    const slug = cmd.skill_slug || cmd.name;
+    // Trailing space closes the dropdown (value now contains a space) and lets
+    // the user type their request right after the token.
+    this.messageInput.value = `/${slug} `;
+    this.messageInput.focus();
+    const len = this.messageInput.value.length;
+    if (this.messageInput.setSelectionRange) {
+      this.messageInput.setSelectionRange(len, len);
+    }
+    this.messageInput.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  /**
+   * Show the full skills list (the /skills command). Sets the input to "/skills"
+   * and re-renders the dropdown listing every installed skill; refetches first so
+   * the list is current. Picking one from the list then evokes it.
+   */
+  showAllSkills() {
+    this.messageInput.value = '/skills';
+    this.messageInput.focus();
+    this.showDropdown('skills');                         // immediate (cached)
+    this.refreshSkills().then(() => {                    // then refresh + re-render
+      if (this.messageInput.value === '/skills') {
+        this.showDropdown('skills');
+      }
+    });
   }
 
   /**

@@ -44,14 +44,14 @@
             </div>
             <h1 data-llamabot="leonardo-title">Leo</h1>
             <a class="backup-status" data-llamabot="backup-status" href="/backup-history" target="_blank"></a>
-            <button class="checkpoint-btn" data-llamabot="checkpoint-btn" title="View history">
+            <button class="checkpoint-btn" data-llamabot="checkpoint-btn" data-tooltip="Version history — view and restore earlier checkpoints of your app" data-tooltip-pos="bottom" aria-label="Version history">
                 <i class="fa-solid fa-clock-rotate-left"></i>
                 <span class="unsaved-badge hidden" data-llamabot="unsaved-badge"></span>
             </button>
-            <a href="/settings" target="_blank" class="settings-btn" title="Settings">
+            <a href="/settings" target="_blank" class="settings-btn" data-tooltip="Settings — API keys, models & preferences" data-tooltip-pos="bottom" aria-label="Settings">
                 <i class="fa-solid fa-gear"></i>
             </a>
-            <button class="collapse-sidebar-btn" data-llamabot="collapse-sidebar-btn" title="Collapse sidebar">
+            <button class="collapse-sidebar-btn" data-llamabot="collapse-sidebar-btn" data-tooltip="Collapse the chat panel to widen the preview" data-tooltip-pos="bottom" aria-label="Collapse sidebar">
                 <i class="fa-solid fa-angles-left"></i>
             </button>
             <button class="mobile-view-toggle" data-llamabot="show-preview-btn">
@@ -76,7 +76,7 @@
                             <div class="version-tooltip" data-llamabot="version-tooltip"></div>
                         </div>
                     </div>
-                    <button class="new-thread-btn" data-llamabot="new-thread-btn" title="Start new conversation">
+                    <button class="new-thread-btn" data-llamabot="new-thread-btn" data-tooltip="Start a new conversation in a fresh thread" data-tooltip-pos="bottom" aria-label="Start new conversation">
                         <i class="fa-solid fa-plus"></i>
                     </button>
                     <!-- <button class="close-drawer" data-llamabot="close-drawer">&times;</button> -->
@@ -116,21 +116,21 @@
             </div>
             <!-- Collapsed toolbar (shown when sidebar is collapsed) -->
             <div class="collapsed-toolbar" data-llamabot="collapsed-toolbar">
-                <button data-llamabot="collapsed-screen-record-btn" class="toolbar-tool" title="Record screen">
+                <button data-llamabot="collapsed-screen-record-btn" class="toolbar-tool" data-tooltip="Record your screen to show Leo a bug or flow" aria-label="Record screen">
                     <i class="fa-solid fa-circle"></i>
                 </button>
                 <span class="recording-timer hidden" data-llamabot="collapsed-recording-timer">00:00</span>
-                <button data-llamabot="collapsed-screenshot-btn" class="toolbar-tool" title="Capture screenshot">
+                <button data-llamabot="collapsed-screenshot-btn" class="toolbar-tool" data-tooltip="Capture a screenshot of the preview to send to Leo" aria-label="Capture screenshot">
                     <i class="fa-solid fa-camera"></i>
                 </button>
             </div>
             <!-- Floating scroll-to-bottom button -->
-            <button class="scroll-to-bottom" data-llamabot="scroll-to-bottom" title="Scroll to bottom">
+            <button class="scroll-to-bottom" data-llamabot="scroll-to-bottom" data-tooltip="Jump to the latest message" aria-label="Scroll to bottom">
                 <i class="fa-solid fa-arrow-down"></i>
                 <!-- Badge will be added dynamically by ScrollManager -->
             </button>
             <!-- Token context usage indicator -->
-            <div class="token-indicator" data-llamabot="token-indicator" title="Context usage">
+            <div class="token-indicator" data-llamabot="token-indicator">
                 <svg class="token-wheel" viewBox="0 0 36 36">
                     <circle class="token-wheel-bg" cx="18" cy="18" r="15.9"/>
                     <circle class="token-wheel-progress" cx="18" cy="18" r="15.9" stroke-dasharray="0 100"/>
@@ -151,6 +151,13 @@
                     <span>Sending an image will start a new conversation on an image-capable model.</span>
                 </div>
             </div>
+            <!-- Vision disabled by operator: blocks image sends with a support hand-off -->
+            <div class="image-switch-banner hidden" data-llamabot="vision-disabled-banner">
+                <div class="warning-content">
+                    <i class="fa-solid fa-circle-info"></i>
+                    <span>Leo can't view images on this instance yet. Reach out to <a href="mailto:support@llamapress.ai">support@llamapress.ai</a> to enable Leo to view and understand images.</span>
+                </div>
+            </div>
             <!-- Session feedback banner — appears once per thread after a few turns -->
             <div class="session-feedback-banner hidden" data-llamabot="session-feedback-banner">
                 <span class="session-feedback-prompt">How is Leo doing this session?</span>
@@ -163,28 +170,34 @@
                     </button>
                 </div>
                 <span class="session-feedback-thanks hidden" data-llamabot="session-feedback-thanks">Thanks for the feedback!</span>
-                <button class="session-feedback-dismiss" data-llamabot="session-feedback-dismiss" title="Dismiss">&times;</button>
+                <button class="session-feedback-dismiss" data-llamabot="session-feedback-dismiss" data-tooltip="Dismiss" aria-label="Dismiss">&times;</button>
             </div>
             <textarea placeholder="Ask Leonardo..." data-llamabot="message-input"></textarea>
             <!-- Floating contextual toolbar (hidden by default) -->
             <div class="tools-toolbar hidden" data-llamabot="tools-toolbar">
                 <div class="toolbar-tools">
-                    <button data-llamabot="capture-logs-btn" class="toolbar-tool" title="Capture Rails logs (10s)">
+                    <button data-llamabot="capture-logs-btn" class="toolbar-tool" data-tooltip="Capture 10s of Rails server logs to help debug an error" aria-label="Capture Rails logs">
                         <i class="fa-solid fa-bug"></i>
                     </button>
-                    <button data-llamabot="prompt-library-btn" class="toolbar-tool" title="Prompt Library">
+                    <button data-llamabot="prompt-library-btn" class="toolbar-tool" data-tooltip="Prompt library — insert a saved, reusable prompt" aria-label="Prompt library">
                         <i class="fa-solid fa-book"></i>
                     </button>
-                    <button data-llamabot="screen-record-btn" class="toolbar-tool" title="Record screen">
+                    <button data-llamabot="brand-guide-btn" class="toolbar-tool" data-tooltip="Brand guide — colors, logos & notes for your app" aria-label="Brand guide">
+                        <i class="fa-solid fa-palette"></i>
+                    </button>
+                    <button data-llamabot="color-attach-btn" class="toolbar-tool" data-tooltip="Eyedropper — pick a color from the page and attach it" aria-label="Attach a color">
+                        <i class="fa-solid fa-eye-dropper"></i>
+                    </button>
+                    <button data-llamabot="screen-record-btn" class="toolbar-tool" data-tooltip="Record your screen to show Leo a bug or flow" aria-label="Record screen">
                         <i class="fa-solid fa-circle"></i>
                     </button>
                     <span class="recording-timer hidden" data-llamabot="recording-timer">00:00</span>
-                    <button data-llamabot="screenshot-btn" class="toolbar-tool" title="Capture screenshot">
+                    <button data-llamabot="screenshot-btn" class="toolbar-tool" data-tooltip="Capture a screenshot of the preview to send to Leo" aria-label="Capture screenshot">
                         <i class="fa-solid fa-camera"></i>
                     </button>
                 </div>
                 <div class="toolbar-divider"></div>
-                <button data-llamabot="model-toggle-btn" class="toolbar-model-btn" title="Switch AI model">
+                <button data-llamabot="model-toggle-btn" class="toolbar-model-btn" data-tooltip="Choose which AI model Leo uses" aria-label="Switch AI model">
                     <i class="fa-solid fa-microchip"></i>
                     <span>Model</span>
                 </button>
@@ -212,32 +225,36 @@
                         <option value="gemini-3.1-flash-lite" data-short-label="Gemini Lite">Gemini 3.1 Flash Lite</option>
                         <option value="claude-4.5-haiku" data-short-label="Haiku">Claude 4.5 Haiku</option>
                         <option value="gpt-5-mini" data-short-label="GPT-5">GPT-5 Mini</option>
+                        <option value="gpt-5-nano" data-short-label="GPT-5 Nano">GPT-5 Nano</option>
+                        <option value="gpt-5.4-nano" data-short-label="GPT-5.4 Nano">GPT-5.4 Nano</option>
                         <option value="deepseek-v4-flash" data-short-label="DeepSeek" selected>DeepSeek V4 Flash</option>
                         <option value="deepseek-v4-pro" data-short-label="DeepSeek Pro">DeepSeek V4 Pro</option>
                         <option value="qwen3.7-plus" data-short-label="Qwen">Qwen3.7 Plus</option>
                     </select>
                 </div>
             </div>
+            <!-- Brand color picker panel (hidden by default, shown from tools toolbar) -->
+            <div class="brand-guide-container hidden" data-llamabot="brand-guide-container"></div>
             <div class="button-row">
                 <div class="send-controls">
                     <!-- Recording indicator (visible when recording, positioned outside toolbar) -->
                     <div class="floating-record-indicator hidden" data-llamabot="floating-record-indicator">
-                        <button class="stop-recording-btn" data-llamabot="stop-recording-btn" title="Stop recording">
+                        <button class="stop-recording-btn" data-llamabot="stop-recording-btn" data-tooltip="Stop screen recording" aria-label="Stop recording">
                             <i class="fa-solid fa-stop"></i>
                         </button>
                         <span class="floating-record-timer" data-llamabot="floating-record-timer">00:00</span>
                     </div>
                     <!-- Tools toggle button -->
-                    <button class="tools-toggle-btn" data-llamabot="tools-toggle-btn" title="More tools">
+                    <button class="tools-toggle-btn" data-llamabot="tools-toggle-btn" data-tooltip="More tools — logs, screenshots, colors & model" aria-label="More tools">
                         <i class="fa-solid fa-plus"></i>
                     </button>
                     <!-- Element selector (always visible) -->
-                    <button data-llamabot="element-selector-btn" class="tools-toggle-btn" title="Select element from page">
+                    <button data-llamabot="element-selector-btn" class="tools-toggle-btn" data-tooltip="Click an element on the page to point Leo at what to change" aria-label="Select element from page">
                         <i class="fa-solid fa-mouse-pointer"></i>
                     </button>
                     <!-- File attach with dropdown menu -->
                     <div class="file-attach-wrapper" style="position: relative; display: inline-block;">
-                        <button data-llamabot="file-attach-btn" class="tools-toggle-btn" title="Attach file (PDF, images, Excel)">
+                        <button data-llamabot="file-attach-btn" class="tools-toggle-btn" data-tooltip="Attach a file — images, PDFs, Excel & more" aria-label="Attach file">
                             <i class="fa-solid fa-paperclip"></i>
                         </button>
                         <div data-llamabot="file-attach-menu" class="file-attach-menu hidden">
@@ -256,7 +273,7 @@
                             <div class="file-browser-header">
                                 <span>Uploaded Files</span>
                                 <div class="file-browser-header-actions">
-                                    <button data-llamabot="file-browser-expand" class="file-browser-expand" title="Open asset library">
+                                    <button data-llamabot="file-browser-expand" class="file-browser-expand" data-tooltip="Open the full asset library" data-tooltip-pos="bottom" aria-label="Open asset library">
                                         <i class="fa-solid fa-up-right-and-down-left-from-center"></i>
                                     </button>
                                     <button data-llamabot="file-browser-close" class="file-browser-close">&times;</button>
@@ -284,7 +301,7 @@
                             </div>
                         </div>
                     </div>
-                    <button data-llamabot="send-button" class="send-icon-button" disabled title="Send message">
+                    <button data-llamabot="send-button" class="send-icon-button" disabled data-tooltip="Send message (Enter)" aria-label="Send message">
                         <i class="fa-solid fa-arrow-up"></i>
                     </button>
                 </div>
@@ -311,7 +328,7 @@
                 <div class="browser-tabs">
                     <div class="tab active" data-target="liveSiteFrame">
                         <span class="tab-text"><span class="tab-text-full">Your App</span><span class="tab-text-short">App</span></span>
-                        <button class="tab-external-link" data-iframe="liveSiteFrame" title="Open in new tab">
+                        <button class="tab-external-link" data-iframe="liveSiteFrame" data-tooltip="Open your app in a new browser tab" data-tooltip-pos="bottom" aria-label="Open your app in a new tab">
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
                                 <polyline points="15 3 21 3 21 9"></polyline>
@@ -321,7 +338,7 @@
                     </div>
                     <div class="tab" data-target="vsCodeFrame" data-engineer-only="true">
                         <span class="tab-text">Code</span>
-                        <button class="tab-external-link" data-iframe="vsCodeFrame" title="Open in new tab">
+                        <button class="tab-external-link" data-iframe="vsCodeFrame" data-tooltip="Open the code editor in a new browser tab" data-tooltip-pos="bottom" aria-label="Open the code editor in a new tab">
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
                                 <polyline points="15 3 21 3 21 9"></polyline>
@@ -331,7 +348,7 @@
                     </div>
                     <div class="tab" data-target="ticketsFrame" data-engineer-only="true">
                         <span class="tab-text">Tickets</span>
-                        <button class="tab-external-link" data-iframe="ticketsFrame" title="Open in new tab">
+                        <button class="tab-external-link" data-iframe="ticketsFrame" data-tooltip="Open tickets in a new browser tab" data-tooltip-pos="bottom" aria-label="Open tickets in a new tab">
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
                                 <polyline points="15 3 21 3 21 9"></polyline>
@@ -341,7 +358,7 @@
                     </div>
                     <div class="tab" data-target="feedbackFrame">
                         <span class="tab-text">Feedback</span>
-                        <button class="tab-external-link" data-iframe="feedbackFrame" title="Open in new tab">
+                        <button class="tab-external-link" data-iframe="feedbackFrame" data-tooltip="Open feedback in a new browser tab" data-tooltip-pos="bottom" aria-label="Open feedback in a new tab">
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
                                 <polyline points="15 3 21 3 21 9"></polyline>
@@ -361,20 +378,20 @@
                     <div class="url-dropdown hidden" data-llamabot="url-dropdown"></div>
                     <div class="browser-controls-right">
                         <div class="view-mode-toggle">
-                            <button class="view-mode-btn active" data-llamabot="desktop-mode-btn" title="Desktop View">
+                            <button class="view-mode-btn active" data-llamabot="desktop-mode-btn" data-tooltip="Preview at desktop width" data-tooltip-pos="bottom" aria-label="Desktop view">
                                 <svg fill="currentColor" viewBox="0 0 24 24"><path d="M21 2H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h7v2H8v2h8v-2h-2v-2h7c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H3V4h18v12z"/></svg>
                             </button>
-                            <button class="view-mode-btn" data-llamabot="mobile-mode-btn" title="Mobile View">
+                            <button class="view-mode-btn" data-llamabot="mobile-mode-btn" data-tooltip="Preview at mobile width" data-tooltip-pos="bottom" aria-label="Mobile view">
                                 <svg fill="currentColor" viewBox="0 0 24 24"><path d="M17 1.01L7 1c-1.1 0-2 .9-2 2v18c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V3c0-1.1-.9-1.99-2-1.99zM17 19H7V5h10v14z"/></svg>
                             </button>
                         </div>
-                        <button class="nav-button" data-llamabot="back-button" title="Go back">
+                        <button class="nav-button" data-llamabot="back-button" data-tooltip="Go back to the previous page" data-tooltip-pos="bottom" aria-label="Go back">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M19 12H5"/>
                                 <path d="M12 19l-7-7 7-7"/>
                             </svg>
                         </button>
-                        <button class="nav-button refresh-button" data-llamabot="refresh-button" title="Refresh live site">
+                        <button class="nav-button refresh-button" data-llamabot="refresh-button" data-tooltip="Reload the live preview" data-tooltip-pos="bottom" aria-label="Refresh live site">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
                                 <path d="M21 3v5h-5"/>
@@ -828,10 +845,10 @@
                     <span data-llamabot="asset-modal-count" class="asset-modal-count"></span>
                 </div>
                 <div class="asset-modal-header-actions">
-                    <button data-llamabot="asset-modal-refresh" class="asset-modal-icon-btn" title="Refresh">
+                    <button data-llamabot="asset-modal-refresh" class="asset-modal-icon-btn" data-tooltip="Refresh the asset list" data-tooltip-pos="bottom" aria-label="Refresh">
                         <i class="fa-solid fa-rotate"></i>
                     </button>
-                    <button data-llamabot="asset-modal-close" class="asset-modal-icon-btn" title="Close (Esc)">
+                    <button data-llamabot="asset-modal-close" class="asset-modal-icon-btn" data-tooltip="Close (Esc)" data-tooltip-pos="bottom" aria-label="Close">
                         <i class="fa-solid fa-xmark"></i>
                     </button>
                 </div>

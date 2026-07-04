@@ -26,6 +26,9 @@ MODEL_CAPABILITIES = {
     'gpt-4o': {'images': True, 'video': False, 'pdf': False},
     'gpt-4o-mini': {'images': True, 'video': False, 'pdf': False},
     'gpt-5-codex': {'images': True, 'video': False, 'pdf': False},
+    'gpt-5-mini': {'images': True, 'video': False, 'pdf': False},
+    'gpt-5-nano': {'images': True, 'video': False, 'pdf': False},
+    'gpt-5.4-nano': {'images': True, 'video': False, 'pdf': False},
 
     # DeepSeek - primarily text focused
     'deepseek-v4-flash': {'images': False, 'video': False, 'pdf': False},
@@ -38,7 +41,18 @@ MODEL_CAPABILITIES = {
 
 
 def get_model_capabilities(model_name: str) -> dict:
-    """Get capabilities for a model, defaulting to Gemini if unknown (most permissive)."""
+    """Get capabilities for a model, defaulting to Gemini if unknown (most permissive).
+
+    NOTE: the permissive default is deliberate (see test_unknown_model_defaults_
+    permissive) — the frontend image auto-switch depends on unknown models
+    reporting vision-capable so it never spuriously moves an image off a model.
+    The trade-off: during a frontend/backend version skew (the dropdown offers a
+    model name the running backend hasn't loaded), this default reports
+    images:True while get_llm's unknown-model branch falls back to text-only
+    DeepSeek — so an attached image reaches a text-only model and 400s with
+    ``unknown variant image_url, expected text``. Keep every real model listed
+    explicitly above so only genuine skew/typos ever hit this default.
+    """
     return MODEL_CAPABILITIES.get(model_name, {'images': True, 'video': True, 'pdf': True})
 
 

@@ -17,6 +17,8 @@ import { MenuManager } from './ui/MenuManager.js';
 import { MobileViewManager } from './ui/MobileViewManager.js';
 import { TokenIndicator } from './ui/TokenIndicator.js';
 import { PromptManager } from './ui/PromptManager.js';
+import { BrandGuide } from './ui/BrandGuide.js';
+import { ColorAttach } from './ui/ColorAttach.js';
 import { FileAttachmentManager } from './ui/FileAttachmentManager.js';
 import { ScreenRecorder } from './ui/ScreenRecorder.js';
 import { ScreenshotAnnotator } from './ui/ScreenshotAnnotator.js';
@@ -97,6 +99,14 @@ class ChatApp {
       // permissive, but a stale/missing fetch previously bounced it off Qwen).
       ['qwen3.7-plus', { images: true }],
     ]);
+
+    // Operator gates, hydrated from /api/available-models (fetchAvailableModels).
+    // Default permissive so the UI works before the fetch resolves; the backend
+    // (get_llm / _build_message_content) is the authoritative gate either way.
+    // - modelSwitchingAllowed=false hides the model dropdown and pins DeepSeek.
+    // - visionAllowed=false blocks image sends with a support hand-off.
+    this.modelSwitchingAllowed = true;
+    this.visionAllowed = true;
 
     // Agent running state (for stop button)
     this.isAgentRunning = false;
@@ -277,8 +287,13 @@ class ChatApp {
         this.updateCompletedPlanBadges(elapsedTime);
       }
 
-      // Maybe surface the "How is Leo doing this session?" banner.
-      this.maybeShowSessionFeedback();
+      // Maybe surface the "How is Leo doing this session?" banner. Only count
+      // genuine turn-ends toward the warm-up — 'system_message'/'error'/'paywall_hit'
+      // also fire this event, and counting them made the banner appear early (and
+      // is a bad moment to ask right after an error/paywall anyway).
+      if (event.detail?.type === 'end') {
+        this.maybeShowSessionFeedback();
+      }
     });
 
     // Listen for HITL approval decisions and send via WebSocket
@@ -334,6 +349,33 @@ class ChatApp {
     // Close toolbar when prompt library is clicked
     if (this.elements.promptLibraryBtn) {
       this.elements.promptLibraryBtn.addEventListener('click', () => {
+        this.closeToolsToolbar();
+      });
+    }
+
+    // Initialize the brand guide (lives in the tools toolbar)
+    this.brandGuide = new BrandGuide();
+    this.brandGuide.init(
+      this.elements.brandGuideBtn,
+      this.elements.brandGuideContainer,
+      this.elements.messageInput,
+      (src, name) => this.fileAttachmentManager?.openImagePreview(src, name)
+    );
+    // Collapse the tools toolbar once the brand guide opens, like the other tools.
+    if (this.elements.brandGuideBtn) {
+      this.elements.brandGuideBtn.addEventListener('click', () => {
+        this.closeToolsToolbar();
+      });
+    }
+
+    // Initialize the standalone color selector (attaches a color to the message)
+    this.colorAttach = new ColorAttach();
+    this.colorAttach.init(
+      this.elements.colorAttachBtn,
+      this.elements.messageInput
+    );
+    if (this.elements.colorAttachBtn) {
+      this.elements.colorAttachBtn.addEventListener('click', () => {
         this.closeToolsToolbar();
       });
     }
@@ -438,6 +480,9 @@ class ChatApp {
       liveSiteFrame: this.container.querySelector('[data-llamabot="live-site-frame"]'),
       vsCodeFrame: this.container.querySelector('[data-llamabot="vscode-frame"]'),
       promptLibraryBtn: this.container.querySelector('[data-llamabot="prompt-library-btn"]'),
+      brandGuideBtn: this.container.querySelector('[data-llamabot="brand-guide-btn"]'),
+      brandGuideContainer: this.container.querySelector('[data-llamabot="brand-guide-container"]'),
+      colorAttachBtn: this.container.querySelector('[data-llamabot="color-attach-btn"]'),
       fileAttachBtn: this.container.querySelector('[data-llamabot="file-attach-btn"]'),
       fileInput: this.container.querySelector('[data-llamabot="file-input"]'),
       attachmentsPreview: this.container.querySelector('[data-llamabot="attachments-preview"]'),
@@ -478,12 +523,18 @@ class ChatApp {
     this._feedbackTurns = new Map();       // threadId -> completed turns this page-load
     this._feedbackThresholds = new Map();  // threadId -> randomized trigger point
     this._feedbackShown = new Set();       // threadIds already surfaced this page-load
+    this._feedbackActiveThreadId = null;   // threadId the visible banner is rating
 
     const choices = banner.querySelector('.session-feedback-choices');
     const thanks = q('session-feedback-thanks');
 
+    // Always rate the thread the banner was surfaced for — captured at show-time.
+    // The live thread id can change out from under us (sidebar switch, image-model
+    // auto-switch), which would otherwise record "answered" against the wrong
+    // thread and let the banner re-appear on the one the user actually rated.
+    const activeThreadId = () => this._feedbackActiveThreadId || this.appState.getThreadId?.();
     const stateKey = () => {
-      const tid = this.appState.getThreadId?.();
+      const tid = activeThreadId();
       return tid ? `leo_session_feedback_${tid}` : null;
     };
     const remember = (state) => {
@@ -493,7 +544,7 @@ class ChatApp {
     const hide = () => banner.classList.add('hidden');
 
     const submit = (rating) => {
-      const threadId = this.appState.getThreadId?.();
+      const threadId = activeThreadId();
       if (threadId) {
         fetch('/api/feedback', {
           method: 'POST',
@@ -514,9 +565,10 @@ class ChatApp {
   }
 
   /**
-   * Called after each completed assistant turn. Surfaces the session-feedback
-   * banner once per thread, after a randomized ~10-turn warm-up, unless the thread
-   * was already answered/dismissed (persisted) or the banner is already showing.
+   * Called after each successfully completed assistant turn (only 'end' events;
+   * see the agentTaskCompleted listener). Surfaces the session-feedback banner
+   * once per thread, after a randomized 5–7 turn warm-up (≈10–14 messages), unless
+   * the thread was already answered/dismissed (persisted) or the banner is showing.
    */
   maybeShowSessionFeedback() {
     const banner = this._feedbackBanner;
@@ -544,6 +596,7 @@ class ChatApp {
     if (turns < threshold) return;
 
     this._feedbackShown.add(threadId);
+    this._feedbackActiveThreadId = threadId;  // rate THIS thread even if it switches
     banner.querySelector('.session-feedback-choices')?.classList.remove('hidden');
     this.container.querySelector('[data-llamabot="session-feedback-thanks"]')?.classList.add('hidden');
     banner.classList.remove('hidden');
@@ -1087,6 +1140,27 @@ class ChatApp {
   }
 
   /**
+   * Enforce the model-switching operator gate in the UI. When switching is
+   * locked the model dropdown and its toggle button are hidden and the model is
+   * pinned to the default text model. This is UX only — get_llm re-pins any
+   * other requested model server-side. Safe to call more than once.
+   */
+  applyModelSwitchingPolicy() {
+    const locked = !this.modelSwitchingAllowed;
+    const toggleBtn = this.elements.modelToggleBtn;
+    const container = this.elements.modelSelectorContainer;
+    if (toggleBtn) toggleBtn.classList.toggle('hidden', locked);
+    if (locked && container) {
+      container.classList.add('hidden');
+      toggleBtn?.classList.remove('active');
+    }
+    if (locked) {
+      // Pin to the default text model regardless of any saved cookie/URL param.
+      this.setModel(DEFAULT_TEXT_MODEL);
+    }
+  }
+
+  /**
    * Whether any pending attachment is an inline image (uploaded_file refs are
    * sent as text, not image blocks, so they don't count).
    */
@@ -1138,12 +1212,21 @@ class ChatApp {
    * images, and we're mid-conversation. Hidden otherwise.
    */
   updateImageSwitchBanner() {
-    const banner = this.container.querySelector('[data-llamabot="image-switch-banner"]');
-    if (!banner) return;
     const attachments = this.fileAttachmentManager?.getAttachments() || [];
     const model = this.elements.modelSelect?.value || DEFAULT_TEXT_MODEL;
+    const hasImage = this.hasImageAttachment(attachments);
+
+    // Vision disabled by operator takes precedence: an attached image can't be
+    // sent at all, so show the support hand-off (not the auto-switch notice).
+    const visionBanner = this.container.querySelector('[data-llamabot="vision-disabled-banner"]');
+    const visionBlocked = hasImage && !this.visionAllowed;
+    if (visionBanner) visionBanner.classList.toggle('hidden', !visionBlocked);
+
+    const banner = this.container.querySelector('[data-llamabot="image-switch-banner"]');
+    if (!banner) return;
     const shouldShow =
-      this.hasImageAttachment(attachments) &&
+      !visionBlocked &&
+      hasImage &&
       !this.modelSupportsImages(model) &&
       this.conversationHasMessages();
     banner.classList.toggle('hidden', !shouldShow);
@@ -1222,27 +1305,28 @@ class ChatApp {
       message = `${promptContent}\n\n${message}`;
     }
 
-    // Append skill contents after prompt, before user message
-    const skillsContent = this.promptManager?.getSelectedSkillsContent();
-    if (skillsContent && skillsContent.length > 0) {
-      const skillsText = skillsContent.join('\n\n---\n\n');
-      // Insert skills between prompt and user's typed message
-      // If prompt was prepended, skills go after it but before the original message
-      if (promptContent) {
-        // message is currently: promptContent + "\n\n" + originalMessage
-        // We want: promptContent + "\n\n" + skillsText + "\n\n" + originalMessage
-        const originalMessage = message.substring(promptContent.length + 2);
-        message = `${promptContent}\n\n${skillsText}\n\n${originalMessage}`;
-      } else {
-        // No prompt, just prepend skills before the user message
-        message = `${skillsText}\n\n${message}`;
-      }
+    // NOTE: Legacy client-side "skill" injection was removed. Skills are now
+    // Agent Skills (.leonardo/skills/<slug>/SKILL.md) that the model loads on
+    // demand via the use_skill tool — no longer concatenated into the message.
+
+    // Check if there are selected elements and append each to the message.
+    // Multiple elements can be selected (1st, 2nd, ...); emit one block each.
+    const selectedElements = this.elementSelector?.getSelectedElements() || [];
+    if (selectedElements.length === 1) {
+      message = `${message}\n\n<SELECTED_ELEMENT>\n${selectedElements[0].html}\n</SELECTED_ELEMENT>`;
+    } else if (selectedElements.length > 1) {
+      const blocks = selectedElements
+        .map((el, i) => `<SELECTED_ELEMENT index="${i + 1}">\n${el.html}\n</SELECTED_ELEMENT>`)
+        .join('\n\n');
+      message = `${message}\n\n${blocks}`;
     }
 
-    // Check if there's a selected element and append it to the message
-    const selectedHTML = this.elementSelector?.getSelectedElementHTML();
-    if (selectedHTML) {
-      message = `${message}\n\n<SELECTED_ELEMENT>\n${selectedHTML}\n</SELECTED_ELEMENT>`;
+    // Append any standalone colors the user attached (like image attachments).
+    const attachedColors = this.colorAttach?.getColors() || [];
+    if (attachedColors.length > 0) {
+      const list = attachedColors.join(', ');
+      const plural = attachedColors.length > 1 ? 's' : '';
+      message = `${message}\n\n<SELECTED_COLORS>\nThe user selected the following brand color${plural}: ${list}\n</SELECTED_COLORS>`;
     }
 
     // Get file attachments before clearing (needed for display)
@@ -1254,6 +1338,21 @@ class ChatApp {
       const fileList = uploadedFiles.map(f => `- ${f.filename} (saved to ${f.path})`).join('\n');
       message = `${message}\n\n<UPLOADED_FILES>\nThe user uploaded the following files to the Rails app:\n${fileList}\n</UPLOADED_FILES>`;
     }
+
+    // --- Vision gate: refuse image sends when the operator disables vision ---
+    // Block the send (nothing destructive has happened yet — input still holds
+    // the text and the image stays attached) and point the user at support. The
+    // backend re-enforces this in _build_message_content regardless.
+    if (!this.visionAllowed && this.hasImageAttachment(attachments)) {
+      this.updateImageSwitchBanner();
+      this.slashCommandManager?.showToast(
+        "Leo can't view images on this instance yet. Reach out to " +
+        "support@llamapress.ai to enable Leo to view and understand images.",
+        'info'
+      );
+      return;
+    }
+    // --- end vision gate ---
 
     // --- Auto-switch model when an image is attached to a text-only model ---
     // Cross-provider switches mid-thread are unsafe (provider-specific
@@ -1370,6 +1469,11 @@ class ChatApp {
     // Clear file attachments (already captured above for display)
     if (this.fileAttachmentManager) {
       this.fileAttachmentManager.clearAttachments();
+    }
+
+    // Clear attached color chips
+    if (this.colorAttach) {
+      this.colorAttach.clear();
     }
 
     // Ensure thread ID exists
@@ -1548,6 +1652,13 @@ class ChatApp {
       }
 
       const data = await response.json();
+
+      // Coarse operator gates (default permissive if the backend omits them).
+      this.modelSwitchingAllowed = data.model_switching_allowed !== false;
+      this.visionAllowed = data.vision_allowed !== false;
+      this.applyModelSwitchingPolicy();
+      this.updateImageSwitchBanner();
+
       const modelAvailability = new Map(
         data.models.map(m => [m.value, { available: m.available, reason: m.reason }])
       );
@@ -2013,7 +2124,8 @@ class ChatApp {
       // Expanded button state (inside toolbar)
       if (btn) {
         btn.classList.add('recording');
-        btn.title = 'Stop recording';
+        btn.dataset.tooltip = 'Stop screen recording';
+        btn.setAttribute('aria-label', 'Stop recording');
       }
       if (icon) {
         icon.classList.remove('fa-circle');
@@ -2027,7 +2139,8 @@ class ChatApp {
       // Collapsed button state
       if (collapsedBtn) {
         collapsedBtn.classList.add('recording');
-        collapsedBtn.title = 'Stop recording';
+        collapsedBtn.dataset.tooltip = 'Stop screen recording';
+        collapsedBtn.setAttribute('aria-label', 'Stop recording');
       }
       if (collapsedIcon) {
         collapsedIcon.classList.remove('fa-circle');
@@ -2049,7 +2162,8 @@ class ChatApp {
       // Expanded button state
       if (btn) {
         btn.classList.remove('recording');
-        btn.title = 'Record screen';
+        btn.dataset.tooltip = 'Record your screen to show Leo a bug or flow';
+        btn.setAttribute('aria-label', 'Record screen');
       }
       if (icon) {
         icon.classList.remove('fa-stop');
@@ -2062,7 +2176,8 @@ class ChatApp {
       // Collapsed button state
       if (collapsedBtn) {
         collapsedBtn.classList.remove('recording');
-        collapsedBtn.title = 'Record screen';
+        collapsedBtn.dataset.tooltip = 'Record your screen to show Leo a bug or flow';
+        collapsedBtn.setAttribute('aria-label', 'Record screen');
       }
       if (collapsedIcon) {
         collapsedIcon.classList.remove('fa-stop');

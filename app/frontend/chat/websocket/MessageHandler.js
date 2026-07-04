@@ -502,6 +502,7 @@ export class MessageHandler {
     this.finalizeCurrentThinking();
     // Same notification as a question — an approval card also needs the user's attention.
     this._playAskUserQuestionSound();
+    this._showWaitingForInputBadge();
 
     const actionRequests = data.action_requests || [];
     const threadId = data.thread_id;
@@ -586,9 +587,19 @@ export class MessageHandler {
     }
   }
 
+  /**
+   * Show the blue "?" favicon badge so it's clear which browser tab is waiting
+   * on the user (question / UI-UX question / approval). No-op if the tab is
+   * focused (the manager guards on focus). Best-effort — safe if unavailable.
+   */
+  _showWaitingForInputBadge() {
+    this.messageRenderer?.faviconBadgeManager?.showQuestion();
+  }
+
   handleQuestionRequest(data) {
     this.finalizeCurrentThinking();
     this._playAskUserQuestionSound();
+    this._showWaitingForInputBadge();
 
     const { question, options, context, thread_id, agent_name, ui_related } = data;
     const questionId = `question-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
@@ -809,6 +820,7 @@ export class MessageHandler {
   handleUiuxQuestionRequest(data) {
     this.finalizeCurrentThinking();
     this._playAskUserQuestionSound();
+    this._showWaitingForInputBadge();
 
     const { question, options, context, thread_id, agent_name } = data;
     // Always append a synthetic "None of these" choice so the user can reject every
@@ -1280,7 +1292,7 @@ export class MessageHandler {
       // Include elapsed time for display on completion badges
       const elapsedTime = this.appState.getFormattedElapsedTime();
       window.dispatchEvent(new CustomEvent('agentTaskCompleted', {
-        detail: { elapsedTime }
+        detail: { elapsedTime, type: data.type }
       }));
 
       if (data.type === 'paywall_hit') {

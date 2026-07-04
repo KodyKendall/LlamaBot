@@ -30,6 +30,8 @@ from app.agents.leonardo.rails_agent.tools import (
     git_status, git_commit, git_command, github_cli_command, internet_search,
     save_memory, list_memories, delete_memory,
     read_leonardo_md, edit_leonardo_md, write_leonardo_md,
+    read_brand_guide, write_brand_guide,
+    build_use_skill_tool, list_skills, read_skill, write_skill, edit_skill, delete_skill,
     browser_inspect, browser_inspect_enabled,
 )
 from app.agents.leonardo.rails_agent.prompts import RAILS_AGENT_PROMPT
@@ -183,6 +185,10 @@ default_tools = [
     delegate_research,  # Read-only sub-agent for codebase investigation
     save_memory, list_memories, delete_memory,  # Long-term memory
     read_leonardo_md, edit_leonardo_md, write_leonardo_md,  # Project context file
+    read_brand_guide, write_brand_guide,  # Brand guide (colors, logos, notes)
+    list_skills, read_skill, write_skill, edit_skill, delete_skill,  # Skill library management
+    # use_skill is built dynamically in agent_tools() so its <available_skills>
+    # catalog reflects the current .leonardo/skills/ library (see build_use_skill_tool).
     # browser_inspect is appended conditionally by agent_tools() — gated by the
     # `enable_browser_inspect` site setting (disabled by default).
 ]
@@ -196,6 +202,7 @@ def agent_tools():
     workflow build time, so flipping the setting takes effect on the next restart.
     """
     tools = list(default_tools)
+    tools.append(build_use_skill_tool())
     if browser_inspect_enabled():
         tools.append(browser_inspect)
         logger.info("browser_inspect tool enabled via site setting")

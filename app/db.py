@@ -26,7 +26,7 @@ def init_db():
         return
 
     # Import models to register them with SQLModel
-    from app.models import User, ThreadMetadata, Prompt, Skill, AgentSystemPrompt  # noqa: F401
+    from app.models import User, ThreadMetadata, Prompt, AgentSystemPrompt  # noqa: F401
     try:
         SQLModel.metadata.create_all(engine)
         logger.info("✅ Auth database initialized")
@@ -38,12 +38,6 @@ def init_db():
             if count > 0:
                 logger.info(f"✅ Seeded {count} default prompts")
 
-        # Seed default skills
-        from app.services.skill_service import seed_default_skills
-        with Session(engine) as session:
-            count = seed_default_skills(session)
-            if count > 0:
-                logger.info(f"✅ Seeded {count} default skills")
     except Exception as e:
         logger.error(f"❌ Failed to initialize auth database: {e}")
         raise

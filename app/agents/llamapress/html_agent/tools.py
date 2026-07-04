@@ -1246,7 +1246,10 @@ def read_langgraph_json(
     state: Annotated[RailsAgentState, InjectedState],
 ) -> str:
     """Read the langgraph.json configuration file."""
-    full_path = APP_DIR / "langgraph.json"
+    # Client agents are registered in the overlay, never the platform base (which is
+    # read-only / overwritten by platform updates). See app/lib/langgraph_registry.py.
+    from app.lib.langgraph_registry import local_overlay_path
+    full_path = local_overlay_path(APP_DIR / "langgraph.json")
 
     if not full_path.exists():
         return "Error: langgraph.json not found at /app/app/langgraph.json"
@@ -1270,7 +1273,10 @@ def edit_langgraph_json(
     tool_call_id: Annotated[str, InjectedToolCallId],
 ) -> Command:
     """Edit the langgraph.json configuration file."""
-    full_path = APP_DIR / "langgraph.json"
+    # Client agents are registered in the overlay, never the platform base (which is
+    # read-only / overwritten by platform updates). See app/lib/langgraph_registry.py.
+    from app.lib.langgraph_registry import local_overlay_path
+    full_path = local_overlay_path(APP_DIR / "langgraph.json")
 
     if not full_path.exists():
         error_message = "Error: langgraph.json not found at /app/app/langgraph.json"
