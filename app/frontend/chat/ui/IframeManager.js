@@ -338,12 +338,15 @@ export class IframeManager {
     tipsContainer.style.width = 'auto';
     tipsContainer.style.maxWidth = '100%';
     tipsContainer.style.textAlign = 'center';
-    tipsContainer.style.padding = '4px 0 0';
+    // Extra breathing room below the title so the tip reads as its own thing, not
+    // a subtitle. The title is big+bold+white; the tip is a lighter, amber-accented
+    // hint in its own pill below, so the two clearly separate.
+    tipsContainer.style.padding = '18px 0 0';
     tipsContainer.style.boxSizing = 'border-box';
-    tipsContainer.style.color = 'rgba(255, 255, 255, 0.8)';
+    tipsContainer.style.color = 'rgba(255, 255, 255, 0.85)';
     tipsContainer.style.fontFamily = 'Arial, sans-serif';
     tipsContainer.style.fontSize = '0.7rem';
-    tipsContainer.style.fontWeight = 'bold';
+    tipsContainer.style.fontWeight = 'normal';
     tipsContainer.style.textShadow = '1px 1px 2px rgba(0,0,0,0.5)';
 
     const tips = [
@@ -355,9 +358,15 @@ export class IframeManager {
     const tipEl = document.createElement('div');
     tipEl.style.display = 'inline-flex';
     tipEl.style.alignItems = 'center';
-    tipEl.style.gap = '6px';
+    tipEl.style.gap = '7px';
     tipEl.style.transition = 'opacity 0.4s ease';
     tipEl.style.opacity = '1';
+    // Wrap the tip in its own subtle pill so it stands apart from the solid title
+    // above it, rather than blending into the same block of white text.
+    tipEl.style.padding = '5px 13px';
+    tipEl.style.borderRadius = '999px';
+    tipEl.style.background = 'rgba(255, 255, 255, 0.08)';
+    tipEl.style.border = '1px solid rgba(255, 210, 122, 0.28)';
     const renderTip = (i) => {
       const t = tips[i];
       // Each tip is prefixed with "Tip:" so the user knows it's a tip. Build the
@@ -369,9 +378,17 @@ export class IframeManager {
       tipEl.innerHTML = '';
       const icon = document.createElement('i');
       icon.className = `fa-solid ${t.icon}`;
+      icon.style.color = '#ffd27a'; // amber accent so the eye is drawn to the hint
+      // Bold, amber "Tip:" label contrasts the big white title and flags the hint.
+      const label = document.createElement('span');
+      label.textContent = 'Tip:';
+      label.style.color = '#ffd27a';
+      label.style.fontWeight = '700';
+      // Hint body sits at normal weight — lighter than both the title and the
+      // label — so the three elements read as a clear hierarchy.
       const span = document.createElement('span');
+      span.style.fontWeight = '400';
       if (t.href) {
-        span.appendChild(document.createTextNode('Tip: '));
         const link = document.createElement('a');
         link.href = t.href;
         link.target = '_blank';
@@ -387,9 +404,10 @@ export class IframeManager {
         });
         span.appendChild(link);
       } else {
-        span.textContent = `Tip: ${t.text}`;
+        span.textContent = t.text;
       }
       tipEl.appendChild(icon);
+      tipEl.appendChild(label);
       tipEl.appendChild(span);
     };
     tipsContainer.appendChild(tipEl);

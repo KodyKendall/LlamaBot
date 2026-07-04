@@ -35,6 +35,7 @@ from app.agents.leonardo.rails_agent.tools import (
     fix_permissions,
     rails_api_sh,
     save_memory, list_memories, delete_memory,
+    build_use_skill_tool, list_skills, read_skill, write_skill, edit_skill, delete_skill,
 )
 from app.agents.leonardo.rails_ticket_mode_agent.prompts import TICKET_MODE_AGENT_PROMPT
 from app.agents.leonardo.project_context import build_system_prompt_with_project_context
@@ -295,6 +296,7 @@ default_tools = [
     write_final_ticket,  # Creates ticket directly in Rails database
     offer_implementation,  # Offer to switch to engineer mode after ticket creation
     save_memory, list_memories, delete_memory,
+    list_skills, read_skill, write_skill, edit_skill, delete_skill,  # Skill library
 ]
 
 
@@ -337,7 +339,7 @@ def build_workflow(checkpointer=None):
     # Create and return the agent
     return build_leonardo_agent(
         model=default_model,
-        tools=default_tools,
+        tools=[*default_tools, build_use_skill_tool()],
         system_prompt=get_cached_system_prompt(),
         state_schema=RailsAgentState,
         middleware=middleware,

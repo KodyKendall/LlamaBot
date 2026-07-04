@@ -357,33 +357,32 @@ observer.observe(messageHistory, { childList: true });
 
 ## AGENT FILE PATHS & REGISTRATION
 
+The registry is LAYERED by ownership. You register client agents in the CLIENT OVERLAY
+`langgraph.local.json` — NEVER in the platform base `langgraph.json`:
+- `langgraph.json` (platform base) — built-in agents, ships in the image, READ-ONLY.
+  It is overwritten wholesale by platform updates, so edits here would be lost.
+- `langgraph.local.json` (client overlay) — YOUR write target. It is merged over the base
+  at runtime (your entries win on a name collision) and survives container recreates and
+  platform syncs. `edit_langgraph_json` edits THIS file and creates it if it doesn't exist.
+
 **Creating New Custom Agents:**
 1. Create files in Leonardo filesystem: `langgraph/agents/{agent_name}/nodes.py`
 2. Files mount to container path: `/app/app/user_agents/{agent_name}/nodes.py`
-3. Register in `langgraph/langgraph.json`: `"{agent_name}": "./user_agents/{agent_name}/nodes.py:build_workflow"`
+3. Register in the overlay `langgraph.local.json` via `edit_langgraph_json`:
+   `"{agent_name}": "./user_agents/{agent_name}/nodes.py:build_workflow"`
 
 **Built-in Agents (Pre-installed in LlamaBot):**
-These must ALWAYS be included in your `langgraph.json`:
-```json
-{
-  "rails_agent": "./agents/rails_agent/nodes.py:build_workflow",
-  "rails_ai_builder": "./agents/rails_ai_builder_agent/nodes.py:build_workflow",
-  "rails_frontend_starter": "./agents/rails_frontend_starter_agent/nodes.py:build_workflow"
-}
-```
+Built-ins (e.g. `rails_agent`, `rails_ai_builder_agent`, `rails_frontend_starter_agent`)
+live in the platform base and are ALWAYS available — do NOT re-declare them in the overlay.
+Call `read_langgraph_json` to see the full merged list of what's registered.
 
-**Example Full langgraph.json:**
+**Example client overlay (`langgraph.local.json`) — only YOUR agents go here:**
 ```json
 {
-  "dependencies": ["."],
   "graphs": {
     "leo": "./user_agents/leo/nodes.py:build_workflow",
-    "student": "./user_agents/student/nodes.py:build_workflow",
-    "rails_agent": "./agents/rails_agent/nodes.py:build_workflow",
-    "rails_ai_builder": "./agents/rails_ai_builder_agent/nodes.py:build_workflow",
-    "rails_frontend_starter": "./agents/rails_frontend_starter_agent/nodes.py:build_workflow"
-  },
-  "env": ".env"
+    "student": "./user_agents/student/nodes.py:build_workflow"
+  }
 }
 ```
 
@@ -392,8 +391,8 @@ These must ALWAYS be included in your `langgraph.json`:
 - **Built-in agents:** `./agents/{agent_name}/nodes.py:build_workflow`
 
 **Critical Rules:**
-- The `agent_name` in AgentStateBuilder's `build()` method must match the key in `langgraph.json`
-- Always include all built-in agent routes when modifying `langgraph.json`
+- The `agent_name` in AgentStateBuilder's `build()` method must match the key you register
+- Register client agents ONLY in the overlay `langgraph.local.json`; leave the base alone
 - Custom agent files exist in Leonardo's `langgraph/agents/` directory
 - Built-in agent files exist in LlamaBot's `/app/app/agents/` directory (read-only)
 

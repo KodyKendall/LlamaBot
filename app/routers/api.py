@@ -18,7 +18,11 @@ from app.services.user_service import (
     get_all_users, get_user_by_username, update_user, delete_user
 )
 from app.agents.leonardo.model_capabilities import get_model_capabilities
-from app.agents.leonardo.model_policy import is_model_enabled
+from app.agents.leonardo.model_policy import (
+    is_model_enabled,
+    model_switching_allowed,
+    vision_allowed,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -56,19 +60,11 @@ class UpdatePromptRequest(BaseModel):
     is_active: bool | None = None
 
 
-class CreateSkillRequest(BaseModel):
+class WriteSkillRequest(BaseModel):
     name: str
+    description: str = ""
     content: str
-    group: str = "General"
-    description: str | None = None
-
-
-class UpdateSkillRequest(BaseModel):
-    name: str | None = None
-    content: str | None = None
-    group: str | None = None
-    description: str | None = None
-    is_active: bool | None = None
+    slug: str | None = None
 
 
 # ============== Version API ==============
@@ -626,10 +622,9 @@ async def chat_history(thread_id: str, request: Request, username: str = Depends
 
 @router.get("/available-agents", response_class=JSONResponse)
 async def available_agents():
-    """Get list of available agents from langgraph.json."""
-    with open("langgraph.json", "r") as f:
-        langgraph_json = json.load(f)
-    return {"agents": list(langgraph_json["graphs"].keys())}
+    """Get list of available agents (platform base ∪ client overlay)."""
+    from app.lib.langgraph_registry import load_graphs
+    return {"agents": list(load_graphs().keys())}
 
 
 @router.get("/api/available-models", response_class=JSONResponse)
@@ -646,6 +641,8 @@ async def available_models():
         "claude-4.5-sonnet": "ANTHROPIC_API_KEY",
         "gpt-5-mini": "OPENAI_API_KEY",
         "gpt-5-codex": "OPENAI_API_KEY",
+        "gpt-5-nano": "OPENAI_API_KEY",
+        "gpt-5.4-nano": "OPENAI_API_KEY",
         "gemini-3-flash": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
         "gemini-3-pro": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
         "gemini-3.1-flash-lite": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
@@ -687,7 +684,15 @@ async def available_models():
             "capabilities": get_model_capabilities(model_value),
         })
 
-    return {"models": models}
+    # Coarse operator gates the frontend needs to shape the UI: hide the model
+    # dropdown when switching is locked, and refuse image attachments (with a
+    # support message) when vision is off. Both are re-enforced server-side
+    # (get_llm / _build_message_content); these flags are UX only.
+    return {
+        "models": models,
+        "model_switching_allowed": model_switching_allowed(),
+        "vision_allowed": vision_allowed(),
+    }
 
 
 @router.get("/rails-routes", response_class=JSONResponse)
@@ -1061,6 +1066,56 @@ async def update_leonardo_md(
         raise HTTPException(status_code=500, detail=f"Failed to write file: {e}")
 
 
+# ============== Brand Guide API ==============
+#
+# The Brand Guide is a small, user-editable branding guideline (named colors,
+# logos/icons, free-form notes). Persistence (brand.json + BRAND.md + the
+# brand-guidelines skill) lives in app.services.brand_service, shared with the
+# agent tools (read_brand_guide / write_brand_guide) so the two write surfaces
+# can never drift.
+
+from app.services.brand_service import (
+    load_brand,
+    save_brand,
+    brand_exists,
+    DEFAULT_BRAND,
+)
+
+
+class BrandColorModel(BaseModel):
+    name: str = ""
+    hex: str = ""
+
+
+class BrandLogoModel(BaseModel):
+    name: str = ""
+    path: str = ""
+
+
+class BrandGuideModel(BaseModel):
+    colors: list[BrandColorModel] = []
+    logos: list[BrandLogoModel] = []
+    notes: str = ""
+
+
+@router.get("/api/brand", response_class=JSONResponse)
+async def get_brand(username: str = Depends(auth)):
+    """Get the structured brand guide (brand.json), or sensible defaults."""
+    return {"brand": load_brand(), "exists": brand_exists()}
+
+
+@router.put("/api/brand", response_class=JSONResponse)
+async def update_brand(request: BrandGuideModel, username: str = Depends(auth)):
+    """Persist the brand guide: write brand.json, BRAND.md, and refresh the skill."""
+    try:
+        brand = save_brand(request.model_dump())
+        logger.info(f"User '{username}' updated the brand guide")
+        return {"message": "Brand guide saved", "brand": brand}
+    except Exception as e:
+        logger.error(f"Error writing brand guide: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to write brand guide: {e}")
+
+
 # ============== Visible Agents Configuration ==============
 
 # Default visible agents for users without a custom configuration
@@ -1179,161 +1234,66 @@ async def api_set_site_setting(
     return {"key": key, "value": value}
 
 
-# ============== Skills Library API ==============
+# ============== Skills Library API (filesystem: .leonardo/skills/<slug>/SKILL.md) ==============
+# Skills are now Agent Skills on disk (the SKILL.md open standard), managed the
+# same way as LEONARDO.md. The agent authors/uses them via the use_skill /
+# write_skill / edit_skill tools; these endpoints back an optional management UI.
 
 @router.get("/api/skills", response_class=JSONResponse)
-async def api_get_skills(
-    username: str = Depends(auth),
-    session: Session = Depends(get_db_session),
-    group: Optional[str] = Query(None, description="Filter by group"),
-    search: Optional[str] = Query(None, description="Search term")
-):
-    """Get all skills, optionally filtered by group or search term."""
-    from app.services.skill_service import (
-        get_all_skills, get_skills_by_group, search_skills
-    )
-
-    if search:
-        skills = search_skills(session, search)
-    elif group:
-        skills = get_skills_by_group(session, group)
-    else:
-        skills = get_all_skills(session)
-
+async def api_get_skills(username: str = Depends(auth)):
+    """List all installed skills (slug, name, description)."""
+    from app.agents.leonardo.skills import list_all_skills
     return [
-        {
-            "id": s.id,
-            "name": s.name,
-            "content": s.content,
-            "description": s.description,
-            "group": s.group,
-            "usage_count": s.usage_count,
-            "created_at": s.created_at.isoformat() if s.created_at else None,
-            "updated_at": s.updated_at.isoformat() if s.updated_at else None,
-        }
-        for s in skills
+        {"slug": s["slug"], "name": s["name"], "description": s["description"]}
+        for s in list_all_skills()
     ]
 
 
-@router.get("/api/skills/groups", response_class=JSONResponse)
-async def api_get_skill_groups(
-    username: str = Depends(auth),
-    session: Session = Depends(get_db_session)
-):
-    """Get list of unique skill groups."""
-    from app.services.skill_service import get_skill_groups
-    groups = get_skill_groups(session)
-    return {"groups": groups}
-
-
-@router.get("/api/skills/{skill_id}", response_class=JSONResponse)
-async def api_get_skill(
-    skill_id: int,
-    username: str = Depends(auth),
-    session: Session = Depends(get_db_session)
-):
-    """Get a specific skill by ID."""
-    from app.services.skill_service import get_skill_by_id
-    skill = get_skill_by_id(session, skill_id)
+@router.get("/api/skills/{slug}", response_class=JSONResponse)
+async def api_get_skill(slug: str, username: str = Depends(auth)):
+    """Get a single skill's full SKILL.md (frontmatter + body)."""
+    from app.agents.leonardo.skills import get_skill, get_skill_body
+    skill = get_skill(slug)
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
-
     return {
-        "id": skill.id,
-        "name": skill.name,
-        "content": skill.content,
-        "description": skill.description,
-        "group": skill.group,
-        "usage_count": skill.usage_count,
-        "created_at": skill.created_at.isoformat() if skill.created_at else None,
-        "updated_at": skill.updated_at.isoformat() if skill.updated_at else None,
+        "slug": skill["slug"],
+        "name": skill["name"],
+        "description": skill["description"],
+        "body": skill["body"],
+        "raw": get_skill_body(slug),
     }
 
 
-@router.post("/api/skills", response_class=JSONResponse)
-async def api_create_skill(
-    request: CreateSkillRequest,
-    username: str = Depends(auth),
-    session: Session = Depends(get_db_session)
+@router.put("/api/skills/{slug}", response_class=JSONResponse)
+async def api_write_skill(
+    slug: str,
+    request: WriteSkillRequest,
+    current_user: User = Depends(engineer_or_admin_required),
 ):
-    """Create a new skill."""
-    from app.services.skill_service import create_skill
-
-    if not request.name or not request.name.strip():
-        raise HTTPException(status_code=400, detail="Name is required")
-    if not request.content or not request.content.strip():
-        raise HTTPException(status_code=400, detail="Content is required")
-
-    skill = create_skill(
-        session,
-        name=request.name,
-        content=request.content,
-        group=request.group,
-        description=request.description
-    )
-
-    return {
-        "id": skill.id,
-        "name": skill.name,
-        "message": "Skill created successfully"
-    }
+    """Create or overwrite a skill (engineer/admin only)."""
+    from app.agents.leonardo.skills import write_skill_file
+    try:
+        saved_slug = write_skill_file(
+            request.name, request.description, request.content, slug=request.slug or slug
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    logger.info(f"User '{current_user.username}' wrote skill '{saved_slug}'")
+    return {"slug": saved_slug, "message": "Skill saved successfully"}
 
 
-@router.patch("/api/skills/{skill_id}", response_class=JSONResponse)
-async def api_update_skill(
-    skill_id: int,
-    request: UpdateSkillRequest,
-    username: str = Depends(auth),
-    session: Session = Depends(get_db_session)
-):
-    """Update an existing skill."""
-    from app.services.skill_service import update_skill
-
-    skill = update_skill(
-        session, skill_id,
-        name=request.name,
-        content=request.content,
-        group=request.group,
-        description=request.description,
-        is_active=request.is_active
-    )
-
-    if not skill:
-        raise HTTPException(status_code=404, detail="Skill not found")
-
-    return {"message": "Skill updated successfully"}
-
-
-@router.delete("/api/skills/{skill_id}", response_class=JSONResponse)
+@router.delete("/api/skills/{slug}", response_class=JSONResponse)
 async def api_delete_skill(
-    skill_id: int,
-    username: str = Depends(auth),
-    session: Session = Depends(get_db_session),
-    hard_delete: bool = Query(False, description="Permanently delete")
+    slug: str,
+    current_user: User = Depends(engineer_or_admin_required),
 ):
-    """Delete a skill (soft delete by default)."""
-    from app.services.skill_service import delete_skill
-
-    if not delete_skill(session, skill_id, hard_delete=hard_delete):
+    """Delete a skill by slug (engineer/admin only)."""
+    from app.agents.leonardo.skills import delete_skill_file
+    if not delete_skill_file(slug):
         raise HTTPException(status_code=404, detail="Skill not found")
-
+    logger.info(f"User '{current_user.username}' deleted skill '{slug}'")
     return {"message": "Skill deleted successfully"}
-
-
-@router.post("/api/skills/{skill_id}/use", response_class=JSONResponse)
-async def api_use_skill(
-    skill_id: int,
-    username: str = Depends(auth),
-    session: Session = Depends(get_db_session)
-):
-    """Increment usage count when a skill is selected."""
-    from app.services.skill_service import increment_usage
-
-    skill = increment_usage(session, skill_id)
-    if not skill:
-        raise HTTPException(status_code=404, detail="Skill not found")
-
-    return {"usage_count": skill.usage_count}
 
 
 # ============== File Upload to Assets ==============

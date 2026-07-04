@@ -37,6 +37,13 @@ from app.agents.leonardo.model_capabilities import (
     get_model_capabilities,
     get_file_category,
 )
+from app.agents.leonardo.model_policy import vision_allowed
+
+# Support contact surfaced to users when vision is disabled by the operator.
+SUPPORT_EMAIL = "support@llamapress.ai"
+
+# Attachment categories that require a vision model; gated by VISION_MODEL_ALLOWED.
+_VISION_CATEGORIES = ("images", "video")
 
 async def _report_tool_messages(*, messages, mothership, thread_id: str, agent_depth: int) -> None:
     """Report ToolMessage observations to the mothership.
@@ -73,6 +80,51 @@ class RequestHandler:
         self.locks: Dict[int, Lock] = {}
         self.app = app
     
+    async def _report_error_to_mothership(self, exc: Exception, message: dict, *, recovered: bool = False) -> None:
+        """Best-effort: surface an end-user-facing error to the mothership.
+
+        Fire-and-forget telemetry (see docs/dev/error_telemetry.md). This closes
+        the visibility gap — the LlamaPress team learns an end user hit an error,
+        with the model / agent_mode / version needed to triage it, instead of the
+        trace dying in one instance's stdout. Never raises: a reporting failure
+        must never worsen the error the user already saw. ``recovered`` marks
+        whether a later rung (the graceful floor) still answered the user.
+        """
+        try:
+            mothership = getattr(self.app.state, "mothership_client", None)
+            if not mothership:
+                return
+            import traceback as _tb
+            import hashlib
+            from datetime import datetime, timezone
+
+            error_class = type(exc).__name__
+            agent_mode = (message or {}).get("agent_name")
+            first_line = (str(exc).splitlines() or [""])[0]
+            fingerprint = hashlib.md5(
+                f"{error_class}|{first_line[:160]}|{agent_mode}".encode("utf-8", "replace")
+            ).hexdigest()
+            try:
+                from app.routers.api import get_container_version
+                version = get_container_version()
+            except Exception:
+                version = None
+
+            await mothership.report_error(
+                thread_id=(message or {}).get("thread_id"),
+                error_class=error_class,
+                error_message=str(exc),
+                traceback_str=_tb.format_exc(),
+                agent_mode=agent_mode,
+                model=(message or {}).get("llm_model"),
+                llamabot_version=version,
+                occurred_at=datetime.now(timezone.utc).isoformat(),
+                fingerprint=fingerprint,
+                recovered=recovered,
+            )
+        except Exception as report_exc:
+            logger.warning(f"Failed to report error to mothership (non-fatal): {report_exc}")
+
     def _get_lock(self, websocket) -> Lock:
         """Get or create a lock for a run.
 
@@ -823,6 +875,7 @@ class RequestHandler:
                 raise e
             except Exception as e:
                 logger.error(f"Error handling request: {str(e)}", exc_info=True)
+                await self._report_error_to_mothership(e, incoming_message)
                 # Only send error message if WebSocket is still open
                 if self._is_websocket_open(websocket):
                     await websocket.send_json({
@@ -951,6 +1004,7 @@ class RequestHandler:
                 raise e
             except Exception as e:
                 logger.error(f"Error handling approval response: {str(e)}", exc_info=True)
+                await self._report_error_to_mothership(e, response_message)
                 if self._is_websocket_open(websocket):
                     await websocket.send_json({
                         "type": "error",
@@ -1159,6 +1213,7 @@ class RequestHandler:
                 raise e
             except Exception as e:
                 logger.error(f"Error handling question response: {str(e)}", exc_info=True)
+                await self._report_error_to_mothership(e, response_message)
                 if self._is_websocket_open(websocket):
                     await websocket.send_json({
                         "type": "error",
@@ -1296,36 +1351,24 @@ class RequestHandler:
         if not agent_name:
             raise KeyError("agent_name missing from message")
 
-        # 1️⃣  explicit override (useful in containers / CI)
-        explicit = os.getenv("LANGGRAPH_CONFIG")
-        if explicit:
-            cfg_path = Path(explicit).expanduser()
-            if not cfg_path.is_file():
-                raise FileNotFoundError(f"LANGGRAPH_CONFIG='{cfg_path}' not found")
-            return self._load_workflow(cfg_path, agent_name)
+        # Merge the platform base (langgraph.json) with the client overlay
+        # (langgraph.local.json / langgraph.d/*.json). The helper handles the
+        # LANGGRAPH_CONFIG override and the walk-up search for the base file, so an
+        # agent registered by the client — including ones the AI-builder writes to the
+        # overlay — resolves here without ever editing the platform base.
+        from app.lib.langgraph_registry import load_graphs
+        graphs = load_graphs()
+        if not graphs:
+            raise FileNotFoundError("langgraph.json not found in any expected location")
 
-        # 2️⃣  walk up the tree from the directory that contains *this* file
-        here = Path(__file__).resolve().parent
-        for parent in [here, *here.parents]:
-            candidate = parent / "langgraph.json"
-            if candidate.is_file():
-                return self._load_workflow(candidate, agent_name)
-
-        # 3️⃣  legacy relative fallbacks (same semantics you had)
-        legacy_paths = ["../langgraph.json", "../../langgraph.json", "langgraph.json"]
-        for rel in legacy_paths:
-            candidate = Path(rel).resolve()
-            if candidate.is_file():
-                return self._load_workflow(candidate, agent_name)
-
-        raise FileNotFoundError("langgraph.json not found in any expected location")
+        return self._parse_graph_entry(graphs, agent_name)
 
 
-    def _load_workflow(self, cfg_path: Path, agent_name: str) -> tuple[str, dict]:
+    def _parse_graph_entry(self, graphs: dict, agent_name: str) -> tuple[str, dict]:
         """
-        Load JSON at cfg_path and return (workflow_path, agent_config) for agent_name.
+        Return (workflow_path, agent_config) for agent_name from a merged graphs map.
 
-        Supports two formats in langgraph.json:
+        Supports two entry formats:
         1. Simple string (backwards compatible):
            "llamabot": "./agents/llamabot/nodes.py:build_workflow"
 
@@ -1341,12 +1384,8 @@ class RequestHandler:
                    custom settings like recursion_limit, max_messages, etc.
                    If using simple string format, agent_config will be empty dict.
         """
-        with cfg_path.open("r") as f:
-            data = json.load(f)
-
-        graphs = data.get("graphs", {})
         if agent_name not in graphs:
-            raise KeyError(f"Agent '{agent_name}' not found in {cfg_path}")
+            raise KeyError(f"Agent '{agent_name}' not found in langgraph registry")
 
         graph_entry = graphs[agent_name]
 
@@ -1358,13 +1397,13 @@ class RequestHandler:
             # Object format with config
             workflow_path = graph_entry.get("workflow")
             if not workflow_path:
-                raise KeyError(f"Agent '{agent_name}' config missing 'workflow' key in {cfg_path}")
+                raise KeyError(f"Agent '{agent_name}' config missing 'workflow' key")
 
             # Extract config (everything except 'workflow')
             agent_config = {k: v for k, v in graph_entry.items() if k != "workflow"}
             return workflow_path, agent_config
         else:
-            raise ValueError(f"Invalid format for agent '{agent_name}' in {cfg_path}. Expected string or object.")
+            raise ValueError(f"Invalid format for agent '{agent_name}'. Expected string or object.")
     
     def _build_message_content(self, message: dict) -> list | str:
         """
@@ -1391,9 +1430,16 @@ class RequestHandler:
         # Get model capabilities
         capabilities = get_model_capabilities(llm_model)
 
+        # Authoritative vision gate: when the operator disables vision, image and
+        # video attachments never reach any LLM regardless of the model's own
+        # capabilities. The frontend blocks the send too (UX), but this is the
+        # real chokepoint since llm_model/attachments are unvalidated user input.
+        vision_ok = vision_allowed()
+
         # Build multimodal content array
         content = []
         unsupported_files = []
+        vision_blocked_files = []
 
         # Add text content first
         if text:
@@ -1409,6 +1455,15 @@ class RequestHandler:
                 continue
 
             file_category = get_file_category(mime_type)
+
+            # Vision disabled by operator: refuse visual media outright.
+            if file_category in _VISION_CATEGORIES and not vision_ok:
+                vision_blocked_files.append(f"{filename} ({mime_type})")
+                logger.warning(
+                    "Vision disabled (VISION_MODEL_ALLOWED off); dropping %s (%s)",
+                    filename, mime_type,
+                )
+                continue
 
             # Check if model supports this file type
             if capabilities.get(file_category, False):
@@ -1438,6 +1493,21 @@ class RequestHandler:
         # If there were unsupported files, add a note to the text content
         if unsupported_files:
             note = f"\n\n[Note: The following attachments were not sent because {llm_model} doesn't support them: {', '.join(unsupported_files)}. Consider using Gemini for video support.]"
+            if content and content[0].get("type") == "text":
+                content[0]["text"] += note
+            else:
+                content.insert(0, {"type": "text", "text": note.strip()})
+
+        # Vision disabled: tell the model (and, via it, the user) that image
+        # understanding is gated behind an operator opt-in, so it responds with
+        # the support hand-off instead of pretending it saw the image.
+        if vision_blocked_files:
+            note = (
+                f"\n\n[Note: {len(vision_blocked_files)} image/video attachment(s) "
+                f"were not sent because image understanding is not enabled on this "
+                f"instance. Tell the user to reach out to {SUPPORT_EMAIL} to enable "
+                f"Leo to view and understand images.]"
+            )
             if content and content[0].get("type") == "text":
                 content[0]["text"] += note
             else:

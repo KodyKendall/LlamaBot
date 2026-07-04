@@ -29,6 +29,7 @@ from app.agents.leonardo.rails_agent.tools import (
     fix_permissions,
     save_memory, list_memories, delete_memory,
     read_leonardo_md, edit_leonardo_md, write_leonardo_md,
+    build_use_skill_tool, list_skills, read_skill, write_skill, edit_skill, delete_skill,
 )
 from app.agents.leonardo.rails_agent.sub_agents import delegate_research
 from app.agents.leonardo.rails_user_mode_agent.prompts import USER_MODE_AGENT_PROMPT
@@ -126,6 +127,7 @@ default_tools = [
     delegate_research,  # Read-only sub-agent for codebase investigation
     save_memory, list_memories, delete_memory,  # Long-term memory
     read_leonardo_md, edit_leonardo_md, write_leonardo_md,  # Project context file
+    list_skills, read_skill, write_skill, edit_skill, delete_skill,  # Skill library
 ]
 
 
@@ -168,7 +170,7 @@ def build_workflow(checkpointer=None):
     # Create and return the agent
     return build_leonardo_agent(
         model=default_model,
-        tools=default_tools,
+        tools=[*default_tools, build_use_skill_tool()],
         system_prompt=get_cached_system_prompt(),
         state_schema=RailsAgentState,
         middleware=middleware,

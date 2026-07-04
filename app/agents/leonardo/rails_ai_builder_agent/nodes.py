@@ -24,11 +24,12 @@ from app.agents.leonardo.rails_agent.state import RailsAgentState
 from app.agents.leonardo.rails_agent.tools import (
     write_todos, write_file, read_file, ls, edit_file, search_file, bash_command,
     ls_agents, read_agent_file, write_agent_file, edit_agent_file,
-    read_langgraph_json, edit_langgraph_json
+    read_langgraph_json, edit_langgraph_json,
+    read_brand_guide, write_brand_guide,
 )
 from app.agents.leonardo.rails_agent.sub_agents import delegate_research
 from app.agents.leonardo.rails_ai_builder_agent.prompts import RAILS_AI_BUILDER_AGENT_PROMPT
-from app.agents.leonardo.project_context import build_system_prompt_with_project_context
+from app.agents.leonardo.project_context import build_system_prompt_with_project_context, brand_context_section
 from app.agents.leonardo.llm_factory import get_llm
 from app.agents.leonardo.agent_factory import repair_orphaned_tool_calls_in_messages
 
@@ -48,7 +49,9 @@ def get_sys_msg():
 
     Loads LEONARDO.md if it exists and appends it to the base prompt.
     """
-    full_prompt = build_system_prompt_with_project_context(RAILS_AI_BUILDER_AGENT_PROMPT, agent_mode="rails_ai_builder_agent")
+    # Rebuilt every turn (see get_sys_msg call site), so the brand guide appended
+    # here stays live without a restart.
+    full_prompt = build_system_prompt_with_project_context(RAILS_AI_BUILDER_AGENT_PROMPT, agent_mode="rails_ai_builder_agent") + brand_context_section()
     return {
         "role": "system",
         "content": [
@@ -66,7 +69,8 @@ default_tools = [
     delegate_research,  # Read-only sub-agent for codebase investigation
     # Agent file tools
     ls_agents, read_agent_file, write_agent_file, edit_agent_file,
-    read_langgraph_json, edit_langgraph_json
+    read_langgraph_json, edit_langgraph_json,
+    read_brand_guide, write_brand_guide,  # Brand guide (colors, logos, notes)
 ]
 
 # Node

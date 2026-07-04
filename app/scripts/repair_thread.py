@@ -63,11 +63,9 @@ def _build_compiled_graph(agent_name: str, checkpointer):
     import importlib
     import inspect
 
-    config_path = os.path.join(os.path.dirname(__file__), "..", "langgraph.json")
-    with open(os.path.abspath(config_path)) as f:
-        cfg = json.load(f)
-
-    graphs = cfg.get("graphs", {})
+    from app.lib.langgraph_registry import load_graphs
+    base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "langgraph.json"))
+    graphs = load_graphs(base_path)
     if agent_name not in graphs:
         sys.exit(f"Unknown agent '{agent_name}'. Known: {sorted(graphs)}")
 

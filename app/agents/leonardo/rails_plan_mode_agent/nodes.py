@@ -36,6 +36,7 @@ from app.agents.leonardo.rails_agent.tools import (
     glob_files, grep_files, internet_search,
     read_leonardo_md, write_leonardo_md, edit_leonardo_md,
     save_memory, list_memories, delete_memory,
+    build_use_skill_tool, list_skills, read_skill, write_skill, edit_skill, delete_skill,
     write_personality_file,
 )
 from app.agents.leonardo.rails_plan_mode_agent.prompts import PLAN_MODE_AGENT_PROMPT
@@ -284,6 +285,7 @@ default_tools = [
     glob_files, grep_files, internet_search,
     read_leonardo_md, write_leonardo_md, edit_leonardo_md,
     save_memory, list_memories, delete_memory,
+    list_skills, read_skill, write_skill, edit_skill, delete_skill,  # Skill library
     write_personality_file,
     # Sub-agent delegation
     delegate_task, delegate_research,
@@ -321,7 +323,7 @@ def build_workflow(checkpointer=None):
     # Create and return the agent
     return build_leonardo_agent(
         model=default_model,
-        tools=default_tools,
+        tools=[*default_tools, build_use_skill_tool()],
         system_prompt=get_cached_system_prompt(),
         state_schema=RailsAgentState,
         middleware=middleware,

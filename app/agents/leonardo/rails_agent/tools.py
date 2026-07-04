@@ -38,6 +38,14 @@ from app.agents.leonardo.rails_agent.tool_prompts import (
     HARD_RESTART_RAILS_DESCRIPTION,
     FIX_PERMISSIONS_DESCRIPTION,
     BROWSER_INSPECT_DESCRIPTION,
+    USE_SKILL_DESCRIPTION_TEMPLATE,
+    LIST_SKILLS_DESCRIPTION,
+    READ_SKILL_DESCRIPTION,
+    WRITE_SKILL_DESCRIPTION,
+    EDIT_SKILL_DESCRIPTION,
+    DELETE_SKILL_DESCRIPTION,
+    READ_BRAND_GUIDE_DESCRIPTION,
+    WRITE_BRAND_GUIDE_DESCRIPTION,
 )
 
 from app.agents.leonardo.project_context import (
@@ -47,10 +55,21 @@ from app.agents.leonardo.project_context import (
     IDENTITY_MD_PATH,
 )
 
+from app.services.brand_service import load_brand, save_brand, render_brand_md
+
 from app.agents.leonardo.memory import (
     write_memory_file,
     list_all_memories,
     delete_memory_file,
+)
+
+from app.agents.leonardo.skills import (
+    list_all_skills,
+    get_skill_body,
+    write_skill_file,
+    edit_skill_file,
+    delete_skill_file,
+    render_available_skills,
 )
 
 from app.agents.leonardo.rails_agent.state import Todo
@@ -2090,6 +2109,252 @@ def write_leonardo_md(
         )
 
 
+# ============================================================================
+# BRAND GUIDE TOOLS - read/write the project's brand.json (colors, logos, notes)
+# ============================================================================
+# These share app.services.brand_service with the /api/brand endpoint, so a
+# change from Leo and a change from the toolbar editor go through the exact same
+# write path (brand.json + BRAND.md + brand-guidelines skill).
+
+
+@tool(description=READ_BRAND_GUIDE_DESCRIPTION)
+def read_brand_guide(runtime: ToolRuntime) -> Command:
+    """Read the project's Brand Guide (colors, logos, notes)."""
+    import json
+    tool_call_id = runtime.tool_call_id
+    try:
+        brand = load_brand()
+        raw = json.dumps(brand, indent=2, ensure_ascii=False)
+        result = (
+            f"{render_brand_md(brand)}\n\n---\n\n"
+            "Structured brand.json (edit with write_brand_guide — to change one "
+            "color/logo, pass the FULL list back with your edit applied):\n\n"
+            f"```json\n{raw}\n```"
+        )
+        return Command(update={"messages": [ToolMessage(result, tool_call_id=tool_call_id)]})
+    except Exception as e:
+        return Command(update={"messages": [ToolMessage(f"Error reading brand guide: {e}", tool_call_id=tool_call_id)]})
+
+
+@tool(description=WRITE_BRAND_GUIDE_DESCRIPTION)
+def write_brand_guide(
+    runtime: ToolRuntime,
+    colors: Optional[list] = None,
+    logos: Optional[list] = None,
+    notes: Optional[str] = None,
+) -> Command:
+    """Create/update the Brand Guide. Provided sections replace; omitted are kept."""
+    tool_call_id = runtime.tool_call_id
+
+    if colors is None and logos is None and notes is None:
+        return Command(update={"messages": [ToolMessage(
+            "No changes provided. Pass at least one of: colors, logos, or notes.",
+            tool_call_id=tool_call_id)]})
+
+    try:
+        brand = load_brand()
+        if colors is not None:
+            brand["colors"] = colors
+        if logos is not None:
+            brand["logos"] = logos
+        if notes is not None:
+            brand["notes"] = notes
+
+        saved = save_brand(brand)
+        summary = (
+            f"Brand guide saved: {len(saved['colors'])} color(s), "
+            f"{len(saved['logos'])} logo(s). BRAND.md and the brand-guidelines "
+            "skill were refreshed; the change applies on the next turn."
+        )
+        palette = ", ".join(
+            f"{c.get('name') or 'Color'} {c.get('hex')}"
+            for c in saved["colors"] if c.get("hex")
+        )
+        if palette:
+            summary += f"\nColors: {palette}."
+        return Command(update={"messages": [ToolMessage(summary, tool_call_id=tool_call_id)]})
+    except Exception as e:
+        return Command(update={"messages": [ToolMessage(f"Error saving brand guide: {e}", tool_call_id=tool_call_id)]})
+
+
+# ============================================================================
+# SKILL TOOLS - Agent Skills (SKILL.md progressive disclosure)
+# ============================================================================
+# use_skill loads a skill's full instructions into the conversation on demand;
+# the management tools (list/read/write/edit/delete) let the agent curate the
+# .leonardo/skills/ library the same way it manages memories and LEONARDO.md.
+
+
+def build_use_skill_tool():
+    """Build the use_skill tool with the current <available_skills> catalog baked
+    into its description.
+
+    The description is dynamic — it lists every installed skill's slug +
+    description so the model can decide when to fire. Compiled graphs are cached
+    at startup, so RefreshSkillCatalogMiddleware (agent_factory.py) rebuilds this
+    tool per request to keep the catalog live as skills are authored/deleted.
+    """
+    description = USE_SKILL_DESCRIPTION_TEMPLATE.format(
+        available_skills=render_available_skills()
+    )
+
+    @tool("use_skill", description=description)
+    def use_skill(slug: str, runtime: ToolRuntime) -> Command:
+        """Load a skill's full instructions into context."""
+        tool_call_id = runtime.tool_call_id
+        body = get_skill_body(slug)
+        if body is None:
+            available = [s["slug"] for s in list_all_skills()]
+            hint = ", ".join(available) if available else "(none installed)"
+            return Command(
+                update={
+                    "messages": [ToolMessage(
+                        f"No skill '{slug}' found. Available skills: {hint}",
+                        tool_call_id=tool_call_id,
+                    )]
+                }
+            )
+        return Command(
+            update={
+                "messages": [ToolMessage(body, tool_call_id=tool_call_id)]
+            }
+        )
+
+    return use_skill
+
+
+@tool(description=LIST_SKILLS_DESCRIPTION)
+def list_skills(
+    runtime: ToolRuntime,
+) -> Command:
+    """List all installed skills."""
+    tool_call_id = runtime.tool_call_id
+
+    skills = list_all_skills()
+    if not skills:
+        return Command(
+            update={
+                "messages": [ToolMessage("No skills installed yet. Use write_skill to create one.", tool_call_id=tool_call_id)]
+            }
+        )
+
+    lines = [f"Found {len(skills)} skill(s):\n"]
+    for s in skills:
+        lines.append(f"- {s['slug']} — {s['name']}")
+        lines.append(f"  {s['description'] or '(no description)'}")
+
+    return Command(
+        update={
+            "messages": [ToolMessage("\n".join(lines), tool_call_id=tool_call_id)]
+        }
+    )
+
+
+@tool(description=READ_SKILL_DESCRIPTION)
+def read_skill(
+    slug: str,
+    runtime: ToolRuntime,
+) -> Command:
+    """Read a skill's raw SKILL.md source with line numbers."""
+    tool_call_id = runtime.tool_call_id
+
+    body = get_skill_body(slug)
+    if body is None:
+        return Command(
+            update={
+                "messages": [ToolMessage(f"Skill '{slug}' does not exist. Use list_skills to see available skills.", tool_call_id=tool_call_id)]
+            }
+        )
+
+    lines = body.splitlines()
+    numbered = [f"{i+1:6d}\t{line}" for i, line in enumerate(lines)]
+    result = f"Contents of .leonardo/skills/{slug}/SKILL.md ({len(lines)} lines):\n\n" + "\n".join(numbered)
+
+    return Command(
+        update={
+            "messages": [ToolMessage(result, tool_call_id=tool_call_id)]
+        }
+    )
+
+
+@tool(description=WRITE_SKILL_DESCRIPTION)
+def write_skill(
+    name: str,
+    description: str,
+    content: str,
+    runtime: ToolRuntime,
+    slug: Optional[str] = None,
+) -> Command:
+    """Create or overwrite a skill's SKILL.md."""
+    tool_call_id = runtime.tool_call_id
+
+    try:
+        saved_slug = write_skill_file(name, description, content, slug=slug)
+        return Command(
+            update={
+                "messages": [ToolMessage(f"Skill saved: {saved_slug} (.leonardo/skills/{saved_slug}/SKILL.md)", tool_call_id=tool_call_id)]
+            }
+        )
+    except ValueError as e:
+        return Command(
+            update={
+                "messages": [ToolMessage(f"Error saving skill: {e}", tool_call_id=tool_call_id)]
+            }
+        )
+    except Exception as e:
+        return Command(
+            update={
+                "messages": [ToolMessage(f"Unexpected error saving skill: {e}", tool_call_id=tool_call_id)]
+            }
+        )
+
+
+@tool(description=EDIT_SKILL_DESCRIPTION)
+def edit_skill(
+    slug: str,
+    old_string: str,
+    new_string: str,
+    runtime: ToolRuntime,
+) -> Command:
+    """Edit a skill's SKILL.md by replacing text."""
+    tool_call_id = runtime.tool_call_id
+
+    try:
+        edit_skill_file(slug, old_string, new_string)
+        return Command(
+            update={
+                "messages": [ToolMessage(f"Successfully edited skill '{slug}'.", tool_call_id=tool_call_id)]
+            }
+        )
+    except ValueError as e:
+        return Command(
+            update={
+                "messages": [ToolMessage(f"Error editing skill: {e}", tool_call_id=tool_call_id)]
+            }
+        )
+
+
+@tool(description=DELETE_SKILL_DESCRIPTION)
+def delete_skill(
+    slug: str,
+    runtime: ToolRuntime,
+) -> Command:
+    """Delete a skill by slug."""
+    tool_call_id = runtime.tool_call_id
+
+    if delete_skill_file(slug):
+        return Command(
+            update={
+                "messages": [ToolMessage(f"Skill deleted: {slug}", tool_call_id=tool_call_id)]
+            }
+        )
+    return Command(
+        update={
+            "messages": [ToolMessage(f"Skill not found: {slug}", tool_call_id=tool_call_id)]
+        }
+    )
+
+
 VALID_PERSONALITY_FILES = {
     "SOUL.md": SOUL_MD_PATH,
     "USER.md": USER_MD_PATH,
@@ -2139,50 +2404,80 @@ def write_personality_file(
 
 
 
-@tool(description="""Read the langgraph.json configuration file.
-Returns the contents of /app/app/langgraph.json which registers all agents (built-in and custom).
-This file maps agent names to their workflow build functions.""")
+@tool(description="""Read the agent registry.
+Returns the MERGED list of all registered agents (platform base langgraph.json ∪ the
+client overlay langgraph.local.json), then the raw contents of langgraph.local.json —
+the ONLY file you may edit. Register new client agents by editing the overlay; the
+platform base is read-only and is overwritten by platform updates.""")
 def read_langgraph_json(
     runtime: ToolRuntime,
 ) -> str:
-    """Read the langgraph.json configuration file."""
-    full_path = APP_DIR / "langgraph.json"
-
-    if not full_path.exists():
-        return "Error: langgraph.json not found at /app/app/langgraph.json"
+    """Read the merged agent registry + the editable client overlay."""
+    from app.lib.langgraph_registry import load_graphs, local_overlay_path
+    base_path = APP_DIR / "langgraph.json"
 
     try:
-        content = full_path.read_text()
-        return f"Contents of langgraph.json:\n\n{content}"
+        merged = load_graphs(base_path)
+        merged_list = "\n".join(f"  - {name}" for name in sorted(merged)) or "  (none)"
     except Exception as e:
-        return f"Error reading langgraph.json: {e}"
+        merged_list = f"  (could not read merged registry: {e})"
 
-@tool(description="""Edit the langgraph.json configuration file to register agents.
+    overlay_path = local_overlay_path(base_path)
+    if overlay_path.exists():
+        try:
+            overlay_content = overlay_path.read_text()
+        except Exception as e:
+            overlay_content = f"(error reading overlay: {e})"
+    else:
+        overlay_content = (
+            '(does not exist yet — edit_langgraph_json will create it as:\n'
+            '{\n  "graphs": {}\n}\n)'
+        )
+
+    return (
+        f"All registered agents (platform base ∪ client overlay):\n{merged_list}\n\n"
+        f"Editable client overlay — {overlay_path} (register new agents HERE):\n\n"
+        f"{overlay_content}"
+    )
+
+@tool(description="""Register/edit agents in the CLIENT overlay (langgraph.local.json).
 Usage:
-- old_string: The exact JSON text to find and replace
+- old_string: The exact JSON text to find and replace in langgraph.local.json
 - new_string: The JSON text to replace it with
-This is typically used to add new agent entries to the "graphs" object.
-Example: To add a new agent, replace the graphs object with an updated version that includes your new agent.""")
+Adds/edits entries in the overlay's "graphs" object. The overlay is created as
+{"graphs": {}} if it doesn't exist yet — to add the first agent, use
+old_string='"graphs": {}' and new_string='"graphs": { "my_agent": "..." }'.
+NOTE: this edits ONLY the client overlay, never the platform base langgraph.json
+(the base is read-only and overwritten by platform updates). Client agents registered
+here survive container recreates and platform syncs.""")
 def edit_langgraph_json(
     old_string: str,
     new_string: str,
     runtime: ToolRuntime,
 ) -> Command:
-    """Edit the langgraph.json configuration file."""
+    """Edit the client overlay langgraph.local.json (creating it if absent)."""
+    from app.lib.langgraph_registry import local_overlay_path
     tool_call_id = runtime.tool_call_id
-    full_path = APP_DIR / "langgraph.json"
+    base_path = APP_DIR / "langgraph.json"
+    full_path = local_overlay_path(base_path)
 
+    # The overlay is optional by design — materialize an empty one on first write so the
+    # AI-builder always has a valid target and never has to touch the platform base.
     if not full_path.exists():
-        error_message = "Error: langgraph.json not found at /app/app/langgraph.json"
-        tool_output = {
-            "status": "error",
-            "message": error_message
-        }
-        return Command(
-            update={
-                "messages": [ToolMessage(error_message, artifact=tool_output, tool_call_id=tool_call_id)]
+        try:
+            full_path.write_text('{\n  "graphs": {}\n}\n')
+            chown_for_ubuntu(full_path)
+        except Exception as e:
+            error_message = f"Error creating client overlay {full_path}: {e}"
+            tool_output = {
+                "status": "error",
+                "message": error_message
             }
-        )
+            return Command(
+                update={
+                    "messages": [ToolMessage(error_message, artifact=tool_output, tool_call_id=tool_call_id)]
+                }
+            )
 
     try:
         original_content = full_path.read_text()
@@ -2200,7 +2495,11 @@ def edit_langgraph_json(
 
     # Check if old_string exists
     if old_string not in original_content:
-        error_message = "Error: Could not find the specified text in langgraph.json"
+        error_message = (
+            "Error: Could not find the specified text in langgraph.local.json. "
+            "Note you can only edit the client overlay, not the platform base — "
+            "call read_langgraph_json to see the overlay's current contents."
+        )
         tool_output = {
             "status": "error",
             "message": error_message
@@ -2251,7 +2550,7 @@ def edit_langgraph_json(
             }
         )
 
-    success_message = "Successfully edited langgraph.json"
+    success_message = "Successfully edited langgraph.local.json (client overlay)"
     tool_output = {
         "status": "success",
         "message": success_message,

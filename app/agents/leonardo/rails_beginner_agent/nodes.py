@@ -18,13 +18,15 @@ from app.agents.leonardo.rails_agent.tools import (
     write_todos, write_file, read_file, ls, edit_file, bash_command, tail_rails_logs, hard_restart_rails, fix_permissions,
     glob_files, grep_files, internet_search,
     read_leonardo_md, write_leonardo_md, edit_leonardo_md,
+    read_brand_guide, write_brand_guide,
     save_memory, list_memories, delete_memory,
+    build_use_skill_tool, list_skills, read_skill, write_skill, edit_skill, delete_skill,
     write_personality_file,
     browser_inspect, browser_inspect_enabled,
 )
 from app.agents.leonardo.rails_agent.sub_agents import delegate_task, delegate_research
 from app.agents.leonardo.rails_beginner_agent.prompts import BEGINNER_AGENT_PROMPT
-from app.agents.leonardo.project_context import build_beginner_system_prompt
+from app.agents.leonardo.project_context import build_beginner_system_prompt, brand_context_section
 from app.agents.leonardo.llm_factory import get_llm
 from app.agents.leonardo.agent_factory import repair_orphaned_tool_calls_in_messages
 
@@ -37,7 +39,9 @@ APP_DIR = PROJECT_ROOT / 'app'
 
 
 def get_sys_msg():
-    full_prompt = build_beginner_system_prompt(BEGINNER_AGENT_PROMPT, agent_mode="rails_beginner_agent")
+    # Rebuilt every turn (see get_sys_msg call site), so the brand guide appended
+    # here stays live without a restart.
+    full_prompt = build_beginner_system_prompt(BEGINNER_AGENT_PROMPT, agent_mode="rails_beginner_agent") + brand_context_section()
     return {
         "role": "system",
         "content": [
@@ -94,7 +98,10 @@ default_tools = [
     ls, read_file, write_file, edit_file, bash_command, tail_rails_logs, hard_restart_rails, fix_permissions,
     glob_files, grep_files, internet_search,
     read_leonardo_md, write_leonardo_md, edit_leonardo_md,
+    read_brand_guide, write_brand_guide,  # Brand guide (colors, logos, notes)
     save_memory, list_memories, delete_memory,
+    list_skills, read_skill, write_skill, edit_skill, delete_skill,  # Skill library management
+    build_use_skill_tool(),  # use_skill — ToolNode execution (description is refreshed per-turn in leonardo_beginner)
     write_personality_file,
     delegate_task, delegate_research,
     suggest_plan_mode,
@@ -129,6 +136,8 @@ def leonardo_beginner(state: RailsAgentState, browser_inspect_on: bool = False) 
         ls, read_file, write_file, edit_file, bash_command, tail_rails_logs, hard_restart_rails,
         glob_files, grep_files, internet_search,
         read_leonardo_md, write_leonardo_md, edit_leonardo_md,
+        list_skills, read_skill, write_skill, edit_skill, delete_skill,
+        build_use_skill_tool(),  # fresh <available_skills> catalog each turn (raw graph, no middleware)
         write_personality_file,
         delegate_task, delegate_research,
         suggest_plan_mode,

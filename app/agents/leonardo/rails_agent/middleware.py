@@ -8,13 +8,15 @@ This module contains:
 """
 
 from langchain.agents.middleware import AgentMiddleware
-from google.api_core.exceptions import ResourceExhausted
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 from typing import Any
+import asyncio
 import logging
+import time
 
 from app.agents.leonardo.rails_agent.state import RailsAgentState
 from app.agents.leonardo.llm_factory import get_llm
+from app.agents.leonardo.resilience import is_transient_error
 from app.agents.leonardo.model_capabilities import (
     get_model_capabilities,
     get_file_category,
@@ -371,6 +373,25 @@ class DeepSeekReasoningMiddleware(AgentMiddleware):
 # Dynamic Model Selection
 # =============================================================================
 
+# Rung 1 of the resilience ladder (docs/dev/error_telemetry.md): model-agnostic
+# transient-error retry. We retry the model *call* (re-invoking the handler),
+# NOT by wrapping the model in Runnable.with_retry — the latter returns a
+# RunnableRetry that has no `bind_tools`, which breaks every tool-calling agent
+# ('RunnableRetry' object has no attribute 'bind_tools'). Re-calling handler is
+# the pattern langchain's own ModelRetryMiddleware uses, and it keeps the raw
+# chat model intact. Deterministic errors (bad kwargs, 400s) are NOT retried —
+# is_transient_error returns False — so they fall straight through to the
+# fallback/floor rungs instead of failing identically N times.
+_MODEL_RETRY_MAX_ATTEMPTS = 5          # initial call + up to 4 retries
+_MODEL_RETRY_BASE_DELAY = 0.5          # seconds
+_MODEL_RETRY_MAX_DELAY = 8.0           # seconds
+
+
+def _model_retry_delay(attempt: int) -> float:
+    """Exponential backoff (capped) for the Nth failed attempt (1-based)."""
+    return min(_MODEL_RETRY_BASE_DELAY * (2 ** (attempt - 1)), _MODEL_RETRY_MAX_DELAY)
+
+
 class DynamicModelMiddleware(AgentMiddleware):
     """Middleware that dynamically switches LLM based on state.llm_model.
 
@@ -387,24 +408,46 @@ class DynamicModelMiddleware(AgentMiddleware):
         return get_llm(model_name)
 
     def wrap_model_call(self, request, handler):
-        """Sync version: Override the model in the request based on state."""
+        """Sync: select the model, then retry the call on transient failures."""
         llm_model = request.state.get('llm_model') or 'deepseek-v4-flash'
         logger.info(f"Using LLM model: {llm_model}")
-        model = get_llm(llm_model)
-        # This is all you need for automatic retries on rate limits from Google
-        model = model.with_retry(
-            retry_if_exception_type=(ResourceExhausted,),
-            stop_after_attempt=5,
-            wait_exponential_jitter=True,
-        )
-        return handler(request.override(model=model))
+        req = request.override(model=get_llm(llm_model))
+        attempt = 0
+        while True:
+            try:
+                return handler(req)
+            except Exception as e:
+                attempt += 1
+                if attempt >= _MODEL_RETRY_MAX_ATTEMPTS or not is_transient_error(e):
+                    raise
+                logger.warning(
+                    f"Transient model error on {llm_model} (attempt {attempt}/"
+                    f"{_MODEL_RETRY_MAX_ATTEMPTS - 1}): {e!r}; retrying"
+                )
+                time.sleep(_model_retry_delay(attempt))
 
     async def awrap_model_call(self, request, handler):
-        """Async version: Override the model in the request based on state."""
+        """Async: select the model, then retry the call on transient failures.
+
+        The async path previously had NO retry at all — this closes that gap for
+        the websocket chat path, which runs through here.
+        """
         llm_model = request.state.get('llm_model') or 'deepseek-v4-flash'
         logger.info(f"Using LLM model: {llm_model}")
-        model = get_llm(llm_model)
-        return await handler(request.override(model=model))
+        req = request.override(model=get_llm(llm_model))
+        attempt = 0
+        while True:
+            try:
+                return await handler(req)
+            except Exception as e:
+                attempt += 1
+                if attempt >= _MODEL_RETRY_MAX_ATTEMPTS or not is_transient_error(e):
+                    raise
+                logger.warning(
+                    f"Transient model error on {llm_model} (attempt {attempt}/"
+                    f"{_MODEL_RETRY_MAX_ATTEMPTS - 1}): {e!r}; retrying"
+                )
+                await asyncio.sleep(_model_retry_delay(attempt))
 
 
 # =============================================================================

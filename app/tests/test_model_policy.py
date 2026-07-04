@@ -30,10 +30,19 @@ from app.agents.leonardo.llm_factory import (
 
 @pytest.fixture(autouse=True)
 def _clean_policy_env(monkeypatch):
-    """Default every test to 'nothing configured' unless it opts in."""
+    """Default every test to 'nothing configured' unless it opts in.
+
+    The allow-list / fail-open / disable tests below exercise the per-model
+    layer, which only applies when manual model switching is ON — so this
+    baseline enables switching. The MODEL_SWITCHING_ALLOWED lock (which defaults
+    OFF in production) is exercised on its own further down, with the env var
+    left unset or explicitly toggled.
+    """
     monkeypatch.setattr(model_policy, "_read_instance_config", lambda: None)
     monkeypatch.delenv("ENABLED_MODELS", raising=False)
     monkeypatch.delenv("DISABLED_MODELS", raising=False)
+    monkeypatch.setenv("MODEL_SWITCHING_ALLOWED", "true")
+    monkeypatch.delenv("VISION_MODEL_ALLOWED", raising=False)
 
 
 def _instance(monkeypatch, **config):
@@ -173,3 +182,73 @@ async def test_available_models_reflects_explicit_disable(async_client, monkeypa
     flagged = by_value["gemini-3.1-flash-lite"]
     assert flagged["available"] is False
     assert flagged["reason"] == "Disabled by administrator"
+
+
+# --- coarse operator gates: switching lock + vision ------------------------
+
+def test_switching_and_vision_default_off_when_unset(monkeypatch):
+    """Both gates default OFF when the env vars are absent."""
+    monkeypatch.delenv("MODEL_SWITCHING_ALLOWED", raising=False)
+    monkeypatch.delenv("VISION_MODEL_ALLOWED", raising=False)
+    assert model_policy.model_switching_allowed() is False
+    assert model_policy.vision_allowed() is False
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ("true", True), ("True", True), ("1", True), ("yes", True), ("on", True),
+    ("false", False), ("0", False), ("no", False), ("", False), ("nonsense", False),
+])
+def test_env_bool_parsing(monkeypatch, raw, expected):
+    monkeypatch.setenv("MODEL_SWITCHING_ALLOWED", raw)
+    # blank ("") falls back to the default, which is OFF -> also False here.
+    assert model_policy.model_switching_allowed() is expected
+
+
+def test_switching_locked_pins_default_only(monkeypatch):
+    """Switching off: only the default text model is enabled; vision off too."""
+    monkeypatch.setenv("MODEL_SWITCHING_ALLOWED", "false")
+    monkeypatch.setenv("VISION_MODEL_ALLOWED", "false")
+    assert model_policy.is_model_enabled(DEFAULT_LLM_MODEL) is True
+    assert model_policy.is_model_enabled("gpt-5-codex") is False
+    assert model_policy.is_model_enabled("claude-4.5-sonnet") is False
+    # vision model is NOT enabled while vision is off
+    assert model_policy.is_model_enabled(model_policy.VISION_MODEL) is False
+
+
+def test_switching_locked_keeps_vision_model_when_vision_on(monkeypatch):
+    """Switching off but vision on: the vision model stays reachable (auto-switch)."""
+    monkeypatch.setenv("MODEL_SWITCHING_ALLOWED", "false")
+    monkeypatch.setenv("VISION_MODEL_ALLOWED", "true")
+    assert model_policy.is_model_enabled(DEFAULT_LLM_MODEL) is True
+    assert model_policy.is_model_enabled(model_policy.VISION_MODEL) is True
+    # ...but no other model opens up.
+    assert model_policy.is_model_enabled("gpt-5-codex") is False
+
+
+def test_explicit_disable_beats_switching_lock(monkeypatch):
+    """An explicit disable turns off even the default text model under the lock."""
+    monkeypatch.setenv("MODEL_SWITCHING_ALLOWED", "false")
+    monkeypatch.setenv("DISABLED_MODELS", DEFAULT_LLM_MODEL)
+    assert model_policy.is_model_enabled(DEFAULT_LLM_MODEL) is False
+
+
+def test_get_llm_pins_default_when_switching_locked(monkeypatch):
+    """A non-default model requested while locked is swapped for the default."""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+    monkeypatch.setenv("MODEL_SWITCHING_ALLOWED", "false")
+    llm = get_llm("claude-4.5-sonnet")
+    assert isinstance(llm, ChatDeepSeekWithReasoning)
+
+
+@pytest.mark.asyncio
+async def test_available_models_exposes_gate_flags(async_client, monkeypatch):
+    monkeypatch.setenv("MODEL_SWITCHING_ALLOWED", "false")
+    monkeypatch.setenv("VISION_MODEL_ALLOWED", "true")
+    response = await async_client.get("/api/available-models")
+    body = response.json()
+    assert body["model_switching_allowed"] is False
+    assert body["vision_allowed"] is True
+    # Under the lock, every non-default (non-vision) model is greyed out.
+    by_value = {m["value"]: m for m in body["models"]}
+    assert by_value["gpt-5-codex"]["available"] is False
+    assert by_value["gpt-5-codex"]["reason"] == "Disabled by administrator"

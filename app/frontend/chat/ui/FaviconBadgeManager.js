@@ -116,6 +116,51 @@ export class FaviconBadgeManager {
   }
 
   /**
+   * Draw the favicon with a colored circle + white "?" badge overlay.
+   * Used to signal that Leonardo is waiting on human input (a question /
+   * UI-UX question / plan approval).
+   * @param {string} badgeColor - The color of the badge circle
+   */
+  drawQuestionBadge(badgeColor = '#3b82f6') {
+    if (!this.isReady || !this.ctx || !this.originalFaviconImage) {
+      return;
+    }
+
+    // Clear canvas
+    this.ctx.clearRect(0, 0, 32, 32);
+
+    // Draw original favicon
+    this.ctx.drawImage(this.originalFaviconImage, 0, 0, 32, 32);
+
+    // Badge circle (bottom-right corner) — slightly larger so the "?" reads clearly
+    const badgeRadius = 9;
+    const badgeCenterX = 23;
+    const badgeCenterY = 23;
+
+    // White border/outline
+    this.ctx.beginPath();
+    this.ctx.arc(badgeCenterX, badgeCenterY, badgeRadius + 1, 0, 2 * Math.PI);
+    this.ctx.fillStyle = 'white';
+    this.ctx.fill();
+
+    // Colored badge
+    this.ctx.beginPath();
+    this.ctx.arc(badgeCenterX, badgeCenterY, badgeRadius, 0, 2 * Math.PI);
+    this.ctx.fillStyle = badgeColor;
+    this.ctx.fill();
+
+    // White "?" glyph centered in the badge
+    this.ctx.fillStyle = 'white';
+    this.ctx.font = 'bold 14px Arial';
+    this.ctx.textAlign = 'center';
+    this.ctx.textBaseline = 'middle';
+    this.ctx.fillText('?', badgeCenterX, badgeCenterY + 1);
+
+    // Update favicon
+    this.updateFavicon(this.canvas.toDataURL('image/png'));
+  }
+
+  /**
    * Draw the favicon with a number badge (for unread count)
    * @param {number} count - The number to display
    * @param {string} bgColor - Background color of the badge
@@ -307,6 +352,21 @@ export class FaviconBadgeManager {
 
     this.currentState = 'complete';
     this.drawDotBadge('#22c55e'); // Tailwind green-500
+  }
+
+  /**
+   * Show "waiting for human input" badge (blue question mark).
+   * Fired when Leonardo asks the user a question, a UI/UX question, or
+   * requests plan/tool approval — so it's obvious which tab needs an answer.
+   */
+  showQuestion() {
+    this.stopThinking();
+
+    // Only show badge if tab is not focused (a focused tab already shows the card)
+    if (document.hasFocus()) return;
+
+    this.currentState = 'question';
+    this.drawQuestionBadge('#3b82f6'); // Tailwind blue-500
   }
 
   /**

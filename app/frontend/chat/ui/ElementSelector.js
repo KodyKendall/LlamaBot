@@ -12,8 +12,9 @@ export class ElementSelector {
     this.isSelectionMode = false;
     this.selectorButton = null;
     this.messageInput = null;
-    this.selectedElementHTML = null;
-    this.selectedBadge = null;
+    // Multiple selections: each entry is { text, html }, in the order picked.
+    this.selectedElements = [];
+    this.badgeContainer = null;
 
     // Bind methods
     this.handlePostMessage = this.handlePostMessage.bind(this);
@@ -78,7 +79,8 @@ export class ElementSelector {
 
     // Update button appearance
     this.selectorButton.classList.add('active');
-    this.selectorButton.title = 'Selection mode active - Click to disable';
+    this.selectorButton.dataset.tooltip = 'Selection mode on — click an element, or click here to turn it off';
+    this.selectorButton.setAttribute('aria-label', 'Disable selection mode');
 
     // Send message to iframe to enable selection mode
     this.iframeManager.liveSiteFrame.contentWindow.postMessage({
@@ -93,7 +95,8 @@ export class ElementSelector {
   disableSelectionMode() {
     // Update button appearance
     this.selectorButton.classList.remove('active');
-    this.selectorButton.title = 'Select element from page';
+    this.selectorButton.dataset.tooltip = 'Click an element on the page to point Leo at what to change';
+    this.selectorButton.setAttribute('aria-label', 'Select element from page');
 
     if (this.iframeManager.liveSiteFrame) {
       // Send message to iframe to disable selection mode
@@ -112,11 +115,12 @@ export class ElementSelector {
   handleElementSelected(textContent, htmlContent) {
     if (!textContent || !this.messageInput) return;
 
-    // Store the HTML content for later use
-    this.selectedElementHTML = htmlContent;
+    // Append this selection to the list (don't replace prior ones), so the
+    // user can re-open selection mode and pick a 2nd, 3rd, ... element.
+    this.selectedElements.push({ text: textContent, html: htmlContent });
 
-    // Create or update the selected element badge
-    this.showSelectedBadge(textContent);
+    // Re-render the badges (labelled 1st, 2nd, ...)
+    this.renderBadges();
 
     // Focus the message input
     this.messageInput.focus();
@@ -129,55 +133,95 @@ export class ElementSelector {
   }
 
   /**
-   * Show a badge indicating the selected element
+   * Convert a 1-based index to an ordinal label (1st, 2nd, 3rd, 4th, ...)
    */
-  showSelectedBadge(textContent) {
-    // Remove existing badge if any
-    this.removeSelectedBadge();
-
-    // Create badge element
-    const badge = document.createElement('div');
-    badge.className = 'selected-element-badge';
-    badge.innerHTML = `
-      <span class="badge-icon">🎯</span>
-      <span class="badge-text">Selected: ${textContent}</span>
-      <button class="badge-close" title="Remove selection">×</button>
-    `;
-
-    // Add close button handler
-    const closeBtn = badge.querySelector('.badge-close');
-    closeBtn.addEventListener('click', () => {
-      this.removeSelectedBadge();
-    });
-
-    // Insert badge before the message input
-    this.messageInput.parentElement.insertBefore(badge, this.messageInput);
-    this.selectedBadge = badge;
+  ordinalLabel(n) {
+    const s = ['th', 'st', 'nd', 'rd'];
+    const v = n % 100;
+    return n + (s[(v - 20) % 10] || s[v] || s[0]);
   }
 
   /**
-   * Remove the selected element badge
+   * Render the badges for every selected element.
    */
-  removeSelectedBadge() {
-    if (this.selectedBadge) {
-      this.selectedBadge.remove();
-      this.selectedBadge = null;
-      this.selectedElementHTML = null;
+  renderBadges() {
+    // Ensure a container exists directly before the message input.
+    if (!this.badgeContainer || !this.badgeContainer.isConnected) {
+      this.badgeContainer = document.createElement('div');
+      this.badgeContainer.className = 'selected-elements-container';
+      this.messageInput.parentElement.insertBefore(this.badgeContainer, this.messageInput);
     }
+
+    // Rebuild badges from the current selection list.
+    this.badgeContainer.innerHTML = '';
+
+    if (this.selectedElements.length === 0) {
+      this.badgeContainer.remove();
+      this.badgeContainer = null;
+      return;
+    }
+
+    this.selectedElements.forEach((element, index) => {
+      const label = this.ordinalLabel(index + 1);
+
+      const badge = document.createElement('div');
+      badge.className = 'selected-element-badge';
+
+      const icon = document.createElement('span');
+      icon.className = 'badge-icon';
+      icon.textContent = '🎯';
+
+      const text = document.createElement('span');
+      text.className = 'badge-text';
+      // e.g. "1st: Save button"
+      text.textContent = `${label}: ${element.text}`;
+      text.title = element.text;
+
+      const closeBtn = document.createElement('button');
+      closeBtn.className = 'badge-close';
+      closeBtn.title = 'Remove selection';
+      closeBtn.textContent = '×';
+      closeBtn.addEventListener('click', () => {
+        this.removeSelectionAt(index);
+      });
+
+      badge.appendChild(icon);
+      badge.appendChild(text);
+      badge.appendChild(closeBtn);
+      this.badgeContainer.appendChild(badge);
+    });
   }
 
   /**
-   * Get the selected element HTML (if any) to append to message
+   * Remove a single selection by index and re-render.
+   */
+  removeSelectionAt(index) {
+    this.selectedElements.splice(index, 1);
+    this.renderBadges();
+  }
+
+  /**
+   * Get the ordered list of selected elements ({ text, html }).
+   */
+  getSelectedElements() {
+    return this.selectedElements;
+  }
+
+  /**
+   * Get the selected element HTML (if any) to append to message.
+   * Returns the combined HTML of all selections for backwards compatibility.
    */
   getSelectedElementHTML() {
-    return this.selectedElementHTML;
+    if (this.selectedElements.length === 0) return null;
+    return this.selectedElements.map((el) => el.html).join('\n\n');
   }
 
   /**
-   * Clear the selected element after message is sent
+   * Clear all selected elements after message is sent.
    */
   clearSelection() {
-    this.removeSelectedBadge();
+    this.selectedElements = [];
+    this.renderBadges();
   }
 
   /**
@@ -185,6 +229,6 @@ export class ElementSelector {
    */
   destroy() {
     window.removeEventListener('message', this.handlePostMessage);
-    this.removeSelectedBadge();
+    this.clearSelection();
   }
 }

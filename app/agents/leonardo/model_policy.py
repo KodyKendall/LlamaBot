@@ -18,6 +18,11 @@ the user has no write path to:
      ``DISABLED_MODELS`` is OFF, overriding everything below (including the
      fail-open defaults). This is the deliberate "turn off even a default" knob.
      Disable sources UNION: any source can turn a model off.
+  1a. **Model-switching lock** — when ``MODEL_SWITCHING_ALLOWED`` is off (the
+     default), only the default text model is enabled, plus the vision model when
+     ``VISION_MODEL_ALLOWED`` is on (so the image auto-switch still works). This
+     coarse operator gate sits above the fail-open/allow-list logic below but
+     still yields to an explicit disable in step 1.
   2. **Fail-open defaults** — ``deepseek-v4-flash`` (project default text model)
      and ``gemini-3.1-flash-lite`` (the image auto-switch target) are globally
      enabled, so every instance always keeps a working text *and* vision model,
@@ -48,6 +53,30 @@ logger = logging.getLogger(__name__)
 
 _INSTANCE_CONFIG_PATH = ".leonardo/instance.json"
 
+# --- Coarse operator gates (env-only, no user write path) --------------------
+#
+# Two admin toggles that sit ABOVE the per-model allow/disable lists:
+#
+#   * ``MODEL_SWITCHING_ALLOWED`` — when off, the instance is pinned to the
+#     default text model (users can't pick another; the frontend hides the model
+#     dropdown). The vision model stays reachable for the image auto-switch ONLY
+#     when ``VISION_MODEL_ALLOWED`` is also on.
+#   * ``VISION_MODEL_ALLOWED`` — when off, image/video attachments are refused
+#     (frontend blocks the send with a support message; the backend also strips
+#     them in ``_build_message_content`` as the authoritative gate).
+#
+# Both are read from the environment only — the box operator controls them, the
+# instance user has no write path, exactly like ENABLED_MODELS/DISABLED_MODELS.
+# Flip these two defaults to change fleet-wide behavior for instances that never
+# set the vars.
+_MODEL_SWITCHING_ALLOWED_DEFAULT = False
+_VISION_ALLOWED_DEFAULT = False
+
+# The single vision model the frontend image auto-switch targets. Kept reachable
+# (when vision is allowed) even while manual switching is locked, so image sends
+# still work without opening up the whole dropdown.
+VISION_MODEL = "gemini-3.1-flash-lite"
+
 # Always enabled regardless of any allow-list, so every instance keeps a working
 # text model (DeepSeek, the project default) and a working vision model
 # (Gemini 3.1 Flash Lite — also the frontend image auto-switch target). These can
@@ -65,6 +94,8 @@ _KNOWN_MODELS = [
     "claude-4.5-haiku",
     "gpt-5-codex",
     "gpt-5-mini",
+    "gpt-5-nano",
+    "gpt-5.4-nano",
     "gemini-3-flash",
     "gemini-3-pro",
     "gemini-3.1-flash-lite",
@@ -75,6 +106,28 @@ _KNOWN_MODELS = [
 def _csv_names(raw: str) -> list:
     """Split a comma-separated env value into a clean list of model names."""
     return [m.strip() for m in raw.split(",") if m.strip()]
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    """Read a boolean operator gate from the environment.
+
+    Unset or blank falls back to ``default``. Anything in the truthy set is True;
+    everything else (including an explicit ``false``/``0``/``no``) is False.
+    """
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
+def model_switching_allowed() -> bool:
+    """True if the instance user may pick a model other than the default."""
+    return _env_bool("MODEL_SWITCHING_ALLOWED", _MODEL_SWITCHING_ALLOWED_DEFAULT)
+
+
+def vision_allowed() -> bool:
+    """True if image/video attachments may be sent to a vision model."""
+    return _env_bool("VISION_MODEL_ALLOWED", _VISION_ALLOWED_DEFAULT)
 
 
 def _read_instance_config() -> Optional[dict]:
@@ -135,10 +188,21 @@ def is_model_enabled(model_name: str) -> bool:
     # 1. Explicit disable wins over everything — even the fail-open defaults.
     if model_name in _disabled_set():
         return False
-    # 2. The fail-open defaults are globally enabled (survive any allow-list).
+    # 2. Manual model-switching lock. When switching is off the instance is pinned
+    #    to the default text model; the vision model stays reachable only when
+    #    vision is also enabled, so the image auto-switch path keeps working. This
+    #    sits above the allow-list/fail-open logic — it is the coarse operator
+    #    gate — but still below an explicit disable in step 1.
+    if not model_switching_allowed():
+        if model_name == DEFAULT_LLM_MODEL:
+            return True
+        if model_name == VISION_MODEL and vision_allowed():
+            return True
+        return False
+    # 3. The fail-open defaults are globally enabled (survive any allow-list).
     if model_name in _FAIL_OPEN_MODELS:
         return True
-    # 3. An allow-list, if configured, restricts everything else.
+    # 4. An allow-list, if configured, restricts everything else.
     allow = _allowlist()
     if allow is None:
         return True

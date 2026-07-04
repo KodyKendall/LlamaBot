@@ -164,13 +164,13 @@ async def root(request: Request):
                 visible_agents = list(DEFAULT_VISIBLE_AGENTS_ENGINEER)
 
         # Load per-instance custom agent modes (optional overlay, no image change).
-        # Validated against the registered langgraph.json graphs.
+        # Validated against the registered graphs (platform base ∪ client overlay).
         graphs = {}
         try:
-            with open("langgraph.json", "r", encoding="utf-8") as f:
-                graphs = json.load(f).get("graphs", {})
+            from app.lib.langgraph_registry import load_graphs
+            graphs = load_graphs()
         except Exception as e:
-            logger.warning(f"Could not read langgraph.json for custom agent modes: {e}")
+            logger.warning(f"Could not read langgraph registry for custom agent modes: {e}")
         try:
             custom_agent_modes = load_custom_agent_modes("agent_modes.json", graphs)
         except Exception as e:
@@ -718,7 +718,7 @@ async def users_page(admin: User = Depends(admin_required)):
 
 @router.get("/prompt-library", response_class=HTMLResponse)
 async def prompt_library_page(current_user: User = Depends(get_current_user)):
-    """Serve the prompt library management page with tabs for Prompts and Skills."""
+    """Serve the prompt library management page (Prompts). Skills are now filesystem Agent Skills."""
     html = """
 <!DOCTYPE html>
 <html>
@@ -994,15 +994,12 @@ async def prompt_library_page(current_user: User = Depends(get_current_user)):
     <div class="container">
         <div class="header">
             <a href="/" class="back-btn"><i class="fa-solid fa-arrow-left"></i></a>
-            <h1>Prompt & Skill Library</h1>
+            <h1>Prompt Library</h1>
         </div>
 
         <div class="tab-container">
             <button class="tab-btn active" data-tab="prompts" onclick="switchTab('prompts')">
                 <i class="fa-solid fa-book"></i> Prompts
-            </button>
-            <button class="tab-btn skill-tab" data-tab="skills" onclick="switchTab('skills')">
-                <i class="fa-solid fa-bolt"></i> Skills
             </button>
         </div>
 
@@ -1023,25 +1020,6 @@ async def prompt_library_page(current_user: User = Depends(get_current_user)):
                 <div class="empty-state">
                     <i class="fa-solid fa-book"></i>
                     <p>Loading prompts...</p>
-                </div>
-            </div>
-        </div>
-
-        <!-- Skills Tab -->
-        <div class="tab-content" id="skillsTab">
-            <div class="filter-bar">
-                <input type="text" class="search-input" placeholder="Search skills..." id="skillSearchInput">
-                <select class="group-select" id="skillGroupFilter">
-                    <option value="">All Groups</option>
-                </select>
-                <button class="btn btn-skill" onclick="showCreateSkillModal()">
-                    <i class="fa-solid fa-plus"></i> New Skill
-                </button>
-            </div>
-            <div class="prompt-grid" id="skillGrid">
-                <div class="empty-state">
-                    <i class="fa-solid fa-bolt"></i>
-                    <p>Loading skills...</p>
                 </div>
             </div>
         </div>
@@ -1082,50 +1060,12 @@ async def prompt_library_page(current_user: User = Depends(get_current_user)):
         </div>
     </div>
 
-    <!-- Skill Modal -->
-    <div class="modal" id="skillModal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2 id="skillModalTitle">New Skill</h2>
-                <button class="modal-close" onclick="closeSkillModal()">&times;</button>
-            </div>
-            <form id="skillForm">
-                <input type="hidden" id="skillId">
-                <div class="form-group">
-                    <label>Name *</label>
-                    <input type="text" id="skillName" required placeholder="e.g., Code Review Focus">
-                </div>
-                <div class="form-group">
-                    <label>Group</label>
-                    <input type="text" id="skillGroup" value="General" list="skillGroupSuggestions" placeholder="e.g., Engineering, Communication">
-                    <datalist id="skillGroupSuggestions"></datalist>
-                </div>
-                <div class="form-group">
-                    <label>Description (optional)</label>
-                    <input type="text" id="skillDescription" placeholder="Brief description of what this skill adds">
-                </div>
-                <div class="form-group">
-                    <label>Content * <span id="skillCharCount" style="float: right; font-weight: normal; color: #666;">0 / 50,000</span></label>
-                    <textarea id="skillContent" required placeholder="Enter your skill content..." oninput="updateSkillCharCount()"></textarea>
-                </div>
-                <div style="display: flex; gap: 12px; justify-content: flex-end;">
-                    <button type="button" class="btn btn-danger" id="skillDeleteBtn" onclick="deleteSkill()" style="display: none; margin-right: auto;">Delete</button>
-                    <button type="button" class="btn" onclick="closeSkillModal()">Cancel</button>
-                    <button type="submit" class="btn btn-skill">Save</button>
-                </div>
-            </form>
-        </div>
-    </div>
-
     <script>
         // State
         let activeTab = 'prompts';
         let prompts = [];
         let promptGroups = [];
         let currentPromptId = null;
-        let skills = [];
-        let skillGroups = [];
-        let currentSkillId = null;
 
         // Tab switching
         function switchTab(tab) {
@@ -1141,17 +1081,11 @@ async def prompt_library_page(current_user: User = Depends(get_current_user)):
             if (tab === 'prompts' && prompts.length === 0) {
                 loadPrompts();
                 loadPromptGroups();
-            } else if (tab === 'skills' && skills.length === 0) {
-                loadSkills();
-                loadSkillGroups();
             }
         }
 
         // Check URL for tab parameter
         const urlParams = new URLSearchParams(window.location.search);
-        if (urlParams.get('tab') === 'skills') {
-            switchTab('skills');
-        }
 
         // ============== PROMPTS ==============
 
@@ -1324,177 +1258,6 @@ async def prompt_library_page(current_user: User = Depends(get_current_user)):
             }
         });
 
-        // ============== SKILLS ==============
-
-        async function loadSkills() {
-            const search = document.getElementById('skillSearchInput').value;
-            const group = document.getElementById('skillGroupFilter').value;
-
-            let url = '/api/skills';
-            const params = new URLSearchParams();
-            if (search) params.set('search', search);
-            if (group) params.set('group', group);
-            if (params.toString()) url += '?' + params.toString();
-
-            try {
-                const response = await fetch(url);
-                skills = await response.json();
-                renderSkills();
-            } catch (error) {
-                showMessage('Error loading skills: ' + error.message, 'error');
-            }
-        }
-
-        async function loadSkillGroups() {
-            try {
-                const response = await fetch('/api/skills/groups');
-                const data = await response.json();
-                skillGroups = data.groups;
-
-                const select = document.getElementById('skillGroupFilter');
-                const datalist = document.getElementById('skillGroupSuggestions');
-
-                select.innerHTML = '<option value="">All Groups</option>';
-                datalist.innerHTML = '';
-
-                skillGroups.forEach(g => {
-                    select.innerHTML += '<option value="' + escapeHtml(g) + '">' + escapeHtml(g) + '</option>';
-                    datalist.innerHTML += '<option value="' + escapeHtml(g) + '">';
-                });
-            } catch (error) {
-                console.error('Error loading skill groups:', error);
-            }
-        }
-
-        function renderSkills() {
-            const grid = document.getElementById('skillGrid');
-            if (skills.length === 0) {
-                grid.innerHTML = '<div class="empty-state"><i class="fa-solid fa-bolt"></i><p>No skills found. Create your first skill!</p></div>';
-                return;
-            }
-
-            grid.innerHTML = skills.map(s => `
-                <div class="prompt-card skill-card" onclick="editSkill(${s.id})">
-                    <div class="prompt-name">${escapeHtml(s.name)}</div>
-                    ${s.description ? '<div class="prompt-description">' + escapeHtml(s.description) + '</div>' : ''}
-                    <div class="prompt-content">${escapeHtml(s.content)}</div>
-                    <div class="prompt-meta">
-                        <span class="prompt-group-badge skill-group-badge">${escapeHtml(s.group)}</span>
-                        <span>Used ${s.usage_count} times</span>
-                    </div>
-                </div>
-            `).join('');
-        }
-
-        function updateSkillCharCount() {
-            const content = document.getElementById('skillContent').value;
-            const count = content.length;
-            const charCount = document.getElementById('skillCharCount');
-            charCount.textContent = count.toLocaleString() + ' / 50,000';
-            charCount.style.color = count > 50000 ? '#e57373' : (count > 40000 ? '#ffb74d' : '#666');
-        }
-
-        function showCreateSkillModal() {
-            currentSkillId = null;
-            document.getElementById('skillModalTitle').textContent = 'New Skill';
-            document.getElementById('skillId').value = '';
-            document.getElementById('skillName').value = '';
-            document.getElementById('skillGroup').value = 'General';
-            document.getElementById('skillDescription').value = '';
-            document.getElementById('skillContent').value = '';
-            document.getElementById('skillDeleteBtn').style.display = 'none';
-            document.getElementById('skillModal').classList.add('active');
-            updateSkillCharCount();
-        }
-
-        function editSkill(id) {
-            const skill = skills.find(s => s.id === id);
-            if (!skill) return;
-
-            currentSkillId = id;
-            document.getElementById('skillModalTitle').textContent = 'Edit Skill';
-            document.getElementById('skillId').value = skill.id;
-            document.getElementById('skillName').value = skill.name;
-            document.getElementById('skillGroup').value = skill.group;
-            document.getElementById('skillDescription').value = skill.description || '';
-            document.getElementById('skillContent').value = skill.content;
-            document.getElementById('skillDeleteBtn').style.display = 'block';
-            document.getElementById('skillModal').classList.add('active');
-            updateSkillCharCount();
-        }
-
-        function closeSkillModal() {
-            document.getElementById('skillModal').classList.remove('active');
-            currentSkillId = null;
-        }
-
-        async function deleteSkill() {
-            if (!currentSkillId) return;
-            if (!confirm('Delete this skill?')) return;
-
-            try {
-                const response = await fetch('/api/skills/' + currentSkillId, { method: 'DELETE' });
-                if (response.ok) {
-                    showMessage('Skill deleted', 'success');
-                    closeSkillModal();
-                    loadSkills();
-                    loadSkillGroups();
-                } else {
-                    const error = await response.json();
-                    showMessage(error.detail || 'Error deleting skill', 'error');
-                }
-            } catch (error) {
-                showMessage('Error: ' + error.message, 'error');
-            }
-        }
-
-        document.getElementById('skillForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-
-            const id = document.getElementById('skillId').value;
-            const content = document.getElementById('skillContent').value;
-
-            if (content.length > 50000) {
-                showMessage('Content is too long (' + content.length + ' chars). Max: 50,000 characters.', 'error');
-                return;
-            }
-
-            const data = {
-                name: document.getElementById('skillName').value,
-                group: document.getElementById('skillGroup').value,
-                description: document.getElementById('skillDescription').value,
-                content: content
-            };
-
-            const url = id ? '/api/skills/' + id : '/api/skills';
-            const method = id ? 'PATCH' : 'POST';
-
-            try {
-                const response = await fetch(url, {
-                    method,
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(data)
-                });
-
-                if (response.ok) {
-                    showMessage(id ? 'Skill updated' : 'Skill created', 'success');
-                    closeSkillModal();
-                    loadSkills();
-                    loadSkillGroups();
-                } else {
-                    let errorMsg = 'Error saving skill';
-                    const contentType = response.headers.get('content-type');
-                    if (contentType && contentType.includes('application/json')) {
-                        const error = await response.json();
-                        errorMsg = error.detail || errorMsg;
-                    }
-                    showMessage(errorMsg, 'error');
-                }
-            } catch (error) {
-                showMessage('Error: ' + error.message, 'error');
-            }
-        });
-
         // ============== COMMON ==============
 
         function escapeHtml(text) {
@@ -1518,19 +1281,9 @@ async def prompt_library_page(current_user: User = Depends(get_current_user)):
         });
         document.getElementById('promptGroupFilter').addEventListener('change', loadPrompts);
 
-        let skillSearchTimeout;
-        document.getElementById('skillSearchInput').addEventListener('input', () => {
-            clearTimeout(skillSearchTimeout);
-            skillSearchTimeout = setTimeout(loadSkills, 300);
-        });
-        document.getElementById('skillGroupFilter').addEventListener('change', loadSkills);
-
         // Close modals on outside click
         document.getElementById('promptModal').addEventListener('click', (e) => {
             if (e.target.id === 'promptModal') closePromptModal();
-        });
-        document.getElementById('skillModal').addEventListener('click', (e) => {
-            if (e.target.id === 'skillModal') closeSkillModal();
         });
 
         // Initial load

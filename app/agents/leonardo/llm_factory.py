@@ -168,6 +168,20 @@ def get_llm(model_name: str):
             reasoning={"effort": "low", "summary": "auto"},
             output_version="responses/v1",
         )
+    if model_name == "gpt-5-nano":
+        return ChatOpenAI(
+            model="gpt-5-nano",
+            use_responses_api=True,
+            reasoning={"effort": "low", "summary": "auto"},
+            output_version="responses/v1",
+        )
+    if model_name == "gpt-5.4-nano":
+        return ChatOpenAI(
+            model="gpt-5.4-nano",
+            use_responses_api=True,
+            reasoning={"effort": "low", "summary": "auto"},
+            output_version="responses/v1",
+        )
     if model_name == "claude-4.5-sonnet":
         return ChatAnthropic(
             model="claude-sonnet-4-5-20250929",

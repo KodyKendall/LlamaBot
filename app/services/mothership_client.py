@@ -313,6 +313,76 @@ class MothershipClient:
         except Exception as e:
             logger.warning(f"Disconnect report unexpected error: {e}")
 
+    async def report_error(
+        self,
+        *,
+        thread_id: Optional[str],
+        error_class: str,
+        error_message: str,
+        traceback_str: str,
+        agent_mode: Optional[str] = None,
+        model: Optional[str] = None,
+        llamabot_version: Optional[str] = None,
+        occurred_at: Optional[str] = None,
+        fingerprint: Optional[str] = None,
+        recovered: Optional[bool] = None,
+    ) -> None:
+        """
+        POST /api/leonardo/report_error
+
+        Fire-and-forget telemetry for errors that reached an end user (the outer
+        catch in websocket/request_handler.py, and any rung of the resilience
+        ladder). This closes the visibility gap: an instance can finally tell the
+        mothership that a user hit an error, with the model / agent_mode /
+        version needed to triage it (see docs/dev/error_telemetry.md).
+
+        Best-effort, exactly like report_disconnect: never raises, returns None
+        on any failure so a reporting hiccup never worsens the error the user
+        already saw. ``recovered`` distinguishes "handled by the graceful floor"
+        from "hard failure the user is stuck on".
+        """
+        if not self.enabled:
+            return None
+
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                payload = {
+                    "instance_name": self.config["instance_name"],
+                    "error_class": error_class,
+                    "error_message": (error_message or "")[:2000],
+                    "traceback": (traceback_str or "")[:5000],
+                }
+                if thread_id:
+                    payload["thread_id"] = thread_id
+                if agent_mode:
+                    payload["agent_mode"] = agent_mode
+                if model:
+                    payload["model"] = model
+                if llamabot_version:
+                    payload["llamabot_version"] = llamabot_version
+                if occurred_at:
+                    payload["occurred_at"] = occurred_at
+                if fingerprint:
+                    payload["fingerprint"] = fingerprint
+                if recovered is not None:
+                    payload["recovered"] = recovered
+                response = await client.post(
+                    f"{self.config['mothership_url']}/api/leonardo/report_error",
+                    json=payload,
+                    headers={"Authorization": f"Bearer {self.config['mothership_api_token']}"},
+                )
+                response.raise_for_status()
+                return None
+        except httpx.HTTPStatusError as e:
+            logger.warning(f"Error report failed (HTTP {e.response.status_code}): {e.response.text}")
+            return None
+        except httpx.RequestError as e:
+            logger.warning(f"Error report request failed: {e}")
+            return None
+        except Exception as e:
+            logger.warning(f"Error report unexpected error: {e}")
+            return None
+
     async def notify_teardown(self, reason: str = "sigterm") -> Optional[dict]:
         """
         POST /api/leonardo/teardown

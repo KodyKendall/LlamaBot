@@ -241,6 +241,41 @@ Use this only when creating LEONARDO.md for the first time or when the user want
 Prefer edit_leonardo_md for partial changes."""
 
 # =============================================================================
+# BRAND GUIDE TOOLS
+# =============================================================================
+
+READ_BRAND_GUIDE_DESCRIPTION = """Read the project's Brand Guide (.leonardo/brand.json).
+
+The brand guide holds the project's official brand colors (named, with hex),
+logos/icons, and free-form style notes. It is injected into your prompt (short
+guides inline; long ones are available via the `brand-guidelines` skill).
+
+Use this to see the current brand before doing any visual/design/theming work,
+or before editing the guide with write_brand_guide. Takes no parameters."""
+
+WRITE_BRAND_GUIDE_DESCRIPTION = """Create or update the project's Brand Guide (.leonardo/brand.json).
+
+This is how the user asks you to change their brand — "make the primary color
+teal", "add our logo", "record these brand rules". Saving also regenerates the
+readable BRAND.md and refreshes the brand-guidelines skill, and takes effect on
+the next turn.
+
+Update happens PER SECTION: pass only the sections you want to change; omitted
+sections are left untouched.
+- colors: the COMPLETE new list of brand colors, each {"name": "Primary",
+  "hex": "#8B5CF6"}. Passing this replaces the whole color list, so to change or
+  add one color, call read_brand_guide first and pass back the full list with
+  your edit applied. Pass [] to clear all colors.
+- logos: the COMPLETE new list of logos, each {"name": "Primary logo", "path":
+  "app/assets/images/logo.png"}. Same full-replace semantics as colors. Only
+  reference image paths that already exist (e.g. under app/assets/images).
+- notes: free-form markdown for fonts, voice/tone, do's and don'ts. Replaces the
+  existing notes.
+
+ALWAYS read_brand_guide first when editing an existing guide so you don't drop
+colors or logos the user still wants. Hex values should be #RRGGBB."""
+
+# =============================================================================
 # MEMORY TOOLS
 # =============================================================================
 
@@ -274,6 +309,69 @@ Also use when the user asks "what do you remember?" or similar."""
 
 DELETE_MEMORY_DESCRIPTION = """Delete a memory by filename (e.g., "prefers-tailwind.md").
 Use when the user asks to forget something, or when a memory is outdated and being replaced."""
+
+# =============================================================================
+# SKILL TOOLS (Agent Skills — the SKILL.md open standard)
+# =============================================================================
+
+# use_skill's description is rendered dynamically from the installed skills — the
+# {available_skills} placeholder is filled with the current <available_skills>
+# catalog at build/refresh time (see build_use_skill_tool). This is how the model
+# discovers which skills exist: it reads this list and decides when to fire.
+USE_SKILL_DESCRIPTION_TEMPLATE = """Load a skill's full instructions into your context on demand.
+
+A skill is a reusable, expert-authored playbook (a SKILL.md file). You always see
+the short list below; call this tool the moment a user request matches one of
+these skills, passing its slug. The tool returns the skill's full markdown, which
+you should then follow. Only load a skill when it is relevant — don't load them
+speculatively.
+
+<available_skills>
+{available_skills}
+</available_skills>
+
+Parameters:
+- slug: the skill's slug (the identifier before the colon in the list above)."""
+
+LIST_SKILLS_DESCRIPTION = """List all installed skills with their slug, name, and description.
+Use this to discover the full, current catalog of skills (including ones created this
+session), or when the user asks "what skills do you have?". To actually run a skill's
+instructions, call use_skill with its slug instead."""
+
+READ_SKILL_DESCRIPTION = """Read a skill's raw SKILL.md source (with line numbers) so you can edit it.
+Parameters:
+- slug: the skill's slug.
+Use this before edit_skill to see the exact current contents. To USE a skill's
+instructions (not edit them), call use_skill instead."""
+
+WRITE_SKILL_DESCRIPTION = """Create a new skill or completely overwrite an existing one.
+
+A skill is stored at .leonardo/skills/<slug>/SKILL.md with YAML frontmatter
+(name, description) plus a markdown body. Write skills to capture a reusable
+workflow the user will want again (deployment steps, a coding convention, a
+domain playbook).
+
+Write a GOOD description: it is the only thing the model sees when deciding whether
+to load the skill, so state clearly WHAT it does and WHEN to use it (include trigger
+words). Keep the body focused, imperative, and self-contained.
+
+Parameters:
+- name: Human-readable skill name (e.g., "Rails Migration").
+- description: One or two sentences: what it does + when to use it (the router signal).
+- content: The markdown body — the actual instructions/workflow (max 20000 chars).
+- slug: Optional kebab-case id; derived from name if omitted. Pass the existing slug
+  to overwrite that skill; prefer edit_skill for small changes."""
+
+EDIT_SKILL_DESCRIPTION = """Edit an existing skill's SKILL.md by replacing text.
+Parameters:
+- slug: the skill's slug.
+- old_string: the exact text to find and replace (must be unique in the file).
+- new_string: the text to replace it with.
+Read the skill first with read_skill to see exact contents. Prefer this over
+write_skill for partial changes."""
+
+DELETE_SKILL_DESCRIPTION = """Delete a skill by slug (removes its .leonardo/skills/<slug>/ folder).
+Use when the user asks to remove a skill, or when a skill is obsolete."""
 
 HARD_RESTART_RAILS_DESCRIPTION = """Forcefully restart the Rails (LlamaPress) container — a "hard kick" when a soft restart isn't enough.
 
