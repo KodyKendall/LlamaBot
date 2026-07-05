@@ -54,6 +54,11 @@ class MothershipClient:
         return self.config.get("instance_name") if self.config else None
 
     @property
+    def mothership_url(self) -> Optional[str]:
+        """Get the mothership base URL from config (e.g. https://llamapress.ai)."""
+        return self.config.get("mothership_url") if self.config else None
+
+    @property
     def lease_duration_seconds(self) -> Optional[int]:
         """Get lease duration from config."""
         return self.config.get("lease_duration_seconds") if self.config else None
@@ -382,6 +387,70 @@ class MothershipClient:
         except Exception as e:
             logger.warning(f"Error report unexpected error: {e}")
             return None
+
+    async def verify_login_grant(
+        self, token: str, audience: str = "llamabot"
+    ) -> "tuple[Optional[dict], Optional[str]]":
+        """
+        POST /api/leonardo/verify_login_grant
+
+        Unified Login Phase 2: redeem a short-lived opaque grant the mothership
+        minted, server-to-server (no shared secret). Unlike the fire-and-forget
+        telemetry methods, the CALLER must distinguish outcomes to drive the
+        consume flow, so this returns a ``(payload, error_code)`` tuple rather
+        than logging-and-None:
+
+          * success        -> ``(body, None)`` where body carries user/role/
+            permissions/link_username (see app/routers/unified_login.py).
+          * server refusal -> ``(None, error_code)`` with the mothership's code
+            (``grant_not_found`` / ``grant_expired`` / ``grant_used`` /
+            ``bad_audience``). ``grant_expired`` / ``grant_used`` are EXPECTED on
+            refresh/bookmark and the caller degrades gracefully.
+          * transport fail -> ``(None, "mothership_unreachable")`` — timeouts,
+            connection refused, a drifted 401, or a disabled client. A retry
+            bounce can't help these, so the caller goes straight to the login
+            page.
+
+        Never raises.
+        """
+        if not self.enabled:
+            return None, "mothership_unreachable"
+
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.post(
+                    f"{self.config['mothership_url']}/api/leonardo/verify_login_grant",
+                    json={
+                        "instance_name": self.config["instance_name"],
+                        "token": token,
+                        "audience": audience,
+                    },
+                    headers={"Authorization": f"Bearer {self.config['mothership_api_token']}"},
+                )
+
+            if response.status_code == 200:
+                body = response.json()
+                if body.get("success"):
+                    return body, None
+                # 200 with success:false — honor the server's code if present.
+                return None, body.get("error_code") or "verify_failed"
+
+            # Non-200: prefer the server's structured error_code (404/409/410/422
+            # all carry one). A 401 means the box's mothership creds drifted — no
+            # error_code, and a bounce can't fix it, so treat it as unreachable.
+            if response.status_code == 401:
+                return None, "mothership_unreachable"
+            try:
+                code = (response.json() or {}).get("error_code")
+            except Exception:
+                code = None
+            return None, code or f"http_{response.status_code}"
+        except httpx.RequestError as e:
+            logger.warning(f"verify_login_grant request failed: {e}")
+            return None, "mothership_unreachable"
+        except Exception as e:
+            logger.warning(f"verify_login_grant unexpected error: {e}")
+            return None, "mothership_unreachable"
 
     async def notify_teardown(self, reason: str = "sigterm") -> Optional[dict]:
         """

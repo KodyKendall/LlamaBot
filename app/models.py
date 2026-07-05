@@ -22,6 +22,26 @@ class User(ActiveRecordMixin, SQLModel, table=True):
     # If null, uses default: ["ticket", "engineer", "testing", "feedback", "user"]
     visible_agents: Optional[str] = Field(default=None, max_length=500)
 
+    # Unified Login (llamapress.ai as identity provider). A shadow user is keyed
+    # by a stable llamapress_user_guid minted by the mothership; email/display_name
+    # are synced copies of the mothership profile (never a login key — see
+    # app/routers/unified_login.py). NULL for legacy username/password users. The
+    # unique index below is PARTIAL (only non-NULL guids collide) so any number of
+    # legacy users can coexist without a guid.
+    llamapress_user_guid: Optional[str] = Field(default=None, max_length=64)
+    email: Optional[str] = Field(default=None, max_length=255)
+    display_name: Optional[str] = Field(default=None, max_length=255)
+
+    __table_args__ = (
+        sa.Index(
+            "ix_user_llamapress_user_guid",
+            "llamapress_user_guid",
+            unique=True,
+            postgresql_where=sa.text("llamapress_user_guid IS NOT NULL"),
+            sqlite_where=sa.text("llamapress_user_guid IS NOT NULL"),
+        ),
+    )
+
 
 class ThreadMetadata(ActiveRecordMixin, SQLModel, table=True):
     """Lightweight metadata for conversation threads.

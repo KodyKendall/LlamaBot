@@ -123,7 +123,7 @@ export class IframeManager {
   initIframeSources() {
     // Set Rails iframe URL
     if (this.liveSiteFrame) {
-      this.liveSiteFrame.src = getRailsUrl();
+      this.liveSiteFrame.src = this._railsSrcWithAuth();
     }
 
     // Set VS Code iframe URL
@@ -139,6 +139,46 @@ export class IframeManager {
     // Set Feedback iframe URL
     if (this.feedbackFrame) {
       this.feedbackFrame.src = getFeedbackUrl();
+    }
+  }
+
+  /**
+   * Resolve the initial Rails iframe src, threading a one-time Unified Login
+   * grant to the Rails app when present.
+   *
+   * The box's /auth/consume redirect carries ?rails_token=<raw grant> so the
+   * Rails app (Phase 3 gem middleware at /llamapress_auth/consume) can redeem
+   * the SAME grant once more with audience=rails_app — that's what kills the
+   * Devise login wall inside this iframe. We hand the token to the iframe, then
+   * scrub it from the top-window URL bar (keeping prompt/llm_model/agent_mode)
+   * so a refresh or share can't replay a spent grant.
+   *
+   * With NO rails_token this returns getRailsUrl() verbatim — byte-identical to
+   * the previous behavior, which is the entire backwards-compat story for old
+   * flows (no token, no change). Until the Phase 3 gem ships, a threaded token
+   * just 404s to the Rails login page, same as today's wall.
+   */
+  _railsSrcWithAuth() {
+    const base = getRailsUrl();
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const token = params.get('rails_token');
+      if (!token) return base;
+
+      const src = base + '/llamapress_auth/consume?token=' +
+        encodeURIComponent(token) + '&return_to=%2F';
+
+      // Strip only rails_token from the URL bar; keep the chat hand-off params.
+      params.delete('rails_token');
+      const rest = params.toString();
+      const cleaned = window.location.pathname +
+        (rest ? '?' + rest : '') + window.location.hash;
+      window.history.replaceState({}, '', cleaned);
+
+      return src;
+    } catch (e) {
+      // Any parsing/replaceState failure must not break the iframe — fall back.
+      return base;
     }
   }
 
