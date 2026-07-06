@@ -104,6 +104,38 @@
             border: 1px solid rgba(239, 68, 68, 0.25);
             color: #ef4444;
         }
+        /* Unified Login CTA — "Sign in with your LlamaPress.ai account". Only
+           rendered on mothership-managed instances (see app/routers/ui.py). */
+        .sso-cta {
+            display: block;
+            width: 100%;
+            padding: 12px;
+            margin-bottom: 20px;
+            background: linear-gradient(135deg, #8b5cf6 0%, #a78bfa 100%);
+            color: white;
+            border-radius: 8px;
+            text-align: center;
+            text-decoration: none;
+            font-size: 1rem;
+            font-weight: 500;
+            box-sizing: border-box;
+            transition: opacity 0.2s;
+        }
+        .sso-cta:hover { opacity: 0.9; }
+        .sso-divider {
+            display: flex;
+            align-items: center;
+            text-align: center;
+            color: rgba(255, 255, 255, 0.35);
+            font-size: 0.85rem;
+            margin-bottom: 20px;
+        }
+        .sso-divider::before, .sso-divider::after {
+            content: '';
+            flex: 1;
+            border-bottom: 1px solid rgba(139, 92, 246, 0.2);
+        }
+        .sso-divider span { padding: 0 12px; }
     </style>
 </head>
 <body>
@@ -113,6 +145,7 @@
             <h2>Leonardo</h2>
         </div>
         <div class="card">
+            <!--SSO_CTA-->
             <form id="loginForm" autocomplete="on">
                 <label for="username">Username</label>
                 <input type="text" id="username" name="username" autocomplete="username" required autofocus>

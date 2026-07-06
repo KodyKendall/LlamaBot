@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+from html import escape
 from pathlib import Path
 
 from fastapi import APIRouter, Request, Depends, HTTPException, Form
@@ -27,6 +28,7 @@ from app.services.magic_link_service import (
     MagicLinkSecretMissing,
     verify_magic_link_token,
 )
+from app.services.mothership_client import MothershipClient
 
 # Role-based default visible agents
 DEFAULT_VISIBLE_AGENTS_USER = ["feedback"]
@@ -128,6 +130,34 @@ router = APIRouter()
 
 # Frontend directory path
 frontend_dir = Path(__file__).parent.parent / "frontend"
+
+# Placeholder in login.html where the Unified Login CTA is injected server-side.
+_SSO_CTA_PLACEHOLDER = "<!--SSO_CTA-->"
+
+
+def _render_sso_login_cta() -> str:
+    """Build the "Sign in with your LlamaPress.ai account" CTA for the login page.
+
+    Unified Login's discoverable entry point: a link that top-navigates to the
+    mothership's ``/sso/leo/{instance_name}`` SSO endpoint (which mints a grant
+    and bounces back to ``/auth/consume``). ``target="_top"`` is REQUIRED — the
+    login page can render inside the chat's app-preview iframe and LlamaPress.ai
+    won't load framed, so the click must break out to the top window.
+
+    Returns "" on self-hosted instances (no mothership configured) so those users
+    see the unchanged stock username/password form — never a broken button.
+    """
+    mothership = MothershipClient()
+    base = mothership.mothership_url
+    name = mothership.instance_name
+    if not base or not name:
+        return ""
+    sso_url = f"{base.rstrip('/')}/sso/leo/{name}"
+    return (
+        f'<a class="sso-cta" href="{escape(sso_url, quote=True)}" target="_top">'
+        "Sign in with your LlamaPress.ai account</a>"
+        '<div class="sso-divider"><span>or</span></div>'
+    )
 
 
 @router.get("/")
@@ -357,7 +387,11 @@ async def login_get(
         if not has_any_users():
             return RedirectResponse(url="/register", status_code=302)
         with open("login.html") as f:
-            return HTMLResponse(content=f.read())
+            html = f.read()
+        # Inject the Unified Login CTA on mothership-managed instances; on
+        # self-hosted boxes the placeholder is replaced with "" (stock form).
+        html = html.replace(_SSO_CTA_PLACEHOLDER, _render_sso_login_cta())
+        return HTMLResponse(content=html)
 
     try:
         username = verify_magic_link_token(token)
