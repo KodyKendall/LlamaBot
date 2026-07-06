@@ -2401,9 +2401,6 @@ def write_personality_file(
             }
         )
 
-
-
-
 @tool(description="""Read the agent registry.
 Returns the MERGED list of all registered agents (platform base langgraph.json ∪ the
 client overlay langgraph.local.json), then the raw contents of langgraph.local.json —
