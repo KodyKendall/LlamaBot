@@ -11,7 +11,7 @@ import time
 
 import pytest
 from fastapi.testclient import TestClient
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from app.models import User
 from app.services.token_service import (
@@ -434,6 +434,44 @@ class TestLoginForm:
         assert resp.status_code == 200
         assert "text/html" in resp.headers.get("content-type", "")
         assert "loginForm" in resp.text
+
+    _CARD_HTML = (
+        "<div class='card'><!--SSO_CTA-->"
+        "<form id='loginForm'></form></div>"
+    )
+
+    def test_login_form_shows_sso_cta_on_managed_instance(self, client_with_user):
+        """On a mothership-managed instance the login page surfaces the
+        'Sign in with your LlamaPress.ai account' CTA, top-navigating to the
+        mothership /sso/leo/<instance> endpoint (target=_top for the iframe)."""
+        fake_ms = MagicMock()
+        fake_ms.mothership_url = "https://llamapress.ai/"
+        fake_ms.instance_name = "my-box"
+        with patch("app.routers.ui.has_any_users", return_value=True), \
+             patch("app.routers.ui.MothershipClient", return_value=fake_ms), \
+             patch("builtins.open", create=True) as mock_open:
+            mock_open.return_value.__enter__.return_value.read.return_value = self._CARD_HTML
+            resp = client_with_user.get("/login", follow_redirects=False)
+        assert resp.status_code == 200
+        assert "Sign in with your LlamaPress.ai account" in resp.text
+        assert 'href="https://llamapress.ai/sso/leo/my-box"' in resp.text
+        assert 'target="_top"' in resp.text
+
+    def test_login_form_hides_sso_cta_when_self_hosted(self, client_with_user):
+        """Self-hosted (no mothership config) → the placeholder collapses to
+        nothing; the user sees only the stock username/password form."""
+        fake_ms = MagicMock()
+        fake_ms.mothership_url = None
+        fake_ms.instance_name = None
+        with patch("app.routers.ui.has_any_users", return_value=True), \
+             patch("app.routers.ui.MothershipClient", return_value=fake_ms), \
+             patch("builtins.open", create=True) as mock_open:
+            mock_open.return_value.__enter__.return_value.read.return_value = self._CARD_HTML
+            resp = client_with_user.get("/login", follow_redirects=False)
+        assert resp.status_code == 200
+        assert "loginForm" in resp.text
+        assert "sso/leo" not in resp.text
+        assert "<!--SSO_CTA-->" not in resp.text
 
     def test_get_login_no_users_redirects_to_register(self, client_with_user):
         with patch("app.routers.ui.has_any_users", return_value=False):
