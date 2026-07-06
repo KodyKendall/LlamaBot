@@ -4,3 +4,4 @@
 0.6.0b: 
 - [x] Fix UI/UX issues with our chat tab, so our background runs route properly and the user is less confused. (Ticket -> Engineer mode in particular was rough & broken).
 - [x] Auto change to implement when it goes from ticket -> engineer mode.
+- [x] Bound delegated sub-agent runs to 240s, disable hidden provider retries, stream progress heartbeats, and warn users after 90s of silence.
