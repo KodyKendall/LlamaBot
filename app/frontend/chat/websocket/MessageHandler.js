@@ -123,22 +123,37 @@ export class MessageHandler {
   }
 
   handleMessage(data) {
-    // Layer 2: messages from a background run carry a monotonic per-thread `seq`.
-    // Ignore any we've already rendered so replay-on-reconnect and the live tail
-    // can overlap harmlessly. Control frames (no seq) always pass through.
+    // Background-run frames are labeled with their `thread_id` (stamped by the
+    // backend RunSink) and carry a monotonic per-thread `seq`. Several runs can
+    // stream at once (multiple tabs, the ticket→engineer handoff), so we route and
+    // dedupe by the FRAME's thread — not by whichever chat is currently on screen.
+    const activeThreadId = this.appState.getThreadId?.() || '_';
+    const frameThreadId = data.thread_id != null ? String(data.thread_id) : null;
+
+    // Dedupe by the frame's own thread so one thread's seq stream can't poison
+    // another's cursor. Control frames without a thread fall back to the active one.
     if (typeof data.seq === 'number') {
-      const tid = this.appState.getThreadId?.() || '_';
+      const tid = frameThreadId || activeThreadId;
       if (data.seq <= (this._lastSeqByThread[tid] || 0)) return;
       this._lastSeqByThread[tid] = data.seq;
     }
 
-    // Attach/replay control frames (Layer 2). `attached` is informational — the
-    // run's own messages (incl. the `end` frame) are delivered via replay/tail.
+    // Attach/replay control frames (Layer 2). Handled regardless of thread, before
+    // the cross-thread drop below. `attached` is informational — the run's own
+    // messages (incl. the `end` frame) are delivered via replay/tail.
     if (data.type === 'attached') {
       return;
     }
     if (data.type === 'no_active_run' || data.type === 'replay_gap') {
       window.dispatchEvent(new CustomEvent('websocketReplayUnavailable', { detail: data }));
+      return;
+    }
+
+    // A run frame for a thread the user isn't viewing: its cursor was advanced
+    // above (so reconnect/replay stays correct), but it must NOT render into the
+    // current chat. That thread's real state lives in the checkpointer and shows
+    // when the user switches to it or reloads.
+    if (frameThreadId && frameThreadId !== activeThreadId) {
       return;
     }
 
@@ -1212,17 +1227,26 @@ export class MessageHandler {
         agentSelect.dispatchEvent(new Event('change'));
       }
 
-      // 3. Create new thread
+      // 2b. Force Auto execution. The user already chose to implement, so the
+      // engineer agent should build directly (rails_agent) — not fall into the
+      // plan-mode agent (rails_engineer_plan_mode_agent) that re-asks questions
+      // first when Plan happens to be the active execution mode.
+      window.chatApp?.setExecutionMode?.('auto');
+
+      // 3. Create + switch to the new thread. createNewThread dispatches
+      // `threadChanged` synchronously, so appState is already on the new thread
+      // when this returns.
       window.dispatchEvent(new CustomEvent('createNewThread'));
 
-      // 4. Auto-send ticket content to engineer agent (300ms delay for thread setup)
-      setTimeout(() => {
-        const input = window.chatApp?.elements?.messageInput;
-        if (input) {
-          input.value = `## Implement Ticket #${ticket_id}: ${ticket_title}\n\n${ticket_content}`;
-          window.chatApp.sendMessageWithDebugInfo();
-        }
-      }, 300);
+      // 4. Auto-send the ticket content to the engineer agent on the new thread.
+      // No timer race: step 3 already applied the thread switch, and the old
+      // ticket thread's "yes"-resume output (step 1) is dropped from this view by
+      // the thread-routing guard in handleMessage rather than bleeding in here.
+      const input = window.chatApp?.elements?.messageInput;
+      if (input) {
+        input.value = `## Implement Ticket #${ticket_id}: ${ticket_title}\n\n${ticket_content}`;
+        window.chatApp.sendMessageWithDebugInfo();
+      }
     };
 
     // If proactive build is enabled, skip the confirmation and auto-implement

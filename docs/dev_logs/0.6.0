@@ -1,2 +1,6 @@
 0.6.0:
 - [x] Add unified login based on LlamaPress.ai mothership for better UX on login across LlamaBot & LlamaPress-Simple Rails apps.
+
+0.6.0b: 
+- [x] Fix UI/UX issues with our chat tab, so our background runs route properly and the user is less confused. (Ticket -> Engineer mode in particular was rough & broken).
+- [x] Auto change to implement when it goes from ticket -> engineer mode.

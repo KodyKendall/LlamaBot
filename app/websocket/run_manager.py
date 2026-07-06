@@ -109,6 +109,14 @@ class RunSink:
         self.thread_id = handle.thread_id
 
     async def send_json(self, msg: dict) -> None:
+        # Label every frame with the thread it belongs to. Runs are per-thread and
+        # several can stream at once (multiple tabs, the ticket→engineer handoff),
+        # all forwarding to whatever socket is attached. Without a thread_id the
+        # client renders each frame into whichever chat is on screen — so one
+        # thread's output bleeds into another. Don't clobber a thread_id a caller
+        # already set (interrupt frames carry their own).
+        if "thread_id" not in msg:
+            msg = {**msg, "thread_id": self.thread_id}
         stored = self._handle.log.append(msg)
         ws = self._handle.attached_ws
         if ws is None:

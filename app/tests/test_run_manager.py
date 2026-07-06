@@ -106,6 +106,35 @@ async def test_sink_reports_connected_for_is_open_checks():
     assert sink.client_state == WebSocketState.CONNECTED
 
 
+@pytest.mark.asyncio
+async def test_sink_stamps_thread_id_on_logged_and_forwarded_frames():
+    # Every frame must carry its thread so the client can route it to the right
+    # chat. Without this, concurrent runs (multiple tabs / ticket→engineer handoff)
+    # render into whichever thread is on screen.
+    ws = FakeWS()
+    handle = RunHandle("thread-A", ThreadOutputLog())
+    handle.attached_ws = ws
+    sink = RunSink(handle)
+
+    await sink.send_json({"type": "ai", "content": "hi"})
+
+    assert handle.log.since(0)[0]["thread_id"] == "thread-A"  # logged copy (for replay)
+    assert ws.sent[0]["thread_id"] == "thread-A"              # forwarded copy
+
+
+@pytest.mark.asyncio
+async def test_sink_preserves_caller_supplied_thread_id():
+    # Interrupt frames set their own thread_id; the sink must not overwrite it.
+    ws = FakeWS()
+    handle = RunHandle("thread-A", ThreadOutputLog())
+    handle.attached_ws = ws
+    sink = RunSink(handle)
+
+    await sink.send_json({"type": "approval_request", "thread_id": "explicit-B"})
+
+    assert ws.sent[0]["thread_id"] == "explicit-B"
+
+
 # --------------------------------------------------------------------- RunManager
 
 @pytest.mark.asyncio
