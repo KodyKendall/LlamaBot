@@ -195,12 +195,17 @@ export class BrandGuide {
       const hex = this.normalizeHex(color.hex) || color.hex || '#000000';
       const row = document.createElement('div');
       row.className = 'brand-color-row';
+      // The whole row is tinted with its own color (see .brand-color-row CSS):
+      // faint wash + left accent bar. Kept in sync on every color change.
+      row.style.setProperty('--row-color', hex);
       row.innerHTML = `
-        <label class="brand-swatch-wrap" title="Open color wheel">
-          <span class="brand-swatch" data-role="swatch" style="background:${hex}"></span>
-          <input type="color" class="brand-native" data-role="native" value="${/^#[0-9a-fA-F]{6}$/.test(hex) ? hex : '#000000'}">
-        </label>
-        <input type="text" class="brand-color-name" data-role="name" value="${this.escapeAttr(color.name || '')}" placeholder="Name (e.g. Primary)">
+        <div class="brand-color-main">
+          <label class="brand-swatch-wrap" title="Open color wheel">
+            <span class="brand-swatch" data-role="swatch" style="background:${hex}"></span>
+            <input type="color" class="brand-native" data-role="native" value="${/^#[0-9a-fA-F]{6}$/.test(hex) ? hex : '#000000'}">
+          </label>
+          <input type="text" class="brand-color-name" data-role="name" value="${this.escapeAttr(color.name || '')}" placeholder="Name (e.g. Primary)">
+        </div>
         <input type="text" class="brand-color-hex" data-role="hex" value="${this.escapeAttr(color.hex || '')}" placeholder="#RRGGBB" maxlength="7" spellcheck="false">
         <div class="brand-row-actions">
           ${this._eyedropperSupported ? `<button type="button" class="brand-icon-btn" data-role="pick" title="Pick a color from the app (eyedropper)"><i class="fa-solid fa-eye-dropper"></i></button>` : ''}
@@ -227,6 +232,7 @@ export class BrandGuide {
         if (norm) {
           swatch.style.background = norm;
           native.value = norm;
+          row.style.setProperty('--row-color', norm);
         }
       });
       hexInput.addEventListener('blur', () => {
@@ -313,6 +319,7 @@ export class BrandGuide {
       if (swatch) swatch.style.background = norm;
       if (hexInput) hexInput.value = norm;
       if (native && /^#[0-9a-fA-F]{6}$/.test(norm)) native.value = norm;
+      row.style.setProperty('--row-color', norm);
     }
   }
 

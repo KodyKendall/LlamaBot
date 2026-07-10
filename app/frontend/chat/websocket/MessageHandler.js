@@ -157,6 +157,9 @@ export class MessageHandler {
       return;
     }
 
+    // Only activity for the visible thread resets its silent-stall timer.
+    window.dispatchEvent(new CustomEvent('websocketActivity', { detail: data }));
+
     // Update token indicator if token usage data is present
     if (data.token_usage && this.tokenIndicator) {
       this.tokenIndicator.update(data.token_usage);
@@ -176,6 +179,8 @@ export class MessageHandler {
       this.handleSuggestModeSwitch(data);
     } else if (data.type === 'implement_ticket') {
       this.handleImplementTicket(data);
+    } else if (data.type === 'delegation_progress') {
+      window.chatApp?.handleDelegationProgress(data);
     } else {
       this.handleGenericMessage(data);
     }

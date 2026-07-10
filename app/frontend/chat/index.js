@@ -30,10 +30,11 @@ import { ClipboardFormatter } from './utils/ClipboardFormatter.js';
 import { CheckpointManager } from './checkpoints/CheckpointManager.js';
 import { DiffViewer } from './checkpoints/DiffViewer.js';
 import { FaviconBadgeManager } from './ui/FaviconBadgeManager.js';
+import { StallMonitor } from './ui/StallMonitor.js';
 
 // Image auto-switch: when a user attaches an image while on a text-only model,
 // we move them onto an image-capable model so the image is actually seen.
-const IMAGE_MODEL = 'gemini-3.1-flash-lite';   // vision-capable target
+const IMAGE_MODEL = 'gpt-5-nano';   // vision-capable target
 const DEFAULT_TEXT_MODEL = 'deepseek-v4-flash'; // default text model
 
 /**
@@ -111,6 +112,7 @@ class ChatApp {
     // Agent running state (for stop button)
     this.isAgentRunning = false;
     this.cancelPressCount = 0;
+    this.stallMonitor = new StallMonitor();
 
     // Last payload we sent (carries its client_message_id). Kept so the backend
     // idempotency guard has a stable key; resume-on-reconnect no longer re-sends
@@ -273,6 +275,14 @@ class ChatApp {
     window.addEventListener('websocketReplayUnavailable', () => {
       this.hideThinkingIndicator();
       this.setAgentRunning(false);
+    });
+
+    // Any inbound frame proves the run is alive. Delegation heartbeats arrive
+    // through this same path, so the generic stall affordance works for both
+    // nested agents and future long-running operations.
+    window.addEventListener('websocketActivity', () => {
+      this.stallMonitor.markActivity();
+      this.clearStallHint();
     });
 
     // Listen for agent task completion to stop duration timer and show elapsed time
@@ -1378,7 +1388,7 @@ class ChatApp {
           }
           this.slashCommandManager?.showToast(
             "You attached an image, but your current model can't see images. " +
-            "I switched to Gemini and started a new conversation, carrying your previous messages over.",
+            "I switched to GPT-5 Nano and started a new conversation, carrying your previous messages over.",
             'info'
           );
           this.updateImageSwitchBanner();
@@ -1930,11 +1940,37 @@ class ChatApp {
   startDurationTimerDisplay() {
     // Start the timer in app state
     this.appState.startTaskTimer();
+    this.stallMonitor.start();
+    this.clearStallHint();
 
     // Update every second - the timer text is injected into the thinking area
     this.appState.taskTimerInterval = setInterval(() => {
       this.updateTimerInThinkingArea();
+      this.updateStallHint();
     }, 1000);
+  }
+
+  handleDelegationProgress(data) {
+    if (!this.elements.thinkingArea) return;
+    const thinkingDiv = this.elements.thinkingArea.querySelector('.typing-indicator');
+    if (thinkingDiv && data.message) {
+      this.loadingVerbs?.stopCycling();
+      thinkingDiv.textContent = `🦙 ${data.message}`;
+    }
+  }
+
+  updateStallHint() {
+    if (!this.elements.thinkingArea || !this.stallMonitor.shouldWarn(this.isAgentRunning)) return;
+    if (this.elements.thinkingArea.querySelector('.stall-hint')) return;
+
+    const hint = document.createElement('div');
+    hint.className = 'stall-hint';
+    hint.textContent = "Taking longer than usual — you can cancel and say ‘continue’ to retry.";
+    this.elements.thinkingArea.appendChild(hint);
+  }
+
+  clearStallHint() {
+    this.elements.thinkingArea?.querySelector('.stall-hint')?.remove();
   }
 
   /**
@@ -1975,6 +2011,8 @@ class ChatApp {
   stopDurationTimerDisplay() {
     // Stop the timer in app state
     this.appState.stopTaskTimer();
+    this.stallMonitor.stop();
+    this.clearStallHint();
 
     // Remove timer from thinking area if it exists
     if (this.elements.thinkingArea) {

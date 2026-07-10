@@ -8,7 +8,7 @@ present?" check — so the instance user cannot select (or re-enable) a model th
 operator/mothership has turned off. Resolution order (most-specific wins):
 
   1. Explicit disable (disabled_models / DISABLED_MODELS) — OFF, beats everything.
-  2. Fail-open defaults (deepseek-v4-flash, gemini-3.1-flash-lite) — always ON
+  2. Fail-open defaults (deepseek-v4-flash, gpt-5-nano) — always ON
      unless explicitly disabled, so every instance keeps a text + vision model.
   3. Allow-list (enabled_models / ENABLED_MODELS) — restricts everything else.
   4. Nothing configured — everything enabled (key-gated, as before).
@@ -58,10 +58,10 @@ def test_inert_when_nothing_configured():
 
 
 def test_fail_open_defaults_survive_a_restrictive_allowlist(monkeypatch):
-    """deepseek + gemini-flash-lite stay on even when an allow-list omits them."""
+    """deepseek + gpt-5-nano stay on even when an allow-list omits them."""
     monkeypatch.setenv("ENABLED_MODELS", "claude-4.5-sonnet")
     assert model_policy.is_model_enabled("deepseek-v4-flash") is True
-    assert model_policy.is_model_enabled("gemini-3.1-flash-lite") is True
+    assert model_policy.is_model_enabled("gpt-5-nano") is True
     # ...but a non-default, non-listed model is off.
     assert model_policy.is_model_enabled("gpt-5-codex") is False
 
@@ -125,11 +125,11 @@ def test_enabled_default_model_prefers_project_default():
     assert model_policy.enabled_default_model() == DEFAULT_LLM_MODEL
 
 
-def test_enabled_default_falls_back_to_gemini_when_deepseek_disabled(monkeypatch):
-    """Default disabled + allow-list excludes the rest -> the gemini fail-open wins."""
+def test_enabled_default_falls_back_to_vision_model_when_deepseek_disabled(monkeypatch):
+    """Default disabled + allow-list excludes the rest -> the gpt-5-nano fail-open wins."""
     monkeypatch.setenv("DISABLED_MODELS", "deepseek-v4-flash")
     monkeypatch.setenv("ENABLED_MODELS", "nothing-real")
-    assert model_policy.enabled_default_model() == "gemini-3.1-flash-lite"
+    assert model_policy.enabled_default_model() == "gpt-5-nano"
 
 
 def test_enabled_default_model_never_locks_out(monkeypatch):
@@ -170,7 +170,7 @@ async def test_available_models_marks_allowlist_disabled(async_client, monkeypat
 
     # fail-open default is never flagged disabled by an allow-list.
     assert by_value["deepseek-v4-flash"]["reason"] != "Disabled by administrator"
-    assert by_value["gemini-3.1-flash-lite"]["reason"] != "Disabled by administrator"
+    assert by_value["gpt-5-nano"]["reason"] != "Disabled by administrator"
 
 
 @pytest.mark.asyncio

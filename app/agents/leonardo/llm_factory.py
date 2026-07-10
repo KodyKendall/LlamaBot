@@ -126,6 +126,10 @@ def get_llm(model_name: str):
     - DeepSeek: reasoning_content preserved via ChatDeepSeekWithReasoning
 
     Unknown model names fall back to the project default (DeepSeek v4 Flash).
+
+    Provider SDK retries are disabled here because they are opaque and multiply
+    the 180-second request timeout. Middleware-based agents own classified,
+    warning-logged retries; direct callers fail into the normal recovery path.
     """
     if model_name == "fake-llm" and os.getenv("LLAMABOT_ENABLE_FAKE_LLM", "").lower() == "true":
         return FakeTestChatModel()
@@ -148,11 +152,13 @@ def get_llm(model_name: str):
         return ChatDeepSeekWithReasoning(
             model="deepseek-v4-flash",
             timeout=180,
+            max_retries=0,
         )
     if model_name == "deepseek-v4-pro":
         return ChatDeepSeekWithReasoning(
             model="deepseek-v4-pro",
             timeout=180,
+            max_retries=0,
         )
     if model_name == "gpt-5-codex":
         return ChatOpenAI(
@@ -160,6 +166,7 @@ def get_llm(model_name: str):
             use_responses_api=True,
             reasoning={"effort": "low", "summary": "auto"},
             output_version="responses/v1",
+            max_retries=0,
         )
     if model_name == "gpt-5-mini":
         return ChatOpenAI(
@@ -167,6 +174,7 @@ def get_llm(model_name: str):
             use_responses_api=True,
             reasoning={"effort": "low", "summary": "auto"},
             output_version="responses/v1",
+            max_retries=0,
         )
     if model_name == "gpt-5-nano":
         return ChatOpenAI(
@@ -174,6 +182,7 @@ def get_llm(model_name: str):
             use_responses_api=True,
             reasoning={"effort": "low", "summary": "auto"},
             output_version="responses/v1",
+            max_retries=0,
         )
     if model_name == "gpt-5.4-nano":
         return ChatOpenAI(
@@ -181,34 +190,40 @@ def get_llm(model_name: str):
             use_responses_api=True,
             reasoning={"effort": "low", "summary": "auto"},
             output_version="responses/v1",
+            max_retries=0,
         )
     if model_name == "claude-4.5-sonnet":
         return ChatAnthropic(
             model="claude-sonnet-4-5-20250929",
             max_tokens=16384,
             thinking={"type": "enabled", "budget_tokens": 5000},
+            max_retries=0,
         )
     if model_name == "claude-4.5-haiku":
         return ChatAnthropic(
             model="claude-haiku-4-5",
             max_tokens=16384,
             thinking={"type": "enabled", "budget_tokens": 3000},
+            max_retries=0,
         )
     if model_name == "gemini-3-flash":
         return ChatGoogleGenerativeAI(
             model="gemini-3-flash-preview",
             include_thoughts=True,
+            retries=0,
         )
     if model_name == "gemini-3-pro":
         return ChatGoogleGenerativeAI(
             model="gemini-3.1-pro-preview",
             include_thoughts=True,
+            retries=0,
         )
     if model_name == "gemini-3.1-flash-lite":
         return ChatGoogleGenerativeAI(
             model="gemini-3.1-flash-lite",
             thinking_level="high",
             include_thoughts=True,
+            retries=0,
         )
     if model_name == "qwen3.7-plus":
         # Alibaba Cloud Model Studio's Qwen3.7 Plus, via the dedicated
@@ -227,11 +242,13 @@ def get_llm(model_name: str):
             api_key=os.getenv("ALIBABA_API_KEY"),
             enable_thinking=True,
             thinking_budget=8192,
+            max_retries=0,
         )
 
     return ChatDeepSeekWithReasoning(
         model="deepseek-v4-flash",
         timeout=180,
+        max_retries=0,
     )
 
 

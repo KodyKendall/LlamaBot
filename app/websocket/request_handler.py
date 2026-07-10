@@ -179,6 +179,26 @@ class RequestHandler:
         """Check if the WebSocket connection is still open"""
         return websocket.client_state == WebSocketState.CONNECTED
 
+    async def _forward_custom_stream_chunk(self, chunk, websocket: WebSocket) -> bool:
+        """Forward supported LangGraph custom events to the browser.
+
+        Returns True when ``chunk`` was a custom stream item, even if its payload
+        was intentionally ignored. This keeps custom events out of message/update
+        handling while limiting the browser protocol to known event types.
+        """
+        is_custom = isinstance(chunk, tuple) and len(chunk) == 3 and chunk[1] == "custom"
+        if not is_custom:
+            return False
+
+        payload = chunk[2]
+        if (
+            isinstance(payload, dict)
+            and payload.get("type") == "delegation_progress"
+            and self._is_websocket_open(websocket)
+        ):
+            await websocket.send_json(payload)
+        return True
+
     # Interrupt types raised by "ask the user" tools whose interrupt() expects a plain
     # text answer (which the tool wraps into a ToolMessage). A normal chat message sent
     # while one of these is pending should resume the interrupt with that text — NOT be
@@ -611,7 +631,7 @@ class RequestHandler:
                     await self._repair_thread_state_if_needed(app, config)
                     stream_input = state
 
-                async for chunk in app.astream(stream_input, config=config, stream_mode=["updates", "messages"], subgraphs=True):
+                async for chunk in app.astream(stream_input, config=config, stream_mode=["updates", "messages", "custom"], subgraphs=True):
 
                     # Layer 2: this loop runs inside a background run (RunManager)
                     # writing to a RunSink, NOT bound to the live socket. We do
@@ -624,6 +644,9 @@ class RequestHandler:
                     # NOTE: In LangGraph 0.5, they introduced this "subgraphs" parameter, that changes the datashape if you set it to True.
                     # if subgraph=True, it returns a tuple with 3 elements, instead of 2 elements.
                     # the first element is the subgraph name, the second element is the streaming data type ["updates", "messages", "values"], and the third element is the actual metadata.
+
+                    if await self._forward_custom_stream_chunk(chunk, websocket):
+                        continue
 
                     is_this_chunk_an_llm_message = isinstance(chunk, tuple) and len(chunk) == 3 and chunk[1] == 'messages'
                     is_this_chunk_an_update_stream_type = isinstance(chunk, tuple) and len(chunk) == 3 and chunk[1] == 'updates'
@@ -919,7 +942,10 @@ class RequestHandler:
                 hitl_response = {"decisions": decisions}
 
                 # Resume the graph
-                async for chunk in app.astream(Command(resume=hitl_response), config=config, stream_mode=["updates", "messages"], subgraphs=True):
+                async for chunk in app.astream(Command(resume=hitl_response), config=config, stream_mode=["updates", "messages", "custom"], subgraphs=True):
+                    if await self._forward_custom_stream_chunk(chunk, websocket):
+                        continue
+
                     is_this_chunk_an_llm_message = isinstance(chunk, tuple) and len(chunk) == 3 and chunk[1] == 'messages'
                     is_this_chunk_an_update_stream_type = isinstance(chunk, tuple) and len(chunk) == 3 and chunk[1] == 'updates'
 
@@ -1128,7 +1154,10 @@ class RequestHandler:
                 # Resume the graph — interrupt() returns this answer string
                 answer = response_message.get("answer", "")
 
-                async for chunk in app.astream(Command(resume=answer), config=config, stream_mode=["updates", "messages"], subgraphs=True):
+                async for chunk in app.astream(Command(resume=answer), config=config, stream_mode=["updates", "messages", "custom"], subgraphs=True):
+                    if await self._forward_custom_stream_chunk(chunk, websocket):
+                        continue
+
                     is_this_chunk_an_llm_message = isinstance(chunk, tuple) and len(chunk) == 3 and chunk[1] == 'messages'
                     is_this_chunk_an_update_stream_type = isinstance(chunk, tuple) and len(chunk) == 3 and chunk[1] == 'updates'
 

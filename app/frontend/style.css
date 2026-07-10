@@ -1208,26 +1208,63 @@ body {
 }
 
 /* --- Color rows --- */
+/* Each row is a card tinted with its own color (--row-color, set per-row in
+   BrandGuide.js): a faint wash of the hue + a left accent bar, so it's
+   unambiguous which swatch owns which name/hex. Grid: name (with small swatch
+   chip) on top, hex below (col 1); actions span both rows (col 2). */
 .brand-color-row {
+    position: relative;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-rows: auto auto;
+    align-items: center;
+    column-gap: 10px;
+    row-gap: 6px;
+    padding: 11px 12px 11px 16px;
+    border-radius: 12px;
+    border: 1px solid var(--row-color, rgba(139, 92, 246, 0.25));
+    background:
+        linear-gradient(0deg,
+            color-mix(in srgb, var(--row-color, #8B5CF6) 9%, transparent),
+            color-mix(in srgb, var(--row-color, #8B5CF6) 9%, transparent)),
+        rgba(0, 0, 0, 0.25);
+    overflow: hidden;
+}
+
+.brand-color-row::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 5px;
+    background: var(--row-color, #8B5CF6);
+}
+
+/* Name field sits inline with the small color chip (top row). */
+.brand-color-main {
+    grid-column: 1;
+    grid-row: 1;
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 9px;
+    min-width: 0;
 }
 
 .brand-swatch-wrap {
     position: relative;
-    width: 30px;
-    height: 30px;
+    width: 22px;
+    height: 22px;
     flex-shrink: 0;
     cursor: pointer;
 }
 
 .brand-swatch {
     display: block;
-    width: 30px;
-    height: 30px;
-    border-radius: 8px;
-    border: 1px solid rgba(255, 255, 255, 0.2);
+    width: 22px;
+    height: 22px;
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.25);
     box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.2);
 }
 
@@ -1243,15 +1280,23 @@ body {
 }
 
 .brand-color-name {
-    flex: 1 1 40%;
+    flex: 1;
     min-width: 0;
 }
 
 .brand-color-hex {
-    flex: 0 0 90px;
+    grid-column: 1;
+    grid-row: 2;
+    min-width: 0;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     text-transform: uppercase;
     letter-spacing: 0.5px;
+}
+
+/* Fields pick up a hint of the row color; :focus (below) still wins. */
+.brand-color-row .brand-color-name,
+.brand-color-row .brand-color-hex {
+    border-color: color-mix(in srgb, var(--row-color, #8B5CF6) 45%, rgba(139, 92, 246, 0.25));
 }
 
 .brand-color-name,
@@ -1275,6 +1320,8 @@ body {
 }
 
 .brand-row-actions {
+    grid-column: 2;
+    grid-row: 1 / 3;
     display: flex;
     align-items: center;
     gap: 2px;
@@ -4487,6 +4534,14 @@ button.brand-logo-thumb:hover .brand-logo-zoom {
     min-width: 30px;
     font-weight: 400;
     letter-spacing: 0.3px;
+}
+
+.stall-hint {
+    flex-basis: 100%;
+    margin-top: 4px;
+    color: #a3a3a3;
+    font-size: 0.72rem;
+    line-height: 1.3;
 }
 
 /* ============================================
