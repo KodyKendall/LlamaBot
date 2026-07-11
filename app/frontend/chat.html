@@ -44,6 +44,10 @@
             </div>
             <h1 data-llamabot="leonardo-title">Leo</h1>
             <a class="backup-status" data-llamabot="backup-status" href="/backup-history" target="_blank"></a>
+            <button class="compose-thread-btn" data-llamabot="new-thread-btn" data-tooltip="Start a new conversation in a fresh thread" data-tooltip-pos="bottom" aria-label="Start new conversation">
+                <i class="fa-solid fa-plus"></i>
+                <span>New</span>
+            </button>
             <button class="checkpoint-btn" data-llamabot="checkpoint-btn" data-tooltip="Version history — view and restore earlier checkpoints of your app" data-tooltip-pos="bottom" aria-label="Version history">
                 <i class="fa-solid fa-clock-rotate-left"></i>
                 <span class="unsaved-badge hidden" data-llamabot="unsaved-badge"></span>
@@ -51,8 +55,11 @@
             <a href="/settings" target="_blank" class="settings-btn" data-tooltip="Settings — API keys, models & preferences" data-tooltip-pos="bottom" aria-label="Settings">
                 <i class="fa-solid fa-gear"></i>
             </a>
-            <button class="collapse-sidebar-btn" data-llamabot="collapse-sidebar-btn" data-tooltip="Collapse the chat panel to widen the preview" data-tooltip-pos="bottom" aria-label="Collapse sidebar">
-                <i class="fa-solid fa-angles-left"></i>
+            <button class="collapse-sidebar-btn" data-llamabot="collapse-sidebar-btn" data-tooltip="Hide Leo panel" data-tooltip-pos="bottom" aria-label="Hide Leo panel">
+                <svg class="collapse-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="6" y1="4" x2="6" y2="20"/>
+                    <polyline points="16 7 11 12 16 17"/>
+                </svg>
             </button>
             <button class="mobile-view-toggle" data-llamabot="show-preview-btn">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -76,9 +83,7 @@
                             <div class="version-tooltip" data-llamabot="version-tooltip"></div>
                         </div>
                     </div>
-                    <button class="new-thread-btn" data-llamabot="new-thread-btn" data-tooltip="Start a new conversation in a fresh thread" data-tooltip-pos="bottom" aria-label="Start new conversation">
-                        <i class="fa-solid fa-plus"></i>
-                    </button>
+                    <!-- New-thread action lives in the header now (compose button) -->
                     <!-- <button class="close-drawer" data-llamabot="close-drawer">&times;</button> -->
                 </div>
                 <div class="menu-items">
@@ -168,6 +173,12 @@
                     <button class="session-feedback-choice" data-llamabot="session-feedback-bad">
                         <i class="fa-regular fa-thumbs-down"></i> Bad
                     </button>
+                </div>
+                <!-- Shown after "Bad": ask what went wrong before recording the rating -->
+                <div class="session-feedback-followup hidden" data-llamabot="session-feedback-followup">
+                    <input type="text" class="session-feedback-note" data-llamabot="session-feedback-note"
+                           placeholder="What went wrong? (optional)" maxlength="500" />
+                    <button class="session-feedback-choice" data-llamabot="session-feedback-send">Send</button>
                 </div>
                 <span class="session-feedback-thanks hidden" data-llamabot="session-feedback-thanks">Thanks for the feedback!</span>
                 <button class="session-feedback-dismiss" data-llamabot="session-feedback-dismiss" data-tooltip="Dismiss" aria-label="Dismiss">&times;</button>

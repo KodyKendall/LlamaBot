@@ -13,6 +13,7 @@ import { MessageHandler } from './websocket/MessageHandler.js';
 import { ScrollManager } from './ui/ScrollManager.js';
 import { IframeManager } from './ui/IframeManager.js';
 import { ElementSelector } from './ui/ElementSelector.js';
+import { QuotedReplyManager } from './ui/QuotedReplyManager.js';
 import { MenuManager } from './ui/MenuManager.js';
 import { MobileViewManager } from './ui/MobileViewManager.js';
 import { TokenIndicator } from './ui/TokenIndicator.js';
@@ -63,6 +64,7 @@ class ChatApp {
     this.scrollManager = null;
     this.iframeManager = null;
     this.elementSelector = null;
+    this.quotedReplyManager = null;
     this.menuManager = null;
     this.mobileViewManager = null;
     this.threadManager = null;
@@ -351,6 +353,13 @@ class ChatApp {
     this.elementSelector = new ElementSelector(this.iframeManager);
     this.elementSelector.init(this.elements.elementSelectorBtn, this.elements.messageInput);
 
+    // Initialize quoted-reply manager (reply button on hovered messages)
+    this.quotedReplyManager = new QuotedReplyManager();
+    this.quotedReplyManager.init(this.elements.messageInput);
+    this.elements.messageHistory?.addEventListener('llamabot:reply-to-message', (e) => {
+      this.quotedReplyManager.setQuote(e.detail);
+    });
+
     // Initialize prompt manager
     this.promptManager = new PromptManager();
     const inputArea = this.container.querySelector('.input-area');
@@ -536,6 +545,8 @@ class ChatApp {
     this._feedbackActiveThreadId = null;   // threadId the visible banner is rating
 
     const choices = banner.querySelector('.session-feedback-choices');
+    const followup = q('session-feedback-followup');
+    const note = q('session-feedback-note');
     const thanks = q('session-feedback-thanks');
 
     // Always rate the thread the banner was surfaced for — captured at show-time.
@@ -553,24 +564,42 @@ class ChatApp {
     };
     const hide = () => banner.classList.add('hidden');
 
-    const submit = (rating) => {
+    const submit = (rating, noteText = null) => {
       const threadId = activeThreadId();
       if (threadId) {
         fetch('/api/feedback', {
           method: 'POST',
           credentials: 'same-origin',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ thread_id: threadId, rating, scope: 'session' }),
+          body: JSON.stringify({
+            thread_id: threadId,
+            rating,
+            scope: 'session',
+            note: noteText || undefined,
+          }),
         }).catch((err) => console.warn('session feedback failed', err));
       }
       remember('answered');
       choices?.classList.add('hidden');
+      followup?.classList.add('hidden');
       thanks?.classList.remove('hidden');
       setTimeout(hide, 1500);
     };
 
+    // "Bad" doesn't record right away — swap the buttons for a "what went wrong?"
+    // field and record the rating (with the optional note) when they hit Send.
+    const sendBadWithNote = () => submit('bad', note?.value.trim() || null);
+
     q('session-feedback-good')?.addEventListener('click', () => submit('good'));
-    q('session-feedback-bad')?.addEventListener('click', () => submit('bad'));
+    q('session-feedback-bad')?.addEventListener('click', () => {
+      choices?.classList.add('hidden');
+      followup?.classList.remove('hidden');
+      note?.focus();
+    });
+    q('session-feedback-send')?.addEventListener('click', sendBadWithNote);
+    note?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); sendBadWithNote(); }
+    });
     q('session-feedback-dismiss')?.addEventListener('click', () => { remember('dismissed'); hide(); });
   }
 
@@ -608,6 +637,7 @@ class ChatApp {
     this._feedbackShown.add(threadId);
     this._feedbackActiveThreadId = threadId;  // rate THIS thread even if it switches
     banner.querySelector('.session-feedback-choices')?.classList.remove('hidden');
+    this.container.querySelector('[data-llamabot="session-feedback-followup"]')?.classList.add('hidden');
     this.container.querySelector('[data-llamabot="session-feedback-thanks"]')?.classList.add('hidden');
     banner.classList.remove('hidden');
   }
@@ -1319,6 +1349,13 @@ class ChatApp {
     // Agent Skills (.leonardo/skills/<slug>/SKILL.md) that the model loads on
     // demand via the use_skill tool — no longer concatenated into the message.
 
+    // If the user is replying to a specific message, prepend it as a quote block
+    // so Leo sees which message they're responding to (and can quote it back).
+    const quoteBlock = this.quotedReplyManager?.buildMessageBlock();
+    if (quoteBlock) {
+      message = `${quoteBlock}\n\n${message}`;
+    }
+
     // Check if there are selected elements and append each to the message.
     // Multiple elements can be selected (1st, 2nd, ...); emit one block each.
     const selectedElements = this.elementSelector?.getSelectedElements() || [];
@@ -1469,6 +1506,11 @@ class ChatApp {
     // Clear selected element badge
     if (this.elementSelector) {
       this.elementSelector.clearSelection();
+    }
+
+    // Clear the quoted-reply preview
+    if (this.quotedReplyManager) {
+      this.quotedReplyManager.clear();
     }
 
     // Clear selected prompt badge

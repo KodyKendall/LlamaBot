@@ -11,3 +11,8 @@
 - [x] Add "fix_permissions" tool call to all other modes - beginner planning, engineer planning, ticket planning, etc.
 - [x] Fix the branding window to move the labels below the hex code.
 - [x] Add GPT 5 Nano as the default image vision model
+- [x] Add compose button to be outside hamburger menu as top level item
+- [x] Make collapse icon more clear
+- [x] Add a field to type feedback when user clicks "bad" on the banner at bottom of how is leo doing?
+- [x] Remove Leonardo Said: if they're copying a subset of a message, or just a single message, and include it if they're copying across multiple messages
+- [x] Add a "reply" button so the user can quote Leo and respond to a specific, individual message.

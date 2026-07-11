@@ -40,6 +40,14 @@ export class ClipboardFormatter {
 
     if (messages.length === 0) return null;
 
+    // Single message (or subset of one): copy the text as-is, no role labels.
+    // Only annotate with "You Said:" / "Leonardo Said:" when the selection
+    // spans multiple messages, where the labels distinguish who said what.
+    if (messages.length === 1) {
+      const content = this.getSelectedText(messages[0], selection);
+      return content.trim() ? content : null;
+    }
+
     return messages
       .map(msg => this.formatMessage(msg, selection))
       .filter(text => text.trim())
