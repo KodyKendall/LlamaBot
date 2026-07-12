@@ -24,7 +24,7 @@ the user has no write path to:
      coarse operator gate sits above the fail-open/allow-list logic below but
      still yields to an explicit disable in step 1.
   2. **Fail-open defaults** — ``deepseek-v4-flash`` (project default text model)
-     and ``gemini-3.1-flash-lite`` (the image auto-switch target) are globally
+     and ``gpt-5-nano`` (the image auto-switch target) are globally
      enabled, so every instance always keeps a working text *and* vision model,
      even when an allow-list is configured. Only an explicit disable (step 1)
      turns them off.
@@ -75,14 +75,14 @@ _VISION_ALLOWED_DEFAULT = False
 # The single vision model the frontend image auto-switch targets. Kept reachable
 # (when vision is allowed) even while manual switching is locked, so image sends
 # still work without opening up the whole dropdown.
-VISION_MODEL = "gemini-3.1-flash-lite"
+VISION_MODEL = "gpt-5-nano"
 
 # Always enabled regardless of any allow-list, so every instance keeps a working
 # text model (DeepSeek, the project default) and a working vision model
-# (Gemini 3.1 Flash Lite — also the frontend image auto-switch target). These can
+# (GPT-5 Nano — also the frontend image auto-switch target). These can
 # still be turned off, but ONLY via an explicit disable override (see step 1
 # above); an allow-list that omits them does not disable them.
-_FAIL_OPEN_MODELS = frozenset({"deepseek-v4-flash", "gemini-3.1-flash-lite"})
+_FAIL_OPEN_MODELS = frozenset({"deepseek-v4-flash", "gpt-5-nano"})
 
 # Known frontend model names in preference order. Used only to choose a concrete
 # fallback when the requested model is disabled; an allow-list may legitimately

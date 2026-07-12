@@ -24,10 +24,15 @@ import logging
 # Import tools for research (NO write_file - sub-agent should only read)
 from app.agents.leonardo.rails_agent.state import RailsAgentState
 from app.agents.leonardo.rails_agent.tools import (
-    write_todos, ls, read_file, search_file, bash_command, glob_files, grep_files
+    write_todos, ls, read_file, bash_command, glob_files, grep_files
 )
 # Shared LLM factory - single source of truth for model selection
 from app.agents.leonardo.llm_factory import get_llm
+from app.agents.leonardo.delegation import (
+    DELEGATION_TIMEOUT_SECONDS,
+    DelegationTimedOut,
+    run_delegation,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -161,7 +166,6 @@ def create_sub_agent(llm_model: str = None):
         write_todos,
         ls,
         read_file,
-        search_file,
         glob_files,
         grep_files,
         bash_command,  # For rails runner queries (read-only DB queries)
@@ -186,7 +190,7 @@ def create_sub_agent(llm_model: str = None):
 # =============================================================================
 
 @tool("delegate_task")
-def delegate_task(
+async def delegate_task(
     task_description: str,
     runtime: ToolRuntime,
 ) -> Command:
@@ -240,9 +244,13 @@ def delegate_task(
         sub_agent = create_sub_agent(llm_model=llm_model)
 
         # Invoke with the task - sub-agent starts with fresh context
-        result = sub_agent.invoke({
-            "messages": [{"role": "user", "content": task_description}]
-        })
+        result = await run_delegation(
+            sub_agent,
+            {"messages": [{"role": "user", "content": task_description}]},
+            config=runtime.config,
+            stream_writer=runtime.stream_writer,
+            label="Ticket research sub-agent",
+        )
 
         # Extract the final response from the sub-agent
         final_message = result["messages"][-1].content if result["messages"] else "No response from sub-agent"
@@ -258,6 +266,21 @@ def delegate_task(
             ]
         })
 
+    except DelegationTimedOut:
+        logger.warning("Ticket Mode sub-agent delegation timed out")
+        return Command(update={
+            "messages": [
+                ToolMessage(
+                    content=(
+                        "[DELEGATED TASK FAILED]\n\n"
+                        f"Timed out after {DELEGATION_TIMEOUT_SECONDS}s — you may retry "
+                        "delegate_task once."
+                    ),
+                    tool_call_id=tool_call_id
+                )
+            ],
+            "failed_tool_calls_count": 1
+        })
     except Exception as e:
         logger.error(f"Ticket Mode sub-agent failed: {str(e)}")
         return Command(update={

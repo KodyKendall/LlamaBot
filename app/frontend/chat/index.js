@@ -13,6 +13,7 @@ import { MessageHandler } from './websocket/MessageHandler.js';
 import { ScrollManager } from './ui/ScrollManager.js';
 import { IframeManager } from './ui/IframeManager.js';
 import { ElementSelector } from './ui/ElementSelector.js';
+import { QuotedReplyManager } from './ui/QuotedReplyManager.js';
 import { MenuManager } from './ui/MenuManager.js';
 import { MobileViewManager } from './ui/MobileViewManager.js';
 import { TokenIndicator } from './ui/TokenIndicator.js';
@@ -30,10 +31,11 @@ import { ClipboardFormatter } from './utils/ClipboardFormatter.js';
 import { CheckpointManager } from './checkpoints/CheckpointManager.js';
 import { DiffViewer } from './checkpoints/DiffViewer.js';
 import { FaviconBadgeManager } from './ui/FaviconBadgeManager.js';
+import { StallMonitor } from './ui/StallMonitor.js';
 
 // Image auto-switch: when a user attaches an image while on a text-only model,
 // we move them onto an image-capable model so the image is actually seen.
-const IMAGE_MODEL = 'gemini-3.1-flash-lite';   // vision-capable target
+const IMAGE_MODEL = 'gpt-5-nano';   // vision-capable target
 const DEFAULT_TEXT_MODEL = 'deepseek-v4-flash'; // default text model
 
 /**
@@ -62,6 +64,7 @@ class ChatApp {
     this.scrollManager = null;
     this.iframeManager = null;
     this.elementSelector = null;
+    this.quotedReplyManager = null;
     this.menuManager = null;
     this.mobileViewManager = null;
     this.threadManager = null;
@@ -111,6 +114,7 @@ class ChatApp {
     // Agent running state (for stop button)
     this.isAgentRunning = false;
     this.cancelPressCount = 0;
+    this.stallMonitor = new StallMonitor();
 
     // Last payload we sent (carries its client_message_id). Kept so the backend
     // idempotency guard has a stable key; resume-on-reconnect no longer re-sends
@@ -275,6 +279,14 @@ class ChatApp {
       this.setAgentRunning(false);
     });
 
+    // Any inbound frame proves the run is alive. Delegation heartbeats arrive
+    // through this same path, so the generic stall affordance works for both
+    // nested agents and future long-running operations.
+    window.addEventListener('websocketActivity', () => {
+      this.stallMonitor.markActivity();
+      this.clearStallHint();
+    });
+
     // Listen for agent task completion to stop duration timer and show elapsed time
     window.addEventListener('agentTaskCompleted', (event) => {
       const elapsedTime = event.detail?.elapsedTime;
@@ -340,6 +352,13 @@ class ChatApp {
     // Initialize element selector
     this.elementSelector = new ElementSelector(this.iframeManager);
     this.elementSelector.init(this.elements.elementSelectorBtn, this.elements.messageInput);
+
+    // Initialize quoted-reply manager (reply button on hovered messages)
+    this.quotedReplyManager = new QuotedReplyManager();
+    this.quotedReplyManager.init(this.elements.messageInput);
+    this.elements.messageHistory?.addEventListener('llamabot:reply-to-message', (e) => {
+      this.quotedReplyManager.setQuote(e.detail);
+    });
 
     // Initialize prompt manager
     this.promptManager = new PromptManager();
@@ -526,6 +545,8 @@ class ChatApp {
     this._feedbackActiveThreadId = null;   // threadId the visible banner is rating
 
     const choices = banner.querySelector('.session-feedback-choices');
+    const followup = q('session-feedback-followup');
+    const note = q('session-feedback-note');
     const thanks = q('session-feedback-thanks');
 
     // Always rate the thread the banner was surfaced for — captured at show-time.
@@ -543,24 +564,42 @@ class ChatApp {
     };
     const hide = () => banner.classList.add('hidden');
 
-    const submit = (rating) => {
+    const submit = (rating, noteText = null) => {
       const threadId = activeThreadId();
       if (threadId) {
         fetch('/api/feedback', {
           method: 'POST',
           credentials: 'same-origin',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ thread_id: threadId, rating, scope: 'session' }),
+          body: JSON.stringify({
+            thread_id: threadId,
+            rating,
+            scope: 'session',
+            note: noteText || undefined,
+          }),
         }).catch((err) => console.warn('session feedback failed', err));
       }
       remember('answered');
       choices?.classList.add('hidden');
+      followup?.classList.add('hidden');
       thanks?.classList.remove('hidden');
       setTimeout(hide, 1500);
     };
 
+    // "Bad" doesn't record right away — swap the buttons for a "what went wrong?"
+    // field and record the rating (with the optional note) when they hit Send.
+    const sendBadWithNote = () => submit('bad', note?.value.trim() || null);
+
     q('session-feedback-good')?.addEventListener('click', () => submit('good'));
-    q('session-feedback-bad')?.addEventListener('click', () => submit('bad'));
+    q('session-feedback-bad')?.addEventListener('click', () => {
+      choices?.classList.add('hidden');
+      followup?.classList.remove('hidden');
+      note?.focus();
+    });
+    q('session-feedback-send')?.addEventListener('click', sendBadWithNote);
+    note?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); sendBadWithNote(); }
+    });
     q('session-feedback-dismiss')?.addEventListener('click', () => { remember('dismissed'); hide(); });
   }
 
@@ -598,6 +637,7 @@ class ChatApp {
     this._feedbackShown.add(threadId);
     this._feedbackActiveThreadId = threadId;  // rate THIS thread even if it switches
     banner.querySelector('.session-feedback-choices')?.classList.remove('hidden');
+    this.container.querySelector('[data-llamabot="session-feedback-followup"]')?.classList.add('hidden');
     this.container.querySelector('[data-llamabot="session-feedback-thanks"]')?.classList.add('hidden');
     banner.classList.remove('hidden');
   }
@@ -1309,6 +1349,13 @@ class ChatApp {
     // Agent Skills (.leonardo/skills/<slug>/SKILL.md) that the model loads on
     // demand via the use_skill tool — no longer concatenated into the message.
 
+    // If the user is replying to a specific message, prepend it as a quote block
+    // so Leo sees which message they're responding to (and can quote it back).
+    const quoteBlock = this.quotedReplyManager?.buildMessageBlock();
+    if (quoteBlock) {
+      message = `${quoteBlock}\n\n${message}`;
+    }
+
     // Check if there are selected elements and append each to the message.
     // Multiple elements can be selected (1st, 2nd, ...); emit one block each.
     const selectedElements = this.elementSelector?.getSelectedElements() || [];
@@ -1378,7 +1425,7 @@ class ChatApp {
           }
           this.slashCommandManager?.showToast(
             "You attached an image, but your current model can't see images. " +
-            "I switched to Gemini and started a new conversation, carrying your previous messages over.",
+            "I switched to GPT-5 Nano and started a new conversation, carrying your previous messages over.",
             'info'
           );
           this.updateImageSwitchBanner();
@@ -1459,6 +1506,11 @@ class ChatApp {
     // Clear selected element badge
     if (this.elementSelector) {
       this.elementSelector.clearSelection();
+    }
+
+    // Clear the quoted-reply preview
+    if (this.quotedReplyManager) {
+      this.quotedReplyManager.clear();
     }
 
     // Clear selected prompt badge
@@ -1930,11 +1982,37 @@ class ChatApp {
   startDurationTimerDisplay() {
     // Start the timer in app state
     this.appState.startTaskTimer();
+    this.stallMonitor.start();
+    this.clearStallHint();
 
     // Update every second - the timer text is injected into the thinking area
     this.appState.taskTimerInterval = setInterval(() => {
       this.updateTimerInThinkingArea();
+      this.updateStallHint();
     }, 1000);
+  }
+
+  handleDelegationProgress(data) {
+    if (!this.elements.thinkingArea) return;
+    const thinkingDiv = this.elements.thinkingArea.querySelector('.typing-indicator');
+    if (thinkingDiv && data.message) {
+      this.loadingVerbs?.stopCycling();
+      thinkingDiv.textContent = `🦙 ${data.message}`;
+    }
+  }
+
+  updateStallHint() {
+    if (!this.elements.thinkingArea || !this.stallMonitor.shouldWarn(this.isAgentRunning)) return;
+    if (this.elements.thinkingArea.querySelector('.stall-hint')) return;
+
+    const hint = document.createElement('div');
+    hint.className = 'stall-hint';
+    hint.textContent = "Taking longer than usual — you can cancel and say ‘continue’ to retry.";
+    this.elements.thinkingArea.appendChild(hint);
+  }
+
+  clearStallHint() {
+    this.elements.thinkingArea?.querySelector('.stall-hint')?.remove();
   }
 
   /**
@@ -1975,6 +2053,8 @@ class ChatApp {
   stopDurationTimerDisplay() {
     // Stop the timer in app state
     this.appState.stopTaskTimer();
+    this.stallMonitor.stop();
+    this.clearStallHint();
 
     // Remove timer from thinking area if it exists
     if (this.elements.thinkingArea) {

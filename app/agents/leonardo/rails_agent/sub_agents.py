@@ -30,12 +30,17 @@ from app.agents.leonardo.rails_agent.state import RailsAgentState
 from app.agents.leonardo.rails_agent.prompts import RAILS_AGENT_PROMPT
 from app.agents.leonardo.rails_agent.tools import (
     write_todos, ls, read_file, write_file, edit_file,
-    search_file, bash_command, git_status, git_commit,
+    bash_command, git_status, git_commit,
     grep_files, glob_files,
     git_command, github_cli_command, internet_search
 )
 # Shared LLM factory - single source of truth for model selection
 from app.agents.leonardo.llm_factory import get_llm
+from app.agents.leonardo.delegation import (
+    DELEGATION_TIMEOUT_SECONDS,
+    DelegationTimedOut,
+    run_delegation,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -214,7 +219,6 @@ def create_sub_agent(llm_model: str = None):
     sub_agent_tools = [
         write_todos,
         ls, read_file, write_file, edit_file,
-        #search_file,
         grep_files, glob_files,
         bash_command,
         # git_status, git_commit, git_command, github_cli_command,  # Disabled to prevent auto-commits
@@ -238,7 +242,7 @@ def create_sub_agent(llm_model: str = None):
 # =============================================================================
 
 @tool("delegate_task")
-def delegate_task(
+async def delegate_task(
     task_description: str,
     runtime: ToolRuntime,
 ) -> Command:
@@ -281,9 +285,13 @@ def delegate_task(
         sub_agent = create_sub_agent(llm_model=llm_model)
 
         # Invoke with the task - sub-agent starts with fresh context
-        result = sub_agent.invoke({
-            "messages": [{"role": "user", "content": task_description}]
-        })
+        result = await run_delegation(
+            sub_agent,
+            {"messages": [{"role": "user", "content": task_description}]},
+            config=runtime.config,
+            stream_writer=runtime.stream_writer,
+            label="Implementation sub-agent",
+        )
 
         # Extract the final response from the sub-agent
         final_message = result["messages"][-1].content if result["messages"] else "No response from sub-agent"
@@ -299,6 +307,21 @@ def delegate_task(
             ]
         })
 
+    except DelegationTimedOut:
+        logger.warning("Sub-agent delegation timed out")
+        return Command(update={
+            "messages": [
+                ToolMessage(
+                    content=(
+                        "[DELEGATED TASK FAILED]\n\n"
+                        f"Timed out after {DELEGATION_TIMEOUT_SECONDS}s — you may retry "
+                        "delegate_task once."
+                    ),
+                    tool_call_id=tool_call_id
+                )
+            ],
+            "failed_tool_calls_count": 1
+        })
     except Exception as e:
         logger.error(f"Sub-agent failed: {str(e)}")
         return Command(update={
@@ -365,7 +388,7 @@ def create_research_sub_agent(llm_model: str = None):
 # =============================================================================
 
 @tool("delegate_research")
-def delegate_research(
+async def delegate_research(
     task_description: str,
     runtime: ToolRuntime,
 ) -> Command:
@@ -432,9 +455,13 @@ def delegate_research(
         sub_agent = create_research_sub_agent(llm_model=llm_model)
 
         # Invoke with fresh context - sub-agent only sees the task description
-        result = sub_agent.invoke({
-            "messages": [{"role": "user", "content": task_description}]
-        })
+        result = await run_delegation(
+            sub_agent,
+            {"messages": [{"role": "user", "content": task_description}]},
+            config=runtime.config,
+            stream_writer=runtime.stream_writer,
+            label="Research sub-agent",
+        )
 
         # Extract the final response from the sub-agent
         final_message = result["messages"][-1].content if result["messages"] else "No response from research sub-agent"
@@ -450,6 +477,21 @@ def delegate_research(
             ]
         })
 
+    except DelegationTimedOut:
+        logger.warning("Research sub-agent delegation timed out")
+        return Command(update={
+            "messages": [
+                ToolMessage(
+                    content=(
+                        "[RESEARCH FAILED]\n\n"
+                        f"Timed out after {DELEGATION_TIMEOUT_SECONDS}s — you may retry "
+                        "delegate_research once."
+                    ),
+                    tool_call_id=tool_call_id
+                )
+            ],
+            "failed_tool_calls_count": 1
+        })
     except Exception as e:
         logger.error(f"Research sub-agent failed: {str(e)}")
         return Command(update={

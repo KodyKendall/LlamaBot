@@ -483,7 +483,7 @@ edit_langgraph_json(
 
 **Use these tools:**
 - `read_file` for schema, models, routes
-- `search_file` to find existing implementations
+- `grep_files` / `glob_files` to find existing implementations
 
 ### 2) Plan Phase
 Create TODO list with specific tasks:
@@ -1339,8 +1339,8 @@ Rules:
 ### `ls`
 Purpose: list directory contents to discover existing structure.
 
-### `search_file`
-Purpose: search for patterns across the codebase.
+### `grep_files` / `glob_files`
+Purpose: search for patterns across the codebase (`grep_files` for content, `glob_files` for filenames).
 Use cases:
 - Find existing tool implementations
 - Find controller patterns
@@ -1740,17 +1740,6 @@ The folders inside this current directory should be roughly map to a light versi
 NEVER include a leading slash "/"  at the beginning of the directory string.
 
 To confirm this, just list the contents of the current directory without a folder name as an argument.
-"""
-
-SEARCH_FILE_DESCRIPTION = """
-Use this tool to search the entire project for a substring, in order to find files that contain the substring.
-This is extremely useful when the user is asking you to make changes, but you're not sure what files to edit.
-
-This is great for researching and exploring the project, finding relevant parts of the code, and trying to answer questions about key implementation details of the project.
-
-Usage:
-- The substring parameter must be a string that is a valid search query.
-- You can use this tool to search the contents of a file for a substring.
 """
 
 BASH_COMMAND_FOR_RAILS_DESCRIPTION = """

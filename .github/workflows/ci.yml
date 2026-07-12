@@ -129,6 +129,15 @@ jobs:
           cp .env.example .env
           sed -i 's/^LANGSMITH_TRACING=.*/LANGSMITH_TRACING=false/' .env
           sed -i 's/^LLAMABOT_ENABLE_FAKE_LLM=.*/LLAMABOT_ENABLE_FAKE_LLM=true/' .env
+          # docker-compose.yml bind-mounts ./.leonardo/instance.json into the
+          # rails container (read by leonardo_instance.rb) and ./.leonardo into
+          # llamabot. On a fresh Leonardo checkout that file does not exist, so
+          # Docker auto-creates the mount source as a *directory* - which crashes
+          # both the rails initializer (Errno::EISDIR) and llamabot's config
+          # loader. Materialize a real, minimal JSON file so the mount is a file.
+          mkdir -p .leonardo
+          rm -rf .leonardo/instance.json
+          echo '{}' > .leonardo/instance.json
 
       - name: Start database and create llamabot auth DB
         working-directory: leonardo

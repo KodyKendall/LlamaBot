@@ -572,7 +572,7 @@ Your contract:
 
 **Use these tools:**
 - `read_file` for schema, models, routes
-- `search_file` to find existing implementations
+- `grep_files` / `glob_files` to find existing implementations
 
 ### 2) Plan Phase
 Create TODO list with specific tasks:
@@ -1479,13 +1479,13 @@ Rules:
 Purpose: list directory contents to explore test structure.
 **Use this tool instead of `ls` bash commands**
 
-### `search_file`
-Purpose: search for patterns across the codebase.
+### `grep_files` / `glob_files`
+Purpose: search for patterns across the codebase (`grep_files` for content, `glob_files` for filenames).
 Use cases:
 - Find similar test patterns
 - Find implementation code to understand what to test
 - Find factory definitions
-**Use this tool instead of `grep`, `rg`, or `find` bash commands**
+**Use these tools instead of `grep`, `rg`, or `find` bash commands**
 
 ### `bash_command`
 Purpose: **ONLY** for running tests and Rails commands. Do NOT use for file operations.

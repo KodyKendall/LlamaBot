@@ -251,6 +251,11 @@ export class PanelResizeManager {
     this.chatSection.style.width = '';
     this.iframeSection.style.width = `calc(100% - ${this.COLLAPSED_WIDTH}px - 6px)`;
 
+    if (this.collapseBtn) {
+      this.collapseBtn.dataset.tooltip = 'Show Leo panel';
+      this.collapseBtn.setAttribute('aria-label', 'Show Leo panel');
+    }
+
     this.saveWidth();
   }
 
@@ -262,6 +267,11 @@ export class PanelResizeManager {
 
     this.isCollapsed = false;
     this.chatSection.classList.remove('collapsed');
+
+    if (this.collapseBtn) {
+      this.collapseBtn.dataset.tooltip = 'Hide Leo panel';
+      this.collapseBtn.setAttribute('aria-label', 'Hide Leo panel');
+    }
 
     // Restore previous width or use default
     const width = this.previousWidth || this.getDefaultWidth();

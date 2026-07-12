@@ -32,7 +32,7 @@ from datetime import date
 
 from app.agents.leonardo.rails_agent.state import RailsAgentState
 from app.agents.leonardo.rails_agent.tools import (
-    write_todos, ls, read_file, write_file, edit_file, search_file, bash_command,
+    write_todos, ls, read_file, write_file, edit_file, bash_command,
     fix_permissions,
     save_memory, list_memories, delete_memory,
     build_use_skill_tool, list_skills, read_skill, write_skill, edit_skill, delete_skill,
@@ -93,7 +93,7 @@ default_tools = [
     ask_user_uiux_question,
     # Standard tools
     write_todos,
-    ls, read_file, write_file, edit_file, search_file,
+    ls, read_file, write_file, edit_file,
     bash_command,
     fix_permissions,     # Fix permission issues in Rails container
     delegate_task,       # Sub-agent delegation for focused research tasks

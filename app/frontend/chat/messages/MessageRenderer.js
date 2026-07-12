@@ -22,6 +22,8 @@ export class MessageRenderer {
     this.setupCodeBlockCopyHandler();
     // Set up event delegation for per-message 👍/👎 feedback buttons
     this.setupFeedbackHandler();
+    // Set up event delegation for per-message reply/quote buttons
+    this.setupReplyHandler();
   }
 
   /**
@@ -249,6 +251,39 @@ export class MessageRenderer {
     thumbDown.innerHTML = '<i class="fa-regular fa-thumbs-down"></i>';
     thumbDown.title = 'Bad response';
     messageDiv.appendChild(thumbDown);
+
+    // Reply/quote this message: surfaces a quote preview above the input so the
+    // user can reply to this specific message and have Leo quote it back.
+    const replyBtn = document.createElement('button');
+    replyBtn.setAttribute('data-llamabot', 'reply-btn');
+    replyBtn.innerHTML = '<i class="fa-solid fa-reply"></i>';
+    replyBtn.title = 'Reply to this message';
+    messageDiv.appendChild(replyBtn);
+  }
+
+  /**
+   * Event delegation for per-message reply buttons. Dispatches a bubbling
+   * custom event with the message's role + raw content; the app wires it to the
+   * quoted-reply preview above the input.
+   */
+  setupReplyHandler() {
+    this.messageHistory.addEventListener('click', (e) => {
+      const replyBtn = e.target.closest('[data-llamabot="reply-btn"]');
+      if (!replyBtn) return;
+
+      e.stopPropagation();
+      const messageDiv = replyBtn.closest('[data-raw-content]');
+      const content = messageDiv?.getAttribute('data-raw-content') || '';
+      if (!content.trim()) return;
+
+      const type = messageDiv.getAttribute('data-llamabot');
+      const role = type === 'ai-message' ? 'assistant' : 'user';
+
+      this.messageHistory.dispatchEvent(new CustomEvent('llamabot:reply-to-message', {
+        detail: { role, content },
+        bubbles: true,
+      }));
+    });
   }
 
   /**

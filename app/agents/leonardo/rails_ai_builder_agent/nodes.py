@@ -22,7 +22,7 @@ from app.agents.utils.images import encode_image
 
 from app.agents.leonardo.rails_agent.state import RailsAgentState
 from app.agents.leonardo.rails_agent.tools import (
-    write_todos, write_file, read_file, ls, edit_file, search_file, bash_command,
+    write_todos, write_file, read_file, ls, edit_file, glob_files, grep_files, bash_command,
     ls_agents, read_agent_file, write_agent_file, edit_agent_file,
     read_langgraph_json, edit_langgraph_json,
     read_brand_guide, write_brand_guide,
@@ -65,7 +65,7 @@ def get_sys_msg():
 
 default_tools = [
     write_todos,
-    ls, read_file, write_file, edit_file, search_file, bash_command,
+    ls, read_file, write_file, edit_file, glob_files, grep_files, bash_command,
     delegate_research,  # Read-only sub-agent for codebase investigation
     # Agent file tools
     ls_agents, read_agent_file, write_agent_file, edit_agent_file,
@@ -99,7 +99,7 @@ def leonardo_ai_builder(state: RailsAgentState) -> Command[Literal["tools"]]:
    # Tools
    tools = [
       write_todos,
-      ls, read_file, write_file, edit_file, search_file, bash_command,
+      ls, read_file, write_file, edit_file, glob_files, grep_files, bash_command,
       delegate_research,  # Read-only sub-agent for codebase investigation
       # Agent file tools
       ls_agents, read_agent_file, write_agent_file, edit_agent_file,

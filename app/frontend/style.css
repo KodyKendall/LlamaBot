@@ -103,13 +103,14 @@ body {
     border-color: rgba(139, 92, 246, 0.25);
 }
 
-.collapse-sidebar-btn i {
-    font-size: 14px;
+.collapse-sidebar-btn .collapse-icon {
+    width: 16px;
+    height: 16px;
     transition: transform 0.2s ease;
 }
 
-/* Collapsed state - rotate chevron */
-.chat-section.collapsed .collapse-sidebar-btn i {
+/* Collapsed state - flip the panel-collapse icon (|‹  ->  ›|) */
+.chat-section.collapsed .collapse-sidebar-btn .collapse-icon {
     transform: rotate(180deg);
 }
 
@@ -128,6 +129,7 @@ body {
 .chat-section.collapsed .chat-header .checkpoint-btn,
 .chat-section.collapsed .chat-header .mobile-view-toggle,
 .chat-section.collapsed .chat-header .hamburger-menu,
+.chat-section.collapsed .chat-header .compose-thread-btn,
 .chat-section.collapsed .chat-header .backup-status,
 .chat-section.collapsed .menu-drawer,
 .chat-section.collapsed .timeout-warning-banner,
@@ -166,7 +168,7 @@ body {
 }
 
 /* Rotate the collapse button icon when collapsed */
-.chat-section.collapsed .collapse-sidebar-btn i {
+.chat-section.collapsed .collapse-sidebar-btn .collapse-icon {
     transform: rotate(180deg);
 }
 
@@ -299,11 +301,42 @@ body {
    clips past the edge of the panel / resize handle. */
 .chat-header .logo-container,
 .chat-header .hamburger-menu,
+.chat-header .compose-thread-btn,
 .chat-header .checkpoint-btn,
 .chat-header .settings-btn,
 .chat-header .collapse-sidebar-btn,
 .chat-header .mobile-view-toggle {
     flex-shrink: 0;
+}
+
+/* Compose / new-thread pill in the header (moved out of the drawer) */
+.compose-thread-btn {
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    color: var(--text-color);
+    opacity: 0.85;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    padding: 0 10px;
+    font-size: 13px;
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.compose-thread-btn:hover {
+    opacity: 1;
+    background: rgba(139, 92, 246, 0.12);
+    border-color: rgba(139, 92, 246, 0.25);
+}
+
+.compose-thread-btn i {
+    font-size: 12px;
 }
 
 /* Logo container with status dot overlay */
@@ -1208,26 +1241,63 @@ body {
 }
 
 /* --- Color rows --- */
+/* Each row is a card tinted with its own color (--row-color, set per-row in
+   BrandGuide.js): a faint wash of the hue + a left accent bar, so it's
+   unambiguous which swatch owns which name/hex. Grid: name (with small swatch
+   chip) on top, hex below (col 1); actions span both rows (col 2). */
 .brand-color-row {
+    position: relative;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-rows: auto auto;
+    align-items: center;
+    column-gap: 10px;
+    row-gap: 6px;
+    padding: 11px 12px 11px 16px;
+    border-radius: 12px;
+    border: 1px solid var(--row-color, rgba(139, 92, 246, 0.25));
+    background:
+        linear-gradient(0deg,
+            color-mix(in srgb, var(--row-color, #8B5CF6) 9%, transparent),
+            color-mix(in srgb, var(--row-color, #8B5CF6) 9%, transparent)),
+        rgba(0, 0, 0, 0.25);
+    overflow: hidden;
+}
+
+.brand-color-row::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 5px;
+    background: var(--row-color, #8B5CF6);
+}
+
+/* Name field sits inline with the small color chip (top row). */
+.brand-color-main {
+    grid-column: 1;
+    grid-row: 1;
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 9px;
+    min-width: 0;
 }
 
 .brand-swatch-wrap {
     position: relative;
-    width: 30px;
-    height: 30px;
+    width: 22px;
+    height: 22px;
     flex-shrink: 0;
     cursor: pointer;
 }
 
 .brand-swatch {
     display: block;
-    width: 30px;
-    height: 30px;
-    border-radius: 8px;
-    border: 1px solid rgba(255, 255, 255, 0.2);
+    width: 22px;
+    height: 22px;
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.25);
     box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.2);
 }
 
@@ -1243,15 +1313,23 @@ body {
 }
 
 .brand-color-name {
-    flex: 1 1 40%;
+    flex: 1;
     min-width: 0;
 }
 
 .brand-color-hex {
-    flex: 0 0 90px;
+    grid-column: 1;
+    grid-row: 2;
+    min-width: 0;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     text-transform: uppercase;
     letter-spacing: 0.5px;
+}
+
+/* Fields pick up a hint of the row color; :focus (below) still wins. */
+.brand-color-row .brand-color-name,
+.brand-color-row .brand-color-hex {
+    border-color: color-mix(in srgb, var(--row-color, #8B5CF6) 45%, rgba(139, 92, 246, 0.25));
 }
 
 .brand-color-name,
@@ -1275,6 +1353,8 @@ body {
 }
 
 .brand-row-actions {
+    grid-column: 2;
+    grid-row: 1 / 3;
     display: flex;
     align-items: center;
     gap: 2px;
@@ -1787,6 +1867,38 @@ button.brand-logo-thumb:hover .brand-logo-zoom {
     border-color: rgba(255, 255, 255, 0.3);
 }
 
+/* "What went wrong?" follow-up, shown after the user clicks Bad */
+.session-feedback-followup {
+    display: flex;
+    flex: 1;
+    gap: 8px;
+    align-items: center;
+}
+
+.session-feedback-followup.hidden {
+    display: none;
+}
+
+.session-feedback-note {
+    flex: 1;
+    min-width: 0;
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.9);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 0.8rem;
+    outline: none;
+}
+
+.session-feedback-note::placeholder {
+    color: rgba(255, 255, 255, 0.4);
+}
+
+.session-feedback-note:focus {
+    border-color: rgba(255, 255, 255, 0.35);
+}
+
 .session-feedback-thanks {
     flex: 1;
     text-align: right;
@@ -2214,12 +2326,16 @@ button.brand-logo-thumb:hover .brand-logo-zoom {
     background-color: var(--message-ai-bg);
     align-self: flex-start;
     border-bottom-left-radius: 4px;
+    /* Fit the hover action row (copy + 👍/👎 + reply ≈ 4 buttons) so a short
+       message's leftmost buttons don't overflow the bubble and get clipped. */
+    min-width: 140px;
 }
 
 /* Copy + feedback (👍/👎) buttons for AI messages — shared control row, top-right */
 [data-llamabot="copy-btn"],
 [data-llamabot="thumb-up-btn"],
-[data-llamabot="thumb-down-btn"] {
+[data-llamabot="thumb-down-btn"],
+[data-llamabot="reply-btn"] {
     position: absolute;
     top: 4px;
     background: transparent;
@@ -2236,17 +2352,20 @@ button.brand-logo-thumb:hover .brand-logo-zoom {
 [data-llamabot="copy-btn"]       { right: 4px; }
 [data-llamabot="thumb-down-btn"] { right: 32px; }
 [data-llamabot="thumb-up-btn"]   { right: 60px; }
+[data-llamabot="reply-btn"]      { right: 88px; }
 
 [data-llamabot="ai-message"]:hover [data-llamabot="copy-btn"],
 [data-llamabot="human-message"]:hover [data-llamabot="copy-btn"],
 [data-llamabot="ai-message"]:hover [data-llamabot="thumb-up-btn"],
-[data-llamabot="ai-message"]:hover [data-llamabot="thumb-down-btn"] {
+[data-llamabot="ai-message"]:hover [data-llamabot="thumb-down-btn"],
+[data-llamabot="ai-message"]:hover [data-llamabot="reply-btn"] {
     opacity: 1;
 }
 
 [data-llamabot="copy-btn"]:hover,
 [data-llamabot="thumb-up-btn"]:hover,
-[data-llamabot="thumb-down-btn"]:hover {
+[data-llamabot="thumb-down-btn"]:hover,
+[data-llamabot="reply-btn"]:hover {
     background-color: rgba(255, 255, 255, 0.1);
     color: rgba(255, 255, 255, 0.8);
 }
@@ -3447,6 +3566,70 @@ button.brand-logo-thumb:hover .brand-logo-zoom {
     opacity: 1;
 }
 
+/* Quoted reply preview — shown above the input when replying to a message */
+.quoted-reply-container {
+    margin-bottom: 0.5rem;
+}
+
+.quoted-reply-badge {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    background: rgba(255, 255, 255, 0.05);
+    border-left: 3px solid var(--accent-color, #7c5cff);
+    border-radius: 6px;
+    font-size: 0.85rem;
+    color: var(--text-color);
+}
+
+.quoted-reply-badge .quoted-reply-body {
+    flex: 1;
+    min-width: 0;
+}
+
+.quoted-reply-badge .quoted-reply-label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    opacity: 0.7;
+    margin-bottom: 0.15rem;
+}
+
+.quoted-reply-badge .quoted-reply-label i {
+    margin-right: 0.35rem;
+}
+
+.quoted-reply-badge .quoted-reply-text {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    opacity: 0.85;
+    line-height: 1.35;
+}
+
+.quoted-reply-badge .quoted-reply-close {
+    background: none;
+    border: none;
+    color: var(--text-color);
+    font-size: 1.2rem;
+    cursor: pointer;
+    padding: 0;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.6;
+    transition: opacity 0.2s ease;
+    flex-shrink: 0;
+}
+
+.quoted-reply-badge .quoted-reply-close:hover {
+    opacity: 1;
+}
+
 /* Connection status */
 .connection-status {
     font-size: 0.75rem;
@@ -4487,6 +4670,14 @@ button.brand-logo-thumb:hover .brand-logo-zoom {
     min-width: 30px;
     font-weight: 400;
     letter-spacing: 0.3px;
+}
+
+.stall-hint {
+    flex-basis: 100%;
+    margin-top: 4px;
+    color: #a3a3a3;
+    font-size: 0.72rem;
+    line-height: 1.3;
 }
 
 /* ============================================

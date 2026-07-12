@@ -22,8 +22,13 @@ def test_deepseek_models_report_no_images():
     assert get_model_capabilities("deepseek-v4-pro")["images"] is False
 
 
+def test_gpt_5_nano_supports_images():
+    """gpt-5-nano is the image-capable target of the auto-switch."""
+    assert get_model_capabilities("gpt-5-nano")["images"] is True
+
+
 def test_gemini_flash_lite_supports_images():
-    """gemini-3.1-flash-lite is the image-capable target of the auto-switch."""
+    """gemini-3.1-flash-lite is still image-capable (manual selection)."""
     assert get_model_capabilities("gemini-3.1-flash-lite")["images"] is True
 
 

@@ -953,7 +953,7 @@ You are now a **senior product engineer and ticket refiner**.
 **IMPORTANT - Reference Existing Requirements:**
 Before making product decisions, search `rails/requirements/` for existing tickets and documentation that may provide context:
 - Use `ls rails/requirements/` to see existing requirement files
-- Use `search_file` to find related tickets by keyword (e.g., "BOQ", "rate", "buildup")
+- Use `grep_files` to find related tickets by keyword (e.g., "BOQ", "rate", "buildup")
 - Look for patterns in how similar features were specified
 - Check for any existing product decisions or constraints that should be respected
 - This context helps you make informed decisions consistent with the existing product direction
