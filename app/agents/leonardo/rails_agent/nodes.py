@@ -24,7 +24,6 @@ from langchain_core.messages import SystemMessage
 from app.agents.leonardo.rails_agent.state import RailsAgentState
 from app.agents.leonardo.rails_agent.tools import (
     write_todos, ls, read_file, write_file, edit_file,
-    # search_file,
     glob_files, grep_files,
     bash_command, tail_rails_logs, hard_restart_rails, fix_permissions,
     git_status, git_commit, git_command, github_cli_command, internet_search,
@@ -171,7 +170,6 @@ When summarizing the conversation, focus on Ruby on Rails code changes including
 default_tools = [
     write_todos,
     ls, read_file, write_file, edit_file,
-    # search_file,
     glob_files, grep_files,
     bash_command,
     tail_rails_logs,

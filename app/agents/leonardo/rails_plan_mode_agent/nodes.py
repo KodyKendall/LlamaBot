@@ -31,8 +31,8 @@ from datetime import date
 
 from app.agents.leonardo.rails_agent.state import RailsAgentState
 from app.agents.leonardo.rails_agent.tools import (
-    write_todos, ls, read_file, write_file, edit_file, search_file, bash_command,
-    tail_rails_logs, hard_restart_rails,
+    write_todos, ls, read_file, write_file, edit_file, bash_command,
+    tail_rails_logs, hard_restart_rails, fix_permissions,
     glob_files, grep_files, internet_search,
     read_leonardo_md, write_leonardo_md, edit_leonardo_md,
     save_memory, list_memories, delete_memory,
@@ -278,10 +278,10 @@ default_tools = [
     # Plan mode specific
     ask_user_question,
     ask_user_uiux_question,
-    # Standard tools (same as beginner + search_file)
+    # Standard tools (same as beginner)
     write_todos,
-    ls, read_file, write_file, edit_file, search_file, bash_command,
-    tail_rails_logs, hard_restart_rails,
+    ls, read_file, write_file, edit_file, bash_command,
+    tail_rails_logs, hard_restart_rails, fix_permissions,
     glob_files, grep_files, internet_search,
     read_leonardo_md, write_leonardo_md, edit_leonardo_md,
     save_memory, list_memories, delete_memory,

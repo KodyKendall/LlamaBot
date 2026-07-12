@@ -30,7 +30,7 @@ import base64
 
 from app.agents.leonardo.rails_agent.state import RailsAgentState
 from app.agents.leonardo.rails_agent.tools import (
-    write_todos, ls, read_file, search_file, bash_command,
+    write_todos, ls, read_file, bash_command,
     glob_files, grep_files, rails_api_sh,
 )
 from app.agents.leonardo.rails_user_feedback_agent.prompts import USER_FEEDBACK_AGENT_PROMPT
@@ -217,7 +217,6 @@ default_tools = [
     write_todos,       # Task tracking for complex research
     ls,                # List directories
     read_file,         # Read any file
-    search_file,       # Search for substring in files
     glob_files,        # Find files by pattern
     grep_files,        # Regex search in files
     bash_command,      # Rails console queries (SELECT only - enforced by prompt)

@@ -17,7 +17,6 @@ from app.agents.leonardo.rails_agent.prompts import (
     TOOL_DESCRIPTION,
     LIST_DIRECTORY_DESCRIPTION,
     BASH_COMMAND_FOR_RAILS_DESCRIPTION,
-    SEARCH_FILE_DESCRIPTION,
     GLOB_FILES_DESCRIPTION,
     GREP_FILES_DESCRIPTION,
 )
@@ -546,51 +545,6 @@ def edit_file(
         }
     )
 
-@tool(description=SEARCH_FILE_DESCRIPTION)
-def search_file(
-    substring: str,
-    runtime: ToolRuntime,
-) -> Command:
-    """Search all files in the directory for a substring."""
-    tool_call_id = runtime.tool_call_id
-    full_path = APP_DIR / "rails"
-    matches = []
-
-    # Check if the rails directory exists
-    if not full_path.exists():
-        result_msg = f"Project directory not found"
-        return Command(
-            update={
-                "messages": [ToolMessage(result_msg, tool_call_id=tool_call_id)],
-            }
-        )
-    
-    # Recursively iterate through all files in subdirectories
-    for file_path in full_path.rglob("*"):
-        if file_path.is_file():  # Only check actual files, not directories
-            try:
-                content = file_path.read_text()
-                if substring in content:
-                    # Get relative path from rails directory for cleaner output
-                    relative_path = file_path.relative_to(full_path)
-                    matches.append(str(relative_path))
-            except (UnicodeDecodeError, PermissionError, OSError):
-                # Skip files that can't be read (binary files, permission issues, etc.)
-                continue
-
-    if matches:
-        if len(matches) == 1:
-            result_msg = f"Substring '{substring}' found in 1 file:\n- {matches[0]}"
-        else:
-            result_msg = f"Substring '{substring}' found in {len(matches)} files:\n" + "\n".join(f"- {match}" for match in matches)
-    else:
-        result_msg = f"Substring '{substring}' not found in any files in the directory"
-    
-    return Command(
-        update={
-            "messages": [ToolMessage(result_msg, tool_call_id=tool_call_id)],
-        }
-    )
 
 
 @tool(description=GLOB_FILES_DESCRIPTION)

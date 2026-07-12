@@ -31,7 +31,7 @@ import base64
 
 from app.agents.leonardo.rails_agent.state import RailsAgentState
 from app.agents.leonardo.rails_agent.tools import (
-    write_todos, ls, read_file, write_file, edit_file, search_file, bash_command,
+    write_todos, ls, read_file, write_file, edit_file, bash_command,
     fix_permissions,
     rails_api_sh,
     save_memory, list_memories, delete_memory,
@@ -288,7 +288,7 @@ def offer_implementation(
 # Tool list - tools available to the Ticket Mode agent (NO internet_search)
 default_tools = [
     write_todos,
-    ls, read_file, write_file, edit_file, search_file,
+    ls, read_file, write_file, edit_file,
     bash_command,
     fix_permissions,     # Fix permission issues in Rails container
     delegate_task,       # Sub-agent delegation for focused research tasks

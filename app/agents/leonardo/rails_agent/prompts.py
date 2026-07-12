@@ -1824,18 +1824,6 @@ If you create files in lib/tasks/ via bash_command, they exist in the container 
 NEVER include a leading slash "/" at the beginning. Example: ls("app/models")
 """
 
-# DEPRECATED: 04/07/26 - Leonardo should use glob & grep instead of "search" tool.
-# Kept as a constant because tools.py still imports it (search_file tool definition exists but is not in the active tool list).
-SEARCH_FILE_DESCRIPTION = """Use this tool to search the entire project for a substring, in order to find files that contain the substring.
-This is extremely useful when the user is asking you to make changes, but you're not sure what files to edit.
-
-This is great for researching and exploring the project, finding relevant parts of the code, and trying to answer questions about key implementation details of the project.
-
-Usage:
-- The substring parameter must be a string that is a valid search query.
-- You can use this tool to search the contents of a file for a substring.
-"""
-
 BASH_COMMAND_FOR_RAILS_DESCRIPTION = """
 ## ⛔ FORBIDDEN COMMANDS - DO NOT USE BASH FOR THESE:
 

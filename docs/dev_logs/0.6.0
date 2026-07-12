@@ -16,3 +16,5 @@
 - [x] Add a field to type feedback when user clicks "bad" on the banner at bottom of how is leo doing?
 - [x] Remove Leonardo Said: if they're copying a subset of a message, or just a single message, and include it if they're copying across multiple messages
 - [x] Add a "reply" button so the user can quote Leo and respond to a specific, individual message.
+- [x] Add the fix_permissions tool call into the other items.
+- [x] Remove the deprecated search_tool toolcall, in liue of using glob and grep.
