@@ -34,6 +34,12 @@ class MothershipClient:
         except FileNotFoundError:
             logger.info("No instance.json found - mothership integration disabled")
             return None
+        except IsADirectoryError:
+            # Docker bind-mounts a nonexistent source path as a directory, so in
+            # some compose environments .leonardo/instance.json is an empty dir.
+            # Treat that the same as "not configured" instead of crashing at boot.
+            logger.info("instance.json is a directory (no config mounted) - mothership integration disabled")
+            return None
         except json.JSONDecodeError as e:
             logger.error(f"Invalid JSON in instance.json: {e}")
             return None
