@@ -509,3 +509,25 @@ class TestLogout:
         # Cookie should be cleared in the response (Set-Cookie with Max-Age=0).
         set_cookie = resp.headers.get("set-cookie", "")
         assert SESSION_COOKIE_NAME in set_cookie
+
+    def test_logout_get_redirects_to_login_without_dialog(
+        self, client_with_user, test_user
+    ):
+        """The browser Sign Out path: clear the cookie and land on the form.
+
+        No WWW-Authenticate header, so the browser never shows its native
+        Basic Auth dialog.
+        """
+        client_with_user.post(
+            "/login",
+            json={"username": test_user.username, "password": "correct-password"},
+        )
+        assert SESSION_COOKIE_NAME in client_with_user.cookies
+
+        resp = client_with_user.get("/logout", follow_redirects=False)
+        assert resp.status_code == 303
+        assert resp.headers["location"] == "/login"
+        assert "www-authenticate" not in {k.lower() for k in resp.headers.keys()}
+        set_cookie = resp.headers.get("set-cookie", "")
+        assert SESSION_COOKIE_NAME in set_cookie
+        assert SESSION_COOKIE_NAME not in client_with_user.cookies

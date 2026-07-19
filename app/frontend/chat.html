@@ -217,16 +217,17 @@
                     <select data-llamabot="agent-mode-select" class="custom-dropdown">
                         <option value="engineer" data-short-label="Engineer" data-original-label="Engineer Mode">Engineer</option>
                         <option value="ticket" data-short-label="Ticket">Ticket Mode</option>
-                        <option value="user" data-short-label="Database">Database Mode</option>
+                        <option value="database" data-short-label="Database">Database Mode</option>
                         <option value="ai_builder" data-short-label="AI Builder">AI Builder Mode</option>
                         <option value="testing" data-short-label="Test Builder">Test Builder Mode</option>
                         <option value="beginner" data-short-label="Beginner" selected>Beginner Mode</option>
                         <option value="pyxl" data-short-label="PyXL">PyXL (Excel → Rails)</option>
+                        <option value="chat" data-short-label="Chat">Chat (no tools)</option>
                     </select>
                 </div>
             </div>
             <input type="file" data-llamabot="file-input" class="hidden-file-input" accept=".pdf,.png,.jpg,.jpeg,.gif,.webp,.webm,.mp4,.xlsx,.xls,.csv,image/png,image/jpeg,image/gif,image/webp,video/webm,video/mp4,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv" multiple>
-            <input type="file" data-llamabot="upload-file-input" class="hidden-file-input" accept=".pdf,.docx,.png,.jpg,.jpeg,.gif,.webp,.svg,.xlsx,.xls,.xlsm,.xlsb,.xltx,.xltm,.csv,.pptx,.ppt,.pptm,.key,.odp,.mp4,.webm,.xml,.json,.txt,.md,.yaml,.yml,.html,.htm,.zip" multiple>
+            <input type="file" data-llamabot="upload-file-input" class="hidden-file-input" accept=".pdf,.docx,.png,.jpg,.jpeg,.gif,.webp,.svg,.ico,.xlsx,.xls,.xlsm,.xlsb,.xltx,.xltm,.csv,.pptx,.ppt,.pptm,.key,.odp,.mp4,.webm,.xml,.json,.txt,.md,.yaml,.yml,.html,.htm,.zip" multiple>
             <!-- Model selector (hidden by default, shown when model toggle clicked) -->
             <div class="model-selector-container hidden" data-llamabot="model-selector-container">
                 <div class="custom-dropdown-container">
@@ -240,6 +241,8 @@
                         <option value="gpt-5.4-nano" data-short-label="GPT-5.4 Nano">GPT-5.4 Nano</option>
                         <option value="deepseek-v4-flash" data-short-label="DeepSeek" selected>DeepSeek V4 Flash</option>
                         <option value="deepseek-v4-pro" data-short-label="DeepSeek Pro">DeepSeek V4 Pro</option>
+                        <option value="deepseek-v4-flash-gmi" data-short-label="DeepSeek GMI">DeepSeek V4 Flash (GMI)</option>
+                        <option value="deepseek-v4-flash-fireworks" data-short-label="DeepSeek FW">DeepSeek V4 Flash (Fireworks)</option>
                         <option value="qwen3.7-plus" data-short-label="Qwen">Qwen3.7 Plus</option>
                     </select>
                 </div>
@@ -744,8 +747,7 @@
 
     <!-- Role-based mode and tab restriction -->
     <script>
-        // Filter agent modes based on user's visible_agents setting
-        // Also handle legacy 'user' role restriction and hide engineer-only tabs
+        // Filter agent modes to the user's granted set, and hide engineer-only tabs.
         // Wait for LlamaBot to initialize before modifying the dropdown
         window.addEventListener('llamabot:ready', function() {
             const userRole = window.LLAMABOT_USER_ROLE || 'engineer';
@@ -771,18 +773,11 @@
                     modeSelect.appendChild(opt);
                 });
 
-                // If user role is 'user' and no visible_agents configured (legacy behavior)
-                if (userRole === 'user' && !visibleAgents) {
-                    // Restrict agent mode dropdown to only feedback
-                    Array.from(modeSelect.options).forEach(option => {
-                        if (option.value !== 'feedback') {
-                            option.remove();
-                        }
-                    });
-                    modeSelect.value = 'feedback';
-                }
-                // If visible_agents is configured, filter dropdown to those agents only
-                else if (visibleAgents && Array.isArray(visibleAgents)) {
+                // Filter the dropdown to the modes this user is granted. The backend
+                // always injects LLAMABOT_VISIBLE_AGENTS (app/permissions.py resolves
+                // role grant ∩ per-user preference), so this is presentation only —
+                // the WebSocket rejects an ungranted agent_name regardless.
+                if (visibleAgents && Array.isArray(visibleAgents)) {
                     Array.from(modeSelect.options).forEach(option => {
                         if (!visibleAgents.includes(option.value)) {
                             option.remove();

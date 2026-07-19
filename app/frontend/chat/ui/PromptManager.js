@@ -4,17 +4,22 @@
  * Manages the prompt library panel in the chat interface.
  * Allows users to browse, search, select, and quick-edit prompts to attach to messages.
  *
- * NOTE: This panel used to have a second "Skills" tab (DB-backed prompt-blobs
- * multi-selected and concatenated into every message). Skills are now Agent
- * Skills on the filesystem (.leonardo/skills/<slug>/SKILL.md, the SKILL.md open
- * standard) that the model loads on demand via the use_skill tool — so the
- * legacy Skills tab was removed and this manager is prompts-only.
+ * Two tabs:
+ *   - Prompts: DB-backed prompt library; selecting one attaches it as a badge
+ *     that gets prepended to the next message.
+ *   - Skills: filesystem Agent Skills (.leonardo/skills/<slug>/SKILL.md, the
+ *     SKILL.md open standard) read from /api/skills. These are NOT attached —
+ *     clicking one drops "/<slug> " into the input, same as picking it from the
+ *     slash-command dropdown (see SlashCommandManager.evokeSkill). The agent
+ *     recognizes the leading token and calls use_skill for that slug.
  */
 
 export class PromptManager {
   constructor() {
     this.isOpen = false;
+    this.activeTab = 'skills';
     this.prompts = [];
+    this.skills = [];
     this.groups = [];
     this.selectedPrompt = null;
     this.selectedBadge = null;
@@ -71,16 +76,17 @@ export class PromptManager {
     this.panel.innerHTML = `
       <div class="prompt-panel-header">
         <div class="prompt-panel-tabs">
-          <span class="prompt-panel-title">Prompts</span>
+          <button class="prompt-panel-tab active" data-tab="skills">Skills</button>
+          <button class="prompt-panel-tab" data-tab="prompts">Prompts</button>
         </div>
-        <button class="prompt-panel-add" title="Add new prompt">
+        <button class="prompt-panel-add" title="Add new prompt" style="display: none;">
           <i class="fa-solid fa-plus"></i>
         </button>
         <button class="prompt-panel-close" title="Close">&times;</button>
       </div>
       <div class="prompt-panel-search">
-        <input type="text" placeholder="Search prompts..." class="prompt-search-input">
-        <select class="prompt-group-select">
+        <input type="text" placeholder="Search skills..." class="prompt-search-input">
+        <select class="prompt-group-select" style="display: none;">
           <option value="">All Groups</option>
         </select>
       </div>
@@ -96,6 +102,14 @@ export class PromptManager {
     } else {
       this.inputArea.insertBefore(this.panel, this.inputArea.firstChild);
     }
+
+    // Tab switching
+    this.panel.querySelectorAll('.prompt-panel-tab').forEach(tab => {
+      tab.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.switchTab(tab.dataset.tab);
+      });
+    });
 
     // Add button
     this.panel.querySelector('.prompt-panel-add').addEventListener('click', (e) => {
@@ -113,6 +127,11 @@ export class PromptManager {
     let searchTimeout;
     searchInput.addEventListener('input', () => {
       clearTimeout(searchTimeout);
+      // Skills are filtered client-side (small list, already fetched), so no debounce needed there.
+      if (this.activeTab === 'skills') {
+        this.renderSkills();
+        return;
+      }
       searchTimeout = setTimeout(() => this.loadPrompts(), 300);
     });
 
@@ -336,14 +355,120 @@ export class PromptManager {
     this.panel.classList.add('open');
     this.button.classList.add('active');
 
-    await this.loadGroups();
-    await this.loadPrompts();
+    if (this.activeTab === 'skills') {
+      await this.loadSkills();
+    } else {
+      await this.loadGroups();
+      await this.loadPrompts();
+    }
 
     // Focus search input
     const searchInput = this.panel.querySelector('.prompt-search-input');
     if (searchInput) {
       searchInput.focus();
     }
+  }
+
+  /**
+   * Switch between the Prompts and Skills tabs. The group filter and the "add"
+   * button are prompts-only (skills are authored by the agent, not this panel).
+   */
+  async switchTab(tab) {
+    if (!tab || tab === this.activeTab) return;
+    this.activeTab = tab;
+
+    this.panel.querySelectorAll('.prompt-panel-tab').forEach(t => {
+      t.classList.toggle('active', t.dataset.tab === tab);
+    });
+
+    const isSkills = tab === 'skills';
+    this.panel.querySelector('.prompt-group-select').style.display = isSkills ? 'none' : '';
+    this.panel.querySelector('.prompt-panel-add').style.display = isSkills ? 'none' : '';
+
+    const searchInput = this.panel.querySelector('.prompt-search-input');
+    searchInput.value = '';
+    searchInput.placeholder = isSkills ? 'Search skills...' : 'Search prompts...';
+
+    if (isSkills) {
+      await this.loadSkills();
+    } else {
+      await this.loadGroups();
+      await this.loadPrompts();
+    }
+  }
+
+  /**
+   * Load installed Agent Skills from the filesystem-backed skills API.
+   */
+  async loadSkills() {
+    const list = this.panel.querySelector('.prompt-panel-list');
+    list.innerHTML = '<div class="prompt-empty">Loading...</div>';
+    try {
+      const response = await fetch('/api/skills');
+      this.skills = response.ok ? await response.json() : [];
+      this.renderSkills();
+    } catch (error) {
+      console.error('Failed to load skills:', error);
+      list.innerHTML = '<div class="prompt-error">Failed to load skills</div>';
+    }
+  }
+
+  /**
+   * Render the skills list (filtered by the search box).
+   */
+  renderSkills() {
+    const list = this.panel.querySelector('.prompt-panel-list');
+    const query = this.panel.querySelector('.prompt-search-input').value.trim().toLowerCase();
+
+    const filtered = query
+      ? this.skills.filter(s =>
+          (s.slug || '').toLowerCase().includes(query) ||
+          (s.name || '').toLowerCase().includes(query) ||
+          (s.description || '').toLowerCase().includes(query))
+      : this.skills;
+
+    if (filtered.length === 0) {
+      list.innerHTML = `
+        <div class="prompt-empty">
+          <p>${this.skills.length === 0
+            ? 'No skills installed yet — ask me to create one.'
+            : 'No skills match your search'}</p>
+        </div>
+      `;
+      return;
+    }
+
+    list.innerHTML = filtered.map(s => `
+      <div class="skill-item" data-slug="${this.escapeHtml(s.slug)}">
+        <div class="skill-item-header">
+          <span class="skill-item-checkbox"><i class="fa-solid fa-bolt"></i></span>
+          <span class="skill-item-name">${this.escapeHtml(s.name || s.slug)}</span>
+          <span class="skill-item-group">/${this.escapeHtml(s.slug)}</span>
+        </div>
+        ${s.description ? '<div class="skill-item-preview">' + this.escapeHtml(s.description) + '</div>' : ''}
+      </div>
+    `).join('');
+
+    list.querySelectorAll('.skill-item').forEach(item => {
+      item.addEventListener('click', () => this.insertSkillToken(item.dataset.slug));
+    });
+  }
+
+  /**
+   * Drop "/<slug> " into the message input so the user can add their own request
+   * after it. Mirrors SlashCommandManager.evokeSkill — nothing is sent here.
+   */
+  insertSkillToken(slug) {
+    if (!slug || !this.messageInput) return;
+
+    this.closePanel();
+    this.messageInput.value = `/${slug} `;
+    this.messageInput.focus();
+    const len = this.messageInput.value.length;
+    if (this.messageInput.setSelectionRange) {
+      this.messageInput.setSelectionRange(len, len);
+    }
+    this.messageInput.dispatchEvent(new Event('input', { bubbles: true }));
   }
 
   /**

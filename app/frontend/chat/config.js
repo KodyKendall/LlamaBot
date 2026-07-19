@@ -24,14 +24,19 @@ export const DEFAULT_CONFIG = {
   },
 
   // Agent mode mappings
+  // Mode key -> agent_name (the langgraph graph that actually runs).
+  // Mirrored server-side by MODE_AGENTS in app/permissions.py, which gates these
+  // on the WebSocket — app/tests/test_permissions.py parses THIS object and fails
+  // if the two drift. Change one, change the other.
   agentModes: {
     engineer: 'rails_agent',
     ai_builder: 'rails_ai_builder_agent',
     testing: 'rails_testing_agent',
     ticket: 'rails_ticket_mode_agent',
-    user: 'rails_user_mode_agent',
+    database: 'rails_user_mode_agent',
     beginner: 'rails_beginner_agent',
     pyxl: 'pyxl_agent',
+    chat: 'rails_plain_chat_mode',
     plan: 'rails_plan_mode_agent',
     engineer_plan: 'rails_engineer_plan_mode_agent',
     ticket_plan: 'rails_ticket_plan_mode_agent'

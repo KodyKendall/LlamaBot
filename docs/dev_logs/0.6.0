@@ -18,3 +18,16 @@
 - [x] Add a "reply" button so the user can quote Leo and respond to a specific, individual message.
 - [x] Add the fix_permissions tool call into the other items.
 - [x] Remove the deprecated search_tool toolcall, in liue of using glob and grep.
+
+0.6.0d:
+- [x] Add better persistence and retries for network errors
+- [x] Add .ico as an allowed upload item in our file upload
+- [x] UI/UX fix new button responsiveness on small horizontal width for chat
+- [x] Add DeepSeek v4 flash endpoints for Fireworks, GMI, and Azure Foundry
+- [x] Add resilient retries in LlamaBot (for websocket disconnections, etc.)
+- [x] Add auth for Rails access reusing existing Gem functionality
+- [x] langgraph.json in LlamaBot becomes source of truth for Platform nodes. (overrides what's in langgraph.json in Leonardo upstream repo)
+- [x] Improve conversation history mechanics & reloads. (offload to s3 option, compact/summarize postgres, keep lighter weight human/ai message pairs for cold restore (>48 hours))
+
+future: 
+- [] We also need like superadmin configuration for seeing: what LLM models are available (and not available) to use, see .env variables, see config variables, see our instance.json, api_tokens, etc.

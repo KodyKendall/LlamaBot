@@ -96,6 +96,8 @@ class ChatApp {
     this.modelCapabilities = new Map([
       ['deepseek-v4-flash', { images: false }],
       ['deepseek-v4-pro', { images: false }],
+      ['deepseek-v4-flash-gmi', { images: false }],
+      ['deepseek-v4-flash-fireworks', { images: false }],
       // Qwen3.7 Plus is image-capable — seed it so an image upload while it's
       // selected is NOT spuriously auto-switched to Gemini before the async
       // /api/available-models fetch resolves (the unknown-model default is
@@ -1321,7 +1323,68 @@ class ChatApp {
   /**
    * Send message via WebSocket
    */
-  sendMessage(debugInfo = null) {
+  /**
+   * Fetch (and cache) the per-user Rails API token.
+   *
+   * Why this exists: the chat UI and the Rails app are on DIFFERENT ORIGINS, so this
+   * page can't read Rails' session cookie. Rails mints a short-lived token for
+   * whoever the cookie says you are, and we pass it to the agent, which presents it
+   * back to Rails — so the agent acts as YOU, with your permissions.
+   *
+   * Rails is the only thing that can mint one (it holds the signing key). That's the
+   * point: LlamaBot can't forge a token for someone else.
+   *
+   * Returns null when the user isn't signed into the Rails app. That's a normal
+   * state, not an error — agents needing the token report it themselves.
+   */
+  async getRailsApiToken() {
+    // Reuse while valid. Refresh a minute early so a token can't expire in flight
+    // on a long agent turn.
+    const now = Date.now();
+    if (this._railsApiToken && now < this._railsApiTokenExpiresAt - 60_000) {
+      return this._railsApiToken;
+    }
+    // Coalesce concurrent callers onto one request.
+    if (this._railsApiTokenPromise) return this._railsApiTokenPromise;
+
+    this._railsApiTokenPromise = (async () => {
+      try {
+        const resp = await fetch(`${getRailsUrl()}/llama_bot/agent/token`, {
+          // Sends the Rails session cookie. Both hosts sit under the same site, so
+          // the cookie rides along; Rails must allow this origin + credentials (see
+          // AgentTokenController#set_cors_headers) or the browser blocks the read.
+          credentials: 'include',
+          headers: { 'Accept': 'application/json' }
+        });
+        if (!resp.ok) {
+          // 401 = not signed into Rails. Expected; don't spam the console.
+          if (resp.status !== 401) {
+            console.warn(`[llamabot] token fetch failed: HTTP ${resp.status}`);
+          }
+          this._railsApiToken = null;
+          return null;
+        }
+        const data = await resp.json();
+        this._railsApiToken = data.api_token || null;
+        this._railsApiTokenExpiresAt = Date.now() + ((data.expires_in || 1800) * 1000);
+        return this._railsApiToken;
+      } catch (e) {
+        // Network/CORS failure. Never block sending a message over this.
+        console.warn('[llamabot] token fetch error:', e.message);
+        this._railsApiToken = null;
+        return null;
+      } finally {
+        this._railsApiTokenPromise = null;
+      }
+    })();
+
+    return this._railsApiTokenPromise;
+  }
+
+  // async only for the token fetch below — every caller is fire-and-forget (never
+  // awaits, never uses the return), and all the synchronous UI work still happens
+  // before the first await.
+  async sendMessage(debugInfo = null) {
     const input = this.elements.messageInput;
     if (!input) return;
 
@@ -1546,7 +1609,15 @@ class ChatApp {
         engineer: 'rails_engineer_plan_mode_agent',
         ticket: 'rails_ticket_plan_mode_agent',
       };
-      agentName = planAgentByMode[agentMode] || 'rails_plan_mode_agent';
+      // Modes with no plan variant at all — they keep their own agent when Plan is
+      // toggled. `chat` MUST stay here: the generic plan agent has tools, so falling
+      // back to it would hand a chat-only user (the `user` role) a tool-using agent.
+      // MODE_AGENTS in app/permissions.py grants chat exactly one graph and the
+      // WebSocket enforces it, so a fallback here would just be denied anyway.
+      const NO_PLAN_VARIANT = ['chat'];
+      if (!NO_PLAN_VARIANT.includes(agentMode)) {
+        agentName = planAgentByMode[agentMode] || 'rails_plan_mode_agent';
+      }
     }
 
     // Send message. The client_message_id is the idempotency key: it stays
@@ -1556,6 +1627,12 @@ class ChatApp {
     const clientMessageId = (window.crypto && window.crypto.randomUUID)
       ? window.crypto.randomUUID()
       : `cmid-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    // Per-user Rails token, so agents can call the app's API AS this user. Fetched
+    // fresh-ish from Rails (see getRailsApiToken); null when they aren't signed into
+    // the Rails app, in which case agents that need it say so rather than acting
+    // unauthenticated. Awaited here so the very first message carries it.
+    const apiToken = await this.getRailsApiToken();
+
     const messageData = {
       message: message,
       thread_id: threadId,
@@ -1568,6 +1645,7 @@ class ChatApp {
       attachments: attachments.filter(a => a.type !== 'uploaded_file'),
       ask_before_edits: executionMode === 'ask'
     };
+    if (apiToken) messageData.api_token = apiToken;
 
     this.webSocketManager.send(messageData);
     this.lastSentMessageData = messageData;

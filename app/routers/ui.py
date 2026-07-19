@@ -30,16 +30,10 @@ from app.services.magic_link_service import (
 )
 from app.services.mothership_client import MothershipClient
 
-# Role-based default visible agents
-DEFAULT_VISIBLE_AGENTS_USER = ["feedback"]
-DEFAULT_VISIBLE_AGENTS_ENGINEER = ["ticket", "engineer", "testing", "feedback", "user", "ai_builder", "beginner", "pyxl"]
-
-# Built-in agent-mode dropdown keys baked into the image (chat.html <option>s +
-# config.js agentModes). Per-instance custom modes may NOT shadow these.
-BUILTIN_AGENT_MODE_KEYS = frozenset({
-    "engineer", "ai_builder", "testing", "ticket", "user",
-    "beginner", "pyxl", "plan", "feedback",
-})
+# Role → agent-mode permissions live in app/permissions.py — the single source of
+# truth this router and the WebSocket gate both read. Re-exported here because
+# load_custom_agent_modes() validates against the built-in keys.
+from app.permissions import BUILTIN_AGENT_MODE_KEYS, visible_modes  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
@@ -176,23 +170,6 @@ async def root(request: Request):
         if not user:
             return RedirectResponse(url="/login", status_code=302)
 
-        # Get visible agents for this user (role-based defaults)
-        visible_agents = None
-        visible_from_default = False
-        if user.visible_agents:
-            try:
-                visible_agents = json.loads(user.visible_agents)
-            except json.JSONDecodeError:
-                pass
-
-        # If no custom setting, use role-based defaults
-        if not visible_agents:
-            visible_from_default = True
-            if getattr(user, "role", "engineer") == "user":
-                visible_agents = list(DEFAULT_VISIBLE_AGENTS_USER)
-            else:
-                visible_agents = list(DEFAULT_VISIBLE_AGENTS_ENGINEER)
-
         # Load per-instance custom agent modes (optional overlay, no image change).
         # Validated against the registered graphs (platform base ∪ client overlay).
         graphs = {}
@@ -207,13 +184,14 @@ async def root(request: Request):
             logger.warning(f"Could not load custom agent modes: {e}")
             custom_agent_modes = []
 
-        # Surface custom modes for engineer-role default visibility. We only auto-add
-        # to a role-based default list — an explicit per-user visible_agents setting
-        # is respected as-is (the admin opts the custom key in deliberately).
-        if custom_agent_modes and visible_from_default and getattr(user, "role", "engineer") != "user":
-            for m in custom_agent_modes:
-                if m["key"] not in visible_agents:
-                    visible_agents.append(m["key"])
+        # The dropdown is a VIEW of the role's grant — same resolver the WebSocket
+        # gates on (app/permissions.py). Hiding a mode here is a convenience, not
+        # the control: web_socket_handler rejects an ungranted agent_name outright.
+        visible_agents = visible_modes(
+            session,
+            user,
+            custom={m["key"]: m["agent_name"] for m in custom_agent_modes},
+        )
 
         # Serve the chat.html file with user role and visible agents injected
         with open(frontend_dir / "chat.html") as f:
@@ -564,6 +542,43 @@ async def users_page(admin: User = Depends(admin_required)):
             color: var(--text-color);
             border: 1px solid var(--border-color);
         }
+        .card-hint {
+            margin: 0 0 16px;
+            font-size: 0.85rem;
+            color: rgba(255, 255, 255, 0.5);
+            line-height: 1.5;
+        }
+        .role-row {
+            display: flex;
+            gap: 16px;
+            align-items: baseline;
+            padding: 12px 0;
+            border-top: 1px solid var(--border-color);
+            flex-wrap: wrap;
+        }
+        .role-row:first-child { border-top: none; }
+        .role-name {
+            min-width: 90px;
+            font-weight: 600;
+            text-transform: capitalize;
+        }
+        .mode-grid {
+            display: flex;
+            gap: 8px 18px;
+            flex-wrap: wrap;
+            flex: 1;
+        }
+        .mode-check {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.85rem;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        .mode-check input { cursor: pointer; }
+        #saveRoleModes { margin-top: 16px; }
+        #saveRoleModes:disabled { opacity: 0.5; cursor: default; }
     </style>
 </head>
 <body>
@@ -616,9 +631,81 @@ async def users_page(admin: User = Depends(admin_required)):
                 </tbody>
             </table>
         </div>
+
+        <div class="card">
+            <div class="card-header">Role Permissions</div>
+            <p class="card-hint">
+                Which agent modes each role may use. Enforced on the server — a mode
+                that's off here can't be reached, not just hidden. Admins always have
+                every mode.
+            </p>
+            <div id="roleModes">Loading...</div>
+            <button class="btn btn-primary" id="saveRoleModes" onclick="saveRoleModes()">Save Permissions</button>
+        </div>
     </div>
 
     <script>
+        let ALL_MODES = [];
+
+        async function loadRoleModes() {
+            const container = document.getElementById('roleModes');
+            try {
+                const response = await fetch('/api/role-modes');
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const data = await response.json();
+                ALL_MODES = data.all_modes;
+
+                container.innerHTML = Object.keys(data.role_modes).sort().map(role => `
+                    <div class="role-row" data-role="${role}">
+                        <div class="role-name">${role}</div>
+                        <div class="mode-grid">
+                            ${ALL_MODES.map(mode => `
+                                <label class="mode-check">
+                                    <input type="checkbox" value="${mode}"
+                                        ${data.role_modes[role].includes(mode) ? 'checked' : ''}>
+                                    <span>${mode}${data.custom_modes.includes(mode) ? ' *' : ''}</span>
+                                </label>
+                            `).join('')}
+                        </div>
+                    </div>
+                `).join('');
+
+                if (data.custom_modes.length) {
+                    container.innerHTML += '<p class="card-hint">* custom mode from this instance (agent_modes.json)</p>';
+                }
+            } catch (error) {
+                container.textContent = 'Error loading role permissions: ' + error.message;
+            }
+        }
+
+        async function saveRoleModes() {
+            const btn = document.getElementById('saveRoleModes');
+            btn.disabled = true;
+            const role_modes = {};
+            document.querySelectorAll('#roleModes .role-row').forEach(row => {
+                // Read back in ALL_MODES order — that order drives the chat dropdown.
+                role_modes[row.dataset.role] = Array.from(
+                    row.querySelectorAll('input[type=checkbox]:checked')
+                ).map(cb => cb.value);
+            });
+
+            try {
+                const response = await fetch('/api/role-modes', {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({role_modes})
+                });
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
+                showMessage('Role permissions saved. Takes effect on the next message.', 'success');
+            } catch (error) {
+                showMessage('Error saving: ' + error.message, 'error');
+                loadRoleModes();  // resync the checkboxes with what's actually stored
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
         async function loadUsers() {
             try {
                 const response = await fetch('/api/users');
@@ -743,6 +830,7 @@ async def users_page(admin: User = Depends(admin_required)):
         });
 
         loadUsers();
+        loadRoleModes();
     </script>
 </body>
 </html>
@@ -1774,16 +1862,10 @@ async def settings_page(
         }}
 
         function logout() {{
-            // Clear credentials by making a request that will fail, then redirect
-            fetch('/logout', {{
-                method: 'POST',
-                headers: {{
-                    'Authorization': 'Basic ' + btoa('logout:logout')
-                }}
-            }}).finally(() => {{
-                // Redirect to home which will prompt for new credentials
-                window.location.href = '/?logout=' + Date.now();
-            }});
+            // Plain navigation: the server clears the cookie and redirects to
+            // the sign-in form. Deliberately not a fetch — a 401 response to a
+            // fetch triggers the browser's native auth dialog.
+            window.location.href = '/logout';
         }}
     </script>
 </body>
@@ -1805,6 +1887,20 @@ async def logout():
         status_code=401,
         headers={"WWW-Authenticate": "Basic"},
     )
+    response.delete_cookie(key=SESSION_COOKIE_NAME, path="/")
+    return response
+
+
+@router.get("/logout")
+async def logout_get():
+    """Browser logout — clear the session cookie and land on the sign-in form.
+
+    Unlike POST /logout this sends no WWW-Authenticate challenge: a 401 on a
+    fetch()/navigation is what makes the browser throw up its native Basic Auth
+    dialog, which is exactly what we don't want when the user clicks Sign Out.
+    Scripted callers that want cached Basic creds evicted still use POST.
+    """
+    response = RedirectResponse(url="/login", status_code=303)
     response.delete_cookie(key=SESSION_COOKIE_NAME, path="/")
     return response
 
@@ -3485,6 +3581,8 @@ async def scheduled_jobs_page(user: User = Depends(engineer_or_admin_required)):
             'gpt-5-mini': 'GPT-5 Mini',
             'gpt-5-codex': 'GPT-5 Codex',
             'deepseek-v4-flash': 'DeepSeek V4 Flash',
+            'deepseek-v4-flash-gmi': 'DeepSeek V4 Flash (GMI)',
+            'deepseek-v4-flash-fireworks': 'DeepSeek V4 Flash (Fireworks)',
         };
 
         function prettyAgentLabel(name) {

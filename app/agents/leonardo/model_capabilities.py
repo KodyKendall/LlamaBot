@@ -33,6 +33,11 @@ MODEL_CAPABILITIES = {
     # DeepSeek - primarily text focused
     'deepseek-v4-flash': {'images': False, 'video': False, 'pdf': False},
     'deepseek-v4-pro': {'images': False, 'video': False, 'pdf': False},
+    # Same model as deepseek-v4-flash, served by GMI Cloud rather than
+    # DeepSeek's own API — same (text-only) capabilities.
+    'deepseek-v4-flash-gmi': {'images': False, 'video': False, 'pdf': False},
+    # Same model again, served by Fireworks AI — same (text-only) capabilities.
+    'deepseek-v4-flash-fireworks': {'images': False, 'video': False, 'pdf': False},
 
     # Qwen3.7 Plus (Alibaba) - multimodal agent model: images and video; PDFs
     # are ingested as page-images, not natively, so we leave pdf off.

@@ -17,6 +17,29 @@ logger = logging.getLogger(__name__)
 # Authentication configuration
 WS_AUTH_REQUIRED = os.getenv("WS_AUTH_REQUIRED", "false").lower() == "true"
 
+# Frame fields that are credentials, not data. They must never reach the logs:
+# `api_token` is a bearer credential for a specific Rails user (30-min TTL), and
+# this handler logs whole frames. Before this existed, every chat turn from the
+# Rails-embedded UI wrote a live user token into chat_app.log in plaintext.
+_REDACTED_FRAME_KEYS = frozenset({"api_token", "token"})
+
+
+def _redact_frame(frame):
+    """Copy of `frame` with credential fields masked, for logging.
+
+    Returns the frame unchanged if it isn't dict-like — callers log arbitrary
+    payloads and a logging helper must never be the thing that raises.
+    """
+    try:
+        items = frame.items()
+    except AttributeError:
+        return frame
+    return {
+        k: ("<redacted>" if k in _REDACTED_FRAME_KEYS and v else v)
+        for k, v in items
+    }
+
+
 # Pydantic model for chat request
 class ChatMessage(dict):
     message: str
@@ -80,6 +103,57 @@ class WebSocketHandler:
                 "content": "Invalid or expired token"
             }, self.websocket)
             return False
+
+    async def _authorize_agent_mode(self, json_data: dict) -> bool:
+        """Gate any frame naming an ``agent_name`` against the sender's role grant.
+
+        This is THE server-side check for agent modes. The dropdown filtering in
+        chat.html is a convenience — this is the control. Both read the same
+        resolver (app/permissions.py) so they can't drift.
+
+        Frames with no ``agent_name`` (ping, cancel, attach) pass straight through,
+        which is why this sits before the type dispatch: any future frame type
+        that names a mode is covered without touching this function.
+
+        Only browser JWTs carry a role claim, so only they are enforced:
+          * ``rails_auth`` — the llama_bot_rails gem, a trusted internal caller
+            with no role to check (see token_service.verify_rails_token).
+          * unauthenticated — WS_AUTH_REQUIRED already governs that path below.
+        """
+        agent_name = json_data.get("agent_name")
+        if not agent_name:
+            return True
+        if not self.auth_user or self.auth_user.get("type") != "ws_auth":
+            return True
+
+        from sqlmodel import Session
+
+        from app.db import engine
+        from app.permissions import can_run_agent, custom_modes
+
+        role = self.auth_user.get("role")
+        is_admin = bool(self.auth_user.get("is_admin"))
+        try:
+            with Session(engine) as session:
+                permitted = can_run_agent(session, role, is_admin, agent_name, custom_modes())
+        except Exception as e:
+            # Fail CLOSED: if we can't establish the grant, don't run the agent.
+            logger.error(f"Agent authorization failed for '{agent_name}', denying: {e}")
+            permitted = False
+
+        if permitted:
+            return True
+
+        logger.warning(
+            f"Denied agent '{agent_name}' to user '{self.auth_user.get('sub')}' "
+            f"(role={role}, is_admin={is_admin}) from {self.websocket.client}"
+        )
+        if self._is_websocket_open(self.websocket):
+            await self.manager.send_personal_message({
+                "type": "error",
+                "content": "You don't have access to that mode.",
+            }, self.websocket)
+        return False
 
     async def _check_auth_from_message(self, json_data: dict) -> bool:
         """
@@ -186,6 +260,13 @@ class WebSocketHandler:
                             break
                         continue
 
+                    # Authorize the agent mode BEFORE any dispatch. Sits here so
+                    # every frame that names an agent_name is gated by one check
+                    # — chat, approval_response, question_response, and anything
+                    # added later. Frames without an agent_name pass through.
+                    if isinstance(json_data, dict) and not await self._authorize_agent_mode(json_data):
+                        continue
+
                     # Handle cancel (always allowed) — stop the background run(s)
                     # for the target thread (explicit user "stop").
                     if isinstance(json_data, dict) and json_data.get("type") == "cancel":
@@ -276,7 +357,7 @@ class WebSocketHandler:
                     if thread_id:
                         self._attached_threads.add(str(thread_id))
 
-                    logger.info(f"Received message: {message}")
+                    logger.info(f"Received message: {_redact_frame(message)}")
                     # Start the turn as a background run owned by the per-thread
                     # RunManager (decoupled from this socket, which is attached as
                     # a live subscriber). A new message supersedes any in-flight

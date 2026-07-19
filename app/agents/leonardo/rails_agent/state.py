@@ -27,4 +27,8 @@ class RailsAgentState(AgentState):
     debug_info: NotRequired[dict[str, Any]]
     agent_mode: NotRequired[str]
     llm_model: NotRequired[str]
+    # NOTE: deliberately NO `api_token` here. The built-in agents don't call the
+    # user-scoped Rails API, and declaring the field would persist a bearer credential
+    # into every checkpoint for nothing. Custom agents that DO use it subclass
+    # LlamaPressAPIState (app/lib/llamapress_api.py), which declares it.
     failed_tool_calls_count: Annotated[NotRequired[int], operator.add]

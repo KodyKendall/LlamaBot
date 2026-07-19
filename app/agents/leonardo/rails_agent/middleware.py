@@ -16,7 +16,13 @@ import time
 
 from app.agents.leonardo.rails_agent.state import RailsAgentState
 from app.agents.leonardo.llm_factory import get_llm
-from app.agents.leonardo.resilience import is_transient_error
+from app.agents.leonardo.resilience import (
+    is_transient_error,
+    _MODEL_RETRY_MAX_ATTEMPTS,
+    _MODEL_RETRY_BASE_DELAY,
+    _MODEL_RETRY_MAX_DELAY,
+    _model_retry_delay,
+)
 from app.agents.leonardo.model_capabilities import (
     get_model_capabilities,
     get_file_category,
@@ -382,14 +388,11 @@ class DeepSeekReasoningMiddleware(AgentMiddleware):
 # chat model intact. Deterministic errors (bad kwargs, 400s) are NOT retried —
 # is_transient_error returns False — so they fall straight through to the
 # fallback/floor rungs instead of failing identically N times.
-_MODEL_RETRY_MAX_ATTEMPTS = 5          # initial call + up to 4 retries
-_MODEL_RETRY_BASE_DELAY = 0.5          # seconds
-_MODEL_RETRY_MAX_DELAY = 8.0           # seconds
-
-
-def _model_retry_delay(attempt: int) -> float:
-    """Exponential backoff (capped) for the Nth failed attempt (1-based)."""
-    return min(_MODEL_RETRY_BASE_DELAY * (2 ** (attempt - 1)), _MODEL_RETRY_MAX_DELAY)
+#
+# The retry constants + _model_retry_delay live in resilience.py (single source
+# of truth); raw StateGraph nodes reuse them via invoke_with_transient_retry.
+# They're imported into this module's namespace above, so references below (and
+# tests reaching mw._MODEL_RETRY_MAX_ATTEMPTS) resolve unchanged.
 
 
 class DynamicModelMiddleware(AgentMiddleware):

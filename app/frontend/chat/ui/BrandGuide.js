@@ -46,7 +46,7 @@ export class BrandGuide {
     // Hidden input for uploading logo images.
     this.logoInput = document.createElement('input');
     this.logoInput.type = 'file';
-    this.logoInput.accept = 'image/png,image/jpeg,image/gif,image/webp,image/svg+xml,.png,.jpg,.jpeg,.gif,.webp,.svg';
+    this.logoInput.accept = 'image/png,image/jpeg,image/gif,image/webp,image/svg+xml,image/x-icon,image/vnd.microsoft.icon,.png,.jpg,.jpeg,.gif,.webp,.svg,.ico';
     this.logoInput.style.display = 'none';
     this.logoInput.addEventListener('change', (e) => this.onLogoChosen(e));
     this.panel.appendChild(this.logoInput);
