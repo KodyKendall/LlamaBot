@@ -160,6 +160,59 @@ def get_llm(model_name: str):
             timeout=180,
             max_retries=0,
         )
+    if model_name == "deepseek-v4-flash-gmi":
+        # DeepSeek V4 Flash served by GMI Cloud instead of DeepSeek's own API.
+        # Deliberately a SEPARATE model entry from `deepseek-v4-flash` (which
+        # keeps pointing at api.deepseek.com) so the provider is an explicit
+        # user choice, not a hidden swap.
+        #
+        # GMI is OpenAI-compatible and returns DeepSeek's reasoning_content
+        # (streamed in deltas too), so the same ChatDeepSeekWithReasoning client
+        # works — only the endpoint, key and model id differ. GMI is also more
+        # lenient than DeepSeek direct: it accepts assistant messages with no
+        # reasoning_content, so DeepSeekReasoningMiddleware (which gates on the
+        # exact name "deepseek-v4-flash" and therefore does NOT fire here) is
+        # not needed for this path.
+        return ChatDeepSeekWithReasoning(
+            model=os.getenv("GMI_DEEPSEEK_MODEL", "deepseek-ai/DeepSeek-V4-Flash"),
+            api_base=os.getenv("GMI_BASE_URL", "https://api.gmi-serving.com/v1"),
+            api_key=os.getenv("GMI_DEEPSEEK_API_KEY"),
+            timeout=180,
+            max_retries=0,
+        )
+    if model_name == "deepseek-v4-flash-fireworks":
+        # DeepSeek V4 Flash served by Fireworks AI. Like the GMI entry, a
+        # SEPARATE model from `deepseek-v4-flash` so the provider is an explicit
+        # choice rather than a hidden swap.
+        #
+        # Chosen over DeepSeek direct for data-retention reasons (US-hosted open
+        # weights, so no Chinese data jurisdiction) and over GMI on prompt-cache
+        # behavior: measured ~90% token-weighted prefix-cache hit rate (27/30
+        # calls, misses are all-or-nothing) vs ~20% on GMI's shared fleet. Prompt
+        # caching is per-replica, so a provider's routing — not the model —
+        # decides the hit rate.
+        #
+        # Fireworks is OpenAI-compatible, separates reasoning_content (streamed
+        # in deltas), reports cache hits via usage.prompt_tokens_details, and
+        # accepts assistant messages without reasoning_content — so, as with GMI,
+        # DeepSeekReasoningMiddleware (gated on the exact name
+        # "deepseek-v4-flash") does not need to fire for this path.
+        #
+        # NOTE: stay on chat completions. Fireworks' *Response* API defaults to
+        # store=True with 30-day retention, which would defeat the retention
+        # rationale above.
+        return ChatDeepSeekWithReasoning(
+            model=os.getenv(
+                "FIREWORKS_DEEPSEEK_MODEL",
+                "accounts/fireworks/models/deepseek-v4-flash",
+            ),
+            api_base=os.getenv(
+                "FIREWORKS_BASE_URL", "https://api.fireworks.ai/inference/v1"
+            ),
+            api_key=os.getenv("FIREWORKS_DEEPSEEK_API_KEY"),
+            timeout=180,
+            max_retries=0,
+        )
     if model_name == "gpt-5-codex":
         return ChatOpenAI(
             model="gpt-5-codex",

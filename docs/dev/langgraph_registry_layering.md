@@ -17,7 +17,7 @@ The registry mixed **two ownership tiers** in one file:
 
 - **Platform** graphs (`rails_agent`, `llamabot`, …) — owned upstream, must flow to every
   instance on update.
-- **Client** graphs (`leo`, `user_api_agent`, per-client agents) — owned downstream, must
+- **Client** graphs (`leo`, per-client agents) — owned downstream, must
   never be overwritten.
 
 Leonardo's platform sync (`bin/update`) pulls an **allowlist** of paths wholesale from
@@ -98,7 +98,7 @@ Platform base → image; client overlay → mount.
 
 ## Leonardo changes
 
-- `langgraph/langgraph.local.json` — new client overlay (`leo`, `user_api_agent`).
+- `langgraph/langgraph.local.json` — new client overlay (`leo`).
 - `docker-compose.yml` / `docker-compose-dev.yml` — **dropped** the
   `./langgraph/langgraph.json:/app/app/langgraph.json` mount; **added**
   `./langgraph/langgraph.local.json:/app/app/langgraph.local.json`. The

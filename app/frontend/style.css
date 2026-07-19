@@ -42,6 +42,10 @@ body {
     border-right: 1px solid var(--border-color);
     position: relative;
     transition: width 0.15s ease, min-width 0.15s ease;
+    /* Let header controls respond to the panel's own width (it's resized
+       independently of the viewport) via container queries. */
+    container-type: inline-size;
+    container-name: chat-panel;
 }
 
 /* Resize handle between chat and iframe sections */
@@ -337,6 +341,27 @@ body {
 
 .compose-thread-btn i {
     font-size: 12px;
+}
+
+/* When the chat panel is narrow, drop the "New" label so the button shrinks
+   to just the plus icon and stops crowding the Leo title. */
+@container chat-panel (max-width: 380px) {
+    .compose-thread-btn span {
+        display: none;
+    }
+    .compose-thread-btn {
+        padding: 0 8px;
+    }
+    /* Pull the header controls closer together instead of letting them run
+       into the Leo title. */
+    .chat-header {
+        gap: 0.3rem;
+        padding-left: 0.6rem;
+        padding-right: 0.6rem;
+    }
+    .chat-header .logo-container {
+        margin-right: 0;
+    }
 }
 
 /* Logo container with status dot overlay */

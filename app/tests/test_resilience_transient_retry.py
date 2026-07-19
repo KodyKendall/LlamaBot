@@ -50,6 +50,23 @@ def test_transient_types_preserve_existing_google_behavior():
     assert ResourceExhausted in transient_exception_types()
 
 
+def test_transient_types_include_httpx_stream_read_write_errors():
+    """Gap 1: httpx.ReadError (mid-stream socket read failure, empty str(e)) killed
+    4 real turns because it wasn't classified transient. Its WriteError sibling is
+    the same family. Both must be retryable."""
+    import httpx
+    types = transient_exception_types()
+    assert httpx.ReadError in types
+    assert httpx.WriteError in types
+
+
+def test_is_transient_true_for_httpx_read_error():
+    """ReadError carries no status code and an empty message — the type list is the
+    only signal, so is_transient_error must still say True."""
+    import httpx
+    assert is_transient_error(httpx.ReadError("")) is True
+
+
 def test_transient_types_EXCLUDE_deterministic_errors():
     """The whole point: deterministic bugs must never be retried."""
     import openai
@@ -98,6 +115,57 @@ class _FakeStatusError(Exception):
     def __init__(self, status_code, message=""):
         super().__init__(message)
         self.status_code = status_code
+
+
+# --- the shared invoke_with_transient_retry helper ----------------------------
+# Raw StateGraph nodes (rails_beginner_agent, rails_ai_builder_agent) call the
+# model directly and never touch DynamicModelMiddleware, so they retry via this.
+
+def test_invoke_with_transient_retry_retries_then_succeeds(monkeypatch):
+    import app.agents.leonardo.resilience as res
+    monkeypatch.setattr(res.time, "sleep", lambda *_: None)
+    import httpx
+
+    calls = {"n": 0}
+
+    def fn():
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise httpx.RemoteProtocolError("peer closed connection")
+        return "OK"
+
+    assert res.invoke_with_transient_retry(fn) == "OK"
+    assert calls["n"] == 3
+
+
+def test_invoke_with_transient_retry_does_NOT_retry_deterministic(monkeypatch):
+    import app.agents.leonardo.resilience as res
+    monkeypatch.setattr(res.time, "sleep", lambda *_: None)
+
+    calls = {"n": 0}
+
+    def fn():
+        calls["n"] += 1
+        raise TypeError("unexpected keyword argument 'cache_control'")
+
+    with pytest.raises(TypeError):
+        res.invoke_with_transient_retry(fn)
+    assert calls["n"] == 1
+
+
+def test_invoke_with_transient_retry_gives_up_after_cap(monkeypatch):
+    import app.agents.leonardo.resilience as res
+    monkeypatch.setattr(res.time, "sleep", lambda *_: None)
+
+    calls = {"n": 0}
+
+    def fn():
+        calls["n"] += 1
+        raise ConnectionError("still down")
+
+    with pytest.raises(ConnectionError):
+        res.invoke_with_transient_retry(fn)
+    assert calls["n"] == res._MODEL_RETRY_MAX_ATTEMPTS
 
 
 # --- wiring into DynamicModelMiddleware --------------------------------------

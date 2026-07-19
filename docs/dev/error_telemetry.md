@@ -116,6 +116,16 @@ Different error classes need different rungs. **Blindly chaining "retry 3× → 
 
 ### Rungs 1–2 live in `wrap_model_call` (`rails_agent/middleware.py:389`)
 
+> **Rung 1 also lives outside the middleware.** Raw StateGraph nodes
+> (`rails_beginner_agent`, `rails_ai_builder_agent`) invoke the model directly and
+> never touch `wrap_model_call`, so before 2026-07-12 they had *no* transient retry
+> at all — a single connection blip killed the turn. They now wrap each direct
+> `.invoke(...)` in `resilience.invoke_with_transient_retry(fn)`, which shares the
+> same classifier + backoff constants as the middleware loop. **Any new raw-node
+> agent must do the same** (or be built via `create_agent`, which gets the
+> middleware for free). Also note `httpx.ReadError`/`WriteError` (mid-stream socket
+> failures, empty `str(e)`) are classified transient as of the same date.
+
 Today (Google rate-limits only):
 
 ```python

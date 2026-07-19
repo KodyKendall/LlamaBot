@@ -172,6 +172,19 @@ def test_every_leonardo_agent_is_wired_for_repair(nodes_file):
     if not (uses_factory or uses_raw_create_agent or uses_stategraph):
         pytest.skip(f"{nodes_file.parent.name} does not construct an agent")
 
+    # An agent that binds NO tools cannot produce an orphaned tool call, so it has
+    # nothing to repair (SI#112 is specifically about AIMessage.tool_calls with no
+    # matching ToolMessage). Deliberately narrow: bind a tool by any of the usual
+    # routes and the backstop applies again — this exempts genuinely tool-less
+    # agents, not agents that merely wire tools in an unusual way.
+    #
+    # Scan CODE only: a comment saying "no bind_tools() here" must not read as
+    # binding tools.
+    code = "\n".join(line.split("#", 1)[0] for line in text.splitlines())
+    binds_tools = any(s in code for s in ("bind_tools(", "ToolNode(", "tools=", "tool_list"))
+    if not binds_tools:
+        pytest.skip(f"{nodes_file.parent.name} binds no tools — no orphans possible")
+
     # create_agent path: must go through the factory (which prepends repair).
     if uses_factory:
         return

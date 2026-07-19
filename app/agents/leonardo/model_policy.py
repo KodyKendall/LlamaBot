@@ -90,6 +90,8 @@ _FAIL_OPEN_MODELS = frozenset({"deepseek-v4-flash", "gpt-5-nano"})
 _KNOWN_MODELS = [
     "deepseek-v4-flash",
     "deepseek-v4-pro",
+    "deepseek-v4-flash-gmi",
+    "deepseek-v4-flash-fireworks",
     "claude-4.5-sonnet",
     "claude-4.5-haiku",
     "gpt-5-codex",

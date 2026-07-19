@@ -29,6 +29,7 @@ from app.agents.leonardo.rails_beginner_agent.prompts import BEGINNER_AGENT_PROM
 from app.agents.leonardo.project_context import build_beginner_system_prompt, brand_context_section
 from app.agents.leonardo.llm_factory import get_llm
 from app.agents.leonardo.agent_factory import repair_orphaned_tool_calls_in_messages
+from app.agents.leonardo.resilience import invoke_with_transient_retry
 
 import logging
 logger = logging.getLogger(__name__)
@@ -150,7 +151,13 @@ def leonardo_beginner(state: RailsAgentState, browser_inspect_on: bool = False) 
         messages = messages + [HumanMessage(
             content="<NOTE_FROM_SYSTEM> The user has had too many failed tool calls. DO NOT DO ANY NEW TOOL CALLS. Tell the user it's failed in friendly, beginner-appropriate language, and suggest they try again with a simpler request. </NOTE_FROM_SYSTEM>"
         )]
-        response = llm.invoke(messages)
+        # Raw node — no DynamicModelMiddleware, so wrap the direct invoke in the
+        # shared rung-1 retry (transient DeepSeek connection blips would otherwise
+        # kill the turn with no retry at all).
+        response = invoke_with_transient_retry(
+            lambda: llm.invoke(messages),
+            label=f"rails_beginner_agent/{llm_model}",
+        )
         return {"messages": [response], "failed_tool_calls_count": -failed_tool_calls_count}
 
     if llm_model.startswith("gemini"):
@@ -158,7 +165,10 @@ def leonardo_beginner(state: RailsAgentState, browser_inspect_on: bool = False) 
     else:
         llm_with_tools = llm.bind_tools(tools, parallel_tool_calls=False)
 
-    response = llm_with_tools.invoke(messages)
+    response = invoke_with_transient_retry(
+        lambda: llm_with_tools.invoke(messages),
+        label=f"rails_beginner_agent/{llm_model}",
+    )
     return {"messages": [response]}
 
 

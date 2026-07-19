@@ -648,6 +648,8 @@ async def available_models():
         "gemini-3.1-flash-lite": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
         "deepseek-v4-flash": "DEEPSEEK_API_KEY",
         "deepseek-v4-pro": "DEEPSEEK_API_KEY",
+        "deepseek-v4-flash-gmi": "GMI_DEEPSEEK_API_KEY",
+        "deepseek-v4-flash-fireworks": "FIREWORKS_DEEPSEEK_API_KEY",
         "qwen3.7-plus": "ALIBABA_API_KEY",
     }
 
@@ -1174,6 +1176,82 @@ async def set_visible_agents(
 VALID_SITE_SETTINGS = {"show_token_wheel", "proactive_build_after_ticket", "enable_browser_inspect"}
 
 
+# ============== Role → agent-mode permissions (admin only) ==============
+# Deliberately NOT part of VALID_SITE_SETTINGS: that PUT is engineer-or-admin,
+# and an engineer editing role grants could widen another role's access. These
+# endpoints are admin_required, and they validate the payload — the resolver in
+# app/permissions.py trusts nothing, but a 400 here beats a silently-ignored key.
+
+
+@router.get("/api/role-modes", response_class=JSONResponse)
+async def api_get_role_modes(
+    admin: User = Depends(admin_required),
+    session: Session = Depends(get_db_session),
+):
+    """Current role → agent-mode grants, plus the catalog to render a picker from."""
+    from app.permissions import DEFAULT_ROLE_MODES, MODE_AGENTS, custom_modes, get_role_modes
+
+    custom = custom_modes()
+    return {
+        "role_modes": get_role_modes(session),
+        "defaults": DEFAULT_ROLE_MODES,
+        "all_modes": sorted(MODE_AGENTS) + sorted(custom),
+        "custom_modes": sorted(custom),
+    }
+
+
+@router.put("/api/role-modes", response_class=JSONResponse)
+async def api_set_role_modes(
+    request: Request,
+    admin: User = Depends(admin_required),
+    session: Session = Depends(get_db_session),
+):
+    """Replace the role → agent-mode grants (admin only).
+
+    Body: ``{"role_modes": {"user": ["feedback"], "engineer": [...]}}``.
+    Rejects unknown mode keys so a typo fails loudly at the edit rather than
+    quietly narrowing someone's access at the next login.
+    """
+    from datetime import datetime, timezone
+
+    from app.models import SiteSetting
+    from app.permissions import ROLE_MODES_SETTING_KEY, custom_modes, known_modes
+
+    body = await request.json()
+    role_modes = body.get("role_modes")
+    if not isinstance(role_modes, dict):
+        raise HTTPException(status_code=400, detail="role_modes must be an object")
+
+    valid = known_modes(custom_modes())
+    cleaned: dict[str, list[str]] = {}
+    for role, modes in role_modes.items():
+        if not isinstance(role, str) or not role.strip():
+            raise HTTPException(status_code=400, detail="Role names must be non-empty strings")
+        if not isinstance(modes, list) or not all(isinstance(m, str) for m in modes):
+            raise HTTPException(status_code=400, detail=f"Modes for '{role}' must be a list of strings")
+        unknown = sorted(set(modes) - valid)
+        if unknown:
+            raise HTTPException(status_code=400, detail=f"Unknown mode(s) for '{role}': {', '.join(unknown)}")
+        # De-dupe, preserve the admin's ordering (it drives the dropdown order).
+        cleaned[role] = list(dict.fromkeys(modes))
+
+    value = json.dumps(cleaned)
+    if len(value) > 1000:  # SiteSetting.value is max_length=1000
+        raise HTTPException(status_code=400, detail="Too many roles/modes to store")
+
+    setting = session.get(SiteSetting, ROLE_MODES_SETTING_KEY)
+    if setting:
+        setting.value = value
+        setting.updated_at = datetime.now(timezone.utc)
+    else:
+        setting = SiteSetting(key=ROLE_MODES_SETTING_KEY, value=value)
+        session.add(setting)
+    session.commit()
+
+    logger.info(f"Role modes set to {value} by {admin.username}")
+    return {"role_modes": cleaned}
+
+
 def get_site_setting(session: Session, key: str, default: str = "false") -> str:
     """Get a site setting value, returning default if not found.
 
@@ -1299,7 +1377,7 @@ async def api_delete_skill(
 # ============== File Upload to Assets ==============
 
 UPLOAD_ALLOWED_EXTENSIONS = {
-    '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg',
+    '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.ico',
     # Spreadsheets — all Excel variants, incl. macro-enabled and binary
     '.xlsx', '.xls', '.xlsm', '.xlsb', '.xltx', '.xltm', '.csv',
     # Documents
@@ -1314,14 +1392,14 @@ UPLOAD_ALLOWED_EXTENSIONS = {
     '.zip',
 }
 
-IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'}
+IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.ico'}
 
 # Types a browser can safely render inline. Deliberately excludes SVG: an SVG can
 # embed <script>, so serving it inline is an XSS vector — it downloads instead.
 # Everything not listed here (Office docs, slideshows, etc.) also downloads; we do
 # not render those server-side (no LibreOffice/conversion — keeps the image small
 # and the surface area tiny). The OS opens them in the real app.
-INLINE_PREVIEW_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.pdf'}
+INLINE_PREVIEW_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.pdf', '.ico'}
 
 RAILS_ROOT = "/app/app/rails"
 IMAGES_DIR = f"{RAILS_ROOT}/app/assets/images"
