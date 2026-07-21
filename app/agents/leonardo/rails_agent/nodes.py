@@ -32,6 +32,7 @@ from app.agents.leonardo.rails_agent.tools import (
     read_brand_guide, write_brand_guide,
     build_use_skill_tool, list_skills, read_skill, write_skill, edit_skill, delete_skill,
     browser_inspect, browser_inspect_enabled,
+    navigate_browser, get_browser_js_logs, execute_browser_js, live_browser_tools_enabled,
 )
 from app.agents.leonardo.rails_agent.prompts import RAILS_AGENT_PROMPT
 from app.agents.leonardo.project_context import build_system_prompt_with_project_context
@@ -193,17 +194,22 @@ default_tools = [
 
 
 def agent_tools():
-    """The Rails agent's toolset, with browser_inspect gated by a site setting.
+    """The Rails agent's toolset, with browser tools gated by site settings.
 
     browser_inspect (headless Chromium) is opt-in: only included when the
-    `enable_browser_inspect` site setting is on. Disabled by default. Read at
-    workflow build time, so flipping the setting takes effect on the next restart.
+    `enable_browser_inspect` site setting is on. The live-browser tools
+    (navigate/logs/execute-js in the user's own tab) are likewise gated by
+    `enable_live_browser_tools`. Both default off and are read at workflow
+    build time, so flipping a setting takes effect on the next restart.
     """
     tools = list(default_tools)
     tools.append(build_use_skill_tool())
     if browser_inspect_enabled():
         tools.append(browser_inspect)
         logger.info("browser_inspect tool enabled via site setting")
+    if live_browser_tools_enabled():
+        tools.extend([navigate_browser, get_browser_js_logs, execute_browser_js])
+        logger.info("live browser tools enabled via site setting")
     return tools
 
 def build_workflow(checkpointer=None, ask_before_edits=False):

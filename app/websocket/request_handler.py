@@ -203,6 +203,11 @@ class RequestHandler:
     # text answer (which the tool wraps into a ToolMessage). A normal chat message sent
     # while one of these is pending should resume the interrupt with that text — NOT be
     # appended as a new HumanMessage ahead of the unanswered tool call.
+    #
+    # "browser_command" is deliberately NOT listed: its interrupt is answered by the
+    # frontend programmatically, so user chat text must never be fed in as a fake
+    # browser result. A user message while one is pending instead goes through
+    # _repair_thread_state_if_needed, which cancels the dangling tool call cleanly.
     _QUESTION_INTERRUPT_TYPES = ("user_question", "uiux_question")
 
     async def _pending_question_interrupt(self, app, config):
@@ -1079,6 +1084,19 @@ class RequestHandler:
                             "agent_name": message_data.get('agent_name'),
                         })
                         logger.info("Graph interrupted for plan mode UI/UX question")
+
+                    # Live-browser command interrupt — executed programmatically by the
+                    # frontend against the Rails iframe; it auto-replies over the
+                    # question_response channel (no card is shown to the user).
+                    elif isinstance(interrupt_value, dict) and interrupt_value.get("type") == "browser_command":
+                        await websocket.send_json({
+                            "type": "browser_command",
+                            "command": interrupt_value.get("command", ""),
+                            "args": interrupt_value.get("args", {}) or {},
+                            "thread_id": message_data.get('thread_id'),
+                            "agent_name": message_data.get('agent_name'),
+                        })
+                        logger.info(f"Graph interrupted for browser command: {interrupt_value.get('command')}")
 
                     # Suggest plan mode interrupt
                     elif isinstance(interrupt_value, dict) and interrupt_value.get("type") == "suggest_mode_switch":

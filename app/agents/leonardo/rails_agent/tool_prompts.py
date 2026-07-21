@@ -493,3 +493,43 @@ This is an important tool you will use frequently to understand and "see" what t
 If the HTML is excessively large, use the max_chars parameter to fetch only as much as you need; if further detail is needed, ask the user for a narrower target (specific element, component, selector).
 In your explanation, refer to the route, controller, and view path to anchor your advice precisely.
 """
+
+NAVIGATE_BROWSER_DESCRIPTION = """Navigate the USER'S live app preview (the Rails iframe in their open chat tab) to a specific path.
+
+Unlike `browser_inspect` (which spins up a fresh headless browser with no session), this drives the user's own browser tab — their login session, cookies, and client-side state. The user SEES the navigation happen.
+
+The tool freezes execution until the user's browser confirms the navigation (or reports a problem). If the user has no chat tab open, it may wait until they return.
+
+Returns JSON: {"ok": true, "command": "navigate", "path": "...", "page_loaded": true|false}. `page_loaded: false` with a note means confirmation timed out — the navigation may still have completed.
+
+USAGE RULES:
+Call at most ONE browser tool (navigate_browser / get_browser_js_logs / execute_browser_js) per turn, and never in parallel with other tool calls.
+Pass a path like "/users" or "/posts/1/edit", not a full URL.
+"""
+
+GET_BROWSER_JS_LOGS_DESCRIPTION = """Fetch the JavaScript console logs captured in the USER'S live app preview (the Rails iframe in their open chat tab).
+
+Captures console.log/warn/error plus uncaught errors and unhandled promise rejections, as they happened in the user's real session — including logs from before you were asked to help. Holds at most the 100 most recent entries, and the buffer is CLEARED when you read it: a second immediate call returns nothing new.
+
+The tool freezes execution until the user's browser responds. If the user has no chat tab open, it may wait until they return.
+
+Returns JSON: {"ok": true, "command": "get_js_logs", "logs": [{"type": "log"|"warn"|"error", "args": ["..."], "timestamp": ...}, ...]}.
+
+USAGE RULES:
+Call at most ONE browser tool per turn, and never in parallel with other tool calls.
+Great for debugging "it's broken in my browser" reports: reproduce (or have the user reproduce), then read the logs.
+"""
+
+EXECUTE_BROWSER_JS_DESCRIPTION = """Execute JavaScript inside the USER'S live app preview (the Rails iframe in their open chat tab) and return the result.
+
+The code runs in the page's global scope with full access to its DOM, variables, and the user's logged-in session — unlike `browser_inspect`, which uses a fresh headless browser. If the code returns a Promise, the resolved value is returned. The result is JSON-serialized (String() fallback for DOM nodes / circular structures) and truncated at 10000 characters.
+
+The tool freezes execution until the user's browser responds. If the user has no chat tab open, it may wait until they return.
+
+Returns JSON: {"ok": true, "command": "execute_js", "result": "..."} on success, or {"ok": false, "command": "execute_js", "error": "<message + stack>"} if the code threw or the browser did not respond.
+
+USAGE RULES:
+Call at most ONE browser tool per turn, and never in parallel with other tool calls.
+Use expressions that produce a value, e.g. `document.title`, `document.querySelectorAll('[data-controller]').length`, or `fetch('/health').then(r => r.status)`.
+Prefer read-only inspection; this runs in the user's real session, so avoid destructive actions unless the user asked for them.
+"""

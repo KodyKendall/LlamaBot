@@ -179,6 +179,8 @@ export class MessageHandler {
       this.handleSuggestModeSwitch(data);
     } else if (data.type === 'implement_ticket') {
       this.handleImplementTicket(data);
+    } else if (data.type === 'browser_command') {
+      this.handleBrowserCommand(data);
     } else if (data.type === 'delegation_progress') {
       window.chatApp?.handleDelegationProgress(data);
     } else {
@@ -614,6 +616,105 @@ export class MessageHandler {
    */
   _showWaitingForInputBadge() {
     this.messageRenderer?.faviconBadgeManager?.showQuestion();
+  }
+
+  /**
+   * Handle a browser_command frame (agent interrupt executed programmatically
+   * against the Rails iframe — no card is shown; the result auto-resumes the
+   * agent over the existing question_response channel). The agent must never
+   * be left hanging: every path, including exceptions, sends an answer.
+   */
+  async handleBrowserCommand(data) {
+    // One command at a time. Dropping extras is safe: an unanswered interrupt is
+    // re-emitted as a fresh frame after the next resume turn.
+    if (this._browserCommandInFlight) return;
+    this._browserCommandInFlight = true;
+
+    this.finalizeCurrentThinking();
+
+    const command = data.command || '';
+    let result;
+    try {
+      if (command === 'navigate') {
+        const path = String(data.args?.path || '/');
+        this.messageRenderer.addMessage(`Navigating your preview to ${path}…`, 'system_message', null);
+        if (!this.iframeManager?.liveSiteFrame) {
+          result = { ok: false, command, error: 'Rails iframe not available' };
+        } else {
+          this.iframeManager.navigateToPath(path);
+          const pageLoaded = await this._waitForRailsPageLoaded(7000);
+          result = { ok: true, command, path, page_loaded: pageLoaded };
+          if (!pageLoaded) {
+            result.note = 'timed out waiting for page-loaded after 7000ms; navigation may still have completed';
+          }
+        }
+      } else if (command === 'get_js_logs') {
+        const logs = await window.chatApp.getJsConsoleLogs();
+        result = { ok: true, command, logs };
+        if (!logs.length) result.note = 'no logs captured, or the iframe did not respond';
+      } else if (command === 'execute_js') {
+        const res = await window.chatApp.executeJsInIframe(String(data.args?.code || ''), 5000);
+        result = { ok: res.ok, command, result: res.result, error: res.error };
+      } else {
+        result = { ok: false, command, error: `Unknown browser command: ${command}` };
+      }
+    } catch (e) {
+      result = { ok: false, command, error: String(e) };
+    } finally {
+      this._browserCommandInFlight = false;
+    }
+
+    this._answerBrowserCommand(result, data.thread_id, data.agent_name);
+  }
+
+  /**
+   * Resume the agent with a browser command result, reusing the question_response
+   * channel (the backend's browser_command interrupt returns this JSON string).
+   */
+  _answerBrowserCommand(resultObj, threadId, agentName) {
+    let answer = JSON.stringify(resultObj);
+    if (answer.length > 50000) {
+      answer = JSON.stringify({
+        ok: resultObj.ok,
+        command: resultObj.command,
+        truncated: true,
+        preview: answer.slice(0, 45000),
+      });
+    }
+
+    if (window.chatApp?.webSocketManager) {
+      window.chatApp.webSocketManager.send({
+        type: 'question_response',
+        answer,
+        thread_id: threadId,
+        agent_name: agentName,
+      });
+    }
+
+    window.chatApp?.setAgentRunning(true);
+    window.chatApp?.showThinkingIndicator();
+  }
+
+  /**
+   * Resolve true when the Rails iframe reports a Turbo page load (the
+   * 'llamapress-navigation' events navigation_tracking.js already posts),
+   * false after timeoutMs.
+   */
+  _waitForRailsPageLoaded(timeoutMs) {
+    return new Promise((resolve) => {
+      const handleMessage = (event) => {
+        if (event.data && event.data.source === 'llamapress-navigation' && event.data.type === 'page-loaded') {
+          window.removeEventListener('message', handleMessage);
+          clearTimeout(timer);
+          resolve(true);
+        }
+      };
+      window.addEventListener('message', handleMessage);
+      const timer = setTimeout(() => {
+        window.removeEventListener('message', handleMessage);
+        resolve(false);
+      }, timeoutMs);
+    });
   }
 
   handleQuestionRequest(data) {

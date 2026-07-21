@@ -493,8 +493,12 @@
 
             // Check for available updates
             try {
-                const updateResponse = await fetch('/api/check-updates');
-                if (updateResponse.ok) {
+                // Only engineers/admins can run the update (POST /api/update 403s
+                // otherwise) — don't show anyone else a dead-end affordance.
+                const canUpdate = (window.LLAMABOT_USER_ROLE || 'engineer') === 'engineer'
+                    || window.LLAMABOT_IS_ADMIN === true;
+                const updateResponse = canUpdate ? await fetch('/api/check-updates') : null;
+                if (updateResponse && updateResponse.ok) {
                     const updateData = await updateResponse.json();
                     if (updateData.updates_available) {
                         window.__llamabotUpdateData = updateData;
@@ -554,6 +558,7 @@
             const pill = qs('update-pill');
             let updateInProgress = false;
             let updateComplete = false;
+            let updateFailed = false;
 
             function showState(state) {
                 ['confirm', 'progress', 'complete', 'error'].forEach(s => {
@@ -641,6 +646,21 @@
                 else { setPill('Update may need a refresh', true); }
             }
 
+            // Definite failure (the server ANSWERED with an error). The backend has
+            // already recorded it and told the mothership, and /api/check-updates
+            // stops offering this version pair — so be honest, fail fast, and don't
+            // leave any affordance that would nag or dead-end the user.
+            function onFailure() {
+                updateInProgress = false;
+                updateFailed = true;
+                const title = qs('update-error-title');
+                if (title) title.textContent = "The update didn't complete";
+                const txt = qs('update-error-text');
+                if (txt) txt.textContent = "Something went wrong applying the update — it's been reported automatically so we can fix it. You're still on your current version and your work is safe. We'll offer the next release when it's ready.";
+                if (modalOpen()) { showState('error'); }
+                else { setPill('Update failed — click for details', true); }
+            }
+
             async function startUpdate() {
                 if (updateInProgress) return;
                 updateInProgress = true;
@@ -665,18 +685,32 @@
                 // Fire the update. POST runs sync + image pull synchronously (server is
                 // still alive), THEN schedules a detached recreate and returns — so the
                 // request usually resolves right as the container restarts. A dropped
-                // connection here is expected, not an error.
+                // connection here is expected, not an error — but an ANSWERED request
+                // that says failure is definite, and must fail fast (no 3-minute poll).
                 let pullDone = false;
+                let postResult = null; // {ok, body} if the server answered; null = connection dropped (restart)
                 const postPromise = fetch('/api/update', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ llamabot_version: targetLb, llamapress_version: lp.version })
-                }).then(() => { pullDone = true; }).catch(() => { pullDone = true; });
+                }).then(async (r) => {
+                    let body = null;
+                    try { body = await r.json(); } catch (_) {}
+                    postResult = { ok: r.ok, body };
+                    pullDone = true;
+                }).catch(() => { postResult = null; pullDone = true; });
 
                 // Advance optimistic steps while the pull is in flight.
                 await wait(1800);
                 if (!pullDone) { setStep('sync', 'done'); setStep('pull', 'active'); }
                 await postPromise;
+
+                if (postResult && (!postResult.ok || !(postResult.body && postResult.body.success))) {
+                    if (postResult.body && postResult.body.error) console.error('Update failed:', postResult.body.error);
+                    onFailure();
+                    return;
+                }
+
                 setStep('sync', 'done');
                 setStep('pull', 'done');
                 setStep('restart', 'active');
@@ -735,10 +769,14 @@
                     window.location.reload();
                     return;
                 }
-                // Dismiss the timeout notice.
+                // Dismiss the timeout/failure notice. After a definite failure there
+                // is nothing left to offer (the banner is gone and check-updates
+                // stops re-offering the pair), so clean up fully; after a timeout,
+                // keep the pill as a "maybe refresh" reminder.
                 if (e.target.closest('[data-llamabot="update-modal-dismiss-error"]')) {
                     closeModal();
-                    setPill('Update may need a refresh', true);
+                    if (updateFailed) { hidePill(); }
+                    else { setPill('Update may need a refresh', true); }
                     return;
                 }
             });
@@ -929,7 +967,7 @@
             <div class="hidden" data-llamabot="update-modal-error">
                 <div class="update-modal-head">
                     <span class="update-modal-badge warn"><i class="fa-solid fa-triangle-exclamation"></i></span>
-                    <h2>Taking longer than expected</h2>
+                    <h2 data-llamabot="update-error-title">Taking longer than expected</h2>
                 </div>
                 <p class="update-modal-sub" data-llamabot="update-error-text">The update was started but we couldn't confirm it finished. Your work is safe — keep using the app and refresh in a minute.</p>
                 <div class="update-modal-actions">
