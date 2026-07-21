@@ -209,6 +209,7 @@ async def root(request: Request):
         llamapress_email = _read_leonardo_value("LLAMAPRESS_EMAIL.txt")
         config_script = f'''<script>
 window.LLAMABOT_USER_ROLE = "{getattr(user, "role", "engineer")}";
+window.LLAMABOT_IS_ADMIN = {"true" if getattr(user, "is_admin", False) else "false"};
 window.LLAMABOT_VISIBLE_AGENTS = {json.dumps(visible_agents)};
 window.LLAMABOT_SHOW_TOKEN_WHEEL = {"true" if show_token_wheel else "false"};
 window.LLAMABOT_POSTHOG_KEY = {json.dumps(posthog_key) if posthog_key else "null"};
@@ -1428,6 +1429,7 @@ async def settings_page(
     show_token_wheel = get_site_setting(session, "show_token_wheel", "false") == "true"
     proactive_build = get_site_setting(session, "proactive_build_after_ticket", "false") == "true"
     browser_inspect_on = get_site_setting(session, "enable_browser_inspect", "false") == "true"
+    live_browser_tools_on = get_site_setting(session, "enable_live_browser_tools", "false") == "true"
     is_engineer_or_admin = current_user.role == "engineer" or current_user.is_admin
 
     html = f"""
@@ -1701,6 +1703,19 @@ async def settings_page(
             <div style="padding: 4px 0 0 36px; font-size: 0.75rem; color: rgba(255,255,255,0.35);">
                 Lets the agent inspect live pages with a headless browser (console logs, DOM, screenshots). Takes effect after the next restart.
             </div>
+            <div class="menu-item" style="cursor: default;">
+                <i class="fa-solid fa-window-maximize"></i>
+                <span>Live Browser Tools</span>
+                <label style="position: relative; display: inline-block; width: 44px; height: 24px;">
+                    <input type="checkbox" id="liveBrowserToolsToggle" style="opacity: 0; width: 0; height: 0;"
+                        onchange="toggleLiveBrowserTools(this.checked)">
+                    <span style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #555; border-radius: 24px; transition: 0.3s;"></span>
+                    <span id="liveBrowserToolsSlider" style="position: absolute; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; border-radius: 50%; transition: 0.3s;"></span>
+                </label>
+            </div>
+            <div style="padding: 4px 0 0 36px; font-size: 0.75rem; color: rgba(255,255,255,0.35);">
+                Lets the agent navigate the user's live app preview, read its console logs, and run JavaScript in it. Takes effect after the next restart.
+            </div>
         </div>'''}
 
         <div class="card">
@@ -1850,6 +1865,38 @@ async def settings_page(
 
         function updateBrowserInspectSlider(enabled) {{
             const slider = document.getElementById('browserInspectSlider');
+            if (!slider) return;
+            const track = slider.previousElementSibling;
+            if (enabled) {{
+                track.style.backgroundColor = '#8b5cf6';
+                slider.style.transform = 'translateX(20px)';
+            }} else {{
+                track.style.backgroundColor = '#555';
+                slider.style.transform = 'translateX(0)';
+            }}
+        }}
+
+        // Live browser tools toggle
+        (function() {{
+            const toggle = document.getElementById('liveBrowserToolsToggle');
+            const slider = document.getElementById('liveBrowserToolsSlider');
+            if (!toggle || !slider) return;
+            const isEnabled = {'true' if live_browser_tools_on else 'false'};
+            toggle.checked = isEnabled;
+            updateLiveBrowserToolsSlider(isEnabled);
+        }})();
+
+        function toggleLiveBrowserTools(enabled) {{
+            updateLiveBrowserToolsSlider(enabled);
+            fetch('/api/site-settings/enable_live_browser_tools', {{
+                method: 'PUT',
+                headers: {{ 'Content-Type': 'application/json' }},
+                body: JSON.stringify({{ value: enabled ? 'true' : 'false' }})
+            }});
+        }}
+
+        function updateLiveBrowserToolsSlider(enabled) {{
+            const slider = document.getElementById('liveBrowserToolsSlider');
             if (!slider) return;
             const track = slider.previousElementSibling;
             if (enabled) {{

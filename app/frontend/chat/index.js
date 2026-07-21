@@ -1733,6 +1733,41 @@ class ChatApp {
   }
 
   /**
+   * Execute JavaScript inside the Rails iframe via postMessage and return
+   * {ok, result, error}. Responses are correlated by a per-call id, so
+   * concurrent calls can't cross-resolve. Never rejects — timeouts and
+   * missing iframes resolve to {ok: false, error}.
+   */
+  executeJsInIframe(code, timeoutMs = 5000) {
+    return new Promise((resolve) => {
+      const iframe = this.elements.liveSiteFrame;
+      if (!iframe || !iframe.contentWindow) {
+        resolve({ ok: false, result: null, error: 'Rails iframe not available' });
+        return;
+      }
+
+      const id = Math.random().toString(36).substring(2, 11);
+
+      const handleMessage = (event) => {
+        if (event.data && event.data.source === 'llamapress'
+            && event.data.type === 'js-execution-result' && event.data.id === id) {
+          window.removeEventListener('message', handleMessage);
+          clearTimeout(timer);
+          resolve({ ok: !!event.data.ok, result: event.data.result, error: event.data.error || null });
+        }
+      };
+
+      window.addEventListener('message', handleMessage);
+      iframe.contentWindow.postMessage({ source: 'leonardo', type: 'execute-js', id, code }, '*');
+
+      const timer = setTimeout(() => {
+        window.removeEventListener('message', handleMessage);
+        resolve({ ok: false, result: null, error: `Timeout: no response from iframe after ${timeoutMs}ms` });
+      }, timeoutMs);
+    });
+  }
+
+  /**
    * Load settings from cookies
    */
   loadSettingsFromCookies() {

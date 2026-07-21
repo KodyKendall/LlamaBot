@@ -4,6 +4,7 @@ import json
 import logging
 import re
 import os
+import subprocess
 
 from typing import Optional
 from fastapi import APIRouter, Request, Depends, HTTPException, Query, UploadFile, File
@@ -225,8 +226,68 @@ async def api_get_version_notes():
     return {"version": version, "notes": notes}
 
 
+# A per-version-pair "this update already failed here" marker, stored in
+# SiteSetting. Keeps the banner from nagging (and re-burning a dead wait) after
+# a failed attempt; the next release is a new pair, so it un-sticks itself.
+# Deliberately NOT in VALID_SITE_SETTINGS — private, like session_secret.
+
+def _update_failure_key(lb_version: str, lp_version: str) -> Optional[str]:
+    key = f"update_failed:{lb_version}:{lp_version}"
+    return key if len(key) <= 100 else None  # SiteSetting.key max_length
+
+
+def _get_update_failure(session: Session, lb_version: str, lp_version: str) -> Optional[str]:
+    key = _update_failure_key(lb_version, lp_version)
+    if key is None:
+        return None
+    return get_site_setting(session, key, default="") or None
+
+
+def _record_update_failure(session: Session, lb_version: str, lp_version: str, error_tail: str) -> None:
+    """Best-effort: a down auth DB must never mask the honest failure response."""
+    try:
+        from datetime import datetime, timezone
+        from app.models import SiteSetting
+
+        key = _update_failure_key(lb_version, lp_version)
+        if key is None:
+            return
+        value = json.dumps({
+            "at": datetime.now(timezone.utc).isoformat(),
+            "error": error_tail[:900],  # SiteSetting.value max_length=1000
+        })
+        setting = session.get(SiteSetting, key)
+        if setting:
+            setting.value = value
+            setting.updated_at = datetime.now(timezone.utc)
+        else:
+            session.add(SiteSetting(key=key, value=value))
+        session.commit()
+    except Exception as e:
+        logger.warning(f"Could not record update failure marker: {e}")
+
+
+async def _report_update_failure(lb_version: str, lp_version: str,
+                                 error_class: str, error_tail: str, detail: str) -> None:
+    """Fire-and-forget mothership telemetry; never interferes with the response."""
+    try:
+        from app.services.mothership_client import MothershipClient
+
+        await MothershipClient().report_error(
+            thread_id=None,
+            error_class=error_class,
+            error_message=error_tail,
+            traceback_str=detail,
+            fingerprint=f"update_failed:{lb_version}:{lp_version}",
+            llamabot_version=get_container_version(),
+            recovered=False,
+        )
+    except Exception as e:
+        logger.warning(f"Could not report update failure to mothership: {e}")
+
+
 @router.get("/api/check-updates", response_class=JSONResponse)
-async def api_check_updates():
+async def api_check_updates(session: Session = Depends(get_db_session)):
     """Check mothership for available updates to llamabot and llamapress."""
     from app.services.mothership_client import MothershipClient
     mothership = MothershipClient()
@@ -239,6 +300,15 @@ async def api_check_updates():
     result = await mothership.check_updates(llamabot_version, llamapress_version)
     if result is None:
         return {"updates_available": False, "reason": "check_failed"}
+
+    # Don't re-offer a pair that already failed on this instance — the user
+    # clicked, it broke, and mothership was told. Fails open on DB trouble.
+    if result.get("updates_available"):
+        latest = result.get("latest_versions") or {}
+        target_lb = (latest.get("llamabot") or {}).get("version") or llamabot_version
+        target_lp = (latest.get("llamapress") or {}).get("version") or llamapress_version
+        if _get_update_failure(session, target_lb, target_lp):
+            return {"updates_available": False, "reason": "previous_update_failed"}
     return result
 
 
@@ -251,25 +321,56 @@ class UpdateRequest(BaseModel):
 async def api_perform_update(
     request: UpdateRequest,
     current_user: User = Depends(engineer_or_admin_required),
+    session: Session = Depends(get_db_session),
 ):
-    """Update docker-compose.yml image tags, pull new images, and restart."""
+    """Update docker-compose.yml image tags, pull new images, and restart.
+
+    Failures are reported honestly: bin/update exiting non-zero, a timeout, or
+    a broken host bridge all return success=false with an error tail, persist a
+    per-pair failure marker (so /api/check-updates stops offering that pair),
+    and tell the mothership. A container killed mid-restart produces no
+    response at all — the frontend treats a dropped connection as the restart,
+    so nothing catchable here is a success.
+    """
     version_pattern = re.compile(r'^[0-9a-zA-Z.\-]+$')
     if not version_pattern.match(request.llamabot_version) or not version_pattern.match(request.llamapress_version):
         raise HTTPException(status_code=400, detail="Invalid version format")
 
     from app.routers.slash_commands import execute_command
     command = f"bash bin/update {request.llamabot_version} {request.llamapress_version}"
+
+    async def _fail(error_class: str, error_tail: str, detail: str, return_code: int):
+        _record_update_failure(session, request.llamabot_version, request.llamapress_version, error_tail)
+        await _report_update_failure(request.llamabot_version, request.llamapress_version,
+                                     error_class, error_tail, detail)
+        return {
+            "success": False,
+            "stdout": "",
+            "stderr": "",
+            "return_code": return_code,
+            "error": error_tail,
+        }
+
     try:
         result = execute_command(command, timeout=300)
-        return {
-            "success": result.returncode == 0,
-            "stdout": result.stdout.strip() if result.stdout else "",
-            "stderr": result.stderr.strip() if result.stderr else "",
-            "return_code": result.returncode,
-        }
+    except subprocess.TimeoutExpired as e:
+        return await _fail("UpdateTimeout", f"Update timed out after {e.timeout}s", str(e), -1)
     except Exception as e:
-        # Container may be killed mid-response during restart
-        return {"success": True, "stdout": "Update initiated, server restarting...", "stderr": "", "return_code": 0}
+        return await _fail(type(e).__name__, str(e), str(e), -1)
+
+    if result.returncode != 0:
+        output = (result.stderr or "").strip() or (result.stdout or "").strip() \
+            or f"bin/update exited {result.returncode}"
+        return await _fail("UpdateFailed", output[-500:],
+                           f"stdout:\n{result.stdout}\n\nstderr:\n{result.stderr}",
+                           result.returncode)
+
+    return {
+        "success": True,
+        "stdout": result.stdout.strip() if result.stdout else "",
+        "stderr": result.stderr.strip() if result.stderr else "",
+        "return_code": 0,
+    }
 
 
 # ============== WebSocket Authentication API ==============
@@ -1173,7 +1274,7 @@ async def set_visible_agents(
 
 # ============== Site Settings API ==============
 
-VALID_SITE_SETTINGS = {"show_token_wheel", "proactive_build_after_ticket", "enable_browser_inspect"}
+VALID_SITE_SETTINGS = {"show_token_wheel", "proactive_build_after_ticket", "enable_browser_inspect", "enable_live_browser_tools"}
 
 
 # ============== Role → agent-mode permissions (admin only) ==============

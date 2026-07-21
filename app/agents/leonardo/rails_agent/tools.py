@@ -1,5 +1,5 @@
 from langchain.tools import tool, ToolRuntime
-from langgraph.types import Command
+from langgraph.types import Command, interrupt
 from langchain_core.messages import ToolMessage
 from tavily import TavilyClient
 from typing import Optional
@@ -37,6 +37,9 @@ from app.agents.leonardo.rails_agent.tool_prompts import (
     HARD_RESTART_RAILS_DESCRIPTION,
     FIX_PERMISSIONS_DESCRIPTION,
     BROWSER_INSPECT_DESCRIPTION,
+    NAVIGATE_BROWSER_DESCRIPTION,
+    GET_BROWSER_JS_LOGS_DESCRIPTION,
+    EXECUTE_BROWSER_JS_DESCRIPTION,
     USE_SKILL_DESCRIPTION_TEMPLATE,
     LIST_SKILLS_DESCRIPTION,
     READ_SKILL_DESCRIPTION,
@@ -2632,3 +2635,67 @@ def browser_inspect(
             "messages": [ToolMessage(content=content, tool_call_id=tool_call_id)]
         }
     )
+
+def live_browser_tools_enabled() -> bool:
+    """Whether the live-browser tools (navigate/logs/execute-js in the user's tab) are enabled.
+
+    Gated by the ``enable_live_browser_tools`` site setting, which defaults to ``"false"``
+    so driving the user's real browser session is opt-in. Read when an agent's tool list
+    is built (workflow compile time), so flipping the setting takes effect on the next
+    workflow rebuild / app restart. Fails closed (returns ``False``) when the auth DB
+    is unavailable.
+    """
+    import logging
+    try:
+        from sqlmodel import Session
+        from app.db import engine
+        from app.routers.api import get_site_setting
+        if engine is None:
+            return False
+        with Session(engine) as session:
+            return get_site_setting(session, "enable_live_browser_tools", "false") == "true"
+    except Exception as e:
+        logging.getLogger(__name__).warning(
+            f"Could not read enable_live_browser_tools setting; tools disabled: {e}"
+        )
+        return False
+
+
+BROWSER_COMMAND_RESULT_MAX_CHARS = 50_000
+
+
+def _browser_command(command: str, args: dict, tool_call_id: str) -> Command:
+    """Round-trip a command to the user's live browser tab via a LangGraph interrupt.
+
+    The interrupt payload is forwarded to the frontend as a ``browser_command`` WS
+    frame; the frontend executes it against the Rails iframe and resumes the graph
+    with a JSON-string result. No side effects may happen before ``interrupt()`` —
+    the tool body is replayed on resume.
+    """
+    raw = interrupt({"type": "browser_command", "command": command, "args": args})
+    content = str(raw)
+    if len(content) > BROWSER_COMMAND_RESULT_MAX_CHARS:
+        content = content[:BROWSER_COMMAND_RESULT_MAX_CHARS] + "...[truncated]"
+    return Command(
+        update={
+            "messages": [ToolMessage(content=content, tool_call_id=tool_call_id)]
+        }
+    )
+
+
+@tool(description=NAVIGATE_BROWSER_DESCRIPTION)
+def navigate_browser(path: str, runtime: ToolRuntime) -> Command:
+    """Navigate the user's live Rails iframe to a path."""
+    return _browser_command("navigate", {"path": path}, runtime.tool_call_id)
+
+
+@tool(description=GET_BROWSER_JS_LOGS_DESCRIPTION)
+def get_browser_js_logs(runtime: ToolRuntime) -> Command:
+    """Fetch (and clear) the JS console logs captured in the user's live Rails iframe."""
+    return _browser_command("get_js_logs", {}, runtime.tool_call_id)
+
+
+@tool(description=EXECUTE_BROWSER_JS_DESCRIPTION)
+def execute_browser_js(code: str, runtime: ToolRuntime) -> Command:
+    """Execute JavaScript in the user's live Rails iframe and return the serialized result."""
+    return _browser_command("execute_js", {"code": code}, runtime.tool_call_id)
