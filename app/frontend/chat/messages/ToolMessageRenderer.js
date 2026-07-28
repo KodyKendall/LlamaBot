@@ -3,6 +3,7 @@
  */
 
 import { generateUniqueId } from '../utils/domHelpers.js';
+import { isCustomAgentMode } from '../utils/agentModes.js';
 import { PlanMessageRenderer } from './PlanMessageRenderer.js';
 import { ToolIcons } from '../utils/icons.js';
 
@@ -260,12 +261,14 @@ export class ToolMessageRenderer {
   }
 
   /**
-   * Check if the current agent mode uses the simplified UX (beginner or engineer)
+   * Check if the current agent mode uses the simplified UX (beginner, engineer,
+   * or any per-instance custom mode)
    */
   _isBeginnerMode() {
     const modeSelect = document.querySelector('[data-llamabot="agent-mode-select"]');
     console.log('[ToolRenderer] mode select value:', modeSelect?.value);
-    return modeSelect?.value === 'beginner' || modeSelect?.value === 'engineer';
+    return modeSelect?.value === 'beginner' || modeSelect?.value === 'engineer'
+      || isCustomAgentMode(modeSelect?.value);
   }
 
   /**

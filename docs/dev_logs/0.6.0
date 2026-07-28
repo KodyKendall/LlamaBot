@@ -33,6 +33,9 @@
 - [x] Add advanced JavaScript tool calling for Leo to execute tool calls JavaScript on the browser (disabled by default).
 - [x] Improve the update banner experience: honest fail-fast errors (no more 3-minute dead wait), per-version failure marker suppresses the banner after a failed attempt (auto-unsticks on next release), failures reported to mothership via report_error, update UI hidden from roles that can't update.
 
+0.6.0f: 
+- [x] Fix the leo custom modes not saving the cookie for last used mode. (UX issue)
+
 future (backlog):
 - [] We also need like superadmin configuration for seeing: what LLM models are available (and not available) to use, see .env variables, see config variables, see our instance.json, api_tokens, etc.
 - [] Improving message conversation history user experience.

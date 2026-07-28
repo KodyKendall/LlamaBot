@@ -187,6 +187,21 @@ def test_chat_route_injects_custom_modes_and_extends_visible_agents(authed_clien
     assert "engineer" in json.loads(m.group(1))
 
 
+def test_chat_page_reapplies_agent_mode_cookie_before_change_dispatch(authed_client):
+    """Custom-mode <option>s are injected on llamabot:ready — after the cookie
+    restore in loadSettingsFromCookies() already ran. The page must re-apply the
+    agentMode cookie BEFORE dispatching the change event, or a saved custom mode
+    is silently reset to the default and the cookie overwritten with it."""
+    resp = authed_client.get("/")
+    assert resp.status_code == 200
+    html = resp.text
+    reapply = html.find("Re-apply the saved agentMode cookie")
+    dispatch = html.find("modeSelect.dispatchEvent(new Event('change'")
+    assert reapply != -1, "cookie re-apply block missing from chat page"
+    assert dispatch != -1, "mode-select change dispatch missing from chat page"
+    assert reapply < dispatch, "cookie must be re-applied before the change event fires"
+
+
 def test_chat_route_no_custom_modes_is_backcompat(authed_client):
     with patch("app.routers.ui.load_custom_agent_modes", return_value=[]):
         resp = authed_client.get("/")

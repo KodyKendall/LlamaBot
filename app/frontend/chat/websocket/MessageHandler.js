@@ -2,6 +2,8 @@
  * WebSocket message routing and processing
  */
 
+import { isCustomAgentMode } from '../utils/agentModes.js';
+
 const PAYWALL_UPGRADE_URL = 'https://llamapress.ai/pricing';
 
 // Submitted as the answer when the user picks the "See visual options" choice on a
@@ -189,11 +191,13 @@ export class MessageHandler {
   }
 
   /**
-   * Check if current mode is beginner, engineer, or plan (hides sub-agent content)
+   * Check if current mode is beginner, engineer, a custom mode, or plan
+   * (hides sub-agent content)
    */
   _isSimplifiedMode() {
     const modeSelect = document.querySelector('[data-llamabot="agent-mode-select"]');
-    const isBeginnerAgent = modeSelect?.value === 'beginner' || modeSelect?.value === 'engineer';
+    const isBeginnerAgent = modeSelect?.value === 'beginner' || modeSelect?.value === 'engineer'
+      || isCustomAgentMode(modeSelect?.value);
     const savedMode = document.cookie.split(';').find(c => c.trim().startsWith('executionMode='));
     const isPlanExec = savedMode?.split('=')?.[1]?.trim() === 'plan';
     return isBeginnerAgent || isPlanExec;

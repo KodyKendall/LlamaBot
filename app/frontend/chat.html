@@ -827,6 +827,19 @@
                     }
                 }
 
+                // Re-apply the saved agentMode cookie now that custom-mode options
+                // exist: loadSettingsFromCookies() ran before this listener, so a
+                // saved custom mode wasn't in the dropdown yet and was ignored — and
+                // the change event below would then overwrite the cookie with the
+                // default mode.
+                const savedMode = document.cookie.split(';')
+                    .map(function (c) { return c.trim(); })
+                    .filter(function (c) { return c.indexOf('agentMode=') === 0; })
+                    .map(function (c) { return c.substring('agentMode='.length); })[0];
+                if (savedMode && modeSelect.querySelector('option[value="' + CSS.escape(savedMode) + '"]')) {
+                    modeSelect.value = savedMode;
+                }
+
                 // Dispatch change event so LlamaBot updates its internal state
                 modeSelect.dispatchEvent(new Event('change', { bubbles: true }));
             }
