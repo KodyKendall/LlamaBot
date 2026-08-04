@@ -36,6 +36,7 @@ from app.agents.leonardo.rails_agent.tools import (
 )
 from app.agents.leonardo.rails_agent.prompts import RAILS_AGENT_PROMPT
 from app.agents.leonardo.project_context import build_system_prompt_with_project_context
+from app.agents.leonardo.friction import report_friction, with_friction_section
 from app.agents.leonardo.rails_agent.middleware import (
     inject_view_context,
     check_failure_limit,
@@ -60,7 +61,9 @@ def get_cached_system_prompt():
     Loads LEONARDO.md if it exists and appends it to the base prompt.
     Uses Anthropic's ephemeral cache control for cost reduction (~90% input token savings).
     """
-    full_prompt = build_system_prompt_with_project_context(RAILS_AGENT_PROMPT, agent_mode="rails_agent")
+    full_prompt = with_friction_section(
+        build_system_prompt_with_project_context(RAILS_AGENT_PROMPT, agent_mode="rails_agent")
+    )
     return SystemMessage(
         content=[
             {
@@ -185,6 +188,7 @@ default_tools = [
     save_memory, list_memories, delete_memory,  # Long-term memory
     read_leonardo_md, edit_leonardo_md, write_leonardo_md,  # Project context file
     read_brand_guide, write_brand_guide,  # Brand guide (colors, logos, notes)
+    report_friction,    # Papercut channel back to the LlamaPress team
     list_skills, read_skill, write_skill, edit_skill, delete_skill,  # Skill library management
     # use_skill is built dynamically in agent_tools() so its <available_skills>
     # catalog reflects the current .leonardo/skills/ library (see build_use_skill_tool).

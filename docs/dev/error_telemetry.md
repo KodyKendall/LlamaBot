@@ -259,6 +259,68 @@ A `_report_error(self, e, incoming_message)` helper (fills `model`/`agent_mode`/
 
 ---
 
+## 4b. Agent-reported friction — `report_friction` (the papercut channel)
+
+Everything above is about things that *crash*. But most of what actually slows a Leo
+down never raises anything: a tool errors in a way its description never warned about,
+a file is root-owned so every edit silently fails, output contradicts the docs, a
+capability just isn't there and gets routed around. None of that produces an
+`InstanceError` row — it dies in the transcript, and we only ever learn about it
+secondhand, from a customer complaining about the *downstream* symptom.
+
+`report_friction` (`app/agents/leonardo/friction.py`) is the agent's own channel for
+it. The Leo files a short structured complaint about **its own tooling**, and it ships
+down this exact pipeline — `MothershipClient.report_error` → `/api/leonardo/report_error`
+→ the same `InstanceError` queue. No new plumbing, no new endpoint.
+
+**Payload mapping:**
+
+| report_error field | friction value |
+|---|---|
+| `source` | `"agent_friction"` |
+| `error_class` | `AgentFriction.<category>` (e.g. `AgentFriction.permissions`) |
+| `error_message` | the agent's `what_happened` |
+| `traceback` | the details blob — severity, category, tool, agent_mode, model, verbatim `evidence`, `suggested_fix` |
+| `recovered` | `severity != "blocked"` — i.e. did the agent get past it |
+| `fingerprint` | md5 of `category\|tool_name\|first line`, same shape as the backend's |
+
+**Where it's wired:** engineer, engineer plan, beginner, beginner plan (the generic
+`rails_plan_mode_agent`, so database/ai_builder/testing/pyxl plan variants get it too),
+ticket, ticket plan — plus both delegated sub-agents (`delegate_task`,
+`delegate_research`), which run in isolated context and therefore see friction the main
+agent never witnesses. Tool registration AND prompt wiring are pinned per mode by
+`app/tests/test_report_friction.py`.
+
+**Three properties it must keep** (they are the tests, not aspirations):
+
+1. *It can never hurt the turn.* Bad enum values are coerced, not rejected; a broken
+   runtime is swallowed; the POST runs on a detached daemon thread so the agent never
+   waits on it. The tool always returns a string, and every return string — including
+   the dropped ones — reads as "noted, keep going", never as an error worth retrying.
+2. *It can't flood the queue.* Deduped by fingerprint and capped at
+   `MAX_REPORTS_PER_THREAD` (3) per conversation. Sub-agents inherit the parent's
+   config, so they share that budget rather than getting a fresh one.
+3. *The prompt does the work, not the description.* A tool description alone does not
+   get a tool used. `FRICTION_PROMPT_SECTION` states the triggers, plus the two rules
+   without which the model either stops after reporting or narrates the report at the
+   user: it is invisible to the user, and it fixes nothing right now — carry on.
+
+It is appended **after** the project-context overlay (`with_friction_section`), not
+baked into each mode's prompt constant, so a mothership-delivered prompt override —
+which replaces the base prompt wholesale — can't silently strip the instructions for a
+tool the agent still has.
+
+**⚠️ Mothership TODO:** `/api/leonardo/report_error` allowlists `source` to
+`%w[llamabot rails_app frontend]` and silently defaults anything else to `"llamabot"`.
+Until `agent_friction` is added to that allowlist, these reports land in the queue
+wearing the wrong source label — filter on `error_class LIKE 'AgentFriction.%'` in the
+meantime. Do **not** merge friction into the exception stream in the dashboard: it is
+self-reported and subjective, with no traceback, and mixing it in wrecks triage. It
+wants its own view (or at minimum its own filter), ideally sorted by `count` — a
+papercut 40 instances all report is a roadmap item.
+
+---
+
 ## 5. Curing the known cases (proactive, upstream of the net)
 
 The net makes failures graceful; these make the *common, known* cases actually succeed.

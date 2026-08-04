@@ -39,6 +39,7 @@ from app.agents.leonardo.rails_agent.tools import (
 )
 from app.agents.leonardo.rails_ticket_plan_mode_agent.prompts import TICKET_PLAN_MODE_AGENT_PROMPT
 from app.agents.leonardo.project_context import build_system_prompt_with_project_context
+from app.agents.leonardo.friction import report_friction, with_friction_section
 from app.agents.leonardo.rails_ticket_plan_mode_agent.middleware import (
     inject_view_context,
     inject_ticket_plan_mode_context,
@@ -69,11 +70,11 @@ def get_cached_system_prompt():
     """Build system message with project context, date, and prompt caching enabled."""
     current_date = date.today().strftime("%Y-%m-%d")
     date_suffix = f"\n\n---\n**Today's Date:** {current_date}"
-    full_prompt = build_system_prompt_with_project_context(
+    full_prompt = with_friction_section(build_system_prompt_with_project_context(
         TICKET_PLAN_MODE_AGENT_PROMPT,
         suffix=date_suffix,
         agent_mode="rails_ticket_plan_mode_agent",
-    )
+    ))
 
     return SystemMessage(
         content=[
@@ -102,6 +103,7 @@ default_tools = [
     offer_implementation,  # Offer to switch to engineer mode after ticket creation
     save_memory, list_memories, delete_memory,
     list_skills, read_skill, write_skill, edit_skill, delete_skill,  # Skill library
+    report_friction,     # Papercut channel back to the LlamaPress team
 ]
 
 

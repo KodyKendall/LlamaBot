@@ -28,6 +28,7 @@ from app.agents.leonardo.rails_agent.tools import (
 )
 # Shared LLM factory - single source of truth for model selection
 from app.agents.leonardo.llm_factory import get_llm
+from app.agents.leonardo.friction import report_friction, with_friction_section
 from app.agents.leonardo.delegation import (
     DELEGATION_TIMEOUT_SECONDS,
     DelegationTimedOut,
@@ -134,7 +135,9 @@ Return your findings in this structured format:
 def get_research_system_prompt():
     """Build system message for research-only sub-agent."""
     current_date = date.today().strftime("%Y-%m-%d")
-    prompt_with_date = f"{SUB_AGENT_RESEARCH_PROMPT}\n\n---\n**Today's Date:** {current_date}"
+    prompt_with_date = with_friction_section(
+        f"{SUB_AGENT_RESEARCH_PROMPT}\n\n---\n**Today's Date:** {current_date}"
+    )
     return SystemMessage(content=prompt_with_date)
 
 
@@ -169,6 +172,7 @@ def create_sub_agent(llm_model: str = None):
         glob_files,
         grep_files,
         bash_command,  # For rails runner queries (read-only DB queries)
+        report_friction,  # Telemetry about OUR tooling, not a write to the user's project
         # NO write_file - sub-agent should not write files
         # NO edit_file - sub-agent should not edit files
         # NO delegate_task - prevent infinite recursion
