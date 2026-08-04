@@ -6545,6 +6545,7 @@ button.brand-logo-thumb:hover .brand-logo-zoom {
     margin: 0 0 8px;
     display: flex;
     align-items: center;
+    gap: 12px;
     animation: slideDown 0.2s ease-out;
     flex-shrink: 0;
 }
@@ -6560,11 +6561,54 @@ button.brand-logo-thumb:hover .brand-logo-zoom {
     color: #1e40af;
     font-weight: 500;
     font-size: 0.82rem;
+    /* Let the message wrap instead of shoving the × off the banner edge. */
+    min-width: 0;
+}
+
+.image-switch-banner .warning-content span {
+    min-width: 0;
+    overflow-wrap: anywhere;
 }
 
 .image-switch-banner .warning-content i {
     font-size: 1rem;
     flex-shrink: 0;
+}
+
+/* Dismiss (×) — only rendered on banners the user is allowed to close */
+/* Scoped under the banner ON PURPOSE: `.input-area button` (see ~line 2763)
+   paints every button in the composer translucent-white-on-faint-purple, and
+   an unscoped `.image-switch-banner-dismiss` loses to it on specificity — which
+   is why the × read as light gray on light blue for three rounds of QA.
+   White glyph on a near-black disc, so it can't melt into the banner tint. */
+.image-switch-banner .image-switch-banner-dismiss {
+    background: #0f172a;
+    border: 1px solid #0f172a;
+    color: #ffffff;
+    font-size: 1rem;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0;
+    width: 22px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-left: auto;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+/* :not(:disabled) is load-bearing — it outranks `.input-area button:hover:not(:disabled)`,
+   which would otherwise repaint the hover translucent purple. */
+.image-switch-banner .image-switch-banner-dismiss:hover:not(:disabled) {
+    /* A shade lighter than the resting near-black, still clearly dark against
+       the pale banner — the hover reads as a state change, not a new element. */
+    background: #334155;
+    border-color: #334155;
+    /* .input-area button:hover lifts and shadows every composer button. */
+    transform: none;
+    box-shadow: none;
 }
 
 @keyframes slideDown {

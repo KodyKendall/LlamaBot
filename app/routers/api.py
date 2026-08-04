@@ -744,6 +744,7 @@ async def available_models():
         "gpt-5-codex": "OPENAI_API_KEY",
         "gpt-5-nano": "OPENAI_API_KEY",
         "gpt-5.4-nano": "OPENAI_API_KEY",
+        "gpt-5.6-luna": "OPENAI_API_KEY",
         "gemini-3-flash": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
         "gemini-3-pro": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
         "gemini-3.1-flash-lite": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
@@ -876,6 +877,14 @@ class FeedbackRequest(BaseModel):
     note: str | None = None
     content: str | None = None
     sent_at: str | None = None
+    # Bounded, redacted browser snapshot (ws close code, reconnect count, recent
+    # console output, model/mode). See frontend/chat/utils/LeoDiagnostics.js.
+    debug_context: dict | None = None
+
+
+# A snapshot bigger than this is a bug in the collector, not useful evidence. Drop it
+# rather than reject the feedback — losing the user's rating is the worse outcome.
+_MAX_DEBUG_CONTEXT_BYTES = 64_000
 
 
 @router.post("/api/feedback", response_class=JSONResponse)
@@ -897,6 +906,25 @@ async def api_submit_feedback(request: Request, body: FeedbackRequest, username:
     if not mothership.enabled:
         return {"success": False, "reason": "mothership_not_configured"}
 
+    debug_context = body.debug_context
+    if debug_context is not None:
+        try:
+            if len(json.dumps(debug_context)) > _MAX_DEBUG_CONTEXT_BYTES:
+                logger.warning("feedback debug_context too large; dropping it")
+                debug_context = None
+        except (TypeError, ValueError):
+            debug_context = None
+
+    conn = (debug_context or {}).get("connection") or {}
+    last_close = conn.get("last_close") or {}
+    logger.info(
+        "feedback_submit scope=%s rating=%s thread_id=%s ws_recent_close_code=%s "
+        "reconnect_attempts=%s recent_events=%s",
+        body.scope, body.rating, body.thread_id,
+        last_close.get("code"), conn.get("reconnect_attempts"),
+        len((debug_context or {}).get("recent_events") or []),
+    )
+
     result = await mothership.submit_feedback(
         thread_id=body.thread_id,
         rating=body.rating,
@@ -904,8 +932,86 @@ async def api_submit_feedback(request: Request, body: FeedbackRequest, username:
         note=body.note,
         content=body.content,
         sent_at=body.sent_at,
+        debug_context=debug_context,
     )
     return {"success": bool(result and result.get("success"))}
+
+
+class FrontendErrorRequest(BaseModel):
+    error_class: str
+    error_message: str
+    stack: str | None = None
+    thread_id: str | None = None
+    agent_mode: str | None = None
+    model: str | None = None
+    fingerprint: str | None = None
+
+
+# A runaway page must not be able to fire huge payloads at us. Generous enough for
+# a real stack trace (5000 chars) plus the rest of the envelope.
+_MAX_FRONTEND_ERROR_BYTES = 20_000
+
+
+@router.post("/api/frontend-error", response_class=JSONResponse)
+async def api_report_frontend_error(
+    request: Request, body: FrontendErrorRequest, username: str = Depends(auth)
+):
+    """
+    Forward a browser-side chat error to the mothership.
+
+    Error telemetry was backend-only: `_report_error_to_mothership` fires on Python
+    exceptions, but a client-side socket drop raises nothing server-side. Kody hit
+    "Lost connection" mid-run on 2026-07-24 and it left no InstanceError row at all.
+
+    Thin same-origin passthrough (the browser is already authed to this box),
+    mirroring /api/feedback. Best-effort: a reporting hiccup must never 500 the
+    browser, so any failure returns {"success": False}.
+    """
+    total = len(body.error_message or "") + len(body.stack or "")
+    if total > _MAX_FRONTEND_ERROR_BYTES:
+        return {"success": False, "error": "payload too large"}
+
+    mothership = getattr(request.app.state, "mothership_client", None)
+    if mothership is None:
+        from app.services.mothership_client import MothershipClient
+        mothership = MothershipClient()
+    if not mothership.enabled:
+        return {"success": False, "reason": "mothership_not_configured"}
+
+    error_message = (body.error_message or "")[:2000]
+    stack = (body.stack or "")[:5000]
+
+    fingerprint = body.fingerprint
+    if not fingerprint:
+        # Same md5 the backend uses (websocket/request_handler.py), so frontend and
+        # backend rows for the same failure dedupe together on the mothership.
+        import hashlib
+
+        first_line = (error_message.splitlines() or [""])[0]
+        fingerprint = hashlib.md5(
+            f"{body.error_class}|{first_line[:160]}|{body.agent_mode}".encode("utf-8", "replace")
+        ).hexdigest()
+
+    try:
+        from datetime import datetime, timezone
+
+        await mothership.report_error(
+            thread_id=body.thread_id,
+            error_class=body.error_class,
+            error_message=error_message,
+            traceback_str=stack,
+            agent_mode=body.agent_mode,
+            model=body.model,
+            llamabot_version=get_container_version(),
+            occurred_at=datetime.now(timezone.utc).isoformat(),
+            fingerprint=fingerprint,
+            source="frontend",
+        )
+    except Exception as e:
+        logger.warning(f"Frontend error report failed: {e}")
+        return {"success": False}
+
+    return {"success": True}
 
 
 @router.get("/api/lease-status", response_class=JSONResponse)

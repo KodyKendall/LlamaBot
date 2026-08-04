@@ -17,21 +17,38 @@ ENV HOME=/config
 RUN usermod -u 1000 abc && groupmod -g 1000 abc
 
 # Pre-create necessary directories
-RUN mkdir -p /config/.local/share/code-server/extensions && \
-    mkdir -p /config/data/User
+RUN mkdir -p /config/data/User
 
-# Install Claude Code extension
-# Note: This will be persisted when /config is mounted as a volume
-RUN /app/code-server/bin/code-server \
-    --extensions-dir /config/.local/share/code-server/extensions \
-    --install-extension anthropic.claude-code || \
-    echo "Extension will be available after volume mount"
+# ---------------------------------------------------------------------------
+# Claude Code extension
+#
+# Do NOT install into /config — that path is the `code_config` named volume, so
+# anything baked there is masked on every existing install. Instead we stage the
+# .vsix in /opt and let /custom-cont-init.d install it on each boot (see
+# vscode/custom-cont-init.d/10-preinstall-extensions.sh).
+#
+# The platform-specific VSIX bundles the `claude` native binary
+# (resources/native-binary/claude), so no separate CLI install is needed.
+# Bump CLAUDE_CODE_VERSION from https://open-vsx.org/extension/Anthropic/claude-code
+# ---------------------------------------------------------------------------
+ARG TARGETARCH
+ARG CLAUDE_CODE_VERSION=2.1.220
+RUN set -eux; \
+    case "${TARGETARCH}" in \
+        amd64) CC_PLATFORM=linux-x64 ;; \
+        arm64) CC_PLATFORM=linux-arm64 ;; \
+        *) echo "unsupported TARGETARCH=${TARGETARCH}" >&2; exit 1 ;; \
+    esac; \
+    mkdir -p /opt/preinstalled-extensions; \
+    curl -fsSL -o /opt/preinstalled-extensions/anthropic.claude-code.vsix \
+        "https://open-vsx.org/api/Anthropic/claude-code/${CC_PLATFORM}/${CLAUDE_CODE_VERSION}/file/Anthropic.claude-code-${CLAUDE_CODE_VERSION}@${CC_PLATFORM}.vsix"
 
-# Configure VS Code settings (dark theme)
-RUN echo '{\n\
-    "workbench.colorTheme": "Default Dark Modern",\n\
-    "window.autoDetectColorScheme": false\n\
-}' > /config/data/User/settings.json
+COPY vscode/custom-cont-init.d/ /custom-cont-init.d/
+RUN chmod +x /custom-cont-init.d/*.sh
+
+# NOTE: we do not write /config/data/User/settings.json here. That path is
+# inside the code_config volume, so the volume hides anything baked at build
+# time. The user's own VS Code settings are the only settings that apply.
 
 # Set up a default git config (can be overridden by user)
 RUN git config --system credential.helper store && \

@@ -126,13 +126,20 @@ def rollback_checkpoint(
         Success status
     """
     try:
-        success = checkpoint_service.rollback_to_checkpoint(checkpoint_id)
+        result = checkpoint_service.rollback_to_checkpoint(checkpoint_id, report=True)
+        success = bool(result.get("success"))
 
         if success:
             # Mark checkpoint as rejected (user rolled back to it)
             checkpoint_service.mark_checkpoint_rejected(checkpoint_id)
 
-        return JSONResponse(content={"success": success})
+        # `platform_files_reapplied` lets the History panel tell the customer that the
+        # restore also moved platform files and that we put them back — otherwise the
+        # extra commit in their history looks like it came from nowhere.
+        return JSONResponse(content={
+            "success": success,
+            "platform_files_reapplied": result.get("platform_files_reapplied", []),
+        })
 
     except Exception as e:
         logger.error(f"Failed to rollback checkpoint: {str(e)}")

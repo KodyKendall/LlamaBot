@@ -162,6 +162,7 @@
                     <i class="fa-solid fa-circle-info"></i>
                     <span>Leo can't view images on this instance yet. Reach out to <a href="mailto:support@llamapress.ai">support@llamapress.ai</a> to enable Leo to view and understand images.</span>
                 </div>
+                <button class="image-switch-banner-dismiss" data-llamabot="vision-disabled-dismiss" data-tooltip="Dismiss" aria-label="Dismiss">&times;</button>
             </div>
             <!-- Session feedback banner — appears once per thread after a few turns -->
             <div class="session-feedback-banner hidden" data-llamabot="session-feedback-banner">
@@ -239,6 +240,7 @@
                         <option value="gpt-5-mini" data-short-label="GPT-5">GPT-5 Mini</option>
                         <option value="gpt-5-nano" data-short-label="GPT-5 Nano">GPT-5 Nano</option>
                         <option value="gpt-5.4-nano" data-short-label="GPT-5.4 Nano">GPT-5.4 Nano</option>
+                        <option value="gpt-5.6-luna" data-short-label="GPT-5.6 Luna">GPT-5.6 Luna</option>
                         <option value="deepseek-v4-flash" data-short-label="DeepSeek" selected>DeepSeek V4 Flash</option>
                         <option value="deepseek-v4-pro" data-short-label="DeepSeek Pro">DeepSeek V4 Pro</option>
                         <option value="deepseek-v4-flash-gmi" data-short-label="DeepSeek GMI">DeepSeek V4 Flash (GMI)</option>
@@ -554,8 +556,20 @@
             const qs = (name) => document.querySelector(`[data-llamabot="${name}"]`);
             const wait = (ms) => new Promise(r => setTimeout(r, ms));
 
-            const overlay = qs('update-modal');
-            const pill = qs('update-pill');
+            // Resolve a handle that MUST exist, and complain loudly when it doesn't.
+            // A silent null here is what made SI#203 invisible for over a month.
+            const qsRequired = (name) => {
+                const el = qs(name);
+                if (!el) console.warn(`[llamabot] missing required element [data-llamabot="${name}"]`);
+                return el;
+            };
+
+            // NOTE: this <script> is inline and runs DURING parsing, but the modal and
+            // pill markup come hundreds of lines LATER in the document — so a
+            // parse-time querySelector returns null forever (SI#203: the Update Now
+            // button was dead fleet-wide). Resolve lazily, at call time.
+            const overlay = () => qsRequired('update-modal');
+            const pill = () => qsRequired('update-pill');
             let updateInProgress = false;
             let updateComplete = false;
             let updateFailed = false;
@@ -566,17 +580,18 @@
                     if (el) el.classList.toggle('hidden', s !== state);
                 });
             }
-            function openModal() { if (overlay) overlay.classList.remove('hidden'); }
-            function closeModal() { if (overlay) overlay.classList.add('hidden'); }
-            function modalOpen() { return overlay && !overlay.classList.contains('hidden'); }
+            function openModal() { const el = overlay(); if (el) el.classList.remove('hidden'); }
+            function closeModal() { const el = overlay(); if (el) el.classList.add('hidden'); }
+            function modalOpen() { const el = overlay(); return !!el && !el.classList.contains('hidden'); }
             function setPill(text, ready) {
-                if (!pill) return;
+                const el = pill();
+                if (!el) return;
                 const t = qs('update-pill-text');
                 if (t) t.textContent = text;
-                pill.classList.toggle('ready', !!ready);
-                pill.classList.remove('hidden');
+                el.classList.toggle('ready', !!ready);
+                el.classList.remove('hidden');
             }
-            function hidePill() { if (pill) pill.classList.add('hidden'); }
+            function hidePill() { const el = pill(); if (el) el.classList.add('hidden'); }
 
             function setStep(step, status) {
                 const li = document.querySelector(`[data-llamabot="update-steps"] [data-step="${step}"]`);

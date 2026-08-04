@@ -3,10 +3,11 @@
  * Supports both native WebSocket and ActionCable connections
  */
 
-import { getWebSocketUrl, getRailsUrl } from '../config.js';
+import { getWebSocketUrl } from '../config.js';
 import { ActionCableAdapter } from './ActionCableAdapter.js';
 import { TokenManager } from '../auth/TokenManager.js';
 
+import { leoDiagnostics } from '../utils/LeoDiagnostics.js';
 // Control messages that must NOT be queued for replay after a reconnect:
 //  - `auth` tokens are regenerated fresh on every (re)connect, so a stale one is useless.
 //  - `cancel` only means something for the run that was live when it was issued;
@@ -60,10 +61,12 @@ export class WebSocketManager {
     this.socket.onerror = (error) => this.handleError(error);
     this.socket.onmessage = (event) => this.handleMessage(event);
 
-    // Set initial iframe src for HTTPS
-    if (window.location.protocol === 'https:' && this.elements.liveSiteFrame) {
-      this.elements.liveSiteFrame.src = getRailsUrl();
-    }
+    // NOTE: this used to also set `liveSiteFrame.src = getRailsUrl()` on https — a
+    // leftover from before IframeManager existed. IframeManager.initIframeSources()
+    // owns that iframe now and runs FIRST in the same initComponents() pass, so the
+    // line was silently overwriting whatever the manager had just decided: the
+    // restored last page, and the Unified Login consume URL. The websocket layer has
+    // no business touching the preview iframe — don't put it back.
 
     return this.socket;
   }
@@ -99,6 +102,7 @@ export class WebSocketManager {
    */
   handleOpen() {
     this.updateConnectionStatus(true);
+    leoDiagnostics.noteOpen(this.socket ? this.socket.readyState : null);
     this.reconnectAttempts = 0;
 
     if (this.elements.sendButton) {
@@ -155,6 +159,12 @@ export class WebSocketManager {
       maxAttempts: this.maxReconnectAttempts
     };
     console.warn('WebSocket closed:', closeInfo);
+    leoDiagnostics.noteClose({
+      code: closeInfo.code,
+      reason: closeInfo.reason,
+      wasClean: closeInfo.wasClean,
+      readyState: this.socket ? this.socket.readyState : null,
+    });
 
     this.updateConnectionStatus(false);
 
@@ -184,6 +194,8 @@ export class WebSocketManager {
       readyState,
       event: error
     });
+
+    leoDiagnostics.noteError(readyState);
 
     // Emit custom event with error
     window.dispatchEvent(new CustomEvent('websocketError', { detail: error }));
@@ -283,6 +295,7 @@ export class WebSocketManager {
     } else {
       console.warn(`WebSocket not connected; queued message (${this.outbox.length} pending)`);
     }
+    leoDiagnostics.noteOutbox(this.outbox.length, 'queue');
   }
 
   /**
@@ -328,6 +341,7 @@ export class WebSocketManager {
     const pending = this.outbox;
     this.outbox = [];
     console.log(`Flushing ${pending.length} queued WebSocket message(s) after reconnect`);
+    leoDiagnostics.noteOutbox(0, 'flush');
     pending.forEach((data) => this.send(data));
   }
 
@@ -387,6 +401,7 @@ export class WebSocketManager {
     }
 
     this.reconnectAttempts += 1;
+    leoDiagnostics.noteReconnect(this.reconnectAttempts, this.maxReconnectAttempts);
     this.reconnectTimer = setTimeout(() => {
       this.connect();
     }, this.config.reconnectDelay || 3000);

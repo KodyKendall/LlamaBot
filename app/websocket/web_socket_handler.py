@@ -61,6 +61,41 @@ class WebSocketHandler:
         # we DETACH from these (so the run keeps going), we do not cancel them.
         self._attached_threads: set = set()
 
+        # Log correlation. Without these, an open/close pair in chat_app.log cannot
+        # be tied to the thread it was serving, which is exactly what made Lohman's
+        # "the connection is lost" feedback untriageable (2026-07-06).
+        self._init_connection_id()
+        self.current_thread_id = None
+        self.current_agent_name = None
+        self.current_llm_model = None
+
+    def _init_connection_id(self) -> None:
+        """Short, unique-per-socket id that every log line for this socket carries."""
+        import secrets
+        self.connection_id = secrets.token_hex(4)
+
+    def _log_ctx(self) -> str:
+        """`[ws=<conn> thread=<tid>]` prefix for this connection's log lines."""
+        tid = getattr(self, "current_thread_id", None)
+        return f"[ws={self.connection_id}" + (f" thread={tid}]" if tid else "]")
+
+    def _note_message_context(self, data) -> None:
+        """Remember thread/agent/model from an inbound frame for later log lines.
+
+        Only ever overwrites with a present value — a ping or control frame must not
+        wipe the correlation we already established.
+        """
+        if not isinstance(data, dict):
+            return
+        for attr, key in (
+            ("current_thread_id", "thread_id"),
+            ("current_agent_name", "agent_name"),
+            ("current_llm_model", "llm_model"),
+        ):
+            value = data.get(key)
+            if value:
+                setattr(self, attr, value)
+
     def _is_websocket_open(self, websocket: WebSocket) -> bool:
         """Check if the WebSocket connection is still open"""
         return websocket.client_state == WebSocketState.CONNECTED
@@ -97,7 +132,7 @@ class WebSocketHandler:
             }, self.websocket)
             return True
         else:
-            logger.warning(f"WebSocket auth failed from {self.websocket.client}")
+            logger.warning(f"{self._log_ctx()} WebSocket auth failed from {self.websocket.client}")
             await self.manager.send_personal_message({
                 "type": "auth_error",
                 "content": "Invalid or expired token"
@@ -222,7 +257,7 @@ class WebSocketHandler:
         }, self.websocket)
 
     async def handle_websocket(self):
-        logger.info(f"New WebSocket connection attempt from {self.websocket.client}")
+        logger.info(f"{self._log_ctx()} New WebSocket connection attempt from {self.websocket.client}")
         await self.manager.connect(self.websocket)
 
         # Track if we've sent an auth warning (only send once)
@@ -233,14 +268,22 @@ class WebSocketHandler:
                 try:
                     start_time = asyncio.get_event_loop().time()
 
-                    logger.info("Waiting for message from LlamaPress")
+                    logger.info(f"{self._log_ctx()} Waiting for message from LlamaPress")
                     json_data = await self.websocket.receive_json()
 
                     receive_time = asyncio.get_event_loop().time()
 
+                    # Capture thread/agent/model BEFORE any logging below, so every
+                    # subsequent line for this socket (incl. the disconnect) is
+                    # correlatable to the thread it was serving.
+                    self._note_message_context(json_data)
+
                     ### Warning: If LangGraph does await LLM calls appropriately, then this main thread can get blocked and will stop responding to pings from LlamaPress, ultimately killing the websocket connection.
-                    logger.info(f"Message received after {receive_time - start_time:.2f}s")
-                    logger.info(f"Received message from LlamaPress!")
+                    logger.info(f"{self._log_ctx()} Message received after {receive_time - start_time:.2f}s")
+                    logger.info(
+                        f"{self._log_ctx()} Received message from LlamaPress "
+                        f"(agent={self.current_agent_name} model={self.current_llm_model})"
+                    )
 
                     # Handle ping (always allowed, even unauthenticated)
                     if isinstance(json_data, dict) and json_data.get("type") == "ping":
@@ -256,7 +299,7 @@ class WebSocketHandler:
                         success = await self._handle_auth_message(json_data)
                         if not success and WS_AUTH_REQUIRED:
                             # Auth failed and required - close connection
-                            logger.warning(f"WebSocket auth failed, closing connection from {self.websocket.client}")
+                            logger.warning(f"{self._log_ctx()} WebSocket auth failed, closing connection from {self.websocket.client}")
                             break
                         continue
 
@@ -317,7 +360,7 @@ class WebSocketHandler:
                     if not self.authenticated:
                         if WS_AUTH_REQUIRED:
                             # Auth required but not authenticated - reject and close
-                            logger.warning(f"Unauthenticated message rejected from {self.websocket.client}")
+                            logger.warning(f"{self._log_ctx()} Unauthenticated message rejected from {self.websocket.client}")
                             await self.manager.send_personal_message({
                                 "type": "auth_error",
                                 "content": "Authentication required. Please refresh the page."
@@ -366,12 +409,12 @@ class WebSocketHandler:
                     await self.request_handler.start_chat_run(message, self.websocket)
                 except WebSocketDisconnect as e:
                     if e.code == 1000:
-                        logger.info(f"WebSocket connection closed gracefully by client: {e.reason}")
+                        logger.info(f"{self._log_ctx()} WebSocket closed gracefully by client: code={e.code} reason={e.reason}")
                     else:
-                        logger.warning(f"WebSocket disconnected with unexpected code: {e.code} {e.reason}")
+                        logger.warning(f"{self._log_ctx()} WebSocket disconnected unexpectedly: code={e.code} reason={e.reason}")
                     break
                 except Exception as e:
-                    logger.error(f"WebSocket error: {str(e)}")
+                    logger.error(f"{self._log_ctx()} WebSocket error: {str(e)}")
                     # Break on disconnect-related errors to avoid infinite loop
                     if "not connected" in str(e).lower() or not self._is_websocket_open(self.websocket):
                         break
@@ -382,7 +425,7 @@ class WebSocketHandler:
                             "content": f"Error 80: {str(e)}"
                         }, self.websocket)
         except Exception as e:
-            logger.error(f"WebSocket error: {str(e)}")
+            logger.error(f"{self._log_ctx()} WebSocket error: {str(e)}")
             # Only send error message if WebSocket is still open
             if self._is_websocket_open(self.websocket):
                 await self.manager.send_personal_message({

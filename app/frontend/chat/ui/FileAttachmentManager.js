@@ -31,6 +31,11 @@ export class FileAttachmentManager {
     this.attachMenu = null;
     // Optional callback invoked whenever attachments change (add/remove/clear).
     this.onChange = null;
+    // Operator gate: when the instance has vision disabled, images are refused
+    // at attach time — an image Leo can't read is dead weight in the composer.
+    // onImageBlocked fires once per selection so the UI can explain why.
+    this.blockImages = false;
+    this.onImageBlocked = null;
   }
 
   /**
@@ -824,8 +829,15 @@ export class FileAttachmentManager {
    */
   async handleFileSelect(fileList) {
     const files = Array.from(fileList);
+    let refusedImage = false;
 
     for (const file of files) {
+      // Vision disabled by the operator: drop images before they attach.
+      if (this.blockImages && (file.type || '').startsWith('image/')) {
+        refusedImage = true;
+        continue;
+      }
+
       // Validate file type
       if (!ALLOWED_TYPES[file.type]) {
         console.warn(`File type not allowed: ${file.type}`);
@@ -856,6 +868,8 @@ export class FileAttachmentManager {
 
     // Clear the input so the same file can be selected again
     this.fileInput.value = '';
+
+    if (refusedImage && this.onImageBlocked) this.onImageBlocked();
 
     // Update the preview
     this.renderPreview();

@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
+from app.db import engine
 from app.models import User, ScheduledJob, ScheduledJobRun, SchedulerInvocationLog
 from app.dependencies import get_db_session, admin_required, engineer_or_admin_required
 
@@ -135,13 +136,16 @@ security = HTTPBasic(auto_error=False)
 def scheduler_auth(
     x_scheduler_token: Optional[str] = Header(None),
     credentials: Optional[HTTPBasicCredentials] = Depends(security),
-    session: Session = Depends(get_db_session)
 ) -> Optional[User]:
     """
     Allow either scheduler token OR user auth for invoking scheduled jobs.
 
     For cron invocations: Use X-Scheduler-Token header
     For manual invocations: Use standard HTTP Basic Auth
+
+    Takes no request-scoped session on purpose (SupportIncident #137): a
+    `Depends(get_db_session)` session stays checked out for the ENTIRE request, so the
+    basic-auth lookup would pin an open transaction across the whole `/invoke` agent run.
     """
     # First check scheduler token
     if x_scheduler_token:
@@ -159,7 +163,9 @@ def scheduler_auth(
         )
 
     from app.services.user_service import authenticate_user
-    user = authenticate_user(session, credentials.username, credentials.password)
+    # Short-lived session: the transaction ends here, before the agent run starts.
+    with Session(engine) as auth_session:
+        user = authenticate_user(auth_session, credentials.username, credentials.password)
     if not user:
         raise HTTPException(
             status_code=401,
@@ -374,17 +380,45 @@ async def run_job_manually(
 
 # ============== Cron Invocation Endpoint ==============
 
+def _save_invocation_log(invocation_log: SchedulerInvocationLog, start_time: datetime) -> None:
+    """Persist the invocation log in its own short-lived session.
+
+    Best-effort: losing an audit row must never turn a successful poll into a 500.
+    """
+    invocation_log.duration_ms = int(
+        (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
+    )
+    try:
+        with Session(engine) as s:
+            s.add(invocation_log)
+            s.commit()
+    except Exception as e:  # pragma: no cover - audit write, not the critical path
+        logger.error(f"Failed to persist scheduler invocation log: {e}", exc_info=True)
+
+
 @router.post("/invoke", response_class=JSONResponse)
 async def invoke_due_jobs(
     request: Request,
     user: Optional[User] = Depends(scheduler_auth),
-    session: Session = Depends(get_db_session)
 ):
     """
     Cron invocation endpoint - check and run all due jobs.
 
     Called by host crontab every minute via:
     curl -X POST http://localhost:8080/api/scheduled-jobs/invoke -H "X-Scheduler-Token: $TOKEN"
+
+    NOTE (SupportIncident #137): this endpoint deliberately takes NO request-scoped
+    session. It used to read the due-jobs list on a `Depends(get_db_session)` session
+    and then hold that open transaction across `await execute_agent_headless(...)`.
+    The connection sat `idle in transaction` for the whole agent run — and if that run
+    hung (which it does once the pool is under pressure, since the executor needs
+    checkpointer connections itself) the connection was pinned forever. One leak per
+    minute-ly cron poll compounded until the pool was dry, at which point the LangGraph
+    Postgres checkpointer blocked forever and every chat turn went silently dead.
+
+    The invariant: **no pool connection is checked out while an agent run is awaited.**
+    Every DB touch below lives in its own short-lived `with Session(engine)` block, and
+    job rows are copied into plain dicts so nothing lazy-loads mid-await.
     """
     start_time = datetime.now(timezone.utc)
 
@@ -399,20 +433,35 @@ async def invoke_due_jobs(
     try:
         now = start_time
 
-        # Find enabled jobs where next_run_at <= now
-        stmt = select(ScheduledJob).where(
-            ScheduledJob.is_enabled == True,
-            ScheduledJob.next_run_at <= now
-        )
-        due_jobs = session.exec(stmt).all()
+        # --- Read due jobs in a short-lived unit, then let go of the connection. ---
+        # Detach into plain dicts so the loop below never touches the ORM (a lazy
+        # refresh during the await would re-open exactly the transaction we're avoiding).
+        with Session(engine) as read_session:
+            stmt = select(ScheduledJob).where(
+                ScheduledJob.is_enabled == True,  # noqa: E712 - SQLModel needs ==
+                ScheduledJob.next_run_at <= now
+            )
+            due_jobs = [
+                {
+                    "id": job.id,
+                    "name": job.name,
+                    "agent_name": job.agent_name,
+                    "prompt": job.prompt,
+                    "llm_model": job.llm_model,
+                    "max_duration_seconds": job.max_duration_seconds,
+                    "recursion_limit": job.recursion_limit,
+                    "cron_expression": job.cron_expression,
+                    "timezone": job.timezone,
+                }
+                for job in read_session.exec(stmt).all()
+            ]
+
         invocation_log.jobs_checked = len(due_jobs)
 
         if not due_jobs:
             invocation_log.status = "no_jobs_due"
             invocation_log.jobs_executed = 0
-            invocation_log.duration_ms = int((datetime.now(timezone.utc) - start_time).total_seconds() * 1000)
-            session.add(invocation_log)
-            session.commit()
+            _save_invocation_log(invocation_log, start_time)
             return {"jobs_executed": 0, "message": "No jobs due"}
 
         from app.services.headless_agent_executor import execute_agent_headless
@@ -420,45 +469,49 @@ async def invoke_due_jobs(
         results = []
         for job in due_jobs:
             try:
-                logger.info(f"Cron triggering job: {job.name} (id={job.id})")
+                logger.info(f"Cron triggering job: {job['name']} (id={job['id']})")
 
+                # No session is open here — see the note in the docstring.
                 run = await execute_agent_headless(
-                    agent_name=job.agent_name,
-                    prompt=job.prompt,
-                    llm_model=job.llm_model,
-                    job_id=job.id,
+                    agent_name=job["agent_name"],
+                    prompt=job["prompt"],
+                    llm_model=job["llm_model"],
+                    job_id=job["id"],
                     trigger_type="cron",
-                    max_duration_seconds=job.max_duration_seconds,
-                    recursion_limit=job.recursion_limit,
+                    max_duration_seconds=job["max_duration_seconds"],
+                    recursion_limit=job["recursion_limit"],
                     app=request.app,
                     triggered_by_user_id=None  # Cron has no user context
                 )
 
-                # Update job timing
-                job.last_run_at = datetime.now(timezone.utc)
-                job.next_run_at = _calculate_next_run(job.cron_expression, job.timezone)
-                session.add(job)
+                # Update job timing in its own short-lived transaction.
+                next_run = _calculate_next_run(job["cron_expression"], job["timezone"])
+                with Session(engine) as write_session:
+                    row = write_session.get(ScheduledJob, job["id"])
+                    if row:
+                        row.last_run_at = datetime.now(timezone.utc)
+                        row.next_run_at = next_run
+                        write_session.add(row)
+                        write_session.commit()
 
                 results.append({
-                    "job_id": job.id,
-                    "job_name": job.name,
+                    "job_id": job["id"],
+                    "job_name": job["name"],
                     "status": run.status if run else "unknown",
                     "run_id": run.id if run else None
                 })
             except Exception as e:
-                logger.error(f"Cron job {job.id} failed: {e}", exc_info=True)
+                logger.error(f"Cron job {job['id']} failed: {e}", exc_info=True)
                 results.append({
-                    "job_id": job.id,
-                    "job_name": job.name,
+                    "job_id": job["id"],
+                    "job_name": job["name"],
                     "status": "error",
                     "error": str(e)[:200]
                 })
 
         invocation_log.status = "success"
         invocation_log.jobs_executed = len(results)
-        invocation_log.duration_ms = int((datetime.now(timezone.utc) - start_time).total_seconds() * 1000)
-        session.add(invocation_log)
-        session.commit()
+        _save_invocation_log(invocation_log, start_time)
 
         return {
             "jobs_executed": len(results),
@@ -470,9 +523,7 @@ async def invoke_due_jobs(
         invocation_log.status = "error"
         invocation_log.error_type = type(e).__name__
         invocation_log.error_message = str(e)[:2000]
-        invocation_log.duration_ms = int((datetime.now(timezone.utc) - start_time).total_seconds() * 1000)
-        session.add(invocation_log)
-        session.commit()
+        _save_invocation_log(invocation_log, start_time)
 
         logger.error(f"Invoke endpoint failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
