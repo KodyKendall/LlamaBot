@@ -98,6 +98,7 @@ _KNOWN_MODELS = [
     "gpt-5-mini",
     "gpt-5-nano",
     "gpt-5.4-nano",
+    "gpt-5.6-luna",
     "gemini-3-flash",
     "gemini-3-pro",
     "gemini-3.1-flash-lite",

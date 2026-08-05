@@ -28,6 +28,7 @@ import logging
 # Import the same tools, state, and prompt used by the main agent
 from app.agents.leonardo.rails_agent.state import RailsAgentState
 from app.agents.leonardo.rails_agent.prompts import RAILS_AGENT_PROMPT
+from app.agents.leonardo.friction import report_friction, with_friction_section
 from app.agents.leonardo.rails_agent.tools import (
     write_todos, ls, read_file, write_file, edit_file,
     bash_command, git_status, git_commit,
@@ -168,7 +169,9 @@ Return findings in clear, structured format:
 def get_research_system_prompt():
     """Build system message for research-only sub-agent with prompt caching."""
     current_date = date.today().strftime("%Y-%m-%d")
-    prompt_with_date = f"{RESEARCH_ONLY_PROMPT}\n\n---\n**Today's Date:** {current_date}"
+    prompt_with_date = with_friction_section(
+        f"{RESEARCH_ONLY_PROMPT}\n\n---\n**Today's Date:** {current_date}"
+    )
     return SystemMessage(
         content=[
             {
@@ -185,7 +188,7 @@ CACHED_SYSTEM_PROMPT = SystemMessage(
     content=[
         {
             "type": "text",
-            "text": RAILS_AGENT_PROMPT,
+            "text": with_friction_section(RAILS_AGENT_PROMPT),
             "cache_control": {"type": "ephemeral"}
         }
     ]
@@ -223,6 +226,11 @@ def create_sub_agent(llm_model: str = None):
         bash_command,
         # git_status, git_commit, git_command, github_cli_command,  # Disabled to prevent auto-commits
         internet_search,
+        # Papercut channel. Sub-agents run in isolated context, so friction they
+        # hit is exactly the friction the main agent never sees — and their
+        # config (and thus thread_id) is inherited, so they share the parent
+        # conversation's report budget rather than getting a fresh one.
+        report_friction,
         # Note: delegate_task is NOT included to prevent infinite recursion
     ]
 
@@ -366,6 +374,7 @@ def create_research_sub_agent(llm_model: str = None):
         grep_files,   # Search file contents
         bash_command, # For read-only Rails queries (e.g., rails runner)
         internet_search,  # Search the web for documentation/solutions
+        report_friction,  # Telemetry about OUR tooling, not a write to the user's project
         # NO write_file - cannot write files
         # NO edit_file - cannot edit files
         # NO git tools - cannot make commits

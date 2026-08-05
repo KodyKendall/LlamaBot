@@ -41,6 +41,7 @@ from app.agents.leonardo.rails_agent.tools import (
 )
 from app.agents.leonardo.rails_plan_mode_agent.prompts import PLAN_MODE_AGENT_PROMPT
 from app.agents.leonardo.project_context import build_beginner_system_prompt
+from app.agents.leonardo.friction import report_friction, with_friction_section
 from app.agents.leonardo.rails_plan_mode_agent.middleware import (
     inject_view_context,
     inject_plan_mode_context,
@@ -98,11 +99,11 @@ def get_cached_system_prompt():
     """Build system message with project context, personality files, date, and prompt caching."""
     current_date = date.today().strftime("%Y-%m-%d")
     date_suffix = f"\n\n---\n**Today's Date:** {current_date}"
-    full_prompt = build_beginner_system_prompt(
+    full_prompt = with_friction_section(build_beginner_system_prompt(
         PLAN_MODE_AGENT_PROMPT,
         suffix=date_suffix,
         agent_mode="rails_plan_mode_agent",
-    )
+    ))
 
     return SystemMessage(
         content=[
@@ -287,6 +288,7 @@ default_tools = [
     save_memory, list_memories, delete_memory,
     list_skills, read_skill, write_skill, edit_skill, delete_skill,  # Skill library
     write_personality_file,
+    report_friction,     # Papercut channel back to the LlamaPress team
     # Sub-agent delegation
     delegate_task, delegate_research,
 ]

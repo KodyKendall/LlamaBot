@@ -1,4 +1,6 @@
 """Git-based checkpoint service for code rollback functionality."""
+import logging
+import os
 import subprocess
 import re
 from datetime import datetime, timezone
@@ -9,9 +11,39 @@ from app.models import CheckpointInfo
 from app.db import engine
 from sqlmodel import Session
 
+logger = logging.getLogger(__name__)
+
 
 # Path to Leonardo repo (mounted in container)
 LEONARDO_PATH = Path("/app/leonardo")
+
+# The Leonardo agent runs as uid 1000. git in this container runs as root, so every
+# `reset --hard` / `checkout -- .` / `clean -fd` rewrites files as root:root and the
+# agent then silently fails on its next edit. Same uid convention as
+# `rails_agent/tools.py:chown_for_ubuntu`.
+UBUNTU_UID = 1000
+UBUNTU_GID = 1000
+
+# Never walk into these — .git is git's own business, node_modules is tens of
+# thousands of files (LlamaPress-Simple b855115 hit exactly that stall at boot).
+_OWNERSHIP_SKIP_DIRS = {".git", "node_modules"}
+
+# Platform paths, i.e. the files `bin/update` installs rather than the customer's app.
+# A checkpoint commits the WHOLE tree, so a restore to a pre-update checkpoint would
+# otherwise revert the platform on disk while the containers keep running the new
+# images (leo-palevi-dev, 2026-07-27: reverted bin/update, the compose file, the
+# langgraph registry and two applied migrations).
+#
+# This list is deliberately NOT invented here — it mirrors the ALLOWLIST in Leonardo's
+# `bin/update` (bin/update:76). Keep the two in sync; if bin/update's allowlist grows,
+# grow this one in the same change.
+PLATFORM_PATHS = [
+    "bin",
+    "rails/db/migrate",
+    "langgraph/langgraph.json",
+    "docker-compose.yml",
+    "rails/app/javascript/llamapress",
+]
 
 
 def _configure_git_safe_directory():
@@ -33,6 +65,121 @@ def _configure_git_safe_directory():
 
 # Configure safe directory on module load
 _configure_git_safe_directory()
+
+
+def _chown_path(path: str) -> bool:
+    """lchown one path back to the agent user. Best-effort; never raises."""
+    try:
+        st = os.lstat(path)
+        if st.st_uid == UBUNTU_UID and st.st_gid == UBUNTU_GID:
+            return False
+        os.lchown(path, UBUNTU_UID, UBUNTU_GID)   # lchown: never follow symlinks
+        return True
+    except (OSError, PermissionError):
+        return False
+
+
+def _existing_platform_paths(ref: str) -> List[str]:
+    """The PLATFORM_PATHS that actually exist at `ref`.
+
+    `git checkout <ref> -- <path>` errors on a pathspec that doesn't exist there, and
+    a young repo legitimately lacks some of these.
+    """
+    present = []
+    for path in PLATFORM_PATHS:
+        result = subprocess.run(
+            ["git", "-C", str(LEONARDO_PATH), "cat-file", "-e", f"{ref}:{path}"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            present.append(path)
+    return present
+
+
+def _reapply_platform_files(pre_rollback_head: str) -> List[str]:
+    """Put the platform back the way it was, after a rollback moved it.
+
+    Returns the list of files restored (empty when the checkpoint carried the same
+    platform, which is the common case — a same-day restore). Best-effort: the
+    customer's code is already back, so a failure here is logged, not raised.
+    """
+    paths = _existing_platform_paths(pre_rollback_head)
+    if not paths:
+        return []
+
+    try:
+        checkout = subprocess.run(
+            ["git", "-C", str(LEONARDO_PATH), "checkout", pre_rollback_head, "--", *paths],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if checkout.returncode != 0:
+            logger.error(f"Platform re-apply checkout failed: {checkout.stderr}")
+            return []
+
+        changed = subprocess.run(
+            ["git", "-C", str(LEONARDO_PATH), "diff", "--cached", "--name-only"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        restored = [f for f in changed.stdout.splitlines() if f.strip()]
+        if not restored:
+            # Checkpoint had the same platform — nothing to commit, no noise commit.
+            return []
+
+        commit = subprocess.run(
+            [
+                "git", "-C", str(LEONARDO_PATH), "commit",
+                "-m",
+                "🔧 Re-apply platform files after restore\n\n"
+                "A checkpoint commits the whole tree, so restoring one also moves the\n"
+                "platform files bin/update installs. The containers keep running the\n"
+                "current images, so the platform is put back to match them. Your\n"
+                "application code is restored as requested.\n\n"
+                f"Files: {', '.join(restored)}",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if commit.returncode != 0:
+            logger.error(f"Platform re-apply commit failed: {commit.stderr}")
+            return []
+
+        logger.info(f"Re-applied {len(restored)} platform file(s) after rollback")
+        return restored
+    except (subprocess.TimeoutExpired, OSError) as e:
+        logger.error(f"Platform re-apply failed: {e}")
+        return []
+
+
+def _restore_ubuntu_ownership() -> int:
+    """Give the working tree back to uid 1000 after a root-run git write.
+
+    Walks the tree rather than chowning the paths `git diff --name-only` reports:
+    that list is a LOWER BOUND, not the set git actually rewrites. A chown updates
+    ctime, which invalidates git's stat cache, so `reset --hard` re-checks-out
+    entries whose content never changed. Measured: a two-commit repo where only
+    `a.txt` differed still came back with `bin/update` owned by root.
+
+    `.git` and `node_modules` are skipped — `.git` is git's own bookkeeping, and a
+    recursive walk of node_modules is the boot stall LlamaPress-Simple hit in
+    b855115 ("two-pass setfacl so boot isn't blocked by node_modules walk").
+
+    Best-effort by design: a restore that worked must not be reported as a failure
+    because a chown was refused. Returns the number of paths changed.
+    """
+    changed = 0
+    for dirpath, dirnames, filenames in os.walk(LEONARDO_PATH):
+        dirnames[:] = [d for d in dirnames if d not in _OWNERSHIP_SKIP_DIRS]
+        for name in dirnames + filenames:
+            if _chown_path(os.path.join(dirpath, name)):
+                changed += 1
+    return changed
 
 
 class CheckpointService:
@@ -213,14 +360,22 @@ Timestamp: {timestamp}
             raise Exception(f"Failed to get diff: {str(e)}")
 
     @staticmethod
-    def rollback_to_checkpoint(checkpoint_id: str) -> bool:
+    def rollback_to_checkpoint(checkpoint_id: str, report: bool = False):
         """Rollback to a specific checkpoint (hard reset).
+
+        A checkpoint commits the WHOLE Leonardo tree — the customer's application AND
+        the platform files `bin/update` installs. Restoring a checkpoint taken before a
+        platform update would therefore silently revert the platform on disk while the
+        containers keep running the new images. So after the reset we put the platform
+        paths back from the pre-rollback HEAD, as one labelled commit: the customer gets
+        his application code back and keeps a working platform.
 
         Args:
             checkpoint_id: Git commit SHA to rollback to
+            report: When True, return a dict describing what happened instead of a bool.
 
         Returns:
-            True if successful
+            True if successful (or a dict when ``report=True``)
 
         Raises:
             Exception: If rollback fails
@@ -237,6 +392,14 @@ Timestamp: {timestamp}
             if check_result.returncode != 0:
                 raise Exception(f"Checkpoint {checkpoint_id} does not exist")
 
+            # Remember where the platform currently is, BEFORE the reset moves it.
+            pre_rollback_head = subprocess.run(
+                ["git", "-C", str(LEONARDO_PATH), "rev-parse", "HEAD"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            ).stdout.strip()
+
             # Hard reset to checkpoint
             reset_result = subprocess.run(
                 ["git", "-C", str(LEONARDO_PATH), "reset", "--hard", checkpoint_id],
@@ -248,6 +411,18 @@ Timestamp: {timestamp}
             if reset_result.returncode != 0:
                 raise Exception(f"Git reset failed: {reset_result.stderr}")
 
+            # Put the platform back where the running containers expect it.
+            platform_files = (
+                _reapply_platform_files(pre_rollback_head) if pre_rollback_head else []
+            )
+
+            # git ran as root, so every rewritten file is now root-owned and the
+            # uid-1000 agent can no longer edit it (leo-palevi-dev, 2026-07-27).
+            # Runs LAST so it also covers the platform re-apply.
+            fixed = _restore_ubuntu_ownership()
+            if fixed:
+                logger.info(f"Restored agent ownership on {fixed} path(s) after rollback")
+
             # Clean untracked files (optional, commented out for safety)
             # clean_result = subprocess.run(
             #     ["git", "-C", str(LEONARDO_PATH), "clean", "-fd"],
@@ -256,6 +431,12 @@ Timestamp: {timestamp}
             #     timeout=10
             # )
 
+            if report:
+                return {
+                    "success": True,
+                    "checkpoint_id": checkpoint_id,
+                    "platform_files_reapplied": platform_files,
+                }
             return True
 
         except subprocess.TimeoutExpired:
@@ -463,6 +644,12 @@ Timestamp: {timestamp}
 
             if clean_result.returncode != 0:
                 raise Exception(f"Git clean failed: {clean_result.stderr}")
+
+            # Both git calls above ran as root, so anything `checkout` restored is
+            # now root-owned; hand the tree back to the agent user.
+            fixed = _restore_ubuntu_ownership()
+            if fixed:
+                logger.info(f"Restored agent ownership on {fixed} path(s) after discard")
 
             return {
                 "success": True,

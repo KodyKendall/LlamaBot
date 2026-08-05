@@ -34,6 +34,65 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def emitted_tool_calls(msg) -> list:
+    """Every tool call the serializer puts ON THE WIRE for an ``AIMessage``.
+
+    ``langchain_openai`` emits ``tool_calls + invalid_tool_calls``, but every
+    executor (``ToolNode``, ``create_agent``'s tool router) iterates
+    ``tool_calls`` only. So a call whose ``arguments`` JSON did not parse — a
+    response truncated at ``max_tokens`` mid-``write_file``, or DeepSeek emitting
+    malformed args — is announced to the provider, never executed, and therefore
+    never answered by a ``ToolMessage``. Repairs must scan what is emitted, not
+    what is executable, or they see nothing wrong while the thread 400s forever.
+    """
+    return (
+        list(getattr(msg, "tool_calls", None) or [])
+        + list(getattr(msg, "invalid_tool_calls", None) or [])
+    )
+
+
+def _drop_idless_tool_calls(msg):
+    """Return ``(msg, changed)`` with any id-less tool call removed.
+
+    A tool call carrying a null/empty ``id`` is still serialized (as
+    ``'id': None``) yet no ``ToolMessage`` can ever answer it — ``tool_call_id``
+    must be a string. The only repair is to not send it at all, which costs
+    nothing: with no id it was unroutable anyway.
+    """
+    tool_calls = list(getattr(msg, "tool_calls", None) or [])
+    invalid_calls = list(getattr(msg, "invalid_tool_calls", None) or [])
+    kept_calls = [tc for tc in tool_calls if tc.get("id")]
+    kept_invalid = [tc for tc in invalid_calls if tc.get("id")]
+    if len(kept_calls) == len(tool_calls) and len(kept_invalid) == len(invalid_calls):
+        return msg, False
+
+    logger.warning(
+        "repair_orphaned_tool_calls: dropping %d tool call(s) with no id from "
+        "AIMessage id=%s — they can never be answered",
+        (len(tool_calls) - len(kept_calls)) + (len(invalid_calls) - len(kept_invalid)),
+        getattr(msg, "id", "?"),
+    )
+
+    update = {"tool_calls": kept_calls, "invalid_tool_calls": kept_invalid}
+    # The serializer falls back to `additional_kwargs["tool_calls"]` when both
+    # lists are empty, so the raw copy has to be filtered too or the id-less call
+    # comes straight back on the wire.
+    extra = getattr(msg, "additional_kwargs", None) or {}
+    if extra.get("tool_calls"):
+        kept_raw = [
+            rc for rc in extra["tool_calls"]
+            if isinstance(rc, dict) and rc.get("id")
+        ]
+        new_extra = dict(extra)
+        if kept_raw:
+            new_extra["tool_calls"] = kept_raw
+        else:
+            new_extra.pop("tool_calls", None)
+        update["additional_kwargs"] = new_extra
+
+    return msg.model_copy(update=update), True
+
+
 def repair_orphaned_tool_calls_in_messages(messages: list) -> list:
     """Return ``messages`` with a synthetic placeholder ``ToolMessage`` injected
     after any ``AIMessage`` tool_call that has no matching ``ToolMessage``.
@@ -43,6 +102,10 @@ def repair_orphaned_tool_calls_in_messages(messages: list) -> list:
     up with an ``AIMessage`` carrying ``tool_calls`` but no matching
     ``ToolMessage``s, permanently breaking all future turns in that thread (the
     provider rejects the history with ``400 insufficient tool messages``).
+
+    ``invalid_tool_calls`` (malformed args JSON) are repaired the same way — see
+    :func:`emitted_tool_calls` for why they are just as fatal — and an id-less
+    call, which nothing can answer, is dropped from the outgoing message.
 
     This scans the whole thread and injects placeholders so the history is valid
     before the model sees it. Idempotent: returns the SAME list object when
@@ -56,32 +119,45 @@ def repair_orphaned_tool_calls_in_messages(messages: list) -> list:
     }
 
     result = []
-    any_injected = False
+    any_repaired = False
     for msg in messages:
-        result.append(msg)
-        if isinstance(msg, AIMessage) and getattr(msg, "tool_calls", None):
-            missing = [
-                tc for tc in msg.tool_calls
-                if tc.get("id") and tc["id"] not in responded_ids
-            ]
-            for tc in missing:
-                logger.warning(
-                    "repair_orphaned_tool_calls: injecting placeholder "
-                    "ToolMessage for orphaned tool_call_id=%s name=%s",
-                    tc["id"], tc.get("name", "?"),
-                )
-                result.append(ToolMessage(
-                    content=(
-                        "Tool call did not complete — the tool may have crashed "
-                        "(e.g. missing API key) or been interrupted. The operator "
-                        "should check the server logs for the root cause."
-                    ),
-                    tool_call_id=tc["id"],
-                ))
-                responded_ids.add(tc["id"])
-                any_injected = True
+        if isinstance(msg, AIMessage) and emitted_tool_calls(msg):
+            msg, dropped = _drop_idless_tool_calls(msg)
+            any_repaired = any_repaired or dropped
 
-    return result if any_injected else messages
+        result.append(msg)
+        if not isinstance(msg, AIMessage):
+            continue
+
+        missing = [
+            tc for tc in emitted_tool_calls(msg)
+            if tc.get("id") and tc["id"] not in responded_ids
+        ]
+        for tc in missing:
+            is_invalid = bool(tc.get("error")) or tc.get("type") == "invalid_tool_call"
+            logger.warning(
+                "repair_orphaned_tool_calls: injecting placeholder ToolMessage "
+                "for %s tool_call_id=%s name=%s",
+                "malformed" if is_invalid else "orphaned",
+                tc["id"], tc.get("name", "?"),
+            )
+            result.append(ToolMessage(
+                content=(
+                    "Tool call was not executed — its arguments were not valid "
+                    "JSON (often a response cut off at the token limit mid-call). "
+                    "Call the tool again with complete, valid arguments, splitting "
+                    "the work into smaller calls if the payload was large."
+                ) if is_invalid else (
+                    "Tool call did not complete — the tool may have crashed "
+                    "(e.g. missing API key) or been interrupted. The operator "
+                    "should check the server logs for the root cause."
+                ),
+                tool_call_id=tc["id"],
+            ))
+            responded_ids.add(tc["id"])
+            any_repaired = True
+
+    return result if any_repaired else messages
 
 
 class RepairOrphanedToolCallsMiddleware(AgentMiddleware):

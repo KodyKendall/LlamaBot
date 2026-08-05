@@ -29,6 +29,8 @@ MODEL_CAPABILITIES = {
     'gpt-5-mini': {'images': True, 'video': False, 'pdf': False},
     'gpt-5-nano': {'images': True, 'video': False, 'pdf': False},
     'gpt-5.4-nano': {'images': True, 'video': False, 'pdf': False},
+    # GPT-5.6 family: text + image input (no video/pdf), per the OpenAI model card.
+    'gpt-5.6-luna': {'images': True, 'video': False, 'pdf': False},
 
     # DeepSeek - primarily text focused
     'deepseek-v4-flash': {'images': False, 'video': False, 'pdf': False},

@@ -1938,9 +1938,15 @@ def delete_memory(
             }
         )
     else:
+        # Covers blank/invalid/out-of-tree filenames too, so the LLM self-corrects
+        # instead of retrying the same bad argument.
         return Command(
             update={
-                "messages": [ToolMessage(f"Memory not found: {filename}", tool_call_id=tool_call_id)]
+                "messages": [ToolMessage(
+                    f"Invalid or unknown memory filename: {filename!r}. "
+                    "Call list_memories to get exact filenames first.",
+                    tool_call_id=tool_call_id,
+                )]
             }
         )
 

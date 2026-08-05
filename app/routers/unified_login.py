@@ -119,14 +119,21 @@ async def resolve_shadow_user(
 ) -> User:
     """Resolve (or provision) the local shadow user for a verified grant.
 
-    Order matters and NEVER keys by email:
+    Order matters, and matching is NEVER done by email:
       1. Match by ``llamapress_user_guid`` — sync email/display_name if drifted.
+         Never renames an existing account.
       2. Else adopt ``link_username`` ONE TIME: if that account exists with a
          NULL guid, stamp the guid onto it (preserves thread history and
          visible_agents from the claim-time admin user). If it's already linked
          to a DIFFERENT guid, that's a data-integrity smell — report and fall
          through to (3) rather than hijack it.
-      3. Else create a fresh ``lp-<guid[:12]>`` user with an unusable password.
+      3. Else create a fresh user with an unusable password, *named* after the
+         mothership-verified email (falling back to ``lp-<guid[:12]>``).
+
+    Note the distinction in (3): the email is used to NAME a new account, never to
+    FIND an existing one. Naming is safe because ``payload`` only exists after
+    ``grant_redeemer`` verified it server-to-server; matching on it would be the
+    spoofable email-login this function deliberately avoids.
     """
     user_obj = payload.get("user") or {}
     guid = user_obj.get("guid")
@@ -182,10 +189,14 @@ async def resolve_shadow_user(
                 traceback_str="",
             )
 
-    # 3. Create a fresh shadow user. Username is derived from the guid, NEVER the
-    #    email. Unusable password (bcrypt of 32 random bytes) keeps password_hash
-    #    NOT NULL while making local password login impossible for this user.
-    username = f"lp-{(guid or secrets.token_hex(8))[:12]}"
+    # 3. Create a fresh shadow user. Prefer the mothership-VERIFIED email as the
+    #    username — it arrives server-to-server over the bearer channel after
+    #    grant_redeemer succeeds, so it is not user input, and `alice@corp.com` beats
+    #    `lp-a1b2c3d4e5f6` everywhere an operator has to recognize the account. Falls
+    #    back to lp-<guid> when the grant carries no email. Unusable password (bcrypt
+    #    of 32 random bytes) keeps password_hash NOT NULL while making local password
+    #    login impossible for this user.
+    username = email or f"lp-{(guid or secrets.token_hex(8))[:12]}"
     if get_user_by_username(session, username) is not None:
         username = f"{username}-{secrets.token_hex(2)}"
     new_user = User(

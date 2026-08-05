@@ -116,6 +116,30 @@ class ChatDeepSeekWithReasoning(ChatDeepSeek):
         return payload
 
 
+def supports_prompt_caching(model_name: str) -> bool:
+    """Whether this model accepts Anthropic's ephemeral prompt-caching kwarg.
+
+    Single source of truth — do not re-derive with a literal `startswith("claude")`
+    at a call site. `cache_control=` is Anthropic-only; passing it to an
+    OpenAI-compatible client (deepseek, gpt, most of the fleet) raises
+    `TypeError: Completions.create() got an unexpected keyword argument
+    'cache_control'` and 500s every agent turn on that box.
+    """
+    return (model_name or "").startswith(("claude", "anthropic"))
+
+
+def invoke_with_cache(runnable, messages, model_name: str):
+    """Invoke `runnable`, adding Anthropic ephemeral caching only where supported.
+
+    Prefer attaching `cache_control` to a SystemMessage *content block* (see
+    `rails_agent/nodes.py:get_sys_msg`) — non-Anthropic providers ignore that
+    harmlessly. Use this helper when the kwarg form is genuinely needed.
+    """
+    if supports_prompt_caching(model_name):
+        return runnable.invoke(messages, cache_control={"type": "ephemeral"})
+    return runnable.invoke(messages)
+
+
 def get_llm(model_name: str):
     """Build a configured chat model for the given frontend model name.
 
@@ -240,6 +264,17 @@ def get_llm(model_name: str):
     if model_name == "gpt-5.4-nano":
         return ChatOpenAI(
             model="gpt-5.4-nano",
+            use_responses_api=True,
+            reasoning={"effort": "low", "summary": "auto"},
+            output_version="responses/v1",
+            max_retries=0,
+        )
+    if model_name == "gpt-5.6-luna":
+        # `gpt-5.6-luna`, NOT the bare `gpt-5.6` alias — that alias routes to Sol,
+        # a different (and much pricier) tier of the same family. Luna is the
+        # cost/latency tier, roughly where nano sat in the GPT-5 family.
+        return ChatOpenAI(
+            model="gpt-5.6-luna",
             use_responses_api=True,
             reasoning={"effort": "low", "summary": "auto"},
             output_version="responses/v1",

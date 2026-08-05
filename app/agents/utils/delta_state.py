@@ -98,7 +98,7 @@ def messages_delta_reducer(state, writes):
 # Write a full snapshot every N updates to the channel. Higher = less storage but
 # more deltas to replay on resume; lower = bounded replay latency at the cost of
 # more (small) snapshot blobs. 50 keeps reconstruction cheap even for long runs
-# (recursion_limit is 450) while staying far below the per-checkpoint cost of the
+# (recursion_limit is 900) while staying far below the per-checkpoint cost of the
 # old full-serialization model. SummarizationMiddleware keeps the live message
 # list small, so each snapshot blob is tiny.
 DELTA_SNAPSHOT_FREQUENCY = 50

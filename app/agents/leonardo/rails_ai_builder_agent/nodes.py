@@ -30,7 +30,7 @@ from app.agents.leonardo.rails_agent.tools import (
 from app.agents.leonardo.rails_agent.sub_agents import delegate_research
 from app.agents.leonardo.rails_ai_builder_agent.prompts import RAILS_AI_BUILDER_AGENT_PROMPT
 from app.agents.leonardo.project_context import build_system_prompt_with_project_context, brand_context_section
-from app.agents.leonardo.llm_factory import get_llm
+from app.agents.leonardo.llm_factory import get_llm, invoke_with_cache
 from app.agents.leonardo.agent_factory import repair_orphaned_tool_calls_in_messages
 from app.agents.leonardo.resilience import invoke_with_transient_retry
 
@@ -111,18 +111,12 @@ def leonardo_ai_builder(state: RailsAgentState) -> Command[Literal["tools"]]:
    if failed_tool_calls_count >= 3:
       messages = messages + [HumanMessage(content="<NOTE_FROM_SYSTEM> The user has had too many failed tool calls. DO NOT DO ANY NEW TOOL CALLS. Tell the user it's failed, and you need to stop and ask the user to try again in a different way. </NOTE_FROM_SYSTEM>")]
       # Don't bind tools when we've failed too many times - we want a text response only
-      # Only pass cache_control for Anthropic models. Raw node — no middleware — so
-      # wrap the direct invoke in the shared rung-1 transient-error retry.
-      if llm_model.startswith("claude"):
-         response = invoke_with_transient_retry(
-            lambda: llm.invoke(messages, cache_control={"type": "ephemeral"}),
-            label=f"rails_ai_builder_agent/{llm_model}",
-         )
-      else:
-         response = invoke_with_transient_retry(
-            lambda: llm.invoke(messages),
-            label=f"rails_ai_builder_agent/{llm_model}",
-         )
+      # invoke_with_cache owns the Anthropic-only cache_control decision. Raw node —
+      # no middleware — so wrap the invoke in the shared rung-1 transient-error retry.
+      response = invoke_with_transient_retry(
+         lambda: invoke_with_cache(llm, messages, llm_model),
+         label=f"rails_ai_builder_agent/{llm_model}",
+      )
       # Reset counter by subtracting current count (since reducer uses operator.add)
       return {"messages": [response], "failed_tool_calls_count": -failed_tool_calls_count} # by adding a negative number, we subtract the current count and reset it to 0.
 
@@ -132,17 +126,10 @@ def leonardo_ai_builder(state: RailsAgentState) -> Command[Literal["tools"]]:
    else:
       llm_with_tools = llm.bind_tools(tools, parallel_tool_calls=False)
 
-   # Only pass cache_control for Anthropic models
-   if llm_model.startswith("claude"):
-      response = invoke_with_transient_retry(
-         lambda: llm_with_tools.invoke(messages, cache_control={"type": "ephemeral"}),
-         label=f"rails_ai_builder_agent/{llm_model}",
-      )
-   else:
-      response = invoke_with_transient_retry(
-         lambda: llm_with_tools.invoke(messages),
-         label=f"rails_ai_builder_agent/{llm_model}",
-      )
+   response = invoke_with_transient_retry(
+      lambda: invoke_with_cache(llm_with_tools, messages, llm_model),
+      label=f"rails_ai_builder_agent/{llm_model}",
+   )
    return {"messages": [response]}
 
 # Graph

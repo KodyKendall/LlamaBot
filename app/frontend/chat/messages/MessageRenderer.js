@@ -5,6 +5,7 @@
 import { MarkdownParser } from './MarkdownParser.js';
 import { ToolMessageRenderer } from './ToolMessageRenderer.js';
 
+import { leoDiagnostics } from '../utils/LeoDiagnostics.js';
 export class MessageRenderer {
   constructor(messageHistoryElement, iframeManager = null, getRailsDebugInfoCallback = null, scrollManager = null, loadingVerbs = null, config = {}, container = null, elements = {}, faviconBadgeManager = null, appState = null) {
     this.messageHistory = messageHistoryElement;
@@ -338,6 +339,14 @@ export class MessageRenderer {
         content: content || undefined,
         note: note || undefined,
         sent_at: new Date().toISOString(),
+        // Bounded, redacted browser snapshot: ws close code, reconnect count,
+        // recent console output, model/mode. Without it a thumbs-down like
+        // "the connection is lost" is a complaint with no evidence attached.
+        debug_context: leoDiagnostics.snapshot({
+          threadId,
+          agentMode: this.appState?.getAgentConfig?.()?.name || null,
+          llmModel: document.querySelector('[data-llamabot="model-select"]')?.value || null,
+        }),
       }),
     }).catch((err) => console.warn('message feedback failed', err));
   }

@@ -283,22 +283,64 @@ class TestLinkingMatrix:
         assert resp.status_code == 302
         users = {u.username: u for u in _users(db_engine)}
         assert "leo-admin" in users
-        # A fresh lp-* user was created for the new guid.
+        # A fresh shadow user was created for the new guid.
         fresh = [u for u in users.values() if u.llamapress_user_guid == "guid-abc-123"]
         assert len(fresh) == 1
-        assert fresh[0].username.startswith("lp-")
+        assert fresh[0].username == "o@e.com"
         # And the integrity smell was reported.
         assert any(r["error_class"] == "UnifiedLogin::ShadowUserError" for r in fake.reported)
 
-    def test_no_link_username_creates_lp_user(self, db_engine, client):
+    def test_no_link_username_creates_user_named_by_verified_email(self, db_engine, client):
+        """Shadow username is the mothership-VERIFIED email, not lp-<guid>.
+
+        The email arrives over the server-to-server bearer channel after
+        grant_redeemer succeeds, so it is not user input. A recognizable username
+        beats `lp-a1b2c3d4e5f6` everywhere the operator sees it.
+        """
         fake = FakeMothership(payload=self._payload(link_username=None))
         with _install_mothership(fake):
             resp = client.get("/auth/consume?token=T", follow_redirects=False)
         assert resp.status_code == 302
         users = _users(db_engine)
         assert len(users) == 1
+        assert users[0].username == "o@e.com"
+        assert users[0].email == "o@e.com"
+        assert users[0].llamapress_user_guid == "guid-abc-123"
+
+    def test_falls_back_to_lp_guid_when_the_grant_has_no_email(self, db_engine, client):
+        payload = self._payload(link_username=None)
+        payload["user"].pop("email")
+        fake = FakeMothership(payload=payload)
+        with _install_mothership(fake):
+            resp = client.get("/auth/consume?token=T", follow_redirects=False)
+        assert resp.status_code == 302
+        users = _users(db_engine)
+        assert len(users) == 1
         assert users[0].username == "lp-guid-abc-123"
-        assert users[0].username != "o@e.com"  # never the email
+
+    def test_username_collision_gets_a_suffix(self, db_engine, client):
+        """Someone already owns that username locally — don't hijack it."""
+        _seed_user(db_engine, username="o@e.com", llamapress_user_guid=None)
+        fake = FakeMothership(payload=self._payload(link_username=None))
+        with _install_mothership(fake):
+            resp = client.get("/auth/consume?token=T", follow_redirects=False)
+        assert resp.status_code == 302
+        fresh = [u for u in _users(db_engine) if u.llamapress_user_guid == "guid-abc-123"]
+        assert len(fresh) == 1
+        assert fresh[0].username.startswith("o@e.com-")
+        assert fresh[0].username != "o@e.com"
+
+    def test_existing_lp_guid_users_are_never_renamed(self, db_engine, client):
+        """Step-1 guid match only syncs email/display_name — it must not rename."""
+        _seed_user(db_engine, username="lp-guid-abc-123",
+                   llamapress_user_guid="guid-abc-123", email="old@e.com")
+        fake = FakeMothership(payload=self._payload())
+        with _install_mothership(fake):
+            client.get("/auth/consume?token=T", follow_redirects=False)
+        users = _users(db_engine)
+        assert len(users) == 1
+        assert users[0].username == "lp-guid-abc-123"
+        assert users[0].email == "o@e.com"
 
 
 class TestFailurePaths:

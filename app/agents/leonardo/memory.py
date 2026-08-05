@@ -180,8 +180,21 @@ def delete_memory_file(filename: str) -> bool:
 
     Returns True if deleted, False if not found.
     """
-    filepath = Path(MEMORY_DIR) / filename
-    if not filepath.exists():
+    # The LLM can call this with junk. Every reject must return False (the tool turns
+    # that into a "not found" ToolMessage) rather than raise — a raise propagates
+    # through LangGraph's default tool-error handler and kills the whole chat turn.
+    if not filename or not str(filename).strip():
+        return False
+
+    base = Path(MEMORY_DIR).resolve()
+    try:
+        filepath = (base / str(filename).strip()).resolve()
+    except (OSError, ValueError):
+        return False
+
+    # Confine to the memory dir (blocks "../escape.md" and absolute paths) and only
+    # ever unlink a regular file (blocks "" / a subdirectory → IsADirectoryError).
+    if base not in filepath.parents or not filepath.is_file():
         return False
 
     filepath.unlink()

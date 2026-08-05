@@ -5,6 +5,8 @@
 
 import { DEFAULT_CONFIG, getRailsUrl } from './config.js';
 import { setCookie, getCookie } from './utils/cookies.js';
+import { errorReporter } from './utils/ErrorReporter.js';
+import { leoDiagnostics } from './utils/LeoDiagnostics.js';
 import { AppState } from './state/AppState.js';
 import { StreamingState } from './state/StreamingState.js';
 import { MessageRenderer } from './messages/MessageRenderer.js';
@@ -59,6 +61,17 @@ class ChatApp {
     this.appState = new AppState();
     this.streamingState = new StreamingState();
 
+    // Browser-side error telemetry → mothership (source="frontend"). Installed as
+    // early as possible so a crash during the rest of init is still reported.
+    this.errorReporter = errorReporter;
+    this.errorReporter.setAppState(this.appState);
+    this.errorReporter.install();
+
+    // Bounded diagnostics ring buffer, attached to thumbs feedback. Patched here so
+    // console output from the rest of init is already captured.
+    leoDiagnostics.patchConsole();
+    window.LeoDiagnostics = leoDiagnostics;
+
     // Initialize UI components
     this.messageRenderer = null;
     this.scrollManager = null;
@@ -109,9 +122,18 @@ class ChatApp {
     // Default permissive so the UI works before the fetch resolves; the backend
     // (get_llm / _build_message_content) is the authoritative gate either way.
     // - modelSwitchingAllowed=false hides the model dropdown and pins DeepSeek.
-    // - visionAllowed=false blocks image sends with a support hand-off.
+    // - visionAllowed=false refuses images at attach time, with a support hand-off.
     this.modelSwitchingAllowed = true;
     this.visionAllowed = true;
+
+    // Set once an image attach has been refused, so the banner still explains
+    // itself even though nothing ended up in the composer.
+    this.visionBlockNoticeActive = false;
+
+    // The vision-disabled banner is dismissable, but the dismissal is NOT
+    // remembered: it clears the banner now, and the next refused image brings
+    // it back. The banner is the only place the refusal is explained.
+    this.visionBannerDismissed = false;
 
     // Agent running state (for stop button)
     this.isAgentRunning = false;
@@ -249,7 +271,12 @@ class ChatApp {
     // backend run keeps going (Layer 2: it's a background run, not bound to this
     // socket) and we re-attach on reconnect to replay what we missed. Only show
     // the lost-connection error when retries are exhausted.
-    window.addEventListener('websocketReconnectFailed', () => {
+    window.addEventListener('websocketReconnectFailed', (e) => {
+      const d = e?.detail || {};
+      this.errorReporter?.report(
+        'FrontendConnectionLost',
+        `WebSocket reconnect exhausted (code=${d.code ?? 'n/a'}, reason=${d.reason || 'n/a'}, attempts=${d.attempts ?? 'n/a'})`,
+      );
       this.webSocketManager?.clearQueue();
       this.hideThinkingIndicator();
       this.setAgentRunning(false);
@@ -408,6 +435,7 @@ class ChatApp {
       this.elements.fileInput,
       this.elements.attachmentsPreview
     );
+    this.applyVisionPolicy();
     this.fileAttachmentManager.initUploadMenu(
       this.container.querySelector('[data-llamabot="file-attach-menu"]'),
       this.container.querySelector('[data-llamabot="attach-for-ai-btn"]'),
@@ -578,6 +606,11 @@ class ChatApp {
             rating,
             scope: 'session',
             note: noteText || undefined,
+            debug_context: leoDiagnostics.snapshot({
+              threadId,
+              agentMode: this.appState?.getAgentConfig?.()?.name || null,
+              llmModel: this.elements?.modelSelect?.value || null,
+            }),
           }),
         }).catch((err) => console.warn('session feedback failed', err));
       }
@@ -647,6 +680,14 @@ class ChatApp {
   initEventListeners() {
     // "How is Leo doing this session?" bottom banner (Good/Bad + dismiss)
     this.setupSessionFeedback();
+
+    // Dismiss (×) on the "Leo can't view images" banner — until the next refusal.
+    this.container
+      .querySelector('[data-llamabot="vision-disabled-dismiss"]')
+      ?.addEventListener('click', () => {
+        this.visionBannerDismissed = true;
+        this.updateImageSwitchBanner();
+      });
 
     // Send button (doubles as stop button when agent is running)
     if (this.elements.sendButton) {
@@ -1249,6 +1290,29 @@ class ChatApp {
   }
 
   /**
+   * Push the operator's vision gate down into the attachment manager: with
+   * vision disabled, images are refused before they ever attach (a picture Leo
+   * can't read is useless in the composer), and the user is told why.
+   */
+  applyVisionPolicy() {
+    if (!this.fileAttachmentManager) return;
+    this.fileAttachmentManager.blockImages = !this.visionAllowed;
+    this.fileAttachmentManager.onImageBlocked = () => this.refuseImageAttachment();
+  }
+
+  /**
+   * Tell the user an image was turned away. The message stays in the inline
+   * banner above the composer — deliberately NOT a bottom-right toast, which
+   * puts it across the screen from the thing they just tried to attach.
+   * Called from every path that can produce an image.
+   */
+  refuseImageAttachment() {
+    this.visionBlockNoticeActive = true;
+    this.visionBannerDismissed = false;
+    this.updateImageSwitchBanner();
+  }
+
+  /**
    * Show the pre-send banner only when sending the attached image would force
    * a new conversation: an image is attached, the current model can't see
    * images, and we're mid-conversation. Hidden otherwise.
@@ -1258,11 +1322,18 @@ class ChatApp {
     const model = this.elements.modelSelect?.value || DEFAULT_TEXT_MODEL;
     const hasImage = this.hasImageAttachment(attachments);
 
-    // Vision disabled by operator takes precedence: an attached image can't be
-    // sent at all, so show the support hand-off (not the auto-switch notice).
+    // Vision disabled by operator takes precedence: images are refused at attach
+    // time, so show the support hand-off (not the auto-switch notice). The
+    // notice flag carries the case where the refused image never attached.
     const visionBanner = this.container.querySelector('[data-llamabot="vision-disabled-banner"]');
-    const visionBlocked = hasImage && !this.visionAllowed;
-    if (visionBanner) visionBanner.classList.toggle('hidden', !visionBlocked);
+    const visionBlocked =
+      (hasImage || this.visionBlockNoticeActive) && !this.visionAllowed;
+    if (visionBanner) {
+      visionBanner.classList.toggle(
+        'hidden',
+        !visionBlocked || this.visionBannerDismissed,
+      );
+    }
 
     const banner = this.container.querySelector('[data-llamabot="image-switch-banner"]');
     if (!banner) return;
@@ -1450,16 +1521,12 @@ class ChatApp {
     }
 
     // --- Vision gate: refuse image sends when the operator disables vision ---
-    // Block the send (nothing destructive has happened yet — input still holds
-    // the text and the image stays attached) and point the user at support. The
-    // backend re-enforces this in _build_message_content regardless.
+    // Backstop only — images are already refused at attach time — for anything
+    // that seeds an attachment around the manager. Nothing destructive has
+    // happened yet (the input still holds the text), so just stop and point at
+    // support. The backend re-enforces this in _build_message_content anyway.
     if (!this.visionAllowed && this.hasImageAttachment(attachments)) {
-      this.updateImageSwitchBanner();
-      this.slashCommandManager?.showToast(
-        "Leo can't view images on this instance yet. Reach out to " +
-        "support@llamapress.ai to enable Leo to view and understand images.",
-        'info'
-      );
+      this.refuseImageAttachment();
       return;
     }
     // --- end vision gate ---
@@ -1822,6 +1889,7 @@ class ChatApp {
       this.modelSwitchingAllowed = data.model_switching_allowed !== false;
       this.visionAllowed = data.vision_allowed !== false;
       this.applyModelSwitchingPolicy();
+      this.applyVisionPolicy();
       this.updateImageSwitchBanner();
 
       const modelAvailability = new Map(
@@ -2074,6 +2142,12 @@ class ChatApp {
 
     // If we were thinking, show error message and play error sound
     if (wasThinking) {
+      // This is the one the user actually feels: the run was live and the socket
+      // went away. Report it — it produced zero server-side trace before.
+      this.errorReporter?.report(
+        'FrontendConnectionLost',
+        'Lost connection mid-run (thinking indicator active)',
+      );
       // Show error message
       if (this.messageRenderer) {
         this.messageRenderer.renderErrorMessage('Lost connection');
@@ -2279,6 +2353,13 @@ class ChatApp {
     btn.addEventListener('click', async () => {
       // Close toolbar
       this.closeToolsToolbar();
+
+      // Vision disabled: don't even open the screen picker — the capture would
+      // only attach an image Leo can't read (same gate as file/paste/drop).
+      if (!this.visionAllowed) {
+        this.refuseImageAttachment();
+        return;
+      }
 
       try {
         await this.screenshotAnnotator.startCapture((attachment) => {

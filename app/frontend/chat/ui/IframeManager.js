@@ -48,14 +48,88 @@ export class IframeManager {
     // Navigation history stack for back button (since we can't access cross-origin iframe history)
     this.navigationHistory = [];
 
-    // Track current path for reliable refresh (fallback when iframe query fails)
-    this.currentPath = '/';
+    // Track current path for reliable refresh (fallback when iframe query fails).
+    // Seeded from the last page this browser was on so a full page refresh puts
+    // the user back where they were instead of bouncing them to the app root.
+    this.currentPath = this._savedRailsPath() || '/';
 
     // Initialize iframe URLs
     this.initIframeSources();
 
     // Listen for navigation messages from the Rails iframe
     this.initNavigationListener();
+  }
+
+  // ============================================================================
+  // Session restore (remember the last previewed page + tab across a refresh)
+  // ============================================================================
+
+  /**
+   * Storage key for a remembered value, scoped to the Rails origin.
+   *
+   * Scoping matters: a user with two boxes open in the same browser must not
+   * inherit the other app's last page, and an unscoped key would do exactly that.
+   */
+  _storageKey(kind) {
+    return `llamabot:${kind}:${getRailsUrl()}`;
+  }
+
+  /**
+   * Read a remembered value. localStorage can throw outright (Safari private
+   * mode, blocked third-party storage when the chat is embedded), and a dead
+   * storage must never take the iframe down with it — hence the swallow.
+   */
+  _readStored(kind) {
+    try {
+      return window.localStorage.getItem(this._storageKey(kind));
+    } catch (e) {
+      return null;
+    }
+  }
+
+  _writeStored(kind, value) {
+    try {
+      window.localStorage.setItem(this._storageKey(kind), value);
+    } catch (e) {
+      // Storage unavailable or full — restore is a nicety, never a hard failure.
+    }
+  }
+
+  /**
+   * Sanitize a remembered path before it can become an iframe src.
+   *
+   * Only a same-origin absolute path survives. A full URL, a protocol-relative
+   * "//evil.com" (or its "/\evil.com" cousin, which browsers normalize the same
+   * way), or control characters would all point the preview at someone else's
+   * origin — so anything that isn't a plain "/path" is dropped.
+   *
+   * Returns '' when there is nothing worth restoring, which callers append to
+   * the base URL to get byte-identical behavior to the pre-restore code.
+   */
+  _safeRestorePath(path) {
+    if (typeof path !== 'string') return '';
+    if (path.charAt(0) !== '/') return '';
+    if (path.charAt(1) === '/' || path.charAt(1) === '\\') return '';
+    if (path === '/') return '';                 // root is already the default
+    if (/[\x00-\x20\x7f]/.test(path)) return ''; // control chars / whitespace
+    return path;
+  }
+
+  /**
+   * The last Rails path this browser was on, or '' if there's nothing safe to
+   * restore.
+   */
+  _savedRailsPath() {
+    return this._safeRestorePath(this._readStored('lastPath'));
+  }
+
+  /**
+   * Remember the page the preview is on, so the next full page load can return
+   * to it. Navigating back to the root is stored explicitly ('/') so it clears
+   * a stale deep link rather than silently keeping it.
+   */
+  _rememberPath(path) {
+    this._writeStored('lastPath', this._safeRestorePath(path) || '/');
   }
 
   /**
@@ -88,6 +162,7 @@ export class IframeManager {
         // Track current path for reliable refresh fallback
         if (toPath) {
           this.currentPath = toPath;
+          this._rememberPath(toPath);
         }
       } else if (event.data.type === 'page-loaded') {
         // Update URL display when Rails app loads a new page
@@ -98,6 +173,7 @@ export class IframeManager {
         // Track current path for reliable refresh fallback
         if (event.data.path) {
           this.currentPath = event.data.path;
+          this._rememberPath(event.data.path);
         }
       }
     });
@@ -124,6 +200,12 @@ export class IframeManager {
     // Set Rails iframe URL
     if (this.liveSiteFrame) {
       this.liveSiteFrame.src = this._railsSrcWithAuth();
+    }
+
+    // Show the restored page in the URL bar right away. Without this the bar
+    // reads "/" until the Rails app posts its page-loaded message back.
+    if (this.urlInput && this.currentPath) {
+      this.urlInput.value = this.currentPath;
     }
 
     // Set VS Code iframe URL
@@ -153,20 +235,24 @@ export class IframeManager {
    * scrub it from the top-window URL bar (keeping prompt/llm_model/agent_mode)
    * so a refresh or share can't replay a spent grant.
    *
-   * With NO rails_token this returns getRailsUrl() verbatim — byte-identical to
-   * the previous behavior, which is the entire backwards-compat story for old
-   * flows (no token, no change). Until the Phase 3 gem ships, a threaded token
-   * just 404s to the Rails login page, same as today's wall.
+   * Both branches also thread the remembered last page: the plain branch appends
+   * it to the base URL, the token branch hands it to the gem as return_to so the
+   * post-login redirect lands there too. With nothing remembered the saved path
+   * is '' / '/' and this returns getRailsUrl() verbatim — byte-identical to the
+   * previous behavior, which is the entire backwards-compat story for old flows
+   * (no token, no change). Until the Phase 3 gem ships, a threaded token just
+   * 404s to the Rails login page, same as today's wall.
    */
   _railsSrcWithAuth() {
     const base = getRailsUrl();
+    const savedPath = this._savedRailsPath();
     try {
       const params = new URLSearchParams(window.location.search);
       const token = params.get('rails_token');
-      if (!token) return base;
+      if (!token) return base + savedPath;
 
       const src = base + '/llamapress_auth/consume?token=' +
-        encodeURIComponent(token) + '&return_to=%2F';
+        encodeURIComponent(token) + '&return_to=' + encodeURIComponent(savedPath || '/');
 
       // Strip only rails_token from the URL bar; keep the chat hand-off params.
       params.delete('rails_token');
@@ -178,7 +264,7 @@ export class IframeManager {
       return src;
     } catch (e) {
       // Any parsing/replaceState failure must not break the iframe — fall back.
-      return base;
+      return base + savedPath;
     }
   }
 
@@ -831,6 +917,7 @@ export class IframeManager {
 
     // Track current path for reliable refresh fallback
     this.currentPath = path;
+    this._rememberPath(path);
 
     // Update URL input
     if (this.urlInput) {
@@ -1072,11 +1159,48 @@ export class IframeManager {
         if (targetIframe) {
           targetIframe.classList.add('active');
         }
+
+        // Remember the tab so a full page refresh comes back to it.
+        this._writeStored('lastTab', targetIframeId);
       });
     });
 
+    // Re-open whichever tab the user was last on.
+    this._restoreActiveTab(tabs, iframes, idToDataAttrMap);
+
     // Initialize external link buttons
     this.initExternalLinkButtons();
+  }
+
+  /**
+   * Restore the last-used tab on page load.
+   *
+   * Every iframe already has its src set by initIframeSources(), so this is a
+   * pure CSS-class swap — no extra loading.
+   */
+  _restoreActiveTab(tabs, iframes, idToDataAttrMap) {
+    const savedTarget = this._readStored('lastTab');
+    if (!savedTarget) return;
+
+    const tab = Array.from(tabs).find(t => t.dataset.target === savedTarget);
+    if (!tab) return;
+
+    // Never restore a tab this user can't see. The role gate that hides
+    // engineer-only tabs runs later (on llamabot:ready), so checking the tab's
+    // computed visibility here would always say "visible" — read the role
+    // directly instead. Otherwise a 'user' would land on the Code tab with a
+    // hidden, un-highlighted tab strip and no way back.
+    const role = (typeof window !== 'undefined' && window.LLAMABOT_USER_ROLE) || 'engineer';
+    if (role === 'user' && tab.dataset.engineerOnly === 'true') return;
+
+    const dataAttrName = idToDataAttrMap[savedTarget] || savedTarget;
+    const targetIframe = this.querySelector(`[data-llamabot="${dataAttrName}"]`);
+    if (!targetIframe) return;
+
+    tabs.forEach(t => t.classList.remove('active'));
+    iframes.forEach(i => i.classList.remove('active'));
+    tab.classList.add('active');
+    targetIframe.classList.add('active');
   }
 
   /**

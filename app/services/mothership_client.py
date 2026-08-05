@@ -168,6 +168,7 @@ class MothershipClient:
         note: Optional[str] = None,
         content: Optional[str] = None,
         sent_at: Optional[str] = None,
+        debug_context: Optional[dict] = None,
     ) -> Optional[dict]:
         """
         POST /api/leonardo/submit_feedback
@@ -196,6 +197,8 @@ class MothershipClient:
                     payload["content"] = content
                 if sent_at:
                     payload["sent_at"] = sent_at
+                if debug_context:
+                    payload["debug_context"] = debug_context
                 response = await client.post(
                     f"{self.config['mothership_url']}/api/leonardo/submit_feedback",
                     json=payload,
@@ -289,41 +292,6 @@ class MothershipClient:
             logger.warning(f"Update check failed: {e}")
             return None
 
-    async def report_disconnect(
-        self,
-        *,
-        thread_id: str,
-        reason: str,
-    ) -> None:
-        """
-        POST /api/leonardo/report_disconnect
-
-        Fire-and-forget telemetry for mid-stream WebSocket closes. Lets the
-        mothership see how often instances drop connections during streaming
-        without users having to file tickets. Never raises.
-        """
-        if not self.enabled:
-            return
-
-        try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                response = await client.post(
-                    f"{self.config['mothership_url']}/api/leonardo/report_disconnect",
-                    json={
-                        "instance_name": self.config["instance_name"],
-                        "thread_id": thread_id,
-                        "reason": reason,
-                    },
-                    headers={"Authorization": f"Bearer {self.config['mothership_api_token']}"},
-                )
-                response.raise_for_status()
-        except httpx.HTTPStatusError as e:
-            logger.warning(f"Disconnect report failed (HTTP {e.response.status_code}): {e.response.text}")
-        except httpx.RequestError as e:
-            logger.warning(f"Disconnect report request failed: {e}")
-        except Exception as e:
-            logger.warning(f"Disconnect report unexpected error: {e}")
-
     async def report_error(
         self,
         *,
@@ -337,6 +305,7 @@ class MothershipClient:
         occurred_at: Optional[str] = None,
         fingerprint: Optional[str] = None,
         recovered: Optional[bool] = None,
+        source: str = "llamabot",
     ) -> None:
         """
         POST /api/leonardo/report_error
@@ -362,6 +331,9 @@ class MothershipClient:
                     "error_class": error_class,
                     "error_message": (error_message or "")[:2000],
                     "traceback": (traceback_str or "")[:5000],
+                    # Receiver allowlists %w[llamabot rails_app frontend]; anything
+                    # else still defaults to "llamabot" on the mothership side.
+                    "source": source or "llamabot",
                 }
                 if thread_id:
                     payload["thread_id"] = thread_id

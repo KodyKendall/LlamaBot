@@ -27,6 +27,7 @@ from app.agents.leonardo.rails_agent.tools import (
 from app.agents.leonardo.rails_agent.sub_agents import delegate_task, delegate_research
 from app.agents.leonardo.rails_beginner_agent.prompts import BEGINNER_AGENT_PROMPT
 from app.agents.leonardo.project_context import build_beginner_system_prompt, brand_context_section
+from app.agents.leonardo.friction import report_friction, with_friction_section
 from app.agents.leonardo.llm_factory import get_llm
 from app.agents.leonardo.agent_factory import repair_orphaned_tool_calls_in_messages
 from app.agents.leonardo.resilience import invoke_with_transient_retry
@@ -42,7 +43,10 @@ APP_DIR = PROJECT_ROOT / 'app'
 def get_sys_msg():
     # Rebuilt every turn (see get_sys_msg call site), so the brand guide appended
     # here stays live without a restart.
-    full_prompt = build_beginner_system_prompt(BEGINNER_AGENT_PROMPT, agent_mode="rails_beginner_agent") + brand_context_section()
+    full_prompt = with_friction_section(
+        build_beginner_system_prompt(BEGINNER_AGENT_PROMPT, agent_mode="rails_beginner_agent")
+        + brand_context_section()
+    )
     return {
         "role": "system",
         "content": [
@@ -106,9 +110,42 @@ default_tools = [
     write_personality_file,
     delegate_task, delegate_research,
     suggest_plan_mode,
+    report_friction,  # Papercut channel back to the LlamaPress team
     # browser_inspect is appended conditionally in build_workflow() — gated by the
     # `enable_browser_inspect` site setting (disabled by default).
 ]
+
+
+def beginner_turn_tools(browser_inspect_on: bool = False) -> list:
+    """The tools BOUND TO THE LLM for one beginner turn.
+
+    Deliberately a second list from ``default_tools``, which only feeds the
+    ToolNode: this one is rebuilt every turn so ``use_skill`` carries a fresh
+    ``<available_skills>`` catalog (the raw StateGraph runs no middleware that
+    could refresh it). Extracted from ``leonardo_beginner`` so the binding can be
+    asserted in a unit test — a tool added to only one of the two lists is
+    executable but invisible to the model, which is silent and hard to spot.
+
+    NOTE (pre-existing drift, left alone here): this list is already a strict
+    subset of ``default_tools`` — fix_permissions, the memory tools, and the
+    brand-guide tools are registered on the ToolNode but never offered to the
+    model in beginner mode.
+    """
+    tools = [
+        write_todos,
+        ls, read_file, write_file, edit_file, bash_command, tail_rails_logs, hard_restart_rails,
+        glob_files, grep_files, internet_search,
+        read_leonardo_md, write_leonardo_md, edit_leonardo_md,
+        list_skills, read_skill, write_skill, edit_skill, delete_skill,
+        build_use_skill_tool(),  # fresh <available_skills> catalog each turn (raw graph, no middleware)
+        write_personality_file,
+        delegate_task, delegate_research,
+        suggest_plan_mode,
+        report_friction,  # Papercut channel back to the LlamaPress team
+    ]
+    if browser_inspect_on:
+        tools.append(browser_inspect)
+    return tools
 
 
 def leonardo_beginner(state: RailsAgentState, browser_inspect_on: bool = False) -> Command[Literal["tools"]]:
@@ -132,19 +169,7 @@ def leonardo_beginner(state: RailsAgentState, browser_inspect_on: bool = False) 
     # so one repair here covers the failure-limit and main invoke branches.
     messages = repair_orphaned_tool_calls_in_messages(messages)
 
-    tools = [
-        write_todos,
-        ls, read_file, write_file, edit_file, bash_command, tail_rails_logs, hard_restart_rails,
-        glob_files, grep_files, internet_search,
-        read_leonardo_md, write_leonardo_md, edit_leonardo_md,
-        list_skills, read_skill, write_skill, edit_skill, delete_skill,
-        build_use_skill_tool(),  # fresh <available_skills> catalog each turn (raw graph, no middleware)
-        write_personality_file,
-        delegate_task, delegate_research,
-        suggest_plan_mode,
-    ]
-    if browser_inspect_on:
-        tools.append(browser_inspect)
+    tools = beginner_turn_tools(browser_inspect_on)
 
     failed_tool_calls_count = state.get("failed_tool_calls_count", 0)
     if failed_tool_calls_count >= 3:

@@ -266,13 +266,22 @@ class RequestHandler:
 
         (B) Dangling tool_calls — an AIMessage with tool_calls that have no
             corresponding following ToolMessage. Cause: task cancelled
-            mid-tool-execution. Fix: remove anything after the corrupted
+            mid-tool-execution, or the model emitted a call whose arguments JSON
+            did not parse (`invalid_tool_calls`) — no executor ever runs it, so
+            nothing ever answers it. Fix: remove anything after the corrupted
             AIMessage and inject synthetic "[Cancelled]" ToolMessages.
+
+        Both passes scan `emitted_tool_calls` — what the serializer actually puts
+        on the wire (tool_calls + invalid_tool_calls) — not just the executable
+        `tool_calls`. Using the latter would both miss shape B for a malformed
+        call AND make pass A delete the synthetic ToolMessage that answers it,
+        re-bricking the thread on the next turn.
 
         Both fixes are applied in a single aupdate_state call.
         """
         from langchain_core.messages import AIMessage, ToolMessage as LCToolMessage
         from langchain_core.messages import RemoveMessage
+        from app.agents.leonardo.agent_factory import emitted_tool_calls
 
         try:
             state_snapshot = await app.aget_state(config)
@@ -291,7 +300,7 @@ class RequestHandler:
             open_ids: set = set()
             for msg in messages:
                 if isinstance(msg, AIMessage):
-                    open_ids = {tc["id"] for tc in (getattr(msg, "tool_calls", []) or [])}
+                    open_ids = {tc["id"] for tc in emitted_tool_calls(msg) if tc.get("id")}
                 elif isinstance(msg, LCToolMessage):
                     tcid = getattr(msg, "tool_call_id", None)
                     if tcid in open_ids:
@@ -304,10 +313,15 @@ class RequestHandler:
             for i, msg in enumerate(messages):
                 if not isinstance(msg, AIMessage):
                     continue
-                tool_calls = getattr(msg, "tool_calls", [])
+                tool_calls = emitted_tool_calls(msg)
                 if not tool_calls:
                     continue
-                expected_ids = {tc["id"] for tc in tool_calls}
+                # An id-less call cannot be answered by a ToolMessage at all, so
+                # it is never "expected" here — the request-time repair strips it
+                # from the outgoing payload instead.
+                expected_ids = {tc["id"] for tc in tool_calls if tc.get("id")}
+                if not expected_ids:
+                    continue
                 found_ids = set()
                 for j in range(i + 1, len(messages)):
                     if isinstance(messages[j], LCToolMessage):
@@ -341,7 +355,7 @@ class RequestHandler:
             # synthetic ToolMessages for its dangling tool_calls.
             if corrupted_index is not None:
                 corrupted_msg = messages[corrupted_index]
-                tool_calls = corrupted_msg.tool_calls
+                tool_calls = [tc for tc in emitted_tool_calls(corrupted_msg) if tc.get("id")]
                 logger.warning(
                     f"Corrupted thread state detected at message index {corrupted_index}: "
                     f"AIMessage with {len(tool_calls)} dangling tool_call(s). Repairing..."
@@ -350,8 +364,14 @@ class RequestHandler:
                     if hasattr(m, "id") and m.id:
                         remove_ops.append(RemoveMessage(id=m.id))
                 for tc in tool_calls:
+                    is_invalid = bool(tc.get("error")) or tc.get("type") == "invalid_tool_call"
                     repair_messages.append(LCToolMessage(
-                        content="[Cancelled] Tool execution was interrupted before completion.",
+                        content=(
+                            "[Cancelled] Tool call was not executed — its arguments "
+                            "were not valid JSON (often a response cut off at the "
+                            "token limit mid-call)."
+                        ) if is_invalid else
+                        "[Cancelled] Tool execution was interrupted before completion.",
                         tool_call_id=tc["id"],
                         name=tc.get("name", "unknown"),
                     ))
@@ -597,7 +617,7 @@ class RequestHandler:
                 app, state, agent_config = self.get_langgraph_app_and_state(incoming_message)
 
                 # Default limits (can be overridden per-agent in langgraph.json)
-                DEFAULT_RECURSION_LIMIT = 450
+                DEFAULT_RECURSION_LIMIT = 900
 
                 # Get agent-specific limits or use defaults
                 recursion_limit = agent_config.get("recursion_limit", DEFAULT_RECURSION_LIMIT)
@@ -928,7 +948,7 @@ class RequestHandler:
                     "ask_before_edits": True,
                 })
 
-                DEFAULT_RECURSION_LIMIT = 450
+                DEFAULT_RECURSION_LIMIT = 900
                 recursion_limit = agent_config.get("recursion_limit", DEFAULT_RECURSION_LIMIT)
 
                 config = {
@@ -1155,7 +1175,7 @@ class RequestHandler:
                     "message": "",  # No new message, just resuming
                 })
 
-                DEFAULT_RECURSION_LIMIT = 450
+                DEFAULT_RECURSION_LIMIT = 900
                 recursion_limit = agent_config.get("recursion_limit", DEFAULT_RECURSION_LIMIT)
 
                 config = {
