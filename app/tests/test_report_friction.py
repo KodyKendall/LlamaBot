@@ -14,6 +14,7 @@ build_workflow() in a unit test (it clears the asyncio event loop; see memory
 `ci_build_workflow_event_loop`). We assert the payload contract, the
 dedupe/cap guard, tool registration per mode, and prompt wiring.
 """
+import os
 import threading
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -279,9 +280,13 @@ class TestRegisteredInEveryMode:
         "app.agents.leonardo.rails_agent.sub_agents",
         "app.agents.leonardo.rails_ticket_mode_agent.sub_agents",
     ])
-    def test_delegated_sub_agents_can_report_friction(self, module_name):
+    def test_delegated_sub_agents_can_report_friction(self, monkeypatch, module_name):
         """Sub-agents run in isolated context — friction they hit is friction the
         main agent never witnesses, so it has to be reportable from in there."""
+        # Building the sub-agent constructs a real chat client, and ChatDeepSeek
+        # refuses to instantiate without a key even though nothing here calls out
+        # to the network. CI has no DEEPSEEK_API_KEY, so supply a placeholder.
+        monkeypatch.setenv("DEEPSEEK_API_KEY", os.getenv("DEEPSEEK_API_KEY") or "test-key")
         module = __import__(module_name, fromlist=["create_sub_agent"])
         agent = module.create_sub_agent(llm_model="deepseek-v4-flash")
         node = agent.nodes.get("tools")
