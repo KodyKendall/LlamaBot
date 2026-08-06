@@ -225,7 +225,6 @@ async def write_html_page(
     internal_thoughts are your thoughts about the command.
     """
     # Debug logging
-    logger.info(f"API TOKEN: {state.get('api_token')}")
     logger.info(f"Page ID: {state.get('page_id')}")
     logger.info(
         f"State keys: {list(state.keys()) if isinstance(state, dict) else 'Not a dict'}"

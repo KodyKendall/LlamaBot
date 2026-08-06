@@ -2559,9 +2559,32 @@ def browser_inspect(
     timeout_ms: int = 10000,
 ) -> Command:
     """Visit a URL with headless Chromium and return console logs, DOM checks, and a screenshot."""
-    from playwright.sync_api import sync_playwright
+    from app.agents.utils.url_guard import (
+        UrlNotAllowed,
+        guarded_route_handler,
+        validate_outbound_url,
+    )
 
     tool_call_id = runtime.tool_call_id
+
+    # SSRF guard. `url` comes from the model, which can be steered by untrusted
+    # page content, so it may only point at the app's own origin or the public
+    # internet — never at the LlamaBot API, the database, or a metadata endpoint.
+    # Checked before Chromium starts so a blocked URL costs nothing.
+    try:
+        validate_outbound_url(url)
+    except UrlNotAllowed as e:
+        return Command(
+            update={
+                "messages": [ToolMessage(
+                    content=json.dumps({"ok": False, "error": str(e)}, indent=2),
+                    tool_call_id=tool_call_id,
+                )]
+            }
+        )
+
+    from playwright.sync_api import sync_playwright
+
     console_logs: list[dict] = []
     network_failures: list[dict] = []
 
@@ -2569,6 +2592,11 @@ def browser_inspect(
         with sync_playwright() as pw:
             browser = pw.chromium.launch(headless=True)
             page = browser.new_page()
+
+            # The pre-flight check covers the URL we were handed; this covers
+            # where a redirect lands and anything the page itself asks for, so
+            # the page cannot use the browser as a proxy into the network.
+            page.route("**/*", guarded_route_handler())
 
             page.on("console", lambda msg: console_logs.append({
                 "level": msg.type,

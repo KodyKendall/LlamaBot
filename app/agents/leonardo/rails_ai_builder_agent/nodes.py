@@ -15,8 +15,6 @@ from pathlib import Path
 import os
 from typing import List, Literal, Optional, TypedDict
 
-from app.agents.utils.playwright_screenshot import capture_page_and_img_src
-
 from openai import OpenAI
 from app.agents.utils.images import encode_image
 
