@@ -14,6 +14,8 @@ from typing import Optional, TYPE_CHECKING
 
 from langchain_core.messages import HumanMessage
 
+from app.websocket.payload_limits import cap_message_text
+
 if TYPE_CHECKING:
     from fastapi import FastAPI
 
@@ -87,9 +89,10 @@ async def execute_agent_headless(
         logger.error(f"Agent '{agent_name}' not found in compiled_graphs")
         return _mark_run_failed(run_id, f"Agent '{agent_name}' not found")
 
-    # Build state (similar to RequestHandler.get_langgraph_app_and_state)
+    # Build state (similar to RequestHandler.get_langgraph_app_and_state) — the
+    # same byte cap applies, so a scheduled job can't wedge its thread either.
     state = {
-        "messages": [HumanMessage(content=prompt)],
+        "messages": [HumanMessage(content=cap_message_text(prompt))],
         "llm_model": llm_model,
         "agent_prompt": "",  # Can be customized per-job if needed
         "origin": "scheduled",

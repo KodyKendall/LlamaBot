@@ -1,0 +1,79 @@
+0.6.1a: 
+[x] - Fix security vulnerability in webpage cloning agent by removing the agent
+[x] - Fix summarization loop having an unbound payload
+[x] - Fix network errors
+[x] - Fix plain chat mode dying on a mid-stream provider drop (RemoteProtocolError:
+      incomplete chunked read). It was the last raw node still calling llm.invoke()
+      without invoke_with_transient_retry — and it's the mode the `user` role gets.
+[x] - Fix "Error resuming after question:" — a blank cause. httpx.ReadError (the
+      provider dropping the socket mid-response) carries an EMPTY message, so five
+      user-facing error frames rendered as a dangling colon, and the mothership row
+      arrived with a blank Sample message. All of them now go through
+      describe_exception(), which keeps the class name. Fingerprints unchanged.
+      (Incident accf39ac3aa6; the crash itself was already fixed in 0.6.0d.)
+[x] - Fix threads permanently 400ing with "insufficient tool messages" on DeepSeek. The orphaned-tool-call repair was creating the orphan it then couldn't see: dropping id-less tool calls via model_copy skips AIMessage's validators, so both parsed lists went empty and the serializer fell back to additional_kwargs["tool_calls"], announcing a call nothing answered. emitted_tool_calls() now reads that fallback (as its docstring always claimed), and id-less raw calls are pruned too.
+[x] - Fix a Postgres restart killing the next agent turn on every box. Our checkpointer connection pools were built without psycopg's `check=`, so a connection whose backend had already died while idle in the pool was handed straight to the checkpointer and raised "consuming input failed: server closed the connection unexpectedly" mid-stream. Nothing retried it: the pool never re-checks a connection it has handed out, aput_writes is a bare executemany, and LangGraph's retry_policy covers node execution, not the checkpointer put — which runs in the Pregel loop teardown and aborts the whole astream. All three pools now check liveness at checkout and swap in a fresh connection.
+[x] - Fix Database Mode (and every other mode) 400ing on Fireworks/GMI. Agents build
+      their system prompt as Anthropic cache blocks (a LIST with cache_control), but
+      those two OpenAI-compatible gateways require system content to be a plain
+      string — and the fleet default deepseek-v4-flash is policy-remapped to
+      Fireworks. New system_message_for_model() flattens the blocks for non-Anthropic
+      and leaves Claude's caching intact; applied in DynamicModelMiddleware (sync +
+      async, covers all create_agent modes) and at the call sites that run no
+      middleware (ai_builder, beginner, plain_chat, both sub-agent factories). Sweep
+      test fails any new agent that copy-pastes the cached-prompt idiom without it.
+      Notes: docs/dev/provider_prompt_shape.md
+[x] - Add a cookbook search if you do /cookbook -> then it brings up a list of all the cookbook entries from llamapress.ai/cookbook and if you type after /cookbook then it filters/searches through them - make sense? From right within the chat.html 
+[.] - I want a way to see the .env headers (not the actual values), and to enable the ability to toggle certain .env variables with switches, such as the view model dropdown. I also want to be able to see a list of enabled models in the settings regardless of whether the setting is configured or not - make sense?
+[] - I want a way to add my own CUSTOM .env variables that can get saved in a database and merged in so that they make it into the LlamaPress-Simple containers
+[x] - Fix the rainbow UI. Engineer and Beginner mode both shipped pages where every
+      category got its own saturated color, statuses were solid badges, and heroes
+      arrived with gradients nobody asked for. Three lines in the prompts caused it:
+      "Build something visually impressive" (read as "add more colors"), its example
+      list `btn-primary` / `badge-success` / `alert-warning` (read as "use a different
+      one per thing"), and Visual Polish Standards having sections for layout,
+      typography, motion and icons but NONE for color — so nothing ever told the agent
+      to hold back. All three modes now carry the same Color restraint rules: one brand
+      color + neutral surfaces, red/amber/green reserved for destructive/warning/success
+      only, at most one brand accent plus one semantic alert color per section (status
+      columns and legends excepted — that's meaning, not decoration), subtle tinted
+      status over solid badges, and NO gradients unless the project brand guide
+      explicitly allows them (no brand guide = no gradients). "Visually impressive" is
+      now "visually excellent", explicitly defined as spacing, hierarchy, typography,
+      alignment, borders and subtle motion — not color. Edited:
+      rails_agent/prompts.py (covers Engineer, Engineer plan mode, and BOTH delegated
+      sub-agents — they all reuse RAILS_AGENT_PROMPT, and delegated work is where most
+      of the rainbow was coming from), rails_beginner_agent/prompts.py, and
+      rails_plan_mode_agent/prompts.py (Beginner plan mode). Tinted-status examples use
+      `bg-success/10 text-success` / `badge-outline` rather than DaisyUI 5's
+      `badge-soft` — the skeleton pins daisyui@4.12.10, where that class does not exist.
+      NOT touched: html_agent/prompts.py (LlamaPress HTML mode), which still teaches
+      "vibrant gradients" and gradient hero sections in its worked examples.
+[x] - Teach the agents the new theme-based branding. Brand colors are now defined ONCE
+      in `rails/app/assets/stylesheets/application.css` as two DaisyUI themes
+      (`[data-theme="llamapress"]` light / `[data-theme="llamapress-dark"]` dark), and
+      every page inherits them through semantic classes — but no prompt mentioned that
+      file even once, so "make the buttons purple" got answered by restyling a page,
+      and nothing forbade the one thing that actually breaks the inheritance: a hex
+      code (or `bg-indigo-600`, or `bg-white`/`text-gray-900`, which look fine in light
+      mode and break dark) written into a view. Engineer, Beginner and Plan mode now
+      carry the same two rules — colors live in the theme, edit BOTH blocks; never
+      hardcode a color in a view, semantic names only. Engineer plan mode and both
+      delegated sub-agents inherit it via RAILS_AGENT_PROMPT.
+      The rule is deliberately self-healing — "if the file has no `[data-theme=` blocks
+      yet, add them" — because `rails/app` is client-owned and NOT in bin/update's
+      ALLOWLIST, so the ~45 existing boxes will never receive the theme by sync. They
+      migrate themselves the first time someone asks for a color change; new boxes ship
+      with it. No skeleton change and no release are involved (LlamaPress-Simple is
+      irrelevant here — docker-compose mounts ./rails/app over the image).
+      Also fixed the thing that would have beaten the prompt rule: brand.json's palette
+      was injected as bare hex codes ("Colors: Primary #5b21b6") on every styling turn,
+      which reads as paint to apply. build_brand_context() now appends BRAND_THEME_NOTE
+      on BOTH progressive-disclosure branches (short guide inlined, long guide
+      summarized), framing the palette as theme values applied by editing the theme.
+      Tests: app/tests/test_theme_prompt_rules.py — structural only (each prompt names
+      the stylesheet, both themes, and the hardcode ban; both brand-context branches
+      carry the note), never assertions about model output.
+      NOT done: no theme-editing tool, no brand.json→CSS generation, and ai_builder /
+      pyxl / html_agent are untouched — they render standalone HTML off a Tailwind CDN,
+      not the app's theme.

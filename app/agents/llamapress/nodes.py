@@ -26,7 +26,6 @@ from typing import Annotated
 from datetime import datetime
 
 from app.agents.llamapress.html_agent import build_workflow as build_html_agent
-from app.agents.llamapress.clone_agent import build_workflow as build_clone_agent
 
 logger = logging.getLogger(__name__)
 
@@ -89,35 +88,31 @@ def system_prompt(state: LlamaPressState) -> list[AnyMessage]:
     return [SystemMessage(content=system_content)] + state["messages"]
 
 def route_to_agent(state: LlamaPressState):
-    last_message = state.get("messages")[-1]
-    if "clone" in last_message.content.lower():
-        return {"next": "clone_agent"}
-    else:
-        return {"next": "html_agent"}
+    # The page-clone branch (fetch an arbitrary URL server-side, then reproduce it)
+    # was removed in response to a security disclosure — it opened a URL chosen by
+    # the LLM with no destination validation. "Clone this page" now falls through
+    # to the HTML agent, which edits the page the user is already on.
+    return {"next": "html_agent"}
 
 def build_workflow(checkpointer=None):
     html_agent = build_html_agent(checkpointer=checkpointer)
-    clone_agent = build_clone_agent(checkpointer=checkpointer)
 
     # create supervisor graph.
     supervisor_graph = StateGraph(LlamaPressState)
     supervisor_graph.add_node("route_to_agent", route_to_agent)
     supervisor_graph.add_node("html_agent", html_agent)
-    supervisor_graph.add_node("clone_agent", clone_agent)
     # Define edges: these determine how the control flow moves
     supervisor_graph.add_edge(START, "route_to_agent")
 
     # Router condition
     supervisor_graph.add_conditional_edges(
         "route_to_agent",
-         lambda x: x["next"], 
+         lambda x: x["next"],
          {
              "html_agent": "html_agent",
-             "clone_agent": "clone_agent",
          }
     )
 
     supervisor_graph.add_edge("html_agent", END)
-    supervisor_graph.add_edge("clone_agent", END)
 
     return supervisor_graph.compile(checkpointer=checkpointer)

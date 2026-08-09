@@ -66,9 +66,35 @@ def test_dropdown_model_has_declared_capabilities(model):
 
 @pytest.mark.parametrize("model", _dropdown_models())
 def test_dropdown_model_has_an_api_key_mapping(model):
+    """Every dropdown model must have a declared source of credentials.
+
+    Two legitimate kinds:
+      * env-var keyed  -> listed in available_models' model_api_keys
+      * user-credential -> listed in llm_factory._CHATGPT_SUBSCRIPTION_MODELS,
+        where availability is "has this user connected their ChatGPT account",
+        which no env var can answer.
+    """
+    from app.agents.leonardo.llm_factory import _CHATGPT_SUBSCRIPTION_MODELS
+
+    if model in _CHATGPT_SUBSCRIPTION_MODELS:
+        pytest.skip("paid for by the user's ChatGPT plan, not an operator API key")
     assert model in _api_key_map(), (
         f"{model} is offered in the UI but missing from model_api_keys, so "
         "/api/available-models can never report whether it's usable"
+    )
+
+
+def test_subscription_models_are_reported_by_available_models():
+    """The user-credential models still need a reachability path in the endpoint —
+    they are simply resolved from the connection status rather than an env var."""
+    import inspect
+
+    from app.routers import api
+
+    src = inspect.getsource(api.available_models)
+    assert "_CHATGPT_SUBSCRIPTION_MODELS" in src, (
+        "available_models no longer reports the ChatGPT-subscription models, so "
+        "they can never light up in the dropdown"
     )
 
 
@@ -87,7 +113,16 @@ def test_dropdown_model_builds_a_real_client(model, monkeypatch):
     from app.agents.leonardo import llm_factory
 
     src = inspect.getsource(llm_factory.get_llm)
-    assert f'model_name == "{model}"' in src, (
+    # The subscription models are dispatched as a set membership test rather than
+    # one `==` branch each, because they share a single credential-backed client.
+    dispatched = (
+        f'model_name == "{model}"' in src
+        or (
+            model in llm_factory._CHATGPT_SUBSCRIPTION_MODELS
+            and "_CHATGPT_SUBSCRIPTION_MODELS" in src
+        )
+    )
+    assert dispatched, (
         f"get_llm has no branch for {model}; selecting it silently returns the "
         "DeepSeek default instead of the model the user picked"
     )
@@ -138,3 +173,103 @@ def test_luna_is_not_the_default_model():
 
     assert DEFAULT_LLM_MODEL == "deepseek-v4-flash"
     assert LUNA != DEFAULT_LLM_MODEL
+
+
+# --------------------------------------------------------------------------
+# Muse Spark 1.2 (Meta) — contributor tier
+# --------------------------------------------------------------------------
+
+MUSE = "muse-spark-1.2-contributor"
+
+
+def test_muse_is_offered_in_the_dropdown():
+    assert MUSE in _dropdown_models()
+
+
+def test_muse_supports_images_video_and_pdf():
+    """Muse Spark is fully multimodal — text, images, video, audio, PDF in."""
+    assert MODEL_CAPABILITIES[MUSE] == {"images": True, "video": True, "pdf": True}
+
+
+def test_muse_uses_the_meta_key():
+    assert MUSE in _api_key_map()
+
+
+def test_muse_is_known_to_the_policy():
+    assert MUSE in _KNOWN_MODELS
+
+
+def test_muse_builds_an_openai_compatible_client_against_the_meta_endpoint():
+    """Meta's Model API is OpenAI-compatible, so this is ChatOpenAI + a base_url.
+
+    The base_url is NOT optional: without it ChatOpenAI silently talks to
+    api.openai.com, which has never heard of `muse-spark-1.2-contributor`.
+    """
+    import inspect
+
+    from app.agents.leonardo import llm_factory
+
+    src = inspect.getsource(llm_factory.get_llm)
+    branch = src.split(f'model_name == "{MUSE}"', 1)[1].split("if model_name ==", 1)[0]
+    assert "ChatOpenAI(" in branch
+    assert "https://api.meta.ai/v1" in branch
+
+
+def test_muse_pins_the_contributor_tier_id():
+    """The tier lives entirely in the model id, and the two differ by ~12x in price.
+
+    `muse-spark-1.2-contributor` is $0.10/$0.20 per 1M tokens and licenses Meta to
+    train on the prompts and completions we send it; the plain `muse-spark-1.2` id
+    is $1.25/$4.25 and does not. Dropping the suffix is therefore a silent 12x
+    bill, and adding it back is a silent data-sharing change — pin it.
+    """
+    import inspect
+
+    from app.agents.leonardo import llm_factory
+
+    src = inspect.getsource(llm_factory.get_llm)
+    branch = src.split(f'model_name == "{MUSE}"', 1)[1].split("if model_name ==", 1)[0]
+    assert '"muse-spark-1.2-contributor"' in branch
+
+
+def test_muse_is_not_the_default_model():
+    """Adding an option must not change what the fleet actually runs."""
+    from app.agents.leonardo.llm_factory import DEFAULT_LLM_MODEL
+
+    assert DEFAULT_LLM_MODEL == "deepseek-v4-flash"
+    assert MUSE != DEFAULT_LLM_MODEL
+
+
+def test_muse_never_sends_the_openai_key_to_meta(monkeypatch):
+    """With no Meta key configured, the OpenAI key must NOT go to api.meta.ai.
+
+    `ChatOpenAI` builds its underlying `openai.OpenAI` client lazily, and that
+    SDK falls back to `OPENAI_API_KEY` from the environment whenever api_key is
+    None. Since we point base_url at Meta, an instance that has OPENAI_API_KEY
+    but no META_API_KEY would put our OpenAI secret in an Authorization header
+    addressed to a third party. A placeholder keeps the fallback from firing.
+    """
+    monkeypatch.setenv("MODEL_SWITCHING_ALLOWED", "true")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-should-never-leave")
+    monkeypatch.delenv("META_API_KEY", raising=False)
+    monkeypatch.delenv("MODEL_API_KEY", raising=False)
+
+    from app.agents.leonardo.llm_factory import get_llm
+
+    llm = get_llm(MUSE)
+    key = llm.openai_api_key
+
+    assert key is not None, "api_key=None lets the OpenAI SDK fall back to OPENAI_API_KEY"
+    assert key.get_secret_value() != "sk-openai-should-never-leave"
+
+
+def test_muse_is_not_fail_open():
+    """A data-sharing tier must never be one of the always-on models.
+
+    `_FAIL_OPEN_MODELS` entries stay enabled even when an operator's allow-list
+    omits them. Muse contributor trains on every prompt that reaches it, so an
+    operator who leaves it off an allow-list has to actually get it turned off.
+    """
+    from app.agents.leonardo.model_policy import _FAIL_OPEN_MODELS
+
+    assert MUSE not in _FAIL_OPEN_MODELS

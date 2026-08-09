@@ -5,7 +5,7 @@ import pytest
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from app.agents.llamapress.clone_agent import write_html_page, LlamaPressState
+from app.agents.llamapress.html_agent import write_html_page, LlamaPressState
 # Note: BaseAgent class no longer exists in current codebase
 # from app.agents.base_agent import BaseAgent
 from langgraph.checkpoint.memory import MemorySaver
@@ -21,8 +21,8 @@ class TestLlamaPressNodes:
     """Test LlamaPress-specific node functions."""
 
     @pytest.mark.asyncio
-    @patch('agents.llamapress.clone_agent.httpx.AsyncClient')
-    @patch('agents.llamapress.clone_agent.os.getenv')
+    @patch('app.agents.llamapress.html_agent.httpx.AsyncClient')
+    @patch('app.agents.llamapress.html_agent.os.getenv')
     async def test_write_html_page_success(self, mock_getenv, mock_httpx_client):
         """Test successful HTML page writing."""
         # Setup mocks
@@ -57,6 +57,8 @@ class TestLlamaPressNodes:
         # Execute function using async tool invoke
         result = await write_html_page.ainvoke({
             'full_html_document': '<html><body>Test Content</body></html>',
+            'message_to_user': 'Writing the page.',
+            'internal_thoughts': 'Test invocation.',
             'state': state
         })
 
@@ -66,8 +68,8 @@ class TestLlamaPressNodes:
         assert result['tool_name'] == 'write_html_page'
 
     @pytest.mark.asyncio
-    @patch('agents.llamapress.clone_agent.httpx.AsyncClient')
-    @patch('agents.llamapress.clone_agent.os.getenv')
+    @patch('app.agents.llamapress.html_agent.httpx.AsyncClient')
+    @patch('app.agents.llamapress.html_agent.os.getenv')
     async def test_write_html_page_http_error(self, mock_getenv, mock_httpx_client):
         """Test HTML page writing with HTTP error."""
         # Setup mocks
@@ -97,6 +99,8 @@ class TestLlamaPressNodes:
         # Execute function using async tool invoke
         result = await write_html_page.ainvoke({
             'full_html_document': '<html><body>Test</body></html>',
+            'message_to_user': 'Writing the page.',
+            'internal_thoughts': 'Test invocation.',
             'state': state
         })
 
@@ -105,8 +109,8 @@ class TestLlamaPressNodes:
         assert "HTTP Error 404" in result
 
     @pytest.mark.asyncio
-    @patch('agents.llamapress.clone_agent.httpx.AsyncClient')
-    @patch('agents.llamapress.clone_agent.os.getenv')
+    @patch('app.agents.llamapress.html_agent.httpx.AsyncClient')
+    @patch('app.agents.llamapress.html_agent.os.getenv')
     async def test_write_html_page_connection_error(self, mock_getenv, mock_httpx_client):
         """Test HTML page writing with connection error."""
         # Setup mocks
@@ -132,6 +136,8 @@ class TestLlamaPressNodes:
         # Execute function using async tool invoke
         result = await write_html_page.ainvoke({
             'full_html_document': '<html><body>Test</body></html>',
+            'message_to_user': 'Writing the page.',
+            'internal_thoughts': 'Test invocation.',
             'state': state
         })
 
@@ -140,8 +146,8 @@ class TestLlamaPressNodes:
         assert "Unexpected Error" in result
 
     @pytest.mark.asyncio
-    @patch('agents.llamapress.clone_agent.httpx.AsyncClient')
-    @patch('agents.llamapress.clone_agent.os.getenv')
+    @patch('app.agents.llamapress.html_agent.httpx.AsyncClient')
+    @patch('app.agents.llamapress.html_agent.os.getenv')
     async def test_write_html_page_missing_token(self, mock_getenv, mock_httpx_client):
         """Test HTML page writing with missing API token."""
         # Setup mocks
@@ -160,6 +166,8 @@ class TestLlamaPressNodes:
         # Execute function using async tool invoke
         result = await write_html_page.ainvoke({
             'full_html_document': '<html><body>Test</body></html>',
+            'message_to_user': 'Writing the page.',
+            'internal_thoughts': 'Test invocation.',
             'state': state
         })
 
@@ -168,8 +176,8 @@ class TestLlamaPressNodes:
         assert "api_token is required" in result
 
     @pytest.mark.asyncio
-    @patch('agents.llamapress.clone_agent.httpx.AsyncClient')
-    @patch('agents.llamapress.clone_agent.os.getenv')
+    @patch('app.agents.llamapress.html_agent.httpx.AsyncClient')
+    @patch('app.agents.llamapress.html_agent.os.getenv')
     async def test_write_html_page_missing_page_id(self, mock_getenv, mock_httpx_client):
         """Test HTML page writing with missing page ID."""
         # Setup mocks
@@ -188,6 +196,8 @@ class TestLlamaPressNodes:
         # Execute function using async tool invoke
         result = await write_html_page.ainvoke({
             'full_html_document': '<html><body>Test</body></html>',
+            'message_to_user': 'Writing the page.',
+            'internal_thoughts': 'Test invocation.',
             'state': state
         })
 
@@ -196,7 +206,7 @@ class TestLlamaPressNodes:
         assert "page_id is required" in result
 
     @pytest.mark.asyncio
-    @patch('app.agents.llamapress.clone_agent.logger')
+    @patch('app.agents.llamapress.html_agent.logger')
     async def test_write_html_page_logging(self, mock_logger):
         """Test that logging is properly implemented."""
         # Create test state with all required fields
@@ -211,10 +221,12 @@ class TestLlamaPressNodes:
         }
 
         # Mock the environment variable to avoid actual HTTP calls
-        with patch('app.agents.llamapress.clone_agent.os.getenv', return_value=None):
+        with patch('app.agents.llamapress.html_agent.os.getenv', return_value=None):
             # Execute function using async tool invoke
             result = await write_html_page.ainvoke({
                 'full_html_document': '<html><body>Test</body></html>',
+                'message_to_user': 'Writing the page.',
+                'internal_thoughts': 'Test invocation.',
                 'state': state
             })
 

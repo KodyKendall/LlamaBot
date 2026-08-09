@@ -7,6 +7,15 @@
 
 ---
 
+> **A second, different cause of the same symptom** — a thread that summarizes on every step
+> and never completes a turn — was found on 2026-08-06 (SupportIncident #246): unbounded
+> page payloads (a 10 MB `full_html`, a 375 KB picked element) that compaction was
+> structurally incapable of reclaiming. If you are debugging a summarization loop, check
+> **`docs/dev/oversized_payload_caps.md`** as well as the reducer fix below. The two look
+> identical from the outside, including the "checkpoint history racing" signature.
+
+---
+
 ## Resolution (2026-06-25, SupportIncident #106)
 
 The recurring "summarize on every turn" loop (later reproduced on `mbc-preceptors`

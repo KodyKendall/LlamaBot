@@ -729,7 +729,7 @@ async def available_agents():
 
 
 @router.get("/api/available-models", response_class=JSONResponse)
-async def available_models():
+async def available_models(request: Request):
     """Get list of available LLM models based on configured API keys.
 
     Returns which models are available (have API keys) and which are not.
@@ -753,7 +753,34 @@ async def available_models():
         "deepseek-v4-flash-gmi": "GMI_DEEPSEEK_API_KEY",
         "deepseek-v4-flash-fireworks": "FIREWORKS_DEEPSEEK_API_KEY",
         "qwen3.7-plus": "ALIBABA_API_KEY",
+        # Meta's docs call the key MODEL_API_KEY; their LiteLLM integration calls
+        # it META_API_KEY. Accept either, matching get_llm's precedence.
+        "muse-spark-1.2-contributor": ("META_API_KEY", "MODEL_API_KEY"),
     }
+
+    # Models paid for by the SIGNED-IN USER's ChatGPT plan. Their availability is
+    # not an env var — it is whether this user has connected their account — so
+    # they are resolved separately below and skipped by the env-var loop.
+    from app.agents.leonardo.llm_factory import _CHATGPT_SUBSCRIPTION_MODELS
+
+    chatgpt_connected = False
+    try:
+        from sqlmodel import Session
+
+        from app.db import engine
+        from app.dependencies import try_authenticate
+        from app.services.chatgpt_auth import status_for_user
+
+        if engine is not None:
+            with Session(engine) as db:
+                current = try_authenticate(request, db)
+                if current is not None:
+                    chatgpt_connected = bool(
+                        status_for_user(db, current.id).get("connected")
+                    )
+    except Exception as e:
+        # Dropdown shaping must never 500 the chat page.
+        logger.warning("Could not resolve ChatGPT connection status: %s", e)
 
     models = []
     for model_value, env_vars in model_api_keys.items():
@@ -763,7 +790,6 @@ async def available_models():
 
         # Check each env var in order, use first one that has a value
         has_key = False
-        checked_var = env_vars[0]  # For error message
         for env_var in env_vars:
             api_key = os.environ.get(env_var, "")
             if api_key and api_key.strip():
@@ -777,7 +803,11 @@ async def available_models():
         if not enabled:
             reason = "Disabled by administrator"
         elif not has_key:
-            reason = f"{checked_var} not configured in .env"
+            # Deliberately does NOT name the env var. This endpoint is readable by
+            # every signed-in user, and the variable name is a fact about the
+            # instance's .env — which nothing user-facing discloses. "Which key is
+            # missing" is an operator question, answered by the server logs.
+            reason = "API key not configured"
         else:
             reason = None
 
@@ -786,6 +816,22 @@ async def available_models():
             "available": has_key and enabled,
             "reason": reason,
             "capabilities": get_model_capabilities(model_value),
+        })
+
+    for model_value in _CHATGPT_SUBSCRIPTION_MODELS:
+        enabled = is_model_enabled(model_value)
+        if not enabled:
+            reason = "Disabled by administrator"
+        elif not chatgpt_connected:
+            reason = "Connect your ChatGPT account to use this model"
+        else:
+            reason = None
+        models.append({
+            "value": model_value,
+            "available": chatgpt_connected and enabled,
+            "reason": reason,
+            "capabilities": get_model_capabilities(model_value),
+            "requires_chatgpt_login": True,
         })
 
     # Coarse operator gates the frontend needs to shape the UI: hide the model
@@ -1519,6 +1565,137 @@ async def api_set_site_setting(
     return {"key": key, "value": value}
 
 
+# ============== Environment variables API ==============
+#
+# There is NO endpoint here that returns the contents of the .env file — no
+# values, no key names, not even a "configured" bit. That is the whole design:
+# the file holds every provider API key, the database URLs, the SSO login secret
+# and the VS Code password, so the browser is never told anything about it.
+# Deleting the old reveal endpoint was the point, not an oversight; do not add
+# one back.
+#
+# What IS exposed:
+#   * engineer-or-admin — the two allowlisted boolean switches, and the model
+#     enabled/disabled list.
+#   * admin only — creating and deleting the user's OWN custom variables.
+#
+# The service layer enforces the same rules independently, so a future route
+# cannot widen this by accident.
+
+
+@router.get("/api/env-vars", response_class=JSONResponse)
+async def api_list_env_vars(
+    current_user: User = Depends(engineer_or_admin_required),
+    session: Session = Depends(get_db_session),
+):
+    """Settings payload: switches, custom-variable names, restart state.
+
+    Deliberately does NOT include the .env inventory. ``writable`` is a
+    capability bit for the UI, not information about the file's contents.
+    """
+    from app.services import env_settings_service as envsvc
+    from app.services import env_store
+
+    return {
+        "writable": envsvc.is_writable(),
+        "can_edit": bool(current_user.is_admin),
+        "toggles": envsvc.toggle_states(),
+        "custom_vars": env_store.list_custom_vars(session),
+        "pending": env_store.pending_summary(session),
+    }
+
+
+@router.get("/api/env-vars/pending", response_class=JSONResponse)
+async def api_pending_env_changes(
+    current_user: User = Depends(engineer_or_admin_required),
+    session: Session = Depends(get_db_session),
+):
+    """Edits written to the file but not yet live. Self-clears after a restart."""
+    from app.services import env_store
+    return env_store.pending_summary(session)
+
+
+@router.put("/api/env-toggles/{key}", response_class=JSONResponse)
+async def api_set_env_toggle(
+    key: str,
+    request: Request,
+    current_user: User = Depends(engineer_or_admin_required),
+    session: Session = Depends(get_db_session),
+):
+    """Flip one of the two allowlisted boolean switches.
+
+    This is the ONLY write path to a platform variable. It is safe to expose
+    because ``set_toggle`` refuses any key outside the allowlist and coerces the
+    value to the literal "true"/"false" — no caller-supplied text reaches the file,
+    and no key outside the list can be touched.
+    """
+    from app.services import env_settings_service as envsvc
+    from app.services import env_store
+
+    body = await request.json()
+    try:
+        needs_restart = envsvc.set_toggle(key, body.get("value"))
+    except envsvc.EnvValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    if needs_restart:
+        env_store.mark_pending(session, key, "", current_user.username)
+
+    logger.info("Env toggle '%s' set by '%s'", key, current_user.username)
+    return {
+        "key": key,
+        "enabled": envsvc.env_bool(key, False),
+        "needs_restart": needs_restart,
+        "pending": env_store.pending_summary(session),
+    }
+
+
+@router.post("/api/custom-env-vars", response_class=JSONResponse)
+async def api_create_custom_env_var(
+    request: Request,
+    admin: User = Depends(admin_required),
+    session: Session = Depends(get_db_session),
+):
+    """Define a custom variable, stored in the DB and merged into .env.
+
+    It reaches the Rails container because both services load the same
+    ``env_file`` — but only on the next recreate, so this always reports pending.
+    """
+    from app.services import env_settings_service as envsvc
+    from app.services import env_store
+
+    body = await request.json()
+    try:
+        result = env_store.upsert_custom_var(
+            session,
+            name=str(body.get("name", "")),
+            value=str(body.get("value", "")),
+            description=body.get("description"),
+            user_id=admin.id,
+        )
+    except envsvc.EnvValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    logger.info("Custom env var '%s' saved by admin '%s'", result["name"], admin.username)
+    return {**result, "needs_restart": True, "pending": env_store.pending_summary(session)}
+
+
+@router.delete("/api/custom-env-vars/{name}", response_class=JSONResponse)
+async def api_delete_custom_env_var(
+    name: str,
+    admin: User = Depends(admin_required),
+    session: Session = Depends(get_db_session),
+):
+    """Remove a custom variable and re-render the managed block."""
+    from app.services import env_store
+
+    if not env_store.delete_custom_var(session, name):
+        raise HTTPException(status_code=404, detail=f"No custom variable named {name}")
+
+    logger.info("Custom env var '%s' deleted by admin '%s'", name, admin.username)
+    return {"name": name, "deleted": True, "pending": env_store.pending_summary(session)}
+
+
 # ============== Skills Library API (filesystem: .leonardo/skills/<slug>/SKILL.md) ==============
 # Skills are now Agent Skills on disk (the SKILL.md open standard), managed the
 # same way as LEONARDO.md. The agent authors/uses them via the use_skill /
@@ -1579,6 +1756,84 @@ async def api_delete_skill(
         raise HTTPException(status_code=404, detail="Skill not found")
     logger.info(f"User '{current_user.username}' deleted skill '{slug}'")
     return {"message": "Skill deleted successfully"}
+
+
+# ============== Cookbook API (proxy for llamapress.ai/cookbook.json) ==============
+# The published cookbook index sends no CORS headers, so the browser can't fetch it
+# directly — this proxies it for the /cookbook slash menu. Cached in memory so
+# opening the menu repeatedly doesn't hammer llamapress.ai, and the last good
+# payload is served if the fetch fails (a down marketing site must not empty the menu).
+
+COOKBOOK_INDEX_URL = os.getenv("COOKBOOK_URL", "https://llamapress.ai/cookbook.json")
+COOKBOOK_SITE_URL = COOKBOOK_INDEX_URL.rsplit("/cookbook.json", 1)[0] or "https://llamapress.ai"
+COOKBOOK_CACHE_TTL_SECONDS = 15 * 60
+
+# {"guides": [...], "fetched_at": monotonic seconds}
+_cookbook_cache: dict = {"guides": None, "fetched_at": 0.0}
+
+
+def _normalize_cookbook_guides(payload) -> list:
+    """Shape the published index into what the slash menu needs.
+
+    Accepts either {"guides": [...]} or a bare list, and drops entries with no
+    slug (nothing to link to). Unknown extra fields are ignored, so the menu keeps
+    working when the cookbook grows new ones.
+    """
+    if isinstance(payload, dict):
+        raw = payload.get("guides") or []
+    elif isinstance(payload, list):
+        raw = payload
+    else:
+        raw = []
+
+    guides = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        slug = str(entry.get("slug") or "").strip()
+        if not slug:
+            continue
+        tags = entry.get("tags") or []
+        guides.append({
+            "slug": slug,
+            "title": str(entry.get("title") or slug),
+            "category": str(entry.get("category") or ""),
+            "summary": str(entry.get("summary") or ""),
+            "tags": [str(t) for t in tags if isinstance(t, (str, int, float))],
+            "url": f"{COOKBOOK_SITE_URL}/cookbook/{slug}",
+        })
+    return guides
+
+
+async def _fetch_cookbook_index() -> list:
+    """Fetch + normalize the published cookbook index. Raises on failure."""
+    import httpx
+
+    async with httpx.AsyncClient(timeout=8.0) as client:
+        response = await client.get(COOKBOOK_INDEX_URL)
+        response.raise_for_status()
+        return _normalize_cookbook_guides(response.json())
+
+
+@router.get("/api/cookbook", response_class=JSONResponse)
+async def api_get_cookbook(username: str = Depends(auth)):
+    """List published cookbook recipes for the /cookbook slash menu."""
+    import time
+
+    cached = _cookbook_cache.get("guides")
+    age = time.monotonic() - _cookbook_cache.get("fetched_at", 0.0)
+    if cached is not None and age < COOKBOOK_CACHE_TTL_SECONDS:
+        return {"guides": cached, "stale": False}
+
+    try:
+        guides = await _fetch_cookbook_index()
+        _cookbook_cache["guides"] = guides
+        _cookbook_cache["fetched_at"] = time.monotonic()
+        return {"guides": guides, "stale": False}
+    except Exception as e:
+        logger.warning(f"Could not fetch cookbook index from {COOKBOOK_INDEX_URL}: {e}")
+        # Serve the last good payload rather than an empty menu.
+        return {"guides": cached or [], "stale": True, "error": str(e)}
 
 
 # ============== File Upload to Assets ==============

@@ -6,6 +6,7 @@ from starlette.websockets import WebSocketState
 
 from app.websocket.web_socket_request_context import WebSocketRequestContext
 from app.lib.token_usage import extract_token_usage
+from app.lib.turn_metrics import start_turn
 from typing import Dict, Optional
 
 from langchain_core.messages import HumanMessage
@@ -38,6 +39,15 @@ from app.agents.leonardo.model_capabilities import (
     get_file_category,
 )
 from app.agents.leonardo.model_policy import vision_allowed
+# Byte caps for inbound frames. Without these, anything a client sends becomes
+# unbounded LangGraph state — and therefore unbounded checkpoints and an
+# uncompactable thread (SupportIncident #246).
+from app.websocket.payload_limits import cap_message_text, cap_state_value
+from app.websocket.error_text import describe_exception
+
+# Per-message ceiling applied by the `/compact` repair. A message bigger than a
+# tenth of the whole context budget cannot be kept whatever we do with the rest.
+MAX_TOKENS_PER_MESSAGE_ON_COMPACT = 15000
 
 # Support contact surfaced to users when vision is disabled by the operator.
 SUPPORT_EMAIL = "support@llamapress.ai"
@@ -80,6 +90,48 @@ class RequestHandler:
         self.locks: Dict[int, Lock] = {}
         self.app = app
     
+    def _report_turn_metrics(self, turn, started_at: float, message: dict) -> None:
+        """Fire-and-forget the end-of-turn performance rollup.
+
+        Called from a ``finally`` so errored and cancelled turns are reported
+        too — those are exactly the slow ones users complain about, and a
+        rollup that only covered clean turns would show the fleet at its best.
+
+        Synchronous and non-awaiting by design: the user already has their
+        answer, so this must add nothing to the turn's wall clock.
+        """
+        try:
+            mothership = getattr(self.app.state, "mothership_client", None)
+            if mothership is None:
+                return
+
+            import time as _time
+
+            metrics = turn.snapshot(total_ms=(_time.monotonic() - started_at) * 1000.0)
+            try:
+                from app.routers.api import get_container_version
+                version = get_container_version()
+            except Exception:
+                version = None
+
+            asyncio.create_task(mothership.report_turn_metrics(
+                thread_id=str((message or {}).get("thread_id", "")),
+                metrics=metrics,
+                agent_mode=(message or {}).get("agent_name"),
+                model=(message or {}).get("llm_model"),
+                llamabot_version=version,
+                occurred_at=datetime.now(timezone.utc).isoformat(),
+            ))
+            logger.info(
+                "turn metrics: total=%sms ttft=%sms model=%sms tool=%sms overhead=%sms "
+                "tok/s=%s input_tokens=%s",
+                metrics.get("total_ms"), metrics.get("ttft_ms"), metrics.get("model_ms"),
+                metrics.get("tool_ms"), metrics.get("overhead_ms"),
+                metrics.get("tokens_per_second"), metrics.get("input_tokens"),
+            )
+        except Exception as e:  # noqa: BLE001 - telemetry must never mask the turn's own outcome
+            logger.debug(f"turn metrics reporting failed (non-fatal): {e}")
+
     async def _report_error_to_mothership(self, exc: Exception, message: dict, *, recovered: bool = False) -> None:
         """Best-effort: surface an end-user-facing error to the mothership.
 
@@ -113,7 +165,13 @@ class RequestHandler:
             await mothership.report_error(
                 thread_id=(message or {}).get("thread_id"),
                 error_class=error_class,
-                error_message=str(exc),
+                # A message-less exception (httpx.ReadError) lands in the
+                # dashboard's "Sample message" column as an empty cell, which
+                # reads as "no information" rather than "this error has no text".
+                # The fingerprint above deliberately still hashes the RAW first
+                # line — changing that input would re-fingerprint every existing
+                # incident and split its history in two.
+                error_message=describe_exception(exc),
                 traceback_str=_tb.format_exc(),
                 agent_mode=agent_mode,
                 model=(message or {}).get("llm_model"),
@@ -456,6 +514,7 @@ class RequestHandler:
         """
         from app.agents.leonardo.llm_factory import make_summarization_model
         from app.agents.leonardo.rails_agent.nodes import SUMMARIZATION_PROMPT
+        from app.agents.leonardo.summarization import truncate_oversized_messages
         from langchain.agents.middleware import SummarizationMiddleware
         from langchain_core.messages import RemoveMessage
         from langgraph.graph.message import REMOVE_ALL_MESSAGES
@@ -539,6 +598,24 @@ class RequestHandler:
                     full_summary += text
                     await _send({"type": "AIMessageChunk", "content": text})
 
+            # Repair, not just compact: a single oversized message (a picked page
+            # element, a pasted file) survives every summarization because it is
+            # always in the preserved tail — which is exactly how a thread ends up
+            # unable to get back under the trigger (SupportIncident #246). /compact
+            # is the user's rescue lever, so it truncates those in place instead of
+            # handing back a state that is still wedged.
+            preserved_messages, repaired = truncate_oversized_messages(
+                preserved_messages, MAX_TOKENS_PER_MESSAGE_ON_COMPACT, token_counter,
+            )
+            if repaired:
+                await _send({
+                    "type": "AIMessageChunk",
+                    "content": (
+                        f"\n\n_Also truncated {repaired} oversized message(s) that were too "
+                        f"large to keep in context._"
+                    ),
+                })
+
             # Persist compacted state to the checkpoint
             new_messages = middleware._build_new_messages(full_summary)
             await graph.aupdate_state(config, {
@@ -613,6 +690,16 @@ class RequestHandler:
             return
 
         async with lock:
+            # Start performance accounting for this turn. Installed in the
+            # async context BEFORE astream so the timing middleware inside
+            # LangGraph's node tasks resolves to this same recorder (tasks
+            # inherit a copy of the context). See app/lib/turn_metrics.py.
+            import time as _time
+            turn = start_turn(
+                thread_id=str(incoming_message.get("thread_id", "")),
+                agent_mode=incoming_message.get("agent_name"),
+            )
+            turn_started_at = _time.monotonic()
             try:
                 app, state, agent_config = self.get_langgraph_app_and_state(incoming_message)
 
@@ -760,6 +847,16 @@ class RequestHandler:
                             }
                             if token_usage:
                                 ws_message["token_usage"] = token_usage
+
+                            # Time-to-first-token, measured where the user
+                            # actually experiences it: the first content frame
+                            # leaving for the browser. Thinking-only frames do
+                            # not count — the user is still staring at a spinner.
+                            if text_content:
+                                turn.mark_first_token(
+                                    elapsed_ms=(_time.monotonic() - turn_started_at) * 1000.0
+                                )
+
                             await websocket.send_json(ws_message)
 
                     elif is_this_chunk_an_update_stream_type: # This means that LangGraph has given us a state update. This will often include a new message from the AI.
@@ -853,6 +950,10 @@ class RequestHandler:
                                                     model=model_name,
                                                     token_usage=token_usage,
                                                     tool_calls=normalized_tool_calls,
+                                                    # Timing of the model call that produced THIS
+                                                    # reply, so the mothership gets a per-message
+                                                    # tokens/sec series next to the token counts.
+                                                    timings=turn.last_model_call(),
                                                 ))
 
                                         # Report ToolMessage observations (tool outputs/observations).
@@ -928,9 +1029,14 @@ class RequestHandler:
                 if self._is_websocket_open(websocket):
                     await websocket.send_json({
                         "type": "error",
-                        "content": f"Error processing request: {str(e)}"
+                        # describe_exception, not str(e): a mid-stream transport
+                        # failure (httpx.ReadError) has an EMPTY message, so this
+                        # frame used to reach the browser as a dangling colon.
+                        "content": f"Error processing request: {describe_exception(e)}"
                     })
                 raise e
+            finally:
+                self._report_turn_metrics(turn, turn_started_at, incoming_message)
 
     async def handle_approval_response(self, response_message: dict, websocket: WebSocket):
         """Resume a graph after user approves/rejects a HITL request."""
@@ -1059,7 +1165,7 @@ class RequestHandler:
                 if self._is_websocket_open(websocket):
                     await websocket.send_json({
                         "type": "error",
-                        "content": f"Error resuming after approval: {str(e)}"
+                        "content": f"Error resuming after approval: {describe_exception(e)}"
                     })
                 raise e
 
@@ -1284,7 +1390,7 @@ class RequestHandler:
                 if self._is_websocket_open(websocket):
                     await websocket.send_json({
                         "type": "error",
-                        "content": f"Error resuming after question: {str(e)}"
+                        "content": f"Error resuming after question: {describe_exception(e)}"
                     })
                 raise e
 
@@ -1322,8 +1428,15 @@ class RequestHandler:
         self.app.state.async_checkpointer = MemorySaver()  # save in RAM if postgres is not available
         if db_uri and db_uri.strip():
             try:
-                # Create connection pool and PostgresSaver directly
-                pool = AsyncConnectionPool(db_uri)
+                # Create connection pool and PostgresSaver directly.
+                # check= is required: without it (psycopg's default) a connection
+                # whose backend died while idle in the pool is handed to the caller
+                # and raises "server closed the connection unexpectedly" on first
+                # use, aborting the agent turn with no retry anywhere above it.
+                # See app/tests/test_checkpointer_dead_connection.py.
+                pool = AsyncConnectionPool(
+                    db_uri, check=AsyncConnectionPool.check_connection
+                )
                 self.app.state.async_checkpointer = AsyncPostgresSaver(pool)
                 self.app.state.checkpointer_pool = pool  # Store pool for checkpoint cleanup service
                 # NOTE: Don't call setup() here - tables are created by init_pg_checkpointer.py at startup
@@ -1486,7 +1599,11 @@ class RequestHandler:
         If there are attachments, returns a list of content blocks in LangChain format.
         For unsupported file types, adds a text note instead of the binary content.
         """
-        text = message.get("message", "")
+        # The element picker inlines a whole outerHTML into the message body; a
+        # 375 KB block is ~95k tokens in one HumanMessage and always sits in the
+        # preserved recent tail, so compaction can never get back under the
+        # trigger. Cap it here, before it is ever a message.
+        text = cap_message_text(message.get("message", ""))
         attachments = message.get("attachments", [])
         llm_model = message.get("llm_model", "gemini-3-flash")
 
@@ -1582,6 +1699,29 @@ class RequestHandler:
 
         return content
 
+    # Frame fields consumed by the transport itself; they never become state.
+    _SYSTEM_ROUTING_FIELDS = frozenset({
+        "message",      # transformed into `messages`
+        "agent_name",   # workflow routing only
+        "thread_id",    # LangGraph config only
+        "attachments",  # transformed into message content blocks
+    })
+
+    def _bounded_state_fields(self, message: dict) -> dict:
+        """Every non-routing frame field, each one size-bounded.
+
+        This used to be "pass everything else through naturally", which is how a
+        10.6 MB `debug_info.full_html` ended up in LangGraph state — and so in
+        every checkpoint — on every single turn (SupportIncident #246). The cap
+        is applied by key-agnostic rule, not by an allowlist of known-bad fields,
+        so the next content-heavy field nobody predicted is bounded too.
+        """
+        return {
+            key: cap_state_value(key, value)
+            for key, value in message.items()
+            if key not in self._SYSTEM_ROUTING_FIELDS
+        }
+
     def get_langgraph_app_and_state(self, message: dict):
         """
         Returns (app, state, agent_config) tuple.
@@ -1608,18 +1748,8 @@ class RequestHandler:
                 # Start with the transformed messages field
                 state = {"messages": messages}
 
-                # Pass through ALL fields except the ones used for system routing
-                system_routing_fields = {
-                    "message",      # We transformed this into messages
-                    "agent_name",   # Used for workflow routing only
-                    "thread_id",    # Used for LangGraph config only
-                    "attachments"   # We transformed this into message content blocks
-                }
-
-                # Pass everything else through naturally
-                for key, value in message.items():
-                    if key not in system_routing_fields:
-                        state[key] = value
+                # Pass everything else through — bounded (see _bounded_state_fields)
+                state.update(self._bounded_state_fields(message))
 
                 logger.info(f"Created state with keys: {list(state.keys())}")
                 if agent_config:

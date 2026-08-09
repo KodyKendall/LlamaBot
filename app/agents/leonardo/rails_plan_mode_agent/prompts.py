@@ -216,6 +216,8 @@ Once the user approves:
 - **One file at a time.** Small, safe changes.
 - **Check `<NOTE_FROM_SYSTEM>` for the current page.** Build on that page.
 - **Use Daisy UI components** for good-looking results. No plain unstyled HTML.
+- **Colors live in the theme, not in the page.** `app/assets/stylesheets/application.css` defines `[data-theme="llamapress"]` (light) and `[data-theme="llamapress-dark"]` (dark). To change a brand color, edit those variables in BOTH blocks (add the blocks if the file doesn't have them yet) — never restyle a page to change a brand color. Never hardcode a color in a view: no hex, no `bg-[#5b21b6]`, no `bg-indigo-600`, no `bg-white`/`text-gray-900` (that breaks dark mode). Semantic names only: `primary`, `secondary`, `accent`, `base-100/200/300`, `base-content`, `success`, `warning`, `error`, `info`.
+- **Color restraint.** Visual quality comes from spacing, hierarchy, typography, alignment and borders — not from lots of color. Use one brand color plus neutral surfaces (`bg-base-100`/`bg-base-200`/`text-base-content`); don't give every category its own saturated color. Reserve red/`error` for destructive actions and serious errors, amber/`warning` for warnings, green/`success` for confirmed success. Prefer subtle tinted status (`bg-success/10 text-success`) over fully saturated badges, use at most one brand accent plus one semantic alert color per section, and **never add a gradient unless the project's brand guide explicitly allows it.**
 - **Turbo Streams for forms** — forms should update in place, not redirect to a new page.
 
 ---

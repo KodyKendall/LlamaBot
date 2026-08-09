@@ -494,6 +494,13 @@ class ChatApp {
     // Fetch available models and disable unavailable ones
     this.fetchAvailableModels();
 
+    // Connecting or disconnecting a ChatGPT account changes which models are
+    // usable, and the sign-in modal lives in chat.html — so it tells us rather
+    // than the user having to reload to clear "(Connect account)".
+    document.addEventListener('llamabot:chatgpt-connection-changed', () => {
+      this.fetchAvailableModels();
+    });
+
     // Check for ?conversation= URL parameter and render pre-loaded messages
     this.checkConversationParam();
 
@@ -1893,7 +1900,16 @@ class ChatApp {
       this.updateImageSwitchBanner();
 
       const modelAvailability = new Map(
-        data.models.map(m => [m.value, { available: m.available, reason: m.reason }])
+        data.models.map(m => [m.value, {
+          available: m.available,
+          reason: m.reason,
+          // Models paid for by the user's own ChatGPT plan. "Unavailable" here
+          // means "you haven't connected an account yet" — a thing the user can
+          // fix in two clicks — so these must stay SELECTABLE. Disabling them
+          // makes the connect prompt unreachable: a disabled <option> fires no
+          // change event, so the only path to the sign-in modal is dead.
+          requiresChatGptLogin: m.requires_chatgpt_login === true,
+        }])
       );
 
       // Merge fetched capabilities into the seeded map (don't replace it, so
@@ -1912,7 +1928,18 @@ class ChatApp {
       Array.from(this.elements.modelSelect.options).forEach(option => {
         const modelInfo = modelAvailability.get(option.value);
 
-        if (modelInfo && !modelInfo.available) {
+        if (modelInfo && !modelInfo.available && modelInfo.requiresChatGptLogin) {
+          // Selectable on purpose — picking it is how you reach the sign-in
+          // modal (see the change handler in chat.html). Marked, not disabled.
+          option.disabled = false;
+          option.title = modelInfo.reason || 'Connect your ChatGPT account to use this model';
+
+          const originalLabel = option.getAttribute('data-original-label') || option.textContent;
+          if (!originalLabel.includes('(Connect account)')) {
+            option.setAttribute('data-original-label', originalLabel);
+            option.textContent = `${originalLabel} (Connect account)`;
+          }
+        } else if (modelInfo && !modelInfo.available) {
           // Disable unavailable models
           option.disabled = true;
           option.title = modelInfo.reason || 'API key not configured';
@@ -1931,6 +1958,13 @@ class ChatApp {
         } else {
           option.disabled = false;
           option.title = '';
+          // Restore the clean label once a model becomes usable — otherwise a
+          // just-connected account keeps reading "(Connect account)" forever.
+          const originalLabel = option.getAttribute('data-original-label');
+          if (originalLabel) {
+            option.textContent = originalLabel;
+            option.removeAttribute('data-original-label');
+          }
         }
       });
 

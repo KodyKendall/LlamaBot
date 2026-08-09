@@ -1167,6 +1167,10 @@ body {
 .model-selector-container {
     display: flex;
     align-items: center;
+    /* The ChatGPT status line sits beside the dropdown; let it drop to its own
+       row on a narrow composer rather than pushing the select off-screen. */
+    flex-wrap: wrap;
+    gap: 10px;
     margin-bottom: 10px;
     animation: toolbar-slide-in 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -7765,6 +7769,83 @@ button.brand-logo-thumb:hover .brand-logo-zoom {
     font-style: italic;
 }
 
+/* The "/cookbook" meta entry that searches the published recipes. */
+.slash-command-item.cookbook-meta .command-name {
+    color: #fbbf24;
+}
+
+/* The cookbook lists ~30 recipes of two-line prose — the command-sized panel
+   (280px ≈ 4 rows) left it feeling cut off, so this mode gets most of the
+   viewport height and scrolls inside itself. */
+.slash-command-dropdown.cookbook-mode {
+    max-height: min(60vh, 520px);
+}
+
+/* Recipe rows stack title over summary. Recipes are prose, not command tokens:
+   the two-column command layout squeezed long titles into a narrow gutter and
+   let long summaries run off the row. */
+.slash-command-item.cookbook-item {
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 14px;
+}
+
+.slash-command-item .cookbook-body {
+    flex: 1;
+    min-width: 0;          /* lets the summary ellipsize instead of stretching the row */
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.slash-command-item .cookbook-title {
+    font-family: -apple-system, system-ui, sans-serif;
+    color: #fbbf24;
+    font-weight: 600;
+    font-size: 0.9rem;
+    line-height: 1.3;
+}
+
+/* Summaries run to a few sentences upstream — clamp to two lines (the full text
+   is on hover) so every row is the same height and the list stays scannable. */
+.slash-command-item .cookbook-summary {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 0.8rem;
+    line-height: 1.35;
+}
+
+.slash-command-item .command-cookbook-badge {
+    display: inline-block;
+    margin-left: 8px;
+    padding: 1px 7px;
+    border-radius: 999px;
+    background: rgba(251, 191, 36, 0.15);
+    color: #fbbf24;
+    font-size: 0.68rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    vertical-align: middle;
+}
+
+/* Open-on-llamapress.ai link; picking the row itself fills the composer. */
+.slash-command-item .cookbook-open {
+    color: rgba(255, 255, 255, 0.35);
+    font-size: 0.8rem;
+    padding: 2px 4px;
+    text-decoration: none;
+    flex-shrink: 0;
+}
+
+.slash-command-item .cookbook-open:hover {
+    color: #fbbf24;
+}
+
 .slash-command-item .command-skill-badge {
     display: inline-flex;
     align-items: center;
@@ -8402,6 +8483,20 @@ button.brand-logo-thumb:hover .brand-logo-zoom {
 
     .slash-command-item .command-description {
         font-size: 0.8rem;
+    }
+
+    /* The cookbook still needs the height on a phone — the keyboard eats the
+       bottom half, so cap it against the viewport rather than a fixed 200px. */
+    .slash-command-dropdown.cookbook-mode {
+        max-height: min(55vh, 380px);
+    }
+
+    .slash-command-item .cookbook-title {
+        font-size: 0.85rem;
+    }
+
+    .slash-command-item .cookbook-summary {
+        font-size: 0.78rem;
     }
 
     .slash-command-modal-content {
@@ -9995,4 +10090,177 @@ button.brand-logo-thumb:hover .brand-logo-zoom {
 .gh-auth-btn-close:hover {
     background: rgba(255, 255, 255, 0.15);
     color: #fff;
+}
+
+/* ---- Connect your own ChatGPT plan (Codex OAuth) ---- */
+/* Reuses .update-modal-* for the shell; these cover only the new pieces. */
+
+/* The code is a button: the whole block is the copy target, and the icon is a
+   hint rather than the only hit area. Styled to still read as a code display. */
+.chatgpt-usercode {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    width: 100%;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 30px;
+    letter-spacing: 6px;
+    text-align: center;
+    padding: 14px 10px;
+    margin: 12px 0 6px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--border-color);
+    color: inherit;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.chatgpt-usercode:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(139, 124, 246, 0.55);
+}
+
+.chatgpt-usercode:focus-visible {
+    outline: 2px solid var(--button-bg, #8b7cf6);
+    outline-offset: 2px;
+}
+
+/* Manual entry still has to work — some people will retype it. */
+.chatgpt-usercode > span {
+    user-select: all;
+}
+
+/* Subtle: present enough to say "this is copyable", quiet enough not to compete
+   with the code itself. */
+.chatgpt-copy-icon {
+    font-size: 15px;
+    letter-spacing: normal;
+    color: rgba(255, 255, 255, 0.35);
+    transition: color 0.15s;
+}
+
+.chatgpt-usercode:hover .chatgpt-copy-icon {
+    color: var(--button-bg, #8b7cf6);
+}
+
+.chatgpt-copied {
+    margin: 0 0 10px;
+    font-size: 12px;
+    text-align: center;
+    color: var(--button-bg, #8b7cf6);
+    /* Reserve the row so confirming a copy doesn't shift the modal. */
+    visibility: hidden;
+}
+
+.chatgpt-copied.visible {
+    visibility: visible;
+}
+
+.chatgpt-waiting {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    opacity: 0.8;
+    font-size: 13px;
+}
+
+.chatgpt-fineprint {
+    font-size: 12px;
+    opacity: 0.72;
+    line-height: 1.5;
+}
+
+.chatgpt-steps {
+    margin: 10px 0 14px 18px;
+    padding: 0;
+    font-size: 13px;
+    line-height: 1.7;
+}
+
+.chatgpt-steps code {
+    background: rgba(255, 255, 255, 0.08);
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+[data-llamabot="chatgpt-paste-input"] {
+    width: 100%;
+    box-sizing: border-box;
+    background: rgba(0, 0, 0, 0.25);
+    color: var(--text-color);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 10px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+    resize: vertical;
+}
+
+[data-llamabot="chatgpt-verification-url"] {
+    color: var(--button-bg, #8b7cf6);
+    word-break: break-all;
+}
+
+.chatgpt-error {
+    color: #ff9b9b;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+/* How the account was signed in, inside the connected panel. */
+.chatgpt-method {
+    font-size: 13px;
+    line-height: 1.5;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.chatgpt-method.warn {
+    color: #f5c26b;
+}
+
+/* ===== Connection status under the model dropdown =====
+   Shown only while a "my ChatGPT plan" model is selected. */
+.chatgpt-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.75rem;
+    color: rgba(255, 255, 255, 0.55);
+    white-space: nowrap;
+    overflow: hidden;
+}
+
+.chatgpt-status.hidden {
+    display: none;
+}
+
+.chatgpt-status.warn {
+    color: #f5c26b;
+}
+
+/* Scoped under .chatgpt-status on purpose: the broad `.input-area button` rule
+   outranks a bare single-class selector and would repaint this (the same trap
+   that made the vision banner's close button invisible). */
+.chatgpt-status .chatgpt-status-link {
+    background: none;
+    border: none;
+    padding: 0;
+    margin: 0;
+    width: auto;
+    height: auto;
+    min-width: 0;
+    font: inherit;
+    color: var(--button-bg, #8b7cf6);
+    text-decoration: underline;
+    cursor: pointer;
+    flex: 0 0 auto;
+}
+
+.chatgpt-status .chatgpt-status-link:hover {
+    background: none;
+    opacity: 0.85;
 }

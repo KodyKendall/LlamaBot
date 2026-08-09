@@ -150,6 +150,30 @@ def _model_retry_delay(attempt: int) -> float:
     return min(_MODEL_RETRY_BASE_DELAY * (2 ** (attempt - 1)), _MODEL_RETRY_MAX_DELAY)
 
 
+def _record_raw_model_call(turn, started_at: float, response) -> None:
+    """Record a direct (non-middleware) model invocation into the active turn.
+
+    No TTFT: these call sites use blocking ``.invoke()``, so there is no first
+    token to observe. tokens/sec for these calls therefore includes prefill —
+    ``input_tokens`` travels alongside so the two can still be separated
+    downstream. Never raises; telemetry must not break a raw node.
+    """
+    if turn is None:
+        return
+    try:
+        from app.lib.token_usage import extract_token_usage
+
+        usage = extract_token_usage(response) if response is not None else None
+        turn.record_model_call(
+            duration_ms=(time.monotonic() - started_at) * 1000.0,
+            output_tokens=(usage or {}).get("output_tokens", 0),
+            input_tokens=(usage or {}).get("input_tokens", 0),
+            model=(getattr(response, "response_metadata", None) or {}).get("model_name"),
+        )
+    except Exception as e:  # noqa: BLE001 - telemetry must never be fatal
+        logger.debug("turn_metrics: raw model call not recorded: %s", e)
+
+
 def invoke_with_transient_retry(fn, *, label: str = "model call"):
     """Call ``fn()`` with rung-1 transient-error retry semantics, returning its result.
 
@@ -163,17 +187,32 @@ def invoke_with_transient_retry(fn, *, label: str = "model call"):
 
     ``fn`` is a zero-arg thunk so the caller keeps full control of how the model is
     invoked (bind_tools, cache_control kwargs, message list, etc.).
+
+    This is also where the raw agents contribute to per-turn performance
+    telemetry: TurnMetricsMiddleware only wraps ``create_agent`` agents, so
+    without timing here beginner mode would report zero model time and a wildly
+    inflated overhead. Retries are folded into ONE recorded call carrying the
+    total wait — that is what the user actually sat through. See
+    app/lib/turn_metrics.py.
     """
+    from app.lib.turn_metrics import current_turn
+
+    turn = current_turn()
+    started_at = time.monotonic()
     attempt = 0
     while True:
         try:
-            return fn()
+            result = fn()
         except Exception as e:
             attempt += 1
             if attempt >= _MODEL_RETRY_MAX_ATTEMPTS or not is_transient_error(e):
+                _record_raw_model_call(turn, started_at, None)
                 raise
             logger.warning(
                 "Transient error on %s (attempt %d/%d): %r; retrying",
                 label, attempt, _MODEL_RETRY_MAX_ATTEMPTS - 1, e,
             )
             time.sleep(_model_retry_delay(attempt))
+        else:
+            _record_raw_model_call(turn, started_at, result)
+            return result

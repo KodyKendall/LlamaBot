@@ -1419,6 +1419,29 @@ async def prompt_library_page(current_user: User = Depends(get_current_user)):
     return HTMLResponse(content=html)
 
 
+@router.get("/settings/environment", response_class=HTMLResponse)
+async def environment_page(current_user: User = Depends(get_current_user)):
+    """Environment variable inventory, feature switches and the model list.
+
+    A real HTML file rather than an f-string like the other pages here: the
+    escaping cost of ``{{`` in a page this JavaScript-heavy buys nothing, and all
+    of its data arrives from ``/api/env-vars`` anyway. The only thing injected is
+    the admin flag, which shapes the UI — every endpoint re-checks the role
+    server-side, so a tampered flag reveals nothing.
+    """
+    if not (current_user.role == "engineer" or current_user.is_admin):
+        raise HTTPException(status_code=403, detail="Engineers or admins only")
+
+    with open(frontend_dir / "environment.html") as f:
+        html = f.read()
+
+    flag = "true" if current_user.is_admin else "false"
+    html = html.replace(
+        "<script>", f"<script>window.LLAMABOT_IS_ADMIN = {flag};</script>\n<script>", 1
+    )
+    return HTMLResponse(content=html)
+
+
 @router.get("/settings", response_class=HTMLResponse)
 async def settings_page(
     current_user: User = Depends(get_current_user),
@@ -1613,7 +1636,25 @@ async def settings_page(
             <a href='/leonardo-md' class='menu-item'><i class='fa-solid fa-file-lines'></i><span>LEONARDO.md</span><i class='fa-solid fa-chevron-right chevron'></i></a>
         </div>
 
+        <!-- ChatGPT account. Sign-in lives in a modal on the chat page; this card
+             is how a user ever learns it exists, and how they see whether the
+             connection is one that renews itself. It links there rather than
+             duplicating the flow. -->
+        <div class='card'>
+            <div class='card-header'>ChatGPT Account</div>
+            <a href='/?connect=chatgpt' class='menu-item'>
+                <i class='fa-brands fa-openai'></i>
+                <span id='chatgptAccountLabel'>Checking…</span>
+                <i class='fa-solid fa-chevron-right chevron'></i>
+            </a>
+            <div id='chatgptAccountNote' style='padding: 4px 0 0 36px; font-size: 0.75rem; color: rgba(255,255,255,0.35);'>
+                Run Leo on your own ChatGPT Plus/Pro plan for the models marked “my ChatGPT plan”.
+            </div>
+        </div>
+
         {"<div class='card'><div class='card-header'>Automation</div><a href='/scheduled-jobs' class='menu-item'><i class='fa-solid fa-clock'></i><span>Scheduled Jobs</span><i class='fa-solid fa-chevron-right chevron'></i></a></div>" if current_user.role == 'engineer' or current_user.is_admin else ""}
+
+        {"<div class='card'><div class='card-header'>Configuration</div><a href='/settings/environment' class='menu-item'><i class='fa-solid fa-sliders'></i><span>Environment &amp; Models</span><i class='fa-solid fa-chevron-right chevron'></i></a></div>" if current_user.role == 'engineer' or current_user.is_admin else ""}
 
         <div class="card">
             <div class="card-header">Backup</div>
@@ -1727,6 +1768,37 @@ async def settings_page(
     </div>
 
     <script>
+        // ChatGPT connection status. Read-only here — the sign-in modal lives on
+        // the chat page, so the row links there with ?connect=chatgpt.
+        (async function() {{
+            const label = document.getElementById('chatgptAccountLabel');
+            const note = document.getElementById('chatgptAccountNote');
+            if (!label) return;
+            let status;
+            try {{
+                const r = await fetch('/api/chatgpt-auth/status');
+                status = r.ok ? await r.json() : null;
+            }} catch (_) {{ status = null; }}
+
+            if (!status) {{ label.textContent = 'Connection status unavailable'; return; }}
+            if (!status.connected) {{ label.textContent = 'Not connected — sign in'; return; }}
+
+            const who = status.account_email || 'Connected';
+            const plan = status.plan_tier ? ` (${{status.plan_tier}})` : '';
+            label.textContent = who + plan;
+            if (!note) return;
+            if (status.can_auto_refresh) {{
+                note.textContent = status.auth_method === 'device_code'
+                    ? 'Signed in with a device code. The token renews automatically.'
+                    : 'The token renews automatically.';
+            }} else {{
+                // Say this BEFORE it expires — otherwise Leo silently drops back
+                // to the default model mid-task with no explanation.
+                note.textContent = 'Connected with a pasted token, which cannot renew itself. Sign in again to switch to a device code.';
+                note.style.color = '#f5c26b';
+            }}
+        }})();
+
         // Auto-backup toggle
         (function() {{
             const toggle = document.getElementById('autoBackupToggle');

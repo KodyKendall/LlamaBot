@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from app.websocket.web_socket_connection_manager import WebSocketConnectionManager
 from app.websocket.request_handler import RequestHandler
+from app.websocket.error_text import describe_exception
 
 logger = logging.getLogger(__name__)
 
@@ -23,21 +24,39 @@ WS_AUTH_REQUIRED = os.getenv("WS_AUTH_REQUIRED", "false").lower() == "true"
 # Rails-embedded UI wrote a live user token into chat_app.log in plaintext.
 _REDACTED_FRAME_KEYS = frozenset({"api_token", "token"})
 
+# Per-field cap for the LOG copy of a frame. Redaction alone doesn't truncate, so
+# a page-context payload used to write its full 10.6 MB into the docker logs on
+# every single message (SupportIncident #246). Kept generous enough that
+# `docker compose logs llamabot | grep -a "Received message:" | wc -L` is still
+# the triage command — it just can't be tens of megabytes any more.
+_LOGGED_VALUE_MAX_BYTES = 2048
+
 
 def _redact_frame(frame):
-    """Copy of `frame` with credential fields masked, for logging.
+    """Copy of `frame` with credential fields masked and big values truncated.
 
     Returns the frame unchanged if it isn't dict-like — callers log arbitrary
     payloads and a logging helper must never be the thing that raises.
     """
+    from app.lib.text_budget import truncate_text
+
     try:
         items = frame.items()
     except AttributeError:
         return frame
-    return {
-        k: ("<redacted>" if k in _REDACTED_FRAME_KEYS and v else v)
-        for k, v in items
-    }
+
+    def _for_log(key, value):
+        if key in _REDACTED_FRAME_KEYS and value:
+            return "<redacted>"
+        try:
+            rendered = value if isinstance(value, str) else repr(value)
+            if len(rendered.encode("utf-8", "ignore")) <= _LOGGED_VALUE_MAX_BYTES:
+                return value
+            return truncate_text(rendered, _LOGGED_VALUE_MAX_BYTES)
+        except Exception:
+            return value
+
+    return {k: _for_log(k, v) for k, v in items}
 
 
 # Pydantic model for chat request
@@ -126,6 +145,13 @@ class WebSocketHandler:
         if payload:
             self.authenticated = True
             self.auth_user = payload
+            # Stamp the turn owner for the life of this connection's task, so
+            # get_llm knows whose ChatGPT subscription (if any) to spend. Rails
+            # tokens carry no user_id — that leaves it None and the
+            # subscription models fail open to the operator default, which is
+            # the intended behavior. See app/lib/request_context.py.
+            from app.lib.request_context import set_current_user_id
+            set_current_user_id(payload.get("user_id"))
             await self.manager.send_personal_message({
                 "type": "auth_success",
                 "user": payload.get("sub")
@@ -422,7 +448,10 @@ class WebSocketHandler:
                     if self._is_websocket_open(self.websocket):
                         await self.manager.send_personal_message({
                             "type": "error",
-                            "content": f"Error 80: {str(e)}"
+                            # describe_exception keeps the class name — a
+                            # message-less transport error (httpx.ReadError)
+                            # otherwise renders as "Error 80: " and nothing else.
+                            "content": f"Error 80: {describe_exception(e)}"
                         }, self.websocket)
         except Exception as e:
             logger.error(f"{self._log_ctx()} WebSocket error: {str(e)}")
@@ -430,7 +459,7 @@ class WebSocketHandler:
             if self._is_websocket_open(self.websocket):
                 await self.manager.send_personal_message({
                     "type": "error",
-                    "content": f"Error 253: {str(e)}"
+                    "content": f"Error 253: {describe_exception(e)}"
                 }, self.websocket)
         finally:
             # Detach from any background runs this connection subscribed to — but

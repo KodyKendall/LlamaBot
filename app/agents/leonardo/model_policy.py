@@ -99,10 +99,16 @@ _KNOWN_MODELS = [
     "gpt-5-nano",
     "gpt-5.4-nano",
     "gpt-5.6-luna",
+    # Same two models on the signed-in user's ChatGPT plan (see llm_factory's
+    # _CHATGPT_SUBSCRIPTION_MODELS). Listed AFTER the API-key entries so
+    # enabled_default_model() never picks a model that needs a user credential.
+    "gpt-5.6-luna-chatgpt",
+    "gpt-5.6-sol-chatgpt",
     "gemini-3-flash",
     "gemini-3-pro",
     "gemini-3.1-flash-lite",
     "qwen3.7-plus",
+    "muse-spark-1.2-contributor",
 ]
 
 

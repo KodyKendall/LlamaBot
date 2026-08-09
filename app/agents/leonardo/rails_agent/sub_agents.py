@@ -36,7 +36,7 @@ from app.agents.leonardo.rails_agent.tools import (
     git_command, github_cli_command, internet_search
 )
 # Shared LLM factory - single source of truth for model selection
-from app.agents.leonardo.llm_factory import get_llm
+from app.agents.leonardo.llm_factory import get_llm, system_message_for_model
 from app.agents.leonardo.delegation import (
     DELEGATION_TIMEOUT_SECONDS,
     DelegationTimedOut,
@@ -240,7 +240,9 @@ def create_sub_agent(llm_model: str = None):
     return create_agent(
         model=model,
         tools=sub_agent_tools,
-        system_prompt=CACHED_SYSTEM_PROMPT,  # With prompt caching
+        # Sub-agents get no DynamicModelMiddleware, so the cache blocks are
+        # flattened here for providers that reject list system content.
+        system_prompt=system_message_for_model(CACHED_SYSTEM_PROMPT, llm_model or 'deepseek-v4-flash'),
         state_schema=RailsAgentState,
     )
 
@@ -387,7 +389,9 @@ def create_research_sub_agent(llm_model: str = None):
     return create_agent(
         model=model,
         tools=research_tools,
-        system_prompt=get_research_system_prompt(),  # Research-only prompt
+        system_prompt=system_message_for_model(
+            get_research_system_prompt(), llm_model or 'deepseek-v4-flash'
+        ),  # Research-only prompt (block-list flattened for non-Anthropic)
         state_schema=RailsAgentState,
     )
 
