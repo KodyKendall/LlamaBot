@@ -28,7 +28,7 @@ from app.agents.leonardo.rails_agent.sub_agents import delegate_task, delegate_r
 from app.agents.leonardo.rails_beginner_agent.prompts import BEGINNER_AGENT_PROMPT
 from app.agents.leonardo.project_context import build_beginner_system_prompt, brand_context_section
 from app.agents.leonardo.friction import report_friction, with_friction_section
-from app.agents.leonardo.llm_factory import get_llm
+from app.agents.leonardo.llm_factory import get_llm, system_message_for_model
 from app.agents.leonardo.agent_factory import repair_orphaned_tool_calls_in_messages
 from app.agents.leonardo.resilience import invoke_with_transient_retry
 
@@ -155,7 +155,7 @@ def leonardo_beginner(state: RailsAgentState, browser_inspect_on: bool = False) 
 
     view_path = (state.get('debug_info') or {}).get('view_path')
 
-    messages = [get_sys_msg()] + state["messages"]
+    messages = [system_message_for_model(get_sys_msg(), llm_model)] + state["messages"]
     if view_path:
         messages = messages + [HumanMessage(
             content="<NOTE_FROM_SYSTEM> The user is currently viewing their Ruby on Rails webpage route at: " + view_path + " </NOTE_FROM_SYSTEM>"

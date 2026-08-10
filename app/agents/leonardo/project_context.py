@@ -110,21 +110,38 @@ def _compact_brand_summary() -> Optional[str]:
     return "\n".join(lines) if lines else None
 
 
+# Appended to every injected brand guide. Without it the palette above reads as
+# "paint to apply", and the agent pastes the hex codes straight into views —
+# which is exactly what the theme system exists to prevent.
+BRAND_THEME_NOTE = (
+    "These colors are the app's THEME values, not paint for individual pages. "
+    "They live in `app/assets/stylesheets/application.css` under "
+    '`[data-theme="llamapress"]` (light) and `[data-theme="llamapress-dark"]` '
+    "(dark). Apply a brand color by editing those variables in BOTH blocks — "
+    "never by writing a hex code into a view. In views, refer to them only by "
+    "their semantic names (`primary`, `secondary`, `accent`, `base-100/200/300`, "
+    "`base-content`, `success`, `warning`, `error`, `info`)."
+)
+
+
 def build_brand_context() -> Optional[str]:
     """Return the brand-guide body to inject into a model call, or None.
 
     Progressive disclosure: a short guide is inlined whole; a long guide is
     reduced to the compact palette plus a pointer to the ``brand-guidelines``
-    skill (which ``use_skill`` loads on demand).
+    skill (which ``use_skill`` loads on demand). Either way the theme note is
+    appended, so the palette is never handed over as loose hex codes.
     """
     md = get_brand_md_content()
     if not md:
         return None
     if len(md) <= BRAND_INLINE_THRESHOLD:
-        return md
+        return md + "\n\n" + BRAND_THEME_NOTE
     summary = _compact_brand_summary() or "(brand guide available)"
     return (
         summary
+        + "\n\n"
+        + BRAND_THEME_NOTE
         + "\n\nThe full brand guidelines are long — load them on demand with the "
         "`brand-guidelines` skill (call use_skill) before doing any visual, "
         "design, or theming work."

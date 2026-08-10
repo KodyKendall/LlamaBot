@@ -214,6 +214,77 @@ class SiteSetting(ActiveRecordMixin, SQLModel, table=True):
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
+class CustomEnvVar(ActiveRecordMixin, SQLModel, table=True):
+    """An operator-defined environment variable, rendered into the instance .env.
+
+    Deliberately NOT a ``SiteSetting`` row, for the same reason as
+    ``ChatGptCredential``: ``SiteSetting.value`` is ``max_length=1000`` and these
+    routinely hold connection strings and JWT-shaped service tokens. ``value`` is
+    a ``Text`` column.
+
+    The database is the source of truth; the ``.env`` managed block is a rendered
+    artifact regenerated from these rows (see
+    ``services/env_settings_service.sync_managed_block``). That direction matters
+    — the file is wiped and rebuilt by tooling, the rows are not.
+
+    A row here can NEVER override a variable already present in ``.env``. The
+    render step drops any name that collides, and the row is surfaced in the UI
+    as shadowed/inactive rather than silently winning.
+    """
+
+    __tablename__ = "custom_env_var"
+
+    name: str = Field(primary_key=True, max_length=128)
+    value: str = Field(sa_column=sa.Column(sa.Text, nullable=False))
+
+    # Free-text note so the next operator knows why this exists.
+    description: Optional[str] = Field(default=None, max_length=500)
+
+    created_by_user_id: Optional[int] = Field(default=None, foreign_key="user.id")
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class ChatGptCredential(ActiveRecordMixin, SQLModel, table=True):
+    """A user's ChatGPT (Codex) OAuth credential, for running Leo on their own plan.
+
+    Deliberately NOT a ``SiteSetting`` row: ``SiteSetting.value`` is
+    ``max_length=1000`` and OpenAI's access tokens are JWTs that exceed that on
+    their own, never mind an access+refresh pair. These are ``Text`` columns.
+
+    Scoped per ``user_id``, not per instance — an instance can have several users
+    (see ``User.role``), and one user's subscription must never serve another's
+    turn.
+
+    **The tokens in this table must never leave the container.** They are not
+    readable through ``/api/site-settings``, must not appear in error telemetry or
+    feedback snapshots, and are never sent to the mothership. See
+    ``docs/dev/chatgpt_oauth_byo_subscription.md`` §1 constraint 1.
+    """
+
+    __tablename__ = "chatgpt_credential"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", unique=True, index=True)
+
+    # Fernet-encrypted at rest (see services/chatgpt_auth.py). Text, not String.
+    access_token_encrypted: str = Field(sa_column=sa.Column(sa.Text, nullable=False))
+    refresh_token_encrypted: str = Field(sa_column=sa.Column(sa.Text, nullable=False))
+
+    account_id: Optional[str] = Field(default=None, max_length=128)
+    plan_tier: Optional[str] = Field(default=None, max_length=64)
+    account_email: Optional[str] = Field(default=None, max_length=255)
+
+    expires_at: Optional[datetime] = Field(default=None)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    last_refreshed_at: Optional[datetime] = Field(default=None)
+
+    # Set when OpenAI rejects the credential (revoked, plan lapsed, originator
+    # refused). Keeps the row for UI ("reconnect") while get_llm fails open to the
+    # default model instead of retrying a known-dead token every turn.
+    disconnected_reason: Optional[str] = Field(default=None, max_length=255)
+
+
 class SchedulerInvocationLog(SQLModel, table=True):
     """Log entry for each cron invocation of /api/scheduled-jobs/invoke.
 

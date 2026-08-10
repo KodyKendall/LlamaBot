@@ -6,6 +6,60 @@
  * with a confirmation dialog.
  */
 
+/**
+ * Recognize the cookbook search. "/cookbook" lists every published recipe;
+ * anything typed after it filters the list. Unlike every other slash command
+ * this one stays open once a space is typed — the space starts the search.
+ *
+ * @returns {{query: string}|null} null when the input isn't a cookbook search.
+ */
+export function parseCookbookInput(value) {
+  const match = /^\/cookbook(?:\s+([\s\S]*))?$/i.exec(value || '');
+  if (!match) return null;
+  return { query: (match[1] || '').trim() };
+}
+
+/**
+ * Filter cookbook recipes by a free-text query. Every whitespace-separated word
+ * must appear somewhere in the recipe (title, summary, category, tags or slug),
+ * so "pdf export" narrows rather than widens. Title matches rank above the rest
+ * — searching "auth" should lead with recipes about auth, not ones that merely
+ * mention it in a summary.
+ */
+export function filterCookbookGuides(guides, query) {
+  const list = Array.isArray(guides) ? guides : [];
+  const words = String(query || '').toLowerCase().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return [...list];
+
+  const haystack = (g) => [
+    g.title, g.summary, g.category, g.slug, ...(g.tags || []),
+  ].join(' ').toLowerCase();
+
+  const scored = [];
+  list.forEach((g, index) => {
+    const hay = haystack(g);
+    if (!words.every(w => hay.includes(w))) return;
+    const title = String(g.title || '').toLowerCase();
+    const tags = (g.tags || []).join(' ').toLowerCase();
+    const category = String(g.category || '').toLowerCase();
+    let rank = 3;
+    if (words.every(w => title.includes(w))) rank = 0;
+    else if (words.every(w => tags.includes(w))) rank = 1;
+    else if (words.every(w => category.includes(w))) rank = 2;
+    scored.push({ g, rank, index });
+  });
+
+  scored.sort((a, b) => (a.rank - b.rank) || (a.index - b.index));
+  return scored.map(s => s.g);
+}
+
+/** The message a picked recipe drops into the composer. */
+export function cookbookDirective(guide) {
+  const title = guide.title || guide.slug;
+  const url = guide.url || `https://llamapress.ai/cookbook/${guide.slug}`;
+  return `Follow the LlamaPress cookbook recipe "${title}" — curl ${url}.json for the full guide, then apply it to my app. `;
+}
+
 export class SlashCommandManager {
   constructor(container = null) {
     this.container = container || document;
@@ -14,6 +68,9 @@ export class SlashCommandManager {
     this.commands = [];
     this.hostCommands = [];   // privileged host slash commands (/api/slash-commands)
     this.skillCommands = [];  // filesystem Agent Skills (/api/skills), shown to all users
+    this.cookbookGuides = null;   // published recipes (/api/cookbook), lazily fetched
+    this.cookbookFetchedAt = 0;
+    this.cookbookLoading = false;
     this.isOpen = false;
     this.selectedIndex = -1;
     this.confirmModal = null;
@@ -402,6 +459,13 @@ export class SlashCommandManager {
   handleInput() {
     const value = this.messageInput.value;
 
+    // The cookbook search owns everything after "/cookbook", spaces included.
+    const cookbook = parseCookbookInput(value);
+    if (cookbook) {
+      this.showCookbookDropdown(cookbook.query);
+      return;
+    }
+
     // Check if input starts with "/" and only contains command text (no spaces)
     if (value.startsWith('/') && !value.includes(' ')) {
       const query = value.slice(1).toLowerCase();
@@ -469,7 +533,147 @@ export class SlashCommandManager {
     this.rebuildCommandList();
   }
 
-  /** Merge host commands + the /skills entry + skills into the dropdown list. */
+  /**
+   * Fetch published cookbook recipes through the backend proxy (llamapress.ai
+   * serves no CORS headers, so the browser can't read cookbook.json itself).
+   * Cached for the session; a failure leaves whatever we already had.
+   */
+  async fetchCookbook(force = false) {
+    const FRESH_MS = 10 * 60 * 1000;
+    const fresh = this.cookbookGuides && (Date.now() - this.cookbookFetchedAt) < FRESH_MS;
+    if (!force && fresh) return this.cookbookGuides;
+
+    this.cookbookLoading = true;
+    try {
+      const response = await fetch('/api/cookbook');
+      const data = response.ok ? await response.json() : null;
+      const guides = Array.isArray(data?.guides) ? data.guides : [];
+      // Never replace a good list with an empty one from a failed/stale fetch.
+      if (guides.length > 0 || !this.cookbookGuides) {
+        this.cookbookGuides = guides;
+      }
+      this.cookbookFetchedAt = Date.now();
+    } catch (error) {
+      console.error('Failed to fetch cookbook:', error);
+      if (!this.cookbookGuides) this.cookbookGuides = [];
+    } finally {
+      this.cookbookLoading = false;
+    }
+    return this.cookbookGuides;
+  }
+
+  /**
+   * Render the cookbook search: "/cookbook" lists every recipe, "/cookbook pdf"
+   * filters. Renders immediately from cache (or a loading note) and re-renders
+   * once the fetch lands, if the user is still searching the cookbook.
+   */
+  showCookbookDropdown(query = '') {
+    // Recipe rows are two-line prose, and there are ~30 of them — the cookbook
+    // list gets its own (much taller) panel height, see .cookbook-mode.
+    this.dropdown.classList.add('cookbook-mode');
+
+    if (!this.cookbookGuides) {
+      if (!this.cookbookLoading) {
+        this.fetchCookbook().then(() => {
+          const still = parseCookbookInput(this.messageInput.value);
+          if (still) this.showCookbookDropdown(still.query);
+        });
+      }
+      this.dropdown.innerHTML =
+        '<div class="slash-command-group-header">Cookbook</div>' +
+        '<div class="slash-command-empty"><i class="fa-solid fa-spinner fa-spin"></i> Loading recipes…</div>';
+      this.dropdown.classList.remove('hidden');
+      this.isOpen = true;
+      this.selectedIndex = -1;
+      this.filteredCommands = [];
+      return;
+    }
+
+    const filtered = filterCookbookGuides(this.cookbookGuides, query);
+
+    if (filtered.length === 0) {
+      const note = this.cookbookGuides.length === 0
+        ? "Couldn't load the cookbook — check your connection and try again."
+        : `No recipes match "${this._esc(query)}".`;
+      this.dropdown.innerHTML =
+        '<div class="slash-command-group-header">Cookbook</div>' +
+        `<div class="slash-command-empty">${note}</div>`;
+      this.dropdown.classList.remove('hidden');
+      this.isOpen = true;
+      this.selectedIndex = -1;
+      this.filteredCommands = [];
+      return;
+    }
+
+    const count = query
+      ? `Cookbook · ${filtered.length} match${filtered.length === 1 ? '' : 'es'}`
+      : `Cookbook · ${filtered.length} recipes`;
+
+    this.dropdown.innerHTML =
+      `<div class="slash-command-group-header">${count}</div>` +
+      filtered.map((g, index) => `
+      <div class="slash-command-item cookbook-item${index === 0 ? ' selected' : ''}" data-index="${index}" data-slug="${this._esc(g.slug)}">
+        <div class="cookbook-body">
+          <span class="cookbook-title">${this._esc(g.title)}${g.category ? `<span class="command-cookbook-badge">${this._esc(g.category)}</span>` : ''}</span>
+          <span class="command-description cookbook-summary" title="${this._esc(g.summary)}">${this._esc(g.summary)}</span>
+        </div>
+        <a class="cookbook-open" href="${this._esc(g.url)}" target="_blank" rel="noopener noreferrer" title="Open this recipe on llamapress.ai"><i class="fa-solid fa-arrow-up-right-from-square"></i></a>
+      </div>`).join('');
+
+    this.dropdown.querySelectorAll('.slash-command-item').forEach((item, index) => {
+      item.addEventListener('click', (e) => {
+        // The ↗ link opens the guide; it must not also fill the composer.
+        if (e.target.closest('.cookbook-open')) {
+          e.stopPropagation();
+          return;
+        }
+        e.stopPropagation();
+        this.selectedIndex = index;
+        this.executeSelected();
+      });
+      item.addEventListener('mouseenter', () => {
+        this.setSelectedIndex(index);
+      });
+    });
+
+    this.dropdown.classList.remove('hidden');
+    this.isOpen = true;
+    this.selectedIndex = 0;
+    this.filteredCommands = filtered.map(g => ({ ...g, is_cookbook: true }));
+  }
+
+  /**
+   * The "/cookbook" menu entry: switch the input into cookbook search mode and
+   * list every recipe. Nothing is sent — the user picks one (or keeps typing to
+   * filter) and the pick fills the composer.
+   */
+  showAllCookbook() {
+    this.messageInput.value = '/cookbook ';
+    this.messageInput.focus();
+    const len = this.messageInput.value.length;
+    if (this.messageInput.setSelectionRange) {
+      this.messageInput.setSelectionRange(len, len);
+    }
+    this.showCookbookDropdown('');
+  }
+
+  /**
+   * Picking a recipe fills the composer with a directive naming it (and its
+   * JSON URL, which the agent curls for the full guide) — it does NOT send, so
+   * the user can add "…for my invoices page" before hitting enter.
+   */
+  insertCookbookRecipe(guide) {
+    this.hideDropdown();
+    this.messageInput.value = cookbookDirective(guide);
+    this.messageInput.focus();
+    const len = this.messageInput.value.length;
+    if (this.messageInput.setSelectionRange) {
+      this.messageInput.setSelectionRange(len, len);
+    }
+    this.messageInput.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  /** Merge host commands + the /cookbook entry + the /skills entry + skills. */
   rebuildCommandList() {
     // `/skills` is a meta entry (Claude-style): selecting it — or typing the full
     // word — lists every installed skill. Sits at the top of the Skills section.
@@ -478,7 +682,18 @@ export class SlashCommandManager {
       description: 'List all available skills',
       is_meta: true,
     }];
-    this.commands = [...(this.hostCommands || []), ...meta, ...(this.skillCommands || [])];
+    // `/cookbook` searches the published recipes at llamapress.ai/cookbook.
+    const cookbook = [{
+      name: 'cookbook',
+      description: 'Search LlamaPress cookbook recipes',
+      is_cookbook_meta: true,
+    }];
+    this.commands = [
+      ...(this.hostCommands || []),
+      ...cookbook,
+      ...meta,
+      ...(this.skillCommands || []),
+    ];
   }
 
   /** Escape user-authored text before injecting into the dropdown HTML. */
@@ -492,6 +707,8 @@ export class SlashCommandManager {
    * Show dropdown with filtered commands
    */
   showDropdown(query = '') {
+    this.dropdown.classList.remove('cookbook-mode');
+
     // Typing "/skills" (or picking the /skills entry) lists EVERY installed skill,
     // even ones whose slug doesn't contain the word "skills".
     const listAllSkills = query === 'skills';
@@ -522,15 +739,17 @@ export class SlashCommandManager {
     let html = '';
     let lastGroup = null;
     filtered.forEach((cmd, index) => {
-      const inSkills = cmd.is_skill || cmd.is_meta;
-      const group = inSkills ? 'skills' : 'commands';
+      const group = cmd.is_cookbook_meta ? 'cookbook'
+        : (cmd.is_skill || cmd.is_meta) ? 'skills'
+        : 'commands';
       if (group !== lastGroup) {
-        html += `<div class="slash-command-group-header">${inSkills ? 'Skills' : 'Commands'}</div>`;
+        const label = group === 'cookbook' ? 'Cookbook' : group === 'skills' ? 'Skills' : 'Commands';
+        html += `<div class="slash-command-group-header">${label}</div>`;
         lastGroup = group;
       }
       const badge = cmd.is_skill ? '<span class="command-skill-badge"><i class="fa-solid fa-bolt"></i> skill</span>' : '';
       html += `
-      <div class="slash-command-item${index === 0 ? ' selected' : ''}${cmd.is_skill ? ' skill-command' : ''}${cmd.is_meta ? ' skills-meta' : ''}" data-command="${this._esc(cmd.name)}" data-index="${index}">
+      <div class="slash-command-item${index === 0 ? ' selected' : ''}${cmd.is_skill ? ' skill-command' : ''}${cmd.is_meta ? ' skills-meta' : ''}${cmd.is_cookbook_meta ? ' cookbook-meta' : ''}" data-command="${this._esc(cmd.name)}" data-index="${index}">
         <span class="command-name">/${this._esc(cmd.name)}${badge}</span>
         <span class="command-description">${this._esc(cmd.description)}</span>
         ${cmd.dangerous ? '<span class="command-warning"><i class="fa-solid fa-exclamation-triangle"></i></span>' : ''}
@@ -561,6 +780,7 @@ export class SlashCommandManager {
    */
   hideDropdown() {
     this.dropdown.classList.add('hidden');
+    this.dropdown.classList.remove('cookbook-mode');
     this.isOpen = false;
     this.selectedIndex = -1;
     this.filteredCommands = [];
@@ -609,10 +829,17 @@ export class SlashCommandManager {
     if (this.selectedIndex < 0 || !this.filteredCommands) return;
 
     const cmd = this.filteredCommands[this.selectedIndex];
-    if (cmd) {
-      this.messageInput.value = `/${cmd.name}`;
-      this.hideDropdown();
+    if (!cmd) return;
+
+    // Cookbook recipes have no slash token to complete — Tab fills the composer
+    // with the recipe directive, same as Enter.
+    if (cmd.is_cookbook) {
+      this.insertCookbookRecipe(cmd);
+      return;
     }
+
+    this.messageInput.value = `/${cmd.name}`;
+    this.hideDropdown();
   }
 
   /**
@@ -625,6 +852,18 @@ export class SlashCommandManager {
 
     if (!cmd) {
       this.hideDropdown();
+      return;
+    }
+
+    // A picked cookbook recipe fills the composer; nothing runs on the host.
+    if (cmd.is_cookbook) {
+      this.insertCookbookRecipe(cmd);
+      return;
+    }
+
+    // The /cookbook entry switches into cookbook search instead of executing.
+    if (cmd.is_cookbook_meta) {
+      this.showAllCookbook();
       return;
     }
 

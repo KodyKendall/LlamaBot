@@ -15,9 +15,10 @@ import logging
 from dotenv import load_dotenv
 from langgraph.graph import END, START, StateGraph
 
-from app.agents.leonardo.llm_factory import get_llm
+from app.agents.leonardo.llm_factory import get_llm, system_message_for_model
 from app.agents.leonardo.rails_agent.state import RailsAgentState
 from app.agents.leonardo.project_context import brand_context_section
+from app.agents.leonardo.resilience import invoke_with_transient_retry
 
 load_dotenv()
 
@@ -56,7 +57,16 @@ def plain_chat(state: RailsAgentState):
     # No .bind_tools() — see the module docstring before adding any.
     llm = get_llm(llm_model)
 
-    return {"messages": [llm.invoke([get_sys_msg()] + state["messages"])]}
+    sys_msg = system_message_for_model(get_sys_msg(), llm_model)
+    # Raw node — no DynamicModelMiddleware, so the rung-1 transient retry has to
+    # be at the call site, same as rails_beginner_agent / rails_ai_builder_agent.
+    # Without it a mid-stream provider drop (RemoteProtocolError: incomplete
+    # chunked read) kills the turn outright. See test_stream_truncated_response.py.
+    response = invoke_with_transient_retry(
+        lambda: llm.invoke([sys_msg] + state["messages"]),
+        label=f"rails_plain_chat_mode/{llm_model}",
+    )
+    return {"messages": [response]}
 
 
 def build_workflow(checkpointer=None):

@@ -15,7 +15,7 @@ import logging
 import time
 
 from app.agents.leonardo.rails_agent.state import RailsAgentState
-from app.agents.leonardo.llm_factory import get_llm
+from app.agents.leonardo.llm_factory import get_llm, system_message_for_model
 from app.agents.leonardo.resilience import (
     is_transient_error,
     _MODEL_RETRY_MAX_ATTEMPTS,
@@ -404,17 +404,28 @@ class DynamicModelMiddleware(AgentMiddleware):
 
     Note: Prompt caching for Anthropic is handled by passing a SystemMessage
     with cache_control to create_agent's system_prompt parameter in nodes.py.
+    That SystemMessage carries LIST content (the cache blocks), which Fireworks
+    and GMI reject outright — so the model swap here also normalizes the system
+    message for the model it just selected (see system_message_for_model).
     """
 
     def _get_llm(self, model_name: str):
         """Backward-compatible alias for sub-agents that reach into the middleware."""
         return get_llm(model_name)
 
+    def _override(self, request, llm_model):
+        """Swap in the selected model AND a system message that model accepts."""
+        overrides = {"model": get_llm(llm_model)}
+        system_message = getattr(request, "system_message", None)
+        if system_message is not None:
+            overrides["system_message"] = system_message_for_model(system_message, llm_model)
+        return request.override(**overrides)
+
     def wrap_model_call(self, request, handler):
         """Sync: select the model, then retry the call on transient failures."""
         llm_model = request.state.get('llm_model') or 'deepseek-v4-flash'
         logger.info(f"Using LLM model: {llm_model}")
-        req = request.override(model=get_llm(llm_model))
+        req = self._override(request, llm_model)
         attempt = 0
         while True:
             try:
@@ -437,7 +448,7 @@ class DynamicModelMiddleware(AgentMiddleware):
         """
         llm_model = request.state.get('llm_model') or 'deepseek-v4-flash'
         logger.info(f"Using LLM model: {llm_model}")
-        req = request.override(model=get_llm(llm_model))
+        req = self._override(request, llm_model)
         attempt = 0
         while True:
             try:

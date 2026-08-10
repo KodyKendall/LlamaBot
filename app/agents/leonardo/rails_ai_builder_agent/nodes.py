@@ -15,8 +15,6 @@ from pathlib import Path
 import os
 from typing import List, Literal, Optional, TypedDict
 
-from app.agents.utils.playwright_screenshot import capture_page_and_img_src
-
 from openai import OpenAI
 from app.agents.utils.images import encode_image
 
@@ -30,7 +28,7 @@ from app.agents.leonardo.rails_agent.tools import (
 from app.agents.leonardo.rails_agent.sub_agents import delegate_research
 from app.agents.leonardo.rails_ai_builder_agent.prompts import RAILS_AI_BUILDER_AGENT_PROMPT
 from app.agents.leonardo.project_context import build_system_prompt_with_project_context, brand_context_section
-from app.agents.leonardo.llm_factory import get_llm, invoke_with_cache
+from app.agents.leonardo.llm_factory import get_llm, invoke_with_cache, system_message_for_model
 from app.agents.leonardo.agent_factory import repair_orphaned_tool_calls_in_messages
 from app.agents.leonardo.resilience import invoke_with_transient_retry
 
@@ -85,7 +83,7 @@ def leonardo_ai_builder(state: RailsAgentState) -> Command[Literal["tools"]]:
 
    view_path = (state.get('debug_info') or {}).get('view_path')
 
-   messages = [get_sys_msg()] + state["messages"]
+   messages = [system_message_for_model(get_sys_msg(), llm_model)] + state["messages"]
 
    if view_path:
       messages = messages + [HumanMessage(content="<NOTE_FROM_SYSTEM> The user is currently viewing their Ruby on Rails webpage route at: " + view_path + " </NOTE_FROM_SYSTEM>")]

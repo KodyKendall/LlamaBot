@@ -221,6 +221,45 @@ def guard_against_beginning_slash_argument(argument: str) -> str:
 
     return argument
 
+
+#: Every file tool is scoped to the customer's Rails project. Nothing above it is
+#: theirs to read or write.
+RAILS_ROOT = APP_DIR / "rails"
+
+
+class PathTraversalError(ValueError):
+    """Raised when a tool argument resolves outside the Rails project."""
+
+
+def resolve_within_rails(argument: str):
+    """Normalize ``argument`` and resolve it, refusing anything outside the project.
+
+    ``guard_against_beginning_slash_argument`` only rewrote *prefixes*; it never
+    looked at ``..``. That left every file tool able to walk out of the project —
+    ``read_file("../../leonardo/.env")`` resolved to the instance's real ``.env``,
+    which holds every provider API key, the database URLs and the VS Code
+    password. ``bash_command`` refuses the literal string ``.env`` but the file
+    tools had no equivalent check, so this was the way out.
+
+    Resolution happens BEFORE the containment check, so ``..`` segments and
+    symlinks are both collapsed first — checking the raw string would be
+    defeated by either.
+    """
+    cleaned = guard_against_beginning_slash_argument(argument or "")
+    try:
+        root = RAILS_ROOT.resolve()
+        # strict=False: write_file legitimately targets a path that doesn't exist yet.
+        resolved = (RAILS_ROOT / cleaned).resolve()
+    except OSError as e:
+        raise PathTraversalError(f"Could not resolve path '{argument}': {e}")
+
+    if resolved != root and not resolved.is_relative_to(root):
+        raise PathTraversalError(
+            f"Path '{argument}' is outside the Rails project and cannot be accessed. "
+            "File tools are scoped to the project directory."
+        )
+    return resolved
+
 def normalize_whitespace(s: str) -> str:
     """Normalize whitespace for more flexible string matching.
 
@@ -251,15 +290,14 @@ def normalize_whitespace(s: str) -> str:
 
 @tool(description=LIST_DIRECTORY_DESCRIPTION)
 def ls(directory: str = "") -> list[str]:
-    if directory.startswith("/"): # we NEVER want to include a leading slash "/"  at the beginning of the directory string. It's all relative in our docker container.
-        directory = directory[1:]
+    try:
+        dir_path = resolve_within_rails(directory) if directory else RAILS_ROOT
+    except PathTraversalError as e:
+        return f"Error: {e}"
 
-    # Build path - if directory is empty, just use rails root
-    dir_path = APP_DIR / "rails" / directory if directory else APP_DIR / "rails"
-    
     if not dir_path.exists():
         return f"Directory not found: {directory}"
-    
+
     return os.listdir(dir_path)
 
 @tool(description=TOOL_DESCRIPTION)
@@ -270,11 +308,11 @@ def read_file(
     limit: int = 2000,
 ) -> str:
     """Read a file within the Rails project and return its contents."""
-    file_path = guard_against_beginning_slash_argument(file_path)
-    
-    # Construct the full path
-    full_path = APP_DIR / "rails" / file_path
-    
+    try:
+        full_path = resolve_within_rails(file_path)
+    except PathTraversalError as e:
+        return f"Error: {e}"
+
     # Check if file exists
     if not full_path.exists():
         return f"Error: File '{file_path}' not found"
@@ -326,8 +364,10 @@ def write_file(
     runtime: ToolRuntime,
 ) -> Command:
     """Create or overwrite a file at the specified path."""
-    file_path = guard_against_beginning_slash_argument(file_path)
-    full_path = APP_DIR / "rails" / file_path
+    try:
+        full_path = resolve_within_rails(file_path)
+    except PathTraversalError as e:
+        return Command(update={"messages": [ToolMessage(f"Error: {e}", tool_call_id=runtime.tool_call_id)]})
 
     # NOTE: Auto-checkpoint disabled. Users create checkpoints manually via History panel.
 
@@ -378,8 +418,10 @@ def edit_file(
 ) -> Command:
     """Edit a file by replacing old_string with new_string."""
     tool_call_id = runtime.tool_call_id
-    file_path = guard_against_beginning_slash_argument(file_path)
-    full_path = APP_DIR / "rails" / file_path
+    try:
+        full_path = resolve_within_rails(file_path)
+    except PathTraversalError as e:
+        return Command(update={"messages": [ToolMessage(f"Error: {e}", tool_call_id=tool_call_id)]})
 
     # NOTE: Auto-checkpoint disabled. Users create checkpoints manually via History panel.
 
@@ -560,12 +602,11 @@ def glob_files(
     """Find files matching a glob pattern using ripgrep."""
     tool_call_id = runtime.tool_call_id
 
-    # Normalize path
-    if path:
-        path = guard_against_beginning_slash_argument(path)
-        search_dir = APP_DIR / "rails" / path
-    else:
-        search_dir = APP_DIR / "rails"
+    # Normalize path, refusing anything that resolves outside the project.
+    try:
+        search_dir = resolve_within_rails(path) if path else RAILS_ROOT
+    except PathTraversalError as e:
+        return Command(update={"messages": [ToolMessage(f"Error: {e}", tool_call_id=tool_call_id)]})
 
     if not search_dir.exists():
         return Command(update={
@@ -625,12 +666,11 @@ def grep_files(
     """Search file contents for a regex pattern using ripgrep."""
     tool_call_id = runtime.tool_call_id
 
-    # Normalize path
-    if path:
-        path = guard_against_beginning_slash_argument(path)
-        search_dir = APP_DIR / "rails" / path
-    else:
-        search_dir = APP_DIR / "rails"
+    # Normalize path, refusing anything that resolves outside the project.
+    try:
+        search_dir = resolve_within_rails(path) if path else RAILS_ROOT
+    except PathTraversalError as e:
+        return Command(update={"messages": [ToolMessage(f"Error: {e}", tool_call_id=tool_call_id)]})
 
     if not search_dir.exists():
         return Command(update={
@@ -737,6 +777,125 @@ def list_all_files_recursive(directory: Path):
 # Rails container configuration
 WORKDIR = "/rails"  # path that contains bin/rails inside the Rails container
 
+# --- Environment scrubbing for shell execs -----------------------------------
+#
+# The Rails container is started with `env_file: .env`, so its environment holds
+# every LLM provider key, the VS Code password and the SSO login secret. A docker
+# `exec` INHERITS all of it, which meant `bash_command` could read the lot with
+# `printenv` — the old `[".env", "ENV["]` substring blocklist only ever caught one
+# spelling of one route. You cannot win a string match against a shell:
+# `printenv`, `env`, `export -p`, `echo $OPENAI_API_KEY`, `ruby -e 'p ENV'`,
+# `cat /proc/self/environ` and any base64 of those all sail past it.
+#
+# So we stop blocking commands and take the secrets away instead. Docker's exec
+# `Env` is applied ON TOP of the container's environment, so naming a variable
+# with an empty value blanks it for that exec session only — verified: a key that
+# reads 164 characters normally reads 0 with the override.
+#
+# This is an ALLOWLIST: everything the container defines is blanked unless it is
+# named here. A provider key added to .env next year is therefore scrubbed by
+# default rather than exposed until somebody remembers to add it to a blocklist.
+#
+# Two limits worth being honest about:
+#   * It covers exec'd shells only. The Rails SERVER process still has the real
+#     environment, so agent-authored code that runs in-process (a controller that
+#     prints ENV, an initializer) can still read it. The fix for that is to stop
+#     giving the Rails container the secrets at all — see Leonardo's unused
+#     `.env.rails`.
+#   * `/proc/<pid>/environ` of the server would sidestep this, but the server runs
+#     as root and execs run as uid 1000, so the kernel already denies it.
+#: Variables a Rails command legitimately needs. Everything else is blanked.
+_EXEC_ENV_ALLOWLIST = frozenset({
+    # Shell / runtime plumbing
+    "PATH", "HOME", "HOSTNAME", "TERM", "LANG", "LC_ALL", "PWD", "SHELL", "USER",
+    "TZ", "RUBYOPT", "RAILS_ENV", "RACK_ENV", "NODE_ENV",
+    # Bundler / gem / build caches
+    "GEM_HOME", "GEM_PATH", "BUNDLE_PATH", "BUNDLE_APP_CONFIG", "BUNDLE_WITHOUT",
+    "BOOTSNAP_CACHE_DIR", "MALLOC_ARENA_MAX",
+    # The app's own datastores and storage — Rails cannot boot or run a migration
+    # without these, and they belong to the customer's own app.
+    "DATABASE_URL", "DB_URI", "REDIS_URL", "SECRET_KEY_BASE", "RAILS_MASTER_KEY",
+    "POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB",
+    "AWS_KEY", "AWS_PASS", "AWS_BUCKET", "AWS_REGION", "S3_BUCKET_PATH",
+    # Where the app calls back to
+    "LLAMABOT_API_URL", "LLAMABOT_WEBSOCKET_URL", "LLAMAPRESS_API_URL",
+    "RAILS_BASE_URL", "INSTANCE_NAME",
+})
+
+#: Cache of container name -> list of env var NAMES it defines. The container's
+#: environment only changes on recreate, so re-reading it per command would be a
+#: Docker API round trip for nothing.
+_container_env_names_cache: dict = {}
+
+
+def _container_env_names(container_name: str) -> list:
+    """Names of the environment variables the Rails container defines.
+
+    Read from the container's config rather than guessed, so the scrub covers
+    whatever this particular instance was started with. On any failure we return
+    an empty list and the caller falls back to a static scrub — a Docker API
+    hiccup must not turn into "run the command with full secrets".
+    """
+    if container_name in _container_env_names_cache:
+        return _container_env_names_cache[container_name]
+
+    names = []
+    try:
+        result = subprocess.run(
+            ["curl", "--silent", "--unix-socket", "/var/run/docker.sock",
+             f"http://localhost/containers/{container_name}/json"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0:
+            config = json.loads(result.stdout).get("Config", {}) or {}
+            for entry in config.get("Env", []) or []:
+                name = entry.split("=", 1)[0].strip()
+                if name:
+                    names.append(name)
+    except Exception as e:
+        # Must not raise: this runs on the path of every bash_command, and the
+        # caller falls back to the static scrub list. (This module has no module
+        # logger — it prints, like the rest of its diagnostics.)
+        print(f"Could not read container env names for scrubbing: {e}")
+
+    _container_env_names_cache[container_name] = names
+    return names
+
+
+#: Fallback scrub list, used when the container's env cannot be enumerated. Names
+#: only — no values — so it is safe to keep in source.
+_ALWAYS_SCRUB = (
+    "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY",
+    "DEEPSEEK_API_KEY", "GMI_DEEPSEEK_API_KEY", "FIREWORKS_DEEPSEEK_API_KEY",
+    "ALIBABA_API_KEY", "META_API_KEY", "MODEL_API_KEY", "BEDROCK_API_KEY",
+    "TAVILY_API_KEY", "GROUND_ROUTE_SEARCH_API_KEY",
+    "VSCODE_PASSWORD", "LLAMAPRESS_AI_LOGIN_SECRET", "SCHEDULER_TOKEN",
+    "WS_SECRET_KEY", "SECRET_KEY", "SESSION_SECRET", "CHATGPT_CREDENTIAL_KEY",
+    "AUTH_DB_URI", "LEONARDO_DB_URI", "CHECKPOINTER_DB_URI", "LLAMABOT_DB_URI",
+    "GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET", "LLAMABOT_POSTHOG_KEY",
+)
+
+
+def build_exec_env(container_name: str, extra: Optional[list] = None) -> list:
+    """Docker exec ``Env`` entries: the extras, plus a blank for every secret.
+
+    Returns entries like ``["RUBYOPT=-W0", "OPENAI_API_KEY=", ...]``. Blanking
+    rather than unsetting is what Docker's exec API supports, and it is enough —
+    the shell sees an empty string.
+    """
+    entries = list(extra or [])
+    explicitly_set = {e.split("=", 1)[0] for e in entries}
+
+    discovered = _container_env_names(container_name)
+    to_scrub = {n for n in discovered if n not in _EXEC_ENV_ALLOWLIST}
+    # Belt and braces: scrub the known-sensitive names even if enumeration failed.
+    to_scrub.update(n for n in _ALWAYS_SCRUB if n not in _EXEC_ENV_ALLOWLIST)
+
+    for name in sorted(to_scrub - explicitly_set):
+        entries.append(f"{name}=")
+    return entries
+
+
 def get_rails_container_name():
     """Dynamically get the Rails container name by looking for containers with 'llamapress' in the name.
 
@@ -805,8 +964,13 @@ def rails_api_sh(snippet: str, workdir: str = WORKDIR, timeout_seconds: int = 60
             "Tty": True,
             "Cmd": ["/bin/sh", "-lc", snippet],
             "WorkingDir": workdir,
-            "User": "1000:1000",  # Run as UID 1000 to match host user and prevent permission issues
-            "Env": ["RUBYOPT=-W0"]  # Suppress Ruby warnings (e.g., gem deprecation notices)
+            # uid 1000 while the Rails server runs as root — which is also what
+            # makes /proc/1/environ unreadable from here, so the scrub below
+            # can't be sidestepped by reading the server's environment.
+            "User": "1000:1000",
+            # RUBYOPT suppresses gem deprecation noise; everything else in here is
+            # a blank that hides a secret from the command. See build_exec_env.
+            "Env": build_exec_env(container_name, ["RUBYOPT=-W0"]),
         }
 
         # Create exec instance using curl
@@ -2559,9 +2723,32 @@ def browser_inspect(
     timeout_ms: int = 10000,
 ) -> Command:
     """Visit a URL with headless Chromium and return console logs, DOM checks, and a screenshot."""
-    from playwright.sync_api import sync_playwright
+    from app.agents.utils.url_guard import (
+        UrlNotAllowed,
+        guarded_route_handler,
+        validate_outbound_url,
+    )
 
     tool_call_id = runtime.tool_call_id
+
+    # SSRF guard. `url` comes from the model, which can be steered by untrusted
+    # page content, so it may only point at the app's own origin or the public
+    # internet — never at the LlamaBot API, the database, or a metadata endpoint.
+    # Checked before Chromium starts so a blocked URL costs nothing.
+    try:
+        validate_outbound_url(url)
+    except UrlNotAllowed as e:
+        return Command(
+            update={
+                "messages": [ToolMessage(
+                    content=json.dumps({"ok": False, "error": str(e)}, indent=2),
+                    tool_call_id=tool_call_id,
+                )]
+            }
+        )
+
+    from playwright.sync_api import sync_playwright
+
     console_logs: list[dict] = []
     network_failures: list[dict] = []
 
@@ -2569,6 +2756,11 @@ def browser_inspect(
         with sync_playwright() as pw:
             browser = pw.chromium.launch(headless=True)
             page = browser.new_page()
+
+            # The pre-flight check covers the URL we were handed; this covers
+            # where a redirect lands and anything the page itself asks for, so
+            # the page cannot use the browser as a proxy into the network.
+            page.route("**/*", guarded_route_handler())
 
             page.on("console", lambda msg: console_logs.append({
                 "level": msg.type,

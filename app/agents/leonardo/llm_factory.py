@@ -30,7 +30,16 @@ from langchain_qwq import ChatQwen
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_LLM_MODEL = "deepseek-v4-flash"
+# The fleet default (0.7.0). Note this is the CONTRIBUTOR tier — see the tier
+# warning on the `muse-spark-1.2-contributor` branch in `get_llm` before moving
+# any box onto it; an operator pins the paid, non-training tier per box with
+# META_MUSE_MODEL=muse-spark-1.2.
+DEFAULT_LLM_MODEL = "muse-spark-1.2-contributor"
+
+# What the default degrades to on a box with no usable META key. `get_llm` can
+# always build this one, so it is what keeps chat working on a box the Muse
+# rollout has not reached (or that deliberately opts out).
+FALLBACK_TEXT_MODEL = "deepseek-v4-flash"
 
 
 class FakeTestChatModel(BaseChatModel):
@@ -116,6 +125,192 @@ class ChatDeepSeekWithReasoning(ChatDeepSeek):
         return payload
 
 
+_MISSING_KEY_PLACEHOLDER = "missing-provider-api-key-placeholder"
+
+
+def provider_key(*env_vars: str) -> str:
+    """First configured key among `env_vars`, or a dud placeholder — never None.
+
+    MUST be used for every model we point at a non-OpenAI `base_url`.
+
+    All of these clients (ChatOpenAI, ChatDeepSeek, ChatQwen) sit on the openai
+    SDK, and that SDK falls back to `OPENAI_API_KEY` from the environment when it
+    is handed `api_key=None`. Since the base_url is a third party's, an instance
+    that has OPENAI_API_KEY set but not the provider's own key would put our
+    OpenAI secret in an `Authorization: Bearer` header addressed to GMI /
+    Fireworks / Alibaba / Meta. Verified: the constructed client's auth_headers
+    really do carry the OpenAI key.
+
+    Returning a dud instead turns a silent credential disclosure into an honest
+    401 from the provider. It must be a non-empty string, not None or "".
+    """
+    for env_var in env_vars:
+        value = os.getenv(env_var)
+        if value and value.strip():
+            return value
+    return _MISSING_KEY_PLACEHOLDER
+
+
+# Which env vars credential the two models the default can resolve to, in the
+# same precedence `get_llm` uses to build them. Only these two are listed: this
+# map answers "can this box actually construct its default model", not "what is
+# in the dropdown" — that question belongs to /api/available-models, which keeps
+# the full registry (test_model_registry_consistency pins the two in agreement).
+DEFAULT_MODEL_KEY_ENVS = {
+    "muse-spark-1.2-contributor": ("META_API_KEY", "MODEL_API_KEY"),
+    "deepseek-v4-flash": ("DEEPSEEK_API_KEY",),
+}
+
+
+def has_provider_key(model_name: str) -> bool:
+    """True if this box holds a credential for `model_name`.
+
+    Used by the model policy to keep the resolved default to something `get_llm`
+    can build — a default naming a keyless model is not a degraded box, it is a
+    box where every turn 401s.
+
+    A model absent from `DEFAULT_MODEL_KEY_ENVS` reports True: this is not a
+    general reachability check and must not start disabling models it has no
+    opinion about.
+    """
+    env_vars = DEFAULT_MODEL_KEY_ENVS.get(model_name)
+    if not env_vars:
+        return True
+    return provider_key(*env_vars) != _MISSING_KEY_PLACEHOLDER
+
+
+# Models served by the signed-in user's ChatGPT plan (Codex backend) rather than
+# by our OPENAI_API_KEY. Maps the frontend name -> the id OpenAI expects.
+# See docs/dev/chatgpt_oauth_byo_subscription.md.
+_CHATGPT_SUBSCRIPTION_MODELS = {
+    "gpt-5.6-luna-chatgpt": "gpt-5.6-luna",
+    "gpt-5.6-sol-chatgpt": "gpt-5.6-sol",
+}
+
+
+class ChatOpenAICodexBackend(ChatOpenAI):
+    """ChatOpenAI for the ChatGPT-plan Codex backend, which forbids system messages.
+
+    ``chatgpt.com/backend-api/codex`` rejects any ``role: "system"`` entry in the
+    Responses API ``input`` array with::
+
+        400 {"detail": "System messages are not allowed"}
+
+    LangChain emits exactly that for a ``SystemMessage``. The backend instead
+    expects the system prompt in the top-level ``instructions`` field (which is
+    how OpenAI's own Codex client sends it), so hoist it there.
+
+    Same shape of fix as ``ChatDeepSeekWithReasoning`` above: a provider quirk
+    handled once in the client rather than by asking every agent to build its
+    messages differently. Note this is a DIFFERENT quirk from the one
+    ``system_message_for_model`` solves (Fireworks/GMI rejecting Anthropic-style
+    system *block lists*) — that one flattens a list into a string and still
+    sends a system role, which this endpoint would still refuse.
+    """
+
+    def _get_request_payload(self, input_, *, stop=None, **kwargs) -> dict:
+        payload = super()._get_request_payload(input_, stop=stop, **kwargs)
+
+        # The backend refuses server-side response storage:
+        #   400 {"detail": "Store must be set to false"}
+        # Pinned here rather than passed at construction so it cannot be
+        # overridden per-call. It is also the retention posture we want — the
+        # same reason the Fireworks entry above stays on chat completions.
+        payload["store"] = False
+
+        messages = payload.get("input")
+        if not isinstance(messages, list):
+            return payload
+
+        system_texts, kept = [], []
+        for message in messages:
+            if isinstance(message, dict) and message.get("role") == "system":
+                system_texts.append(_flatten_text(message.get("content")))
+            else:
+                kept.append(message)
+
+        if not system_texts:
+            return payload
+
+        existing = payload.get("instructions")
+        combined = [t for t in system_texts if t]
+        if existing:
+            combined.append(existing)
+
+        payload["input"] = kept
+        payload["instructions"] = "\n\n".join(combined)
+        return payload
+
+
+def _flatten_text(content) -> str:
+    """Best-effort text out of a string or a list of content blocks."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict):
+                text = block.get("text") or block.get("content")
+                if isinstance(text, str):
+                    parts.append(text)
+        return "\n".join(parts)
+    return "" if content is None else str(content)
+
+
+def _chatgpt_subscription_client(model_name: str):
+    """Build a client bound to the current user's ChatGPT credential, or None.
+
+    None means "no usable credential" — the caller must fall open to the default
+    model. This function never raises: an unreachable auth DB, an expired refresh
+    token or a revoked grant all read as None.
+    """
+    try:
+        from app.lib.request_context import current_user_id
+        from app.services.chatgpt_auth import (
+            CODEX_BASE_URL,
+            ORIGINATOR,
+            access_token_for_user_sync,
+        )
+
+        user_id = current_user_id()
+        if user_id is None:
+            # Fails closed by design — never guess whose subscription to spend.
+            logger.warning(
+                "ChatGPT-subscription model %r requested with no user in context.",
+                model_name,
+            )
+            return None
+
+        creds = access_token_for_user_sync(user_id)
+        if not creds or not creds[0]:
+            return None
+        access_token, account_id = creds
+
+        headers = {"originator": ORIGINATOR}
+        if account_id:
+            headers["chatgpt-account-id"] = account_id
+
+        return ChatOpenAICodexBackend(
+            model=_CHATGPT_SUBSCRIPTION_MODELS[model_name],
+            base_url=CODEX_BASE_URL,
+            # An OAuth access token, not an API key. Passed explicitly and never
+            # None — see provider_key's docstring: a None here would send our
+            # OPENAI_API_KEY to chatgpt.com.
+            api_key=access_token,
+            use_responses_api=True,
+            reasoning={"effort": "low", "summary": "auto"},
+            output_version="responses/v1",
+            default_headers=headers,
+            timeout=180,
+            max_retries=0,
+        )
+    except Exception as e:
+        logger.warning("Could not build ChatGPT-subscription client for %r: %s", model_name, e)
+        return None
+
+
 def supports_prompt_caching(model_name: str) -> bool:
     """Whether this model accepts Anthropic's ephemeral prompt-caching kwarg.
 
@@ -126,6 +321,56 @@ def supports_prompt_caching(model_name: str) -> bool:
     'cache_control'` and 500s every agent turn on that box.
     """
     return (model_name or "").startswith(("claude", "anthropic"))
+
+
+def system_message_for_model(system_message, model_name: str):
+    """Return a system message the selected provider will actually accept.
+
+    Every Leonardo agent builds its system prompt in Anthropic's prompt-caching
+    shape — a LIST of content blocks carrying `cache_control`. Anthropic needs
+    that list; DeepSeek's own API tolerates it. The OpenAI-compatible gateways we
+    serve `deepseek-v4-flash` through — **Fireworks and GMI** — do NOT: they
+    strictly require system `content` to be a plain string and 400 the turn
+    otherwise. Since the fleet default is policy-remapped to
+    `deepseek-v4-flash-fireworks`, that 400 hit every mode (Database Mode first).
+
+    So: for non-Anthropic models the blocks are flattened to their concatenated
+    text; for Anthropic the message is returned untouched, because flattening it
+    would silently drop prompt caching (~90% of input token cost).
+
+    Accepts a `SystemMessage`, a raw ``{"role": "system", ...}`` dict (what the
+    raw StateGraph agents build), a plain string, or None — and returns the same
+    shape. `supports_prompt_caching` remains the single source of truth for the
+    provider test; do not re-derive it with a literal `startswith("claude")`.
+    """
+    if system_message is None or supports_prompt_caching(model_name):
+        return system_message
+
+    if isinstance(system_message, dict):
+        content = system_message.get("content")
+        flattened = _flatten_content_blocks(content)
+        if flattened is content:
+            return system_message
+        return {**system_message, "content": flattened}
+
+    content = getattr(system_message, "content", None)
+    flattened = _flatten_content_blocks(content)
+    if flattened is content:
+        return system_message
+    return system_message.model_copy(update={"content": flattened})
+
+
+def _flatten_content_blocks(content):
+    """Join a list of text content blocks into one string; pass anything else through."""
+    if not isinstance(content, list):
+        return content
+    parts = []
+    for block in content:
+        if isinstance(block, str):
+            parts.append(block)
+        elif isinstance(block, dict) and block.get("type") == "text":
+            parts.append(block.get("text") or "")
+    return "\n\n".join(p for p in parts if p)
 
 
 def invoke_with_cache(runnable, messages, model_name: str):
@@ -200,7 +445,7 @@ def get_llm(model_name: str):
         return ChatDeepSeekWithReasoning(
             model=os.getenv("GMI_DEEPSEEK_MODEL", "deepseek-ai/DeepSeek-V4-Flash"),
             api_base=os.getenv("GMI_BASE_URL", "https://api.gmi-serving.com/v1"),
-            api_key=os.getenv("GMI_DEEPSEEK_API_KEY"),
+            api_key=provider_key("GMI_DEEPSEEK_API_KEY"),
             timeout=180,
             max_retries=0,
         )
@@ -233,7 +478,7 @@ def get_llm(model_name: str):
             api_base=os.getenv(
                 "FIREWORKS_BASE_URL", "https://api.fireworks.ai/inference/v1"
             ),
-            api_key=os.getenv("FIREWORKS_DEEPSEEK_API_KEY"),
+            api_key=provider_key("FIREWORKS_DEEPSEEK_API_KEY"),
             timeout=180,
             max_retries=0,
         )
@@ -279,6 +524,31 @@ def get_llm(model_name: str):
             reasoning={"effort": "low", "summary": "auto"},
             output_version="responses/v1",
             max_retries=0,
+        )
+    if model_name in _CHATGPT_SUBSCRIPTION_MODELS:
+        # Runs on the SIGNED-IN USER's ChatGPT plan, not our OPENAI_API_KEY.
+        #
+        # Same model ids as the pay-per-token entries above (`gpt-5.6-luna`), but
+        # a different payer and a different endpoint — the ChatGPT Codex backend
+        # rather than api.openai.com. They are deliberately separate dropdown
+        # entries so it is always visible which credential a turn is spending.
+        #
+        # Falls open to the operator default whenever the user has not connected
+        # an account, the token cannot be refreshed, or OpenAI has revoked it.
+        # A dead subscription must degrade to DeepSeek, never break the turn.
+        client = _chatgpt_subscription_client(model_name)
+        if client is not None:
+            return client
+        fallback = enabled_default_model()
+        logger.warning(
+            "No usable ChatGPT credential for %r; falling back to %r. "
+            "The user needs to connect their account under Settings.",
+            model_name, fallback,
+        )
+        if fallback not in _CHATGPT_SUBSCRIPTION_MODELS:
+            return get_llm(fallback)
+        return ChatDeepSeekWithReasoning(
+            model="deepseek-v4-flash", timeout=180, max_retries=0
         )
     if model_name == "claude-4.5-sonnet":
         return ChatAnthropic(
@@ -327,9 +597,42 @@ def get_llm(model_name: str):
                 "ALIBABA_BASE_URL",
                 "https://dashscope-us.aliyuncs.com/compatible-mode/v1",
             ),
-            api_key=os.getenv("ALIBABA_API_KEY"),
+            api_key=provider_key("ALIBABA_API_KEY"),
             enable_thinking=True,
             thinking_budget=8192,
+            max_retries=0,
+        )
+    if model_name == "muse-spark-1.2-contributor":
+        # Meta's Muse Spark 1.2 (Meta Superintelligence Labs), CONTRIBUTOR tier.
+        #
+        # The Model API is OpenAI-compatible chat completions, so a plain
+        # ChatOpenAI with an overridden base_url is the whole client — no new
+        # dependency. The base_url is load-bearing: without it ChatOpenAI talks
+        # to api.openai.com, which has never heard of this model id.
+        #
+        # TIER WARNING — the tier is encoded ONLY in the model id, and the two
+        # ids differ by ~12x in price and completely in data handling:
+        #   muse-spark-1.2              $1.25/$4.25 per 1M, not trained on
+        #   muse-spark-1.2-contributor  $0.10/$0.20 per 1M, Meta trains on every
+        #                               prompt and completion we send it
+        # This entry is deliberately the contributor tier (explicit product
+        # decision). Note that is the opposite trade from
+        # `deepseek-v4-flash-fireworks`, which exists specifically to keep
+        # customer code out of a third party's hands — so this model should not
+        # be made a fleet default without revisiting that. An operator can move a
+        # single instance to the paid, non-training tier with
+        # META_MUSE_MODEL=muse-spark-1.2 without a code change.
+        #
+        # Meta's own docs name the key MODEL_API_KEY while their LiteLLM
+        # integration uses META_API_KEY; we accept either, preferring META_API_KEY.
+        #
+        # `provider_key` (not os.getenv) is load-bearing here — see its docstring:
+        # a None key would send our OpenAI secret to api.meta.ai.
+        return ChatOpenAI(
+            model=os.getenv("META_MUSE_MODEL", "muse-spark-1.2-contributor"),
+            base_url=os.getenv("META_BASE_URL", "https://api.meta.ai/v1"),
+            api_key=provider_key("META_API_KEY", "MODEL_API_KEY"),
+            reasoning_effort="low",
             max_retries=0,
         )
 

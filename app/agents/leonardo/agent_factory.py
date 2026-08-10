@@ -29,9 +29,32 @@ graphs share one implementation with no awkward shared→rails_agent dependency.
 from langchain.agents import create_agent
 from langchain.agents.middleware import AgentMiddleware
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from app.agents.leonardo.turn_metrics_middleware import TurnMetricsMiddleware
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def _raw_fallback_tool_calls(msg) -> list:
+    """The ``additional_kwargs["tool_calls"]`` calls, normalized to the parsed shape.
+
+    ``langchain_openai``'s serializer falls back to this raw list whenever BOTH
+    parsed lists are empty, so these calls really do reach the provider. They are
+    normalized to ``{"id", "name", "args"}`` here so every caller can read them
+    exactly like a parsed call.
+    """
+    extra = getattr(msg, "additional_kwargs", None) or {}
+    out = []
+    for rc in extra.get("tool_calls") or []:
+        if not isinstance(rc, dict):
+            continue
+        fn = rc.get("function") or {}
+        out.append({
+            "id": rc.get("id"),
+            "name": fn.get("name") if isinstance(fn, dict) else None,
+            "args": fn.get("arguments") if isinstance(fn, dict) else None,
+        })
+    return out
 
 
 def emitted_tool_calls(msg) -> list:
@@ -44,11 +67,20 @@ def emitted_tool_calls(msg) -> list:
     malformed args — is announced to the provider, never executed, and therefore
     never answered by a ``ToolMessage``. Repairs must scan what is emitted, not
     what is executable, or they see nothing wrong while the thread 400s forever.
+
+    When BOTH parsed lists are empty the serializer falls back to the raw
+    ``additional_kwargs["tool_calls"]``, so that list is what goes on the wire and
+    this function must report it. Missing that fallback is how the 400 came BACK
+    (fingerprint 4a3f1aa848a9): ``_drop_idless_tool_calls`` empties the parsed
+    lists via ``model_copy``, which does not re-run ``AIMessage``'s validators, so
+    an id-bearing raw call was left announced to the provider while every repair
+    read the message as having no tool calls at all.
     """
-    return (
+    parsed = (
         list(getattr(msg, "tool_calls", None) or [])
         + list(getattr(msg, "invalid_tool_calls", None) or [])
     )
+    return parsed if parsed else _raw_fallback_tool_calls(msg)
 
 
 def _drop_idless_tool_calls(msg):
@@ -63,26 +95,32 @@ def _drop_idless_tool_calls(msg):
     invalid_calls = list(getattr(msg, "invalid_tool_calls", None) or [])
     kept_calls = [tc for tc in tool_calls if tc.get("id")]
     kept_invalid = [tc for tc in invalid_calls if tc.get("id")]
-    if len(kept_calls) == len(tool_calls) and len(kept_invalid) == len(invalid_calls):
+
+    # The serializer falls back to `additional_kwargs["tool_calls"]` when both
+    # parsed lists are empty, so the raw copy has to be filtered too or the
+    # id-less call comes straight back on the wire. That fallback also means the
+    # raw list must be checked even when the parsed lists needed no change — an
+    # id-less raw call on an otherwise-empty message still reaches the provider.
+    extra = getattr(msg, "additional_kwargs", None) or {}
+    raw_calls = [rc for rc in (extra.get("tool_calls") or []) if isinstance(rc, dict)]
+    kept_raw = [rc for rc in raw_calls if rc.get("id")]
+
+    parsed_dropped = (
+        (len(tool_calls) - len(kept_calls)) + (len(invalid_calls) - len(kept_invalid))
+    )
+    raw_dropped = len(raw_calls) - len(kept_raw)
+    if not parsed_dropped and not raw_dropped:
         return msg, False
 
     logger.warning(
         "repair_orphaned_tool_calls: dropping %d tool call(s) with no id from "
         "AIMessage id=%s — they can never be answered",
-        (len(tool_calls) - len(kept_calls)) + (len(invalid_calls) - len(kept_invalid)),
+        parsed_dropped or raw_dropped,
         getattr(msg, "id", "?"),
     )
 
     update = {"tool_calls": kept_calls, "invalid_tool_calls": kept_invalid}
-    # The serializer falls back to `additional_kwargs["tool_calls"]` when both
-    # lists are empty, so the raw copy has to be filtered too or the id-less call
-    # comes straight back on the wire.
-    extra = getattr(msg, "additional_kwargs", None) or {}
     if extra.get("tool_calls"):
-        kept_raw = [
-            rc for rc in extra["tool_calls"]
-            if isinstance(rc, dict) and rc.get("id")
-        ]
         new_extra = dict(extra)
         if kept_raw:
             new_extra["tool_calls"] = kept_raw
@@ -329,6 +367,10 @@ def build_leonardo_agent(*, middleware=None, **kwargs):
       (same startup-caching reason as the skill catalog). It touches only the
       latest human message and is idempotent, so ordering is not critical; we
       insert it after the skill refresh.
+    - ``TurnMetricsMiddleware`` — times every model and tool call. APPENDED so
+      it sits OUTERMOST at the model-call boundary and therefore measures what
+      the user actually waits for, including whatever the inner middleware
+      (summarization, repair, brand injection) costs. Purely observational.
     """
     mw = list(middleware or [])
     if not any(isinstance(m, RepairOrphanedToolCallsMiddleware) for m in mw):
@@ -337,4 +379,6 @@ def build_leonardo_agent(*, middleware=None, **kwargs):
         mw.insert(1, RefreshSkillCatalogMiddleware())
     if not any(isinstance(m, BrandContextMiddleware) for m in mw):
         mw.insert(2, BrandContextMiddleware())
+    if not any(isinstance(m, TurnMetricsMiddleware) for m in mw):
+        mw.append(TurnMetricsMiddleware())
     return create_agent(middleware=mw, **kwargs)

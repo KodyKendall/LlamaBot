@@ -31,6 +31,10 @@ MODEL_CAPABILITIES = {
     'gpt-5.4-nano': {'images': True, 'video': False, 'pdf': False},
     # GPT-5.6 family: text + image input (no video/pdf), per the OpenAI model card.
     'gpt-5.6-luna': {'images': True, 'video': False, 'pdf': False},
+    # The ChatGPT-subscription variants are the same underlying models, so they
+    # carry the same capabilities as their API-key twins.
+    'gpt-5.6-luna-chatgpt': {'images': True, 'video': False, 'pdf': False},
+    'gpt-5.6-sol-chatgpt': {'images': True, 'video': False, 'pdf': False},
 
     # DeepSeek - primarily text focused
     'deepseek-v4-flash': {'images': False, 'video': False, 'pdf': False},
@@ -40,6 +44,10 @@ MODEL_CAPABILITIES = {
     'deepseek-v4-flash-gmi': {'images': False, 'video': False, 'pdf': False},
     # Same model again, served by Fireworks AI — same (text-only) capabilities.
     'deepseek-v4-flash-fireworks': {'images': False, 'video': False, 'pdf': False},
+
+    # Muse Spark 1.2 (Meta) - fully multimodal: text, images, video, audio, PDF.
+    # (Audio has no category of its own in get_file_category, so it isn't listed.)
+    'muse-spark-1.2-contributor': {'images': True, 'video': True, 'pdf': True},
 
     # Qwen3.7 Plus (Alibaba) - multimodal agent model: images and video; PDFs
     # are ingested as page-images, not natively, so we leave pdf off.

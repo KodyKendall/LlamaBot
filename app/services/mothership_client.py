@@ -108,6 +108,7 @@ class MothershipClient:
         token_usage: Optional[dict] = None,
         tool_calls: Optional[list] = None,
         tool_call_id: Optional[str] = None,
+        timings: Optional[dict] = None,
     ) -> Optional[dict]:
         """
         POST /api/leonardo/report_message
@@ -119,6 +120,11 @@ class MothershipClient:
         ({allowed_next, messages_remaining}) which callers use to populate
         the local paywall cache. For role="assistant", the response contains
         no paywall fields.
+
+        ``timings`` (assistant messages only) carries the duration / TTFT /
+        tokens-per-second of the model call that produced this reply, so the
+        mothership has a per-message performance series alongside token usage.
+        See docs/dev/performance_telemetry.md.
         """
         if not self.enabled:
             return None
@@ -140,6 +146,8 @@ class MothershipClient:
                     payload["tool_calls"] = tool_calls
                 if tool_call_id:
                     payload["tool_call_id"] = tool_call_id
+                if timings:
+                    payload["timings"] = timings
                 response = await client.post(
                     f"{self.config['mothership_url']}/api/leonardo/report_message",
                     json=payload,
@@ -364,6 +372,78 @@ class MothershipClient:
             return None
         except Exception as e:
             logger.warning(f"Error report unexpected error: {e}")
+            return None
+
+    async def report_turn_metrics(
+        self,
+        *,
+        thread_id: Optional[str],
+        metrics: dict,
+        agent_mode: Optional[str] = None,
+        model: Optional[str] = None,
+        llamabot_version: Optional[str] = None,
+        occurred_at: Optional[str] = None,
+    ) -> None:
+        """
+        POST /api/leonardo/report_turn_metrics
+
+        End-of-turn performance rollup: where the wall clock actually went
+        (model wait vs. tool execution vs. graph/checkpointer overhead), plus
+        the turn's TTFT and decode rate. This is what makes "Leo is slow"
+        diagnosable instead of anecdotal — see docs/dev/performance_telemetry.md
+        for the payload contract and docs/handoff_mothership_performance.md for
+        the receiving end.
+
+        Deliberately ONE request per turn, not per event: a tool-heavy turn
+        already fires dozens of report_message calls, and fleet-wide ingest cost
+        is the constraint that decides whether this can stay switched on.
+
+        Fire-and-forget like the rest of the telemetry surface — never raises,
+        always returns None. The turn is already over and the user has their
+        answer; a metrics failure must be invisible to them.
+        """
+        if not self.enabled:
+            return None
+
+        # A turn that recorded nothing (e.g. interrupted before the first model
+        # call) has nothing to report, and an empty row would drag fleet
+        # averages toward zero.
+        if not metrics:
+            return None
+
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                payload = {
+                    "instance_name": self.config["instance_name"],
+                    "metrics": metrics,
+                }
+                if thread_id:
+                    payload["thread_id"] = thread_id
+                if agent_mode:
+                    payload["agent_mode"] = agent_mode
+                if model:
+                    payload["model"] = model
+                if llamabot_version:
+                    payload["llamabot_version"] = llamabot_version
+                if occurred_at:
+                    payload["occurred_at"] = occurred_at
+                response = await client.post(
+                    f"{self.config['mothership_url']}/api/leonardo/report_turn_metrics",
+                    json=payload,
+                    headers={"Authorization": f"Bearer {self.config['mothership_api_token']}"},
+                )
+                response.raise_for_status()
+                return None
+        except httpx.HTTPStatusError as e:
+            # A 404 here just means the mothership hasn't shipped the endpoint
+            # yet; debug-level so an un-upgraded mothership can't spam logs.
+            logger.debug(f"Turn metrics report failed (HTTP {e.response.status_code}): {e.response.text}")
+            return None
+        except httpx.RequestError as e:
+            logger.debug(f"Turn metrics report request failed: {e}")
+            return None
+        except Exception as e:
+            logger.debug(f"Turn metrics report unexpected error: {e}")
             return None
 
     async def verify_login_grant(

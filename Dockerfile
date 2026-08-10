@@ -16,6 +16,23 @@ RUN rm -rf /var/lib/apt/lists/* && \
     # apt-get update && \
     # apt-get install -y docker-ce-cli && \
 
+# OpenAI's Codex CLI — the AUTH HELPER for "run Leo on my own ChatGPT plan".
+#
+# Why a vendored binary rather than our own HTTP calls: auth.openai.com sits
+# behind Cloudflare bot management that challenges our Python client (and curl)
+# with a 403 HTML interstitial, while the Codex CLI's own client passes. Verified
+# from the same host, same IP, same minute — so this is client fingerprinting,
+# not an IP block, and no User-Agent change gets around it.
+#
+# Delegating to OpenAI's own signed client is also the most defensible option: the
+# sign-in and token refresh happen inside their software doing exactly what it was
+# built for, with nothing spoofed and no control bypassed.
+#
+# Used ONLY for `codex login --device-auth` / token refresh — never to run agents.
+# Pinned so an upstream change can't silently alter the auth flow underneath us.
+ENV CODEX_CLI_VERSION=0.147.0
+RUN npm install -g @openai/codex@${CODEX_CLI_VERSION} && codex --version
+
 # Install dependencies (cached unless requirements.txt changes)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt

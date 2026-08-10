@@ -71,6 +71,12 @@ jobs:
       - name: Create .env file
         run: |
           echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" >> .env
+          # Not a real key. Several clients (ChatDeepSeek among them) validate key
+          # presence at CONSTRUCTION, so any test that walks a fallback path into
+          # get_llm("deepseek-v4-flash") raises a pydantic ValidationError without
+          # this — no network call is ever made. Same dud-key trick as release.yml's
+          # boot smoke.
+          echo "DEEPSEEK_API_KEY=ci-not-a-real-key" >> .env
           # No POSTGRES_PASSWORD needed now. The DB_URI points to the 'postgres' service container.
           echo "DB_URI=postgresql://postgres@postgres:5432/llamapress_production" >> .env
           echo "LANGCHAIN_TRACING_V2=false" >> .env

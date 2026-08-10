@@ -184,3 +184,384 @@ class TestFactory:
         assert mw.trigger == ("tokens", SUMMARIZATION_TOKEN_THRESHOLD)
         assert mw.keep == ("tokens", SUMMARIZATION_KEEP_TOKENS)
         assert mw.keep_initial_human == 3
+
+    def test_factory_gives_the_initial_preserve_a_token_budget(self, monkeypatch):
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "k")
+        mw = make_summarization_middleware(summary_prompt="Summarize {messages}")
+        # An unbounded verbatim re-add of the first K messages is what made a
+        # wedged thread unrecoverable (SupportIncident #246).
+        assert 0 < mw.initial_preserve_budget() < SUMMARIZATION_TOKEN_THRESHOLD
+
+
+# ===========================================================================
+# SupportIncident #246 — the summarization loop
+#
+# A thread on `leo-nefe` triggered summarization on every step and never got a
+# turn's work done. The machinery was fine; it was handed bytes it structurally
+# could not reclaim: the first 3 human messages were re-added VERBATIM with no
+# byte budget, and one of them carried a 375 KB `<SELECTED_ELEMENT>` block. That
+# pins the count above the trigger permanently — compaction can never win, and
+# the customer has to abandon the thread.
+#
+# These use the REAL production constants and the REAL token counter, because
+# the bug is a property of those numbers, not of the code shape.
+# ===========================================================================
+
+from app.agents.leonardo.summarization import _strip_images_then_count  # noqa: E402
+from app.agents.utils.token_counter import tiktoken_token_counter  # noqa: E402
+
+_COUNTER = _strip_images_then_count(tiktoken_token_counter)
+_THRESHOLD = SUMMARIZATION_TOKEN_THRESHOLD
+
+
+def _text_of_tokens(tokens: int) -> str:
+    """Realistic page markup sized to roughly `tokens` tokens."""
+    unit = "<div class='row'>a meeting transcript row of text</div>"
+    sample = unit * 100
+    per_char = _COUNTER([HumanMessage(content=sample)]) / len(sample)
+    return unit * int(tokens / per_char / len(unit) + 1)
+
+
+def _picked_element_message(tokens: int, msg_id: str, ask: str) -> HumanMessage:
+    """The exact shape the element picker produces: intent + raw outerHTML."""
+    return HumanMessage(
+        content=(
+            f"{ask}\n\n<SELECTED_ELEMENT>\n<section class='transcripts'>"
+            f"{_text_of_tokens(tokens)}</section>\n</SELECTED_ELEMENT>"
+        ),
+        id=msg_id,
+    )
+
+
+def _prod_mw(keep_initial_human=3):
+    return RailsSummarizationMiddleware(
+        model=_FakeSummaryModel(),
+        trigger=("tokens", _THRESHOLD),
+        keep=("tokens", SUMMARIZATION_KEEP_TOKENS),
+        token_counter=_COUNTER,
+        trim_tokens_to_summarize=None,
+        summary_prompt="Summarize:\n{messages}",
+        keep_initial_human=keep_initial_human,
+    )
+
+
+def _wedged_by_initial_messages():
+    """Repro A: three fat early messages, then a normal working conversation."""
+    msgs = []
+    for i in range(3):
+        msgs.append(_picked_element_message(
+            int(_THRESHOLD * 0.35), f"h{i}", f"fix the transcript list ({i})",
+        ))
+        msgs.append(AIMessage(content="on it", id=f"a{i}"))
+    for i in range(20):
+        msgs.append(HumanMessage(content=f"follow-up {i}", id=f"f{i}"))
+        msgs.append(AIMessage(content="done " + _text_of_tokens(400), id=f"fa{i}"))
+    return msgs
+
+
+def _wedged_by_newest_message():
+    """Cause B: the newest message alone is over the trigger.
+
+    Stock `SummarizationMiddleware` never summarizes the current turn's message,
+    so the preserved tail stays above the trigger and `before_model` re-fires on
+    the very next step, forever.
+    """
+    msgs = []
+    for i in range(30):
+        msgs.append(HumanMessage(content=f"step {i}", id=f"s{i}"))
+        msgs.append(AIMessage(content="ok " + _text_of_tokens(400), id=f"sa{i}"))
+    msgs.append(_picked_element_message(
+        int(_THRESHOLD * 1.05), "big", "Keep transcription collapsed by default",
+    ))
+    return msgs
+
+
+def _compact(mw, convo):
+    """Run one compaction and rebuild state through the real delta reducer."""
+    result = mw.before_model({"messages": convo}, runtime=None)
+    assert result is not None, "precondition: this conversation must summarize"
+    return messages_delta_reducer(convo, [result["messages"]])
+
+
+class TestSummarizationLoop:
+    def test_precondition_conversations_are_over_the_trigger(self):
+        assert _COUNTER(_wedged_by_initial_messages()) > _THRESHOLD
+        assert _COUNTER(_wedged_by_newest_message()) > _THRESHOLD
+
+    def test_fat_initial_messages_no_longer_pin_the_thread(self):
+        """The core bug: after compaction the count must actually be under."""
+        convo = _wedged_by_initial_messages()
+        after = _compact(_prod_mw(), convo)
+        assert _COUNTER(after) < _THRESHOLD
+
+    def test_compaction_does_not_immediately_re_trigger(self):
+        """The symptom the customer saw: summarize, think about nothing, repeat."""
+        mw = _prod_mw()
+        after = _compact(mw, _wedged_by_initial_messages())
+        assert mw.before_model({"messages": after}, runtime=None) is None
+
+    def test_oversized_newest_message_does_not_wedge_the_thread(self):
+        mw = _prod_mw()
+        after = _compact(mw, _wedged_by_newest_message())
+        assert _COUNTER(after) < _THRESHOLD
+        assert mw.before_model({"messages": after}, runtime=None) is None
+
+    def test_user_intent_survives_the_truncation(self):
+        """Preserving intent is the point of the feature; 375 KB of markup is not."""
+        after = _compact(_prod_mw(), _wedged_by_initial_messages())
+        preserved = "\n".join(
+            m.content for m in after
+            if isinstance(m, HumanMessage) and isinstance(m.content, str)
+        )
+        assert "fix the transcript list (0)" in preserved
+        assert "[truncated:" in preserved
+
+    def test_preserved_initial_messages_stay_within_budget(self):
+        mw = _prod_mw()
+        result = mw.before_model({"messages": _wedged_by_initial_messages()}, runtime=None)
+        body = result["messages"][1:]
+        summary_idx = next(
+            i for i, m in enumerate(body)
+            if (getattr(m, "additional_kwargs", None) or {}).get("lc_source") == "summarization"
+        )
+        initial = body[:summary_idx]
+        assert initial, "the original ask must still be preserved"
+        assert _COUNTER(initial) <= mw.initial_preserve_budget() * 1.1
+
+    def test_small_initial_messages_are_still_preserved_verbatim(self):
+        """The budget must not evict ordinary short messages."""
+        convo = [HumanMessage(content="Build me a blog", id="h1")]
+        filler = _text_of_tokens(4000)
+        for i in range(45):
+            convo.append(AIMessage(content="working " + filler, id=f"a{i}"))
+            convo.append(HumanMessage(content=f"and {i}", id=f"h{i+2}"))
+        after = _compact(_prod_mw(keep_initial_human=1), convo)
+        assert any(
+            isinstance(m, HumanMessage) and m.content == "Build me a blog"
+            for m in after
+        ), "a short first message must survive compaction untouched"
+
+
+class TestUncompactableThreadFailsLoud:
+    """4.4 — never loop silently. Log, break the loop, tell the user."""
+
+    def test_logs_an_error_when_compaction_cannot_get_under_the_trigger(self, caplog):
+        with caplog.at_level("ERROR"):
+            _compact(_prod_mw(), _wedged_by_newest_message())
+        errors = [r for r in caplog.records if r.levelname == "ERROR"]
+        assert errors, "an uncompactable thread is a guaranteed infinite loop — say so"
+        text = "\n".join(r.getMessage() for r in errors)
+        assert "summariz" in text.lower()
+
+    def test_tells_the_agent_content_was_dropped_so_the_user_hears_it(self):
+        after = _compact(_prod_mw(), _wedged_by_newest_message())
+        summary = next(
+            m for m in after
+            if (getattr(m, "additional_kwargs", None) or {}).get("lc_source") == "summarization"
+        )
+        assert "TRUNCATED" in summary.content.upper()
+
+    def test_files_a_friction_report(self, monkeypatch):
+        import app.agents.leonardo.friction as friction
+
+        friction.reset_friction_tracking()
+        sent = []
+        monkeypatch.setattr(friction, "dispatch_friction_report", sent.append)
+
+        _compact(_prod_mw(), _wedged_by_newest_message())
+        assert sent, "this is exactly the self-reported tooling failure friction is for"
+        assert sent[0]["error_class"].startswith("AgentFriction.")
+
+    def test_friction_failure_never_breaks_compaction(self, monkeypatch):
+        import app.agents.leonardo.friction as friction
+
+        friction.reset_friction_tracking()
+
+        def _boom(_report):
+            raise RuntimeError("mothership down")
+
+        monkeypatch.setattr(friction, "dispatch_friction_report", _boom)
+        after = _compact(_prod_mw(), _wedged_by_newest_message())
+        assert _COUNTER(after) < _THRESHOLD
+
+    def test_no_error_and_no_friction_on_a_healthy_compaction(self, monkeypatch, caplog):
+        import app.agents.leonardo.friction as friction
+
+        friction.reset_friction_tracking()
+        sent = []
+        monkeypatch.setattr(friction, "dispatch_friction_report", sent.append)
+
+        with caplog.at_level("ERROR"):
+            _compact(_prod_mw(), _wedged_by_initial_messages())
+        assert not sent
+        assert not [r for r in caplog.records if r.levelname == "ERROR"]
+
+    def test_tool_call_pairs_are_never_broken_by_force_truncation(self):
+        """Truncation must edit content, never drop a message out of a pair."""
+        convo = _wedged_by_newest_message()
+        convo.insert(0, ToolMessage(content="x" * 200, tool_call_id="tc0", id="t0"))
+        convo.insert(0, AIMessage(
+            content="", id="a0",
+            tool_calls=[{"name": "read_file", "id": "tc0", "args": {"path": "a.rb"}}],
+        ))
+        after = _compact(_prod_mw(), convo)
+        tool_call_ids = {
+            tc["id"] for m in after for tc in (getattr(m, "tool_calls", None) or [])
+        }
+        for m in after:
+            if isinstance(m, ToolMessage):
+                assert m.tool_call_id in tool_call_ids
+
+
+class TestThreadRepair:
+    """`/compact` is the user's rescue lever for a thread that is ALREADY wedged.
+
+    Threads created before this shipped still carry the oversized messages, and
+    the customer's only alternative is to abandon their context and start over.
+    """
+
+    def test_oversized_messages_are_truncated_in_place(self):
+        from app.agents.leonardo.summarization import truncate_oversized_messages
+
+        convo = [
+            HumanMessage(content="fix the transcript list", id="h1"),
+            AIMessage(content="on it", id="a1"),
+            _picked_element_message(int(_THRESHOLD * 0.7), "big", "and this one"),
+        ]
+        repaired, count = truncate_oversized_messages(convo, 15000, _COUNTER)
+
+        assert count == 1
+        assert _COUNTER([repaired[-1]]) <= 15000 * 1.1
+        assert repaired[-1].id == "big"
+        assert "and this one" in repaired[-1].content
+        assert "[truncated:" in repaired[-1].content
+        # Untouched messages are the SAME objects, not rebuilt copies.
+        assert repaired[0] is convo[0] and repaired[1] is convo[1]
+
+    def test_nothing_to_repair_is_a_no_op(self):
+        from app.agents.leonardo.summarization import truncate_oversized_messages
+
+        convo = [HumanMessage(content="hi", id="h1"), AIMessage(content="hello", id="a1")]
+        repaired, count = truncate_oversized_messages(convo, 15000, _COUNTER)
+        assert count == 0
+        assert repaired == convo
+
+    def test_tool_messages_keep_their_call_id(self):
+        from app.agents.leonardo.summarization import truncate_oversized_messages
+
+        convo = [
+            AIMessage(content="", id="a1", tool_calls=[
+                {"name": "read_file", "id": "tc1", "args": {"path": "a.rb"}},
+            ]),
+            ToolMessage(content=_text_of_tokens(int(_THRESHOLD * 0.5)),
+                        tool_call_id="tc1", id="t1"),
+        ]
+        repaired, count = truncate_oversized_messages(convo, 15000, _COUNTER)
+        assert count == 1
+        assert repaired[1].tool_call_id == "tc1"
+        assert _COUNTER([repaired[1]]) <= 15000 * 1.1
+
+
+class TestHardCeiling:
+    """Truncating text is not always enough — and "we tried" is still a dead
+    thread for the customer.
+
+    Tool-call arguments and image blocks aren't text, so a message can be
+    unshrinkable. When that happens the payload handed to the model must still
+    come in under the trigger, even if that means dropping messages entirely and
+    sending a single summary with nothing attached to it.
+    """
+
+    def _unshrinkable_convo(self):
+        """Every fat message here is fat in a way truncation cannot fix."""
+        fat_args = {"content": _text_of_tokens(int(_THRESHOLD * 0.4))}
+        convo = []
+        for i in range(3):
+            convo.append(AIMessage(content="", id=f"a{i}", tool_calls=[
+                {"name": "write_file", "id": f"tc{i}", "args": dict(fat_args)},
+            ]))
+            convo.append(ToolMessage(content="ok", tool_call_id=f"tc{i}", id=f"t{i}"))
+        convo.append(HumanMessage(content="now fix the header", id="last"))
+        return convo
+
+    def test_payload_is_under_the_trigger_even_when_nothing_can_be_truncated(self):
+        mw = _prod_mw()
+        convo = self._unshrinkable_convo()
+        assert _COUNTER(convo) > _THRESHOLD
+        after = _compact(mw, convo)
+        assert _COUNTER(after) < _THRESHOLD
+        assert mw.before_model({"messages": after}, runtime=None) is None
+
+    def test_dropping_never_leaves_a_dangling_tool_call(self):
+        after = _compact(_prod_mw(), self._unshrinkable_convo())
+        answered = {m.tool_call_id for m in after if isinstance(m, ToolMessage)}
+        for m in after:
+            for tc in (getattr(m, "tool_calls", None) or []):
+                assert tc["id"] in answered, "a tool_call with no answer 400s the request"
+
+    def test_stripping_media_keeps_the_message_and_says_what_went(self):
+        """An image the agent can re-request beats a thread that can't take a turn."""
+        img = {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}
+        msg = ToolMessage(
+            content=[{"type": "text", "text": "the page"}, img],
+            tool_call_id="tc1", id="t1",
+        )
+        stripped = _prod_mw()._strip_media(msg)
+
+        assert not [b for b in stripped.content if b.get("type") == "image_url"]
+        assert stripped.tool_call_id == "tc1" and stripped.id == "t1"
+        text = " ".join(b.get("text", "") for b in stripped.content)
+        assert "the page" in text and "Attachment removed" in text
+
+    def test_no_image_survives_a_payload_that_had_to_be_forced_under(self):
+        img = {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}
+        convo = self._unshrinkable_convo()
+        convo.insert(1, ToolMessage(
+            content=[{"type": "text", "text": "screenshot"}, img],
+            tool_call_id="tc0", id="shot",
+        ))
+        after = _compact(_prod_mw(), convo)
+        assert _COUNTER(after) < _THRESHOLD
+        blocks = [
+            b for m in after if isinstance(getattr(m, "content", None), list)
+            for b in m.content if isinstance(b, dict)
+        ]
+        assert not [b for b in blocks if b.get("type") == "image_url"]
+
+    def test_worst_case_is_a_summary_with_nothing_attached(self):
+        """One message, unshrinkable, bigger than the whole budget on its own."""
+        mw = _prod_mw()
+        convo = [
+            HumanMessage(content="start", id="h0"),
+            AIMessage(content="", id="a1", tool_calls=[
+                {"name": "write_file", "id": "tc1",
+                 "args": {"content": _text_of_tokens(int(_THRESHOLD * 1.4))}},
+            ]),
+            ToolMessage(content="ok", tool_call_id="tc1", id="t1"),
+        ]
+        after = _compact(mw, convo)
+        assert _COUNTER(after) < _THRESHOLD
+        assert any(
+            (getattr(m, "additional_kwargs", None) or {}).get("lc_source") == "summarization"
+            for m in after
+        ), "the summary is the one thing that must always survive"
+        assert mw.before_model({"messages": after}, runtime=None) is None
+
+
+class TestCeilingWhenSummarizationDeclines:
+    """`SummarizationMiddleware` returns None when it finds no safe cutoff — the
+    count stays over the trigger and the oversized payload goes to the provider
+    anyway. The ceiling has to apply there too."""
+
+    def test_oversized_single_message_thread_is_still_bounded(self):
+        mw = _prod_mw()
+        convo = [_picked_element_message(int(_THRESHOLD * 1.3), "only", "fix this")]
+        result = mw.before_model({"messages": convo}, runtime=None)
+        assert result is not None, "an over-trigger payload must never be passed through"
+        after = messages_delta_reducer(convo, [result["messages"]])
+        assert _COUNTER(after) < _THRESHOLD
+
+    def test_a_healthy_thread_is_left_completely_alone(self):
+        mw = _prod_mw()
+        convo = [HumanMessage(content="hi", id="h1"), AIMessage(content="hello", id="a1")]
+        assert mw.before_model({"messages": convo}, runtime=None) is None

@@ -30,7 +30,7 @@ from app.websocket.web_socket_connection_manager import WebSocketConnectionManag
 from app.websocket.request_handler import RequestHandler
 
 # Import routers
-from app.routers import ui, api, websocket, slash_commands, checkpoints, scheduled_jobs, github_auth, unified_login
+from app.routers import ui, api, websocket, slash_commands, checkpoints, scheduled_jobs, github_auth, unified_login, chatgpt_auth
 
 # Configure logging to write info-level events to both chat_app.log and stdout
 log_handlers = [logging.StreamHandler()]
@@ -167,6 +167,18 @@ def get_or_create_checkpointer():
                     timeout=5.0,  # 5 second connection timeout
                     max_idle=300.0,  # 5 minute idle timeout
                     max_lifetime=3600.0,  # 1 hour max connection lifetime
+                    # Liveness check at CHECKOUT. Without this (psycopg's default is
+                    # check=None) a connection whose backend died while idle in the
+                    # pool — postgres restart, pg_terminate_backend, OOM'd backend —
+                    # is handed straight to the caller and raises
+                    # "consuming input failed: server closed the connection
+                    # unexpectedly" on first use, killing the whole agent turn.
+                    # max_idle/max_lifetime do NOT close that window: they only
+                    # recycle connections the pool already knows are old.
+                    # Nothing above us retries it (LangGraph's retry_policy covers
+                    # node execution, not the checkpointer put), so the fix has to
+                    # be here. See app/tests/test_checkpointer_dead_connection.py.
+                    check=ConnectionPool.check_connection,
                     reconnect_failed=lambda pool: logger.warning("PostgreSQL connection failed, using MemorySaver for persistence")
                 )
                 app.state.checkpointer = PostgresSaver(pool)
@@ -204,6 +216,10 @@ def get_or_create_async_checkpointer():
                     timeout=5.0,  # 5 second connection timeout
                     max_idle=300.0,  # 5 minute idle timeout
                     max_lifetime=3600.0,  # 1 hour max connection lifetime
+                    # Liveness check at checkout — see the sync pool above for why
+                    # this is load-bearing. This is the pool that actually served
+                    # the production crash (AsyncPostgresSaver.aput_writes).
+                    check=AsyncConnectionPool.check_connection,
                     reconnect_failed=lambda pool: logger.warning("PostgreSQL async connection failed, using MemorySaver for persistence")
                 )
                 app.state.async_checkpointer = AsyncPostgresSaver(pool)
@@ -248,6 +264,7 @@ app.include_router(checkpoints.router)
 app.include_router(scheduled_jobs.router)
 app.include_router(github_auth.router)
 app.include_router(unified_login.router)
+app.include_router(chatgpt_auth.router)
 
 
 async def graceful_shutdown(sig):

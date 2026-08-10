@@ -156,11 +156,16 @@
                     <span>Sending an image will start a new conversation on an image-capable model.</span>
                 </div>
             </div>
-            <!-- Vision disabled by operator: blocks image sends with a support hand-off -->
+            <!-- Vision unavailable: blocks image sends with a support hand-off.
+                 Two causes, one banner - the operator switched vision off, or this
+                 box has no vision-capable model it can run (no META key, so Muse is
+                 unavailable and the DeepSeek fallback is text-only). index.js shows
+                 exactly one of the two spans. -->
             <div class="image-switch-banner hidden" data-llamabot="vision-disabled-banner">
                 <div class="warning-content">
                     <i class="fa-solid fa-circle-info"></i>
-                    <span>Leo can't view images on this instance yet. Reach out to <a href="mailto:support@llamapress.ai">support@llamapress.ai</a> to enable Leo to view and understand images.</span>
+                    <span data-llamabot="vision-reason-disabled">Leo can't view images on this instance yet. Reach out to <a href="mailto:support@llamapress.ai">support@llamapress.ai</a> to enable Leo to view and understand images.</span>
+                    <span class="hidden" data-llamabot="vision-reason-no-model">Leo can't view images on this instance yet - no image-capable model is configured. Reach out to <a href="mailto:support@llamapress.ai">support@llamapress.ai</a> to enable Leo to view and understand images.</span>
                 </div>
                 <button class="image-switch-banner-dismiss" data-llamabot="vision-disabled-dismiss" data-tooltip="Dismiss" aria-label="Dismiss">&times;</button>
             </div>
@@ -241,12 +246,23 @@
                         <option value="gpt-5-nano" data-short-label="GPT-5 Nano">GPT-5 Nano</option>
                         <option value="gpt-5.4-nano" data-short-label="GPT-5.4 Nano">GPT-5.4 Nano</option>
                         <option value="gpt-5.6-luna" data-short-label="GPT-5.6 Luna">GPT-5.6 Luna</option>
+                        <option value="gpt-5.6-luna-chatgpt" data-short-label="Luna (ChatGPT)">GPT-5.6 Luna — my ChatGPT plan</option>
+                        <option value="gpt-5.6-sol-chatgpt" data-short-label="Sol (ChatGPT)">GPT-5.6 Sol — my ChatGPT plan</option>
                         <option value="deepseek-v4-flash" data-short-label="DeepSeek" selected>DeepSeek V4 Flash</option>
                         <option value="deepseek-v4-pro" data-short-label="DeepSeek Pro">DeepSeek V4 Pro</option>
                         <option value="deepseek-v4-flash-gmi" data-short-label="DeepSeek GMI">DeepSeek V4 Flash (GMI)</option>
                         <option value="deepseek-v4-flash-fireworks" data-short-label="DeepSeek FW">DeepSeek V4 Flash (Fireworks)</option>
                         <option value="qwen3.7-plus" data-short-label="Qwen">Qwen3.7 Plus</option>
+                        <option value="muse-spark-1.2-contributor" data-short-label="Muse" title="Contributor tier: Meta may use these prompts and completions to train future models.">Muse Spark 1.2 (Contributor)</option>
                     </select>
+                </div>
+                <!-- Which ChatGPT account is in use, shown only while a "my ChatGPT
+                     plan" model is selected. Without it there is no way to see the
+                     account, or to reach the sign-in modal again, short of
+                     disconnecting. -->
+                <div class="chatgpt-status hidden" data-llamabot="chatgpt-status">
+                    <span data-llamabot="chatgpt-status-text"></span>
+                    <button type="button" class="chatgpt-status-link" data-llamabot="chatgpt-status-open"></button>
                 </div>
             </div>
             <!-- Brand color picker panel (hidden by default, shown from tools toolbar) -->
@@ -1006,10 +1022,437 @@
         </div>
     </div>
 
+    <script>
+        // ============== Connect your own ChatGPT plan (Codex OAuth) ==============
+        //
+        // Two paths, chosen by what the SERVER can reach — the user never has to
+        // know which one applies:
+        //
+        //   * device code — server talks to auth.openai.com, we show a short code
+        //   * paste       — that host refuses this server's IP (Cloudflare 403), so
+        //                   the user signs in with OpenAI's own CLI on their machine
+        //
+        // /start answers 503 {reason:"auth_host_blocked"} for the second case, which
+        // is why the paste panel is a fallback rather than something to choose.
+        //
+        // Handles are resolved lazily (SI#203: markup below a parse-time
+        // querySelector is null forever).
+        (function () {
+            const qs = (name) => document.querySelector(`[data-llamabot="${name}"]`);
+            const modal = () => qs('chatgpt-modal');
+
+            const STATES = ['intro', 'code', 'paste', 'connected', 'error'];
+            let pollTimer = null;
+
+            function show(state) {
+                STATES.forEach(s => {
+                    const el = qs(`chatgpt-state-${s}`);
+                    if (el) el.classList.toggle('hidden', s !== state);
+                });
+            }
+
+            function open(state) {
+                const el = modal();
+                if (!el) return;
+                el.classList.remove('hidden');
+                show(state || 'intro');
+            }
+
+            function close() {
+                const el = modal();
+                if (el) el.classList.add('hidden');
+                stopPolling();
+            }
+
+            function stopPolling() {
+                if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+            }
+
+            function fail(message) {
+                const el = qs('chatgpt-error-text');
+                if (el) el.textContent = message || 'Something went wrong.';
+                show('error');
+            }
+
+            async function refreshStatus() {
+                try {
+                    const r = await fetch('/api/chatgpt-auth/status');
+                    if (!r.ok) return { connected: false };
+                    return await r.json();
+                } catch (_) {
+                    return { connected: false };
+                }
+            }
+
+            // How long the current token has left, in words. Null expiry means we
+            // were never told — say nothing rather than guess.
+            function expiryPhrase(seconds) {
+                if (seconds === null || seconds === undefined) return '';
+                if (seconds <= 0) return 'expired';
+                if (seconds < 3600) return `expires in ${Math.max(1, Math.round(seconds / 60))} min`;
+                return `expires in ${Math.round(seconds / 3600)} h`;
+            }
+
+            function methodSentence(status) {
+                if (status.can_auto_refresh) {
+                    return status.auth_method === 'device_code'
+                        ? 'Signed in with a device code. Leo renews the token on its own, so this keeps working.'
+                        : 'Leo renews this token on its own, so it keeps working.';
+                }
+                const when = expiryPhrase(status.expires_in_seconds);
+                return 'This account was connected with a pasted token, which cannot renew itself'
+                    + (when ? ` — it ${when}` : '')
+                    + '. Sign in again to switch to a device code that stays connected.';
+            }
+
+            function renderConnected(status) {
+                const el = qs('chatgpt-account');
+                if (el) {
+                    const who = status.account_email ? ` as ${status.account_email}` : '';
+                    const plan = status.plan_tier ? ` (${status.plan_tier})` : '';
+                    el.textContent = who + plan;
+                }
+                const method = qs('chatgpt-method');
+                if (method) {
+                    method.textContent = methodSentence(status);
+                    method.classList.toggle('warn', !status.can_auto_refresh);
+                }
+                show('connected');
+                // Let the dropdown re-evaluate which models are now selectable.
+                document.dispatchEvent(new CustomEvent('llamabot:chatgpt-connection-changed'));
+                renderStatusLine(status);
+            }
+
+            // --- the always-on status line under the model dropdown -------------
+            //
+            // Only meaningful while a "my ChatGPT plan" model is picked, so it is
+            // hidden otherwise rather than adding permanent chrome.
+            let lastStatus = null;
+
+            function selectedModel() {
+                const select = qs('model-select');
+                return select ? String(select.value || '') : '';
+            }
+
+            function renderStatusLine(status) {
+                if (status) lastStatus = status;
+                const line = qs('chatgpt-status');
+                if (!line) return;
+                if (!selectedModel().endsWith('-chatgpt')) {
+                    line.classList.add('hidden');
+                    return;
+                }
+                const text = qs('chatgpt-status-text');
+                const button = qs('chatgpt-status-open');
+                const s = lastStatus || { connected: false };
+                line.classList.remove('hidden');
+                line.classList.toggle('warn', !s.connected || !s.can_auto_refresh);
+
+                if (!s.connected) {
+                    if (text) text.textContent = 'Not signed in to ChatGPT';
+                    if (button) button.textContent = 'Connect';
+                    return;
+                }
+                const who = s.account_email || 'your ChatGPT account';
+                const note = s.can_auto_refresh ? 'device code' : expiryPhrase(s.expires_in_seconds) || 'pasted token';
+                if (text) text.textContent = `ChatGPT: ${who} · ${note}`;
+                if (button) button.textContent = 'Manage';
+            }
+
+            async function syncStatusLine() {
+                if (!selectedModel().endsWith('-chatgpt')) { renderStatusLine(null); return; }
+                renderStatusLine(await refreshStatus());
+            }
+
+            async function startConnect() {
+                try {
+                    const r = await fetch('/api/chatgpt-auth/start', { method: 'POST' });
+                    if (r.status === 503) {
+                        // This server's IP can't reach the sign-in host — not a
+                        // transient error, so offer the flow that does work.
+                        show('paste');
+                        return;
+                    }
+                    if (!r.ok) {
+                        const body = await r.json().catch(() => ({}));
+                        fail(typeof body.detail === 'string' ? body.detail : 'Could not start sign-in.');
+                        return;
+                    }
+                    const data = await r.json();
+                    const link = qs('chatgpt-verification-url');
+                    if (link) {
+                        link.href = data.verification_url || '#';
+                        link.textContent = data.verification_url || '';
+                    }
+                    const code = qs('chatgpt-usercode');
+                    if (code) code.textContent = data.user_code || '';
+                    // A stale "Copied" next to a freshly-issued code would be a lie.
+                    const note = qs('chatgpt-copied');
+                    if (note) { clearTimeout(note._timer); note.classList.remove('visible'); }
+                    show('code');
+                    poll(data.state, Math.max(2, data.interval || 5) * 1000);
+                } catch (e) {
+                    fail('Could not reach the server.');
+                }
+            }
+
+            function poll(state, intervalMs) {
+                stopPolling();
+                pollTimer = setTimeout(async () => {
+                    try {
+                        const r = await fetch('/api/chatgpt-auth/poll', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ state })
+                        });
+                        if (r.ok) {
+                            const data = await r.json();
+                            if (data.status === 'pending') { poll(state, intervalMs); return; }
+                            renderConnected(data);
+                            return;
+                        }
+                        const body = await r.json().catch(() => ({}));
+                        fail(typeof body.detail === 'string' ? body.detail : 'Sign-in did not complete.');
+                    } catch (_) {
+                        fail('Lost connection while waiting for approval.');
+                    }
+                }, intervalMs);
+            }
+
+            async function submitPaste() {
+                const box = qs('chatgpt-paste-input');
+                const raw = (box && box.value || '').trim();
+                if (!raw) { fail('Paste the contents of ~/.codex/auth.json first.'); return; }
+                let parsed;
+                try {
+                    parsed = JSON.parse(raw);
+                } catch (_) {
+                    fail("That isn't valid JSON. Paste the whole file, including the outer { }.");
+                    return;
+                }
+                try {
+                    const r = await fetch('/api/chatgpt-auth/import', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ auth_json: parsed })
+                    });
+                    if (!r.ok) {
+                        const body = await r.json().catch(() => ({}));
+                        fail(typeof body.detail === 'string' ? body.detail : 'Could not store the credential.');
+                        return;
+                    }
+                    if (box) box.value = '';   // don't leave tokens sitting in the DOM
+                    renderConnected(await r.json());
+                } catch (_) {
+                    fail('Could not reach the server.');
+                }
+            }
+
+            async function disconnect() {
+                try {
+                    await fetch('/api/chatgpt-auth/disconnect', { method: 'DELETE' });
+                } catch (_) { /* best effort */ }
+                document.dispatchEvent(new CustomEvent('llamabot:chatgpt-connection-changed'));
+                lastStatus = { connected: false };
+                renderStatusLine(lastStatus);
+                close();
+            }
+
+            // Copy the one-time code. navigator.clipboard is undefined outside a
+            // secure context (plain-http self-hosters, LAN boxes), and a copy
+            // button that silently does nothing is worse than no button — so fall
+            // back to the old selection trick there.
+            async function copyCode() {
+                const el = qs('chatgpt-usercode');
+                const text = (el && el.textContent || '').trim();
+                if (!text) return;
+
+                let copied = false;
+                try {
+                    if (navigator.clipboard && window.isSecureContext) {
+                        await navigator.clipboard.writeText(text);
+                        copied = true;
+                    }
+                } catch (_) { /* fall through */ }
+
+                if (!copied) {
+                    const scratch = document.createElement('textarea');
+                    scratch.value = text;
+                    scratch.setAttribute('readonly', '');
+                    scratch.style.position = 'fixed';
+                    scratch.style.opacity = '0';
+                    document.body.appendChild(scratch);
+                    scratch.select();
+                    try { copied = document.execCommand('copy'); } catch (_) { copied = false; }
+                    scratch.remove();
+                }
+
+                const note = qs('chatgpt-copied');
+                if (!note) return;
+                // Say what actually happened. Claiming "Copied" when it failed
+                // sends the user to another device with an empty clipboard.
+                note.textContent = copied ? 'Copied' : 'Press Ctrl/Cmd+C to copy';
+                note.classList.add('visible');
+                clearTimeout(note._timer);
+                note._timer = setTimeout(() => note.classList.remove('visible'), 1600);
+            }
+
+            // Re-sign-in in one step, and deliberately WITHOUT disconnecting first:
+            // `codex login --device-auth` issues a fresh code over an existing
+            // auth.json and overwrites it on success (verified against CLI 0.147),
+            // so abandoning the new login leaves the working credential intact.
+            // Disconnecting up front would strand the user for a login they
+            // changed their mind about.
+            function signInAgain() {
+                startConnect();
+            }
+
+            // Open on demand — the modal is the one place this lives, so /settings
+            // links here rather than duplicating it.
+            async function openManage() {
+                const status = await refreshStatus();
+                if (status.connected) { renderConnected(status); open('connected'); }
+                else open('intro');
+            }
+
+            document.addEventListener('click', (e) => {
+                if (e.target.closest('[data-llamabot="chatgpt-close"]')) { close(); return; }
+                if (e.target.closest('[data-llamabot="chatgpt-connect-btn"]')) { startConnect(); return; }
+                if (e.target.closest('[data-llamabot="chatgpt-retry"]')) { show('intro'); return; }
+                if (e.target.closest('[data-llamabot="chatgpt-paste-submit"]')) { submitPaste(); return; }
+                if (e.target.closest('[data-llamabot="chatgpt-signin-again"]')) { signInAgain(); return; }
+                if (e.target.closest('[data-llamabot="chatgpt-disconnect"]')) { disconnect(); return; }
+                if (e.target.closest('[data-llamabot="chatgpt-status-open"]')) { openManage(); return; }
+                if (e.target.closest('[data-llamabot="chatgpt-copy"]')) { copyCode(); return; }
+            });
+
+            // Picking a "my ChatGPT plan" model with no account connected would
+            // otherwise silently fall back to the default model mid-conversation,
+            // which is exactly the confusion this whole feature exists to remove.
+            document.addEventListener('change', async (e) => {
+                const select = e.target.closest('[data-llamabot="model-select"]');
+                if (!select) return;
+                if (!String(select.value).endsWith('-chatgpt')) { renderStatusLine(null); return; }
+                const status = await refreshStatus();
+                renderStatusLine(status);
+                if (!status.connected) open('intro');
+            });
+
+            document.addEventListener('llamabot:chatgpt-connection-changed', syncStatusLine);
+
+            // Deep link from /settings, which has no modal of its own.
+            function openIfDeepLinked() {
+                const params = new URLSearchParams(window.location.search);
+                if (params.get('connect') !== 'chatgpt') return;
+                params.delete('connect');
+                const rest = params.toString();
+                window.history.replaceState({}, '', window.location.pathname + (rest ? `?${rest}` : ''));
+                openManage();
+            }
+
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', () => { syncStatusLine(); openIfDeepLinked(); });
+            } else {
+                syncStatusLine();
+                openIfDeepLinked();
+            }
+
+            window.llamabotChatGptConnect = () => open('intro');
+        })();
+    </script>
+
     <!-- Minimized progress pill (click to reopen the modal) -->
     <div class="update-pill hidden" data-llamabot="update-pill" title="Update status">
         <span class="update-modal-spinner small"></span>
         <span data-llamabot="update-pill-text">Updating…</span>
+    </div>
+
+    <!-- Connect your own ChatGPT plan (Codex OAuth). Opens automatically when a
+         "— my ChatGPT plan" model is picked without a connected account. -->
+    <div class="update-modal-overlay hidden" data-llamabot="chatgpt-modal">
+        <div class="update-modal-card">
+            <div class="update-modal-head">
+                <span class="update-modal-badge"><i class="fa-solid fa-plug"></i></span>
+                <h2>Use your own ChatGPT plan</h2>
+            </div>
+
+            <!-- STATE: intro -->
+            <div data-llamabot="chatgpt-state-intro">
+                <p>Sign in with your ChatGPT account to run Leo on your own Plus/Pro
+                   subscription instead of this instance's API credits.</p>
+                <p class="chatgpt-fineprint">
+                    Usage runs under your ChatGPT plan and its terms — including
+                    training on your conversations unless you've turned that off in
+                    your own ChatGPT data controls. You can disconnect at any time.
+                </p>
+                <div class="update-modal-actions">
+                    <button class="update-modal-btn primary" data-llamabot="chatgpt-connect-btn">Connect ChatGPT</button>
+                    <button class="update-modal-btn ghost" data-llamabot="chatgpt-close">Cancel</button>
+                </div>
+            </div>
+
+            <!-- STATE: device code -->
+            <div class="hidden" data-llamabot="chatgpt-state-code">
+                <p>Open this page and enter the code:</p>
+                <p><a data-llamabot="chatgpt-verification-url" target="_blank" rel="noopener noreferrer"></a></p>
+                <!-- The whole code is the copy target — it is going to another
+                     device against a 15-minute clock, so retyping it is the step
+                     this flow loses people on. The icon is a hint, not the only
+                     hit area. -->
+                <button type="button" class="chatgpt-usercode" data-llamabot="chatgpt-copy"
+                        title="Click to copy">
+                    <span data-llamabot="chatgpt-usercode"></span>
+                    <i class="fa-regular fa-copy chatgpt-copy-icon" aria-hidden="true"></i>
+                </button>
+                <p class="chatgpt-copied" data-llamabot="chatgpt-copied" role="status">Copied</p>
+                <p class="chatgpt-waiting"><span class="update-modal-spinner small"></span> Waiting for you to approve…</p>
+                <div class="update-modal-actions">
+                    <button class="update-modal-btn ghost" data-llamabot="chatgpt-close">Cancel</button>
+                </div>
+            </div>
+
+            <!-- STATE: paste (this server's IP can't reach auth.openai.com) -->
+            <div class="hidden" data-llamabot="chatgpt-state-paste">
+                <p>This server can't reach OpenAI's sign-in host, so do it from your
+                   own machine — it takes about a minute:</p>
+                <ol class="chatgpt-steps">
+                    <li>Install OpenAI's Codex CLI and run <code>codex login</code></li>
+                    <li>Approve in the browser that opens</li>
+                    <li>Run <code>cat ~/.codex/auth.json</code> and paste the result below</li>
+                </ol>
+                <textarea data-llamabot="chatgpt-paste-input" rows="6" spellcheck="false"
+                          placeholder='{"tokens": {"access_token": "…", "refresh_token": "…"}}'></textarea>
+                <div class="update-modal-actions">
+                    <button class="update-modal-btn primary" data-llamabot="chatgpt-paste-submit">Connect</button>
+                    <button class="update-modal-btn ghost" data-llamabot="chatgpt-close">Cancel</button>
+                </div>
+            </div>
+
+            <!-- STATE: connected -->
+            <div class="hidden" data-llamabot="chatgpt-state-connected">
+                <p><i class="fa-solid fa-circle-check"></i> Connected<span data-llamabot="chatgpt-account"></span>.</p>
+                <!-- How the account was signed in, and therefore whether it keeps
+                     itself alive. A pasted token that quietly expires mid-task is
+                     the failure this whole feature exists to remove. -->
+                <p class="chatgpt-method" data-llamabot="chatgpt-method"></p>
+                <p class="chatgpt-fineprint">Leo will use your plan for the models marked
+                   “my ChatGPT plan”. Everything else is unchanged.</p>
+                <div class="update-modal-actions">
+                    <button class="update-modal-btn primary" data-llamabot="chatgpt-close">Done</button>
+                    <button class="update-modal-btn ghost" data-llamabot="chatgpt-signin-again">Sign in again</button>
+                    <button class="update-modal-btn ghost" data-llamabot="chatgpt-disconnect">Disconnect</button>
+                </div>
+            </div>
+
+            <!-- STATE: error -->
+            <div class="hidden" data-llamabot="chatgpt-state-error">
+                <p class="chatgpt-error" data-llamabot="chatgpt-error-text"></p>
+                <div class="update-modal-actions">
+                    <button class="update-modal-btn primary" data-llamabot="chatgpt-retry">Try again</button>
+                    <button class="update-modal-btn ghost" data-llamabot="chatgpt-close">Close</button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- Link to external JavaScript -->
