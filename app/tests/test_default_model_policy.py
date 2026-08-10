@@ -140,7 +140,21 @@ async def test_available_models_shows_exactly_the_two(async_client, monkeypatch)
         m["value"] for m in body["models"]
         if m["reason"] != "Disabled by administrator"
     }
-    assert enabled == {MUSE, "deepseek-v4-flash"}
+    assert enabled == {
+        MUSE,
+        "deepseek-v4-flash",
+        # Enabled but not usable until this user connects an account, which is
+        # what the reason string says. No operator key is involved.
+        "gpt-5.6-luna-chatgpt",
+        "gpt-5.6-sol-chatgpt",
+    }
+
+    # ...and of those, only the ones this box holds a key for are actually
+    # usable. No DEEPSEEK_API_KEY here (see the fixture), so Muse stands alone —
+    # `available` is enabled AND keyed, which is the distinction the dropdown
+    # renders as selectable-vs-greyed.
+    usable = {m["value"] for m in body["models"] if m["available"]}
+    assert usable == {MUSE}
 
 
 @pytest.mark.asyncio

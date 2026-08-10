@@ -81,7 +81,11 @@
       2026-08-09/10), all of them defaults — i.e. the behavior of a box that
       configures nothing, which is most of the fleet:
         * DEFAULT_LLM_MODEL is now `muse-spark-1.2-contributor`.
-        * Exactly two models ship enabled: Muse + `deepseek-v4-flash`.
+        * Two models ship enabled on operator credentials: Muse +
+          `deepseek-v4-flash`. The two ChatGPT-subscription entries stay enabled
+          too — no operator key reaches them (a user connects their own account),
+          so the .env rule does not apply and disabling them would have made the
+          feature unreachable fleet-wide.
         * MODEL_SWITCHING_ALLOWED defaults ON (it stays a per-box opt-OUT).
         * Vision routes through Muse; `gpt-5-nano` leaves the default set.
       The load-bearing part was the fallback. `enabled_default_model()` preferred

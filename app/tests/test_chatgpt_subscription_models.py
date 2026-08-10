@@ -31,15 +31,13 @@ SUBSCRIPTION_MODELS = sorted(_CHATGPT_SUBSCRIPTION_MODELS)
 def unlocked_models(monkeypatch):
     """Reach the subscription branch of get_llm at all.
 
-    Two policy layers would otherwise swap the model for the default before the
-    branch under test ever runs: the switching lock, and (since 0.7.0) the
-    compiled two-model default enabled set, which does not include the
-    ChatGPT-subscription entries. Opting in here keeps this file about the
-    credential plumbing; whether the fleet ships them enabled is
-    test_default_model_policy.py's business.
+    These models ARE in the compiled default enabled set (see
+    test_default_model_policy.py for why), so only the switching lock needs
+    unsetting here — under it, get_llm would swap the model for the box default
+    before the branch under test ever runs.
     """
     monkeypatch.setenv("MODEL_SWITCHING_ALLOWED", "true")
-    monkeypatch.setenv("ENABLED_MODELS", ",".join(SUBSCRIPTION_MODELS))
+    monkeypatch.delenv("ENABLED_MODELS", raising=False)
     monkeypatch.delenv("DISABLED_MODELS", raising=False)
 
 

@@ -52,6 +52,7 @@ import os
 from typing import Optional
 
 from app.agents.leonardo.llm_factory import (
+    _CHATGPT_SUBSCRIPTION_MODELS,
     DEFAULT_LLM_MODEL,
     FALLBACK_TEXT_MODEL,
     has_provider_key,
@@ -280,6 +281,13 @@ def enabled_default_model() -> str:
     if is_model_enabled(preferred):
         return preferred
     for name in _KNOWN_MODELS:
+        # Never resolve the box default onto a model paid for by an individual
+        # user's ChatGPT plan: a user who has connected nothing could not chat at
+        # all. _KNOWN_MODELS lists them last, which used to be enough — it stopped
+        # being enough once the compiled default set turned the API-key models
+        # off, leaving a subscription model as the first survivor of this walk.
+        if name in _CHATGPT_SUBSCRIPTION_MODELS:
+            continue
         if is_model_enabled(name):
             return name
     logger.warning(
