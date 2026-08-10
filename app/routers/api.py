@@ -20,6 +20,7 @@ from app.services.user_service import (
 )
 from app.agents.leonardo.model_capabilities import get_model_capabilities
 from app.agents.leonardo.model_policy import (
+    enabled_default_model,
     is_model_enabled,
     model_switching_allowed,
     vision_allowed,
@@ -842,6 +843,11 @@ async def available_models(request: Request):
         "models": models,
         "model_switching_allowed": model_switching_allowed(),
         "vision_allowed": vision_allowed(),
+        # Which model the frontend resets to on a new thread and pins to under
+        # the switching lock. Box-dependent since 0.7.0 (Muse where there is a
+        # META key, DeepSeek where there is not), so it can no longer be a
+        # constant in index.js.
+        "default_model": enabled_default_model(),
     }
 
 

@@ -14,11 +14,10 @@ import pytest
 from app.agents.leonardo import llm_factory
 from app.agents.leonardo.llm_factory import (
     _CHATGPT_SUBSCRIPTION_MODELS,
-    ChatDeepSeekWithReasoning,
     get_llm,
 )
 from app.agents.leonardo.model_capabilities import MODEL_CAPABILITIES
-from app.agents.leonardo.model_policy import _KNOWN_MODELS
+from app.agents.leonardo.model_policy import _KNOWN_MODELS, enabled_default_model
 from app.lib.request_context import (
     current_user_id,
     reset_current_user_id,
@@ -30,11 +29,27 @@ SUBSCRIPTION_MODELS = sorted(_CHATGPT_SUBSCRIPTION_MODELS)
 
 @pytest.fixture
 def unlocked_models(monkeypatch):
-    """Model switching is off by default, which would swap our model for DeepSeek
-    before the branch under test ever runs."""
+    """Reach the subscription branch of get_llm at all.
+
+    Two policy layers would otherwise swap the model for the default before the
+    branch under test ever runs: the switching lock, and (since 0.7.0) the
+    compiled two-model default enabled set, which does not include the
+    ChatGPT-subscription entries. Opting in here keeps this file about the
+    credential plumbing; whether the fleet ships them enabled is
+    test_default_model_policy.py's business.
+    """
     monkeypatch.setenv("MODEL_SWITCHING_ALLOWED", "true")
-    monkeypatch.delenv("ENABLED_MODELS", raising=False)
+    monkeypatch.setenv("ENABLED_MODELS", ",".join(SUBSCRIPTION_MODELS))
     monkeypatch.delenv("DISABLED_MODELS", raising=False)
+
+
+def _is_the_boxs_default(llm) -> bool:
+    """The fallback is whatever THIS box defaults to, which is env-dependent
+    since 0.7.0 (Muse where there is a META key, DeepSeek where there is not).
+    The invariant these tests are really about is 'a usable client came back
+    instead of an exception', so assert that rather than a fixed class."""
+    expected = get_llm(enabled_default_model())
+    return type(llm) is type(expected)
 
 
 @pytest.fixture
@@ -82,12 +97,12 @@ def test_no_connected_account_falls_back_to_default(model, unlocked_models, no_u
         llm_factory, "_chatgpt_subscription_client", lambda _name: None
     )
     llm = get_llm(model)
-    assert isinstance(llm, ChatDeepSeekWithReasoning)
+    assert _is_the_boxs_default(llm)
 
 
 @pytest.mark.parametrize("model", SUBSCRIPTION_MODELS)
 def test_revoked_credential_falls_back_instead_of_raising(model, unlocked_models, monkeypatch):
-    """A revoked token must degrade to DeepSeek, never break the chat turn."""
+    """A revoked token must degrade to the box's default, never break the turn."""
     from app.services import chatgpt_auth
 
     token = set_current_user_id(42)
@@ -98,7 +113,7 @@ def test_revoked_credential_falls_back_instead_of_raising(model, unlocked_models
             lambda _uid: None,
         )
         llm = get_llm(model)
-        assert isinstance(llm, ChatDeepSeekWithReasoning)
+        assert _is_the_boxs_default(llm)
     finally:
         reset_current_user_id(token)
 
@@ -115,7 +130,7 @@ def test_credential_lookup_blowing_up_still_returns_a_model(model, unlocked_mode
     try:
         monkeypatch.setattr(chatgpt_auth, "access_token_for_user_sync", boom)
         llm = get_llm(model)
-        assert isinstance(llm, ChatDeepSeekWithReasoning)
+        assert _is_the_boxs_default(llm)
     finally:
         reset_current_user_id(token)
 
@@ -149,7 +164,7 @@ def test_operator_openai_key_never_reaches_chatgpt_backend(model, unlocked_model
     # like a leak and is not one.
     base_url = str(getattr(llm, "openai_api_base", "") or "")
     assert "chatgpt.com" not in base_url
-    assert isinstance(llm, ChatDeepSeekWithReasoning)
+    assert _is_the_boxs_default(llm)
 
 
 @pytest.mark.parametrize("model", SUBSCRIPTION_MODELS)

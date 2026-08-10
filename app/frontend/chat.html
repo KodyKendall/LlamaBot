@@ -156,11 +156,16 @@
                     <span>Sending an image will start a new conversation on an image-capable model.</span>
                 </div>
             </div>
-            <!-- Vision disabled by operator: blocks image sends with a support hand-off -->
+            <!-- Vision unavailable: blocks image sends with a support hand-off.
+                 Two causes, one banner - the operator switched vision off, or this
+                 box has no vision-capable model it can run (no META key, so Muse is
+                 unavailable and the DeepSeek fallback is text-only). index.js shows
+                 exactly one of the two spans. -->
             <div class="image-switch-banner hidden" data-llamabot="vision-disabled-banner">
                 <div class="warning-content">
                     <i class="fa-solid fa-circle-info"></i>
-                    <span>Leo can't view images on this instance yet. Reach out to <a href="mailto:support@llamapress.ai">support@llamapress.ai</a> to enable Leo to view and understand images.</span>
+                    <span data-llamabot="vision-reason-disabled">Leo can't view images on this instance yet. Reach out to <a href="mailto:support@llamapress.ai">support@llamapress.ai</a> to enable Leo to view and understand images.</span>
+                    <span class="hidden" data-llamabot="vision-reason-no-model">Leo can't view images on this instance yet - no image-capable model is configured. Reach out to <a href="mailto:support@llamapress.ai">support@llamapress.ai</a> to enable Leo to view and understand images.</span>
                 </div>
                 <button class="image-switch-banner-dismiss" data-llamabot="vision-disabled-dismiss" data-tooltip="Dismiss" aria-label="Dismiss">&times;</button>
             </div>

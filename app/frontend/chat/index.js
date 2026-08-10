@@ -37,8 +37,12 @@ import { StallMonitor } from './ui/StallMonitor.js';
 
 // Image auto-switch: when a user attaches an image while on a text-only model,
 // we move them onto an image-capable model so the image is actually seen.
-const IMAGE_MODEL = 'gpt-5-nano';   // vision-capable target
-const DEFAULT_TEXT_MODEL = 'deepseek-v4-flash'; // default text model
+const IMAGE_MODEL = 'muse-spark-1.2-contributor';   // vision-capable target
+const IMAGE_MODEL_LABEL = 'Muse Spark 1.2';
+// Seed only. The real default is box-dependent (Muse where the box has a META
+// key, DeepSeek where it does not), so /api/available-models reports it as
+// `default_model` and this.defaultTextModel takes over as soon as that lands.
+const DEFAULT_TEXT_MODEL = 'deepseek-v4-flash';
 
 /**
  * Main application class - LlamaBot Client
@@ -121,10 +125,22 @@ class ChatApp {
     // Operator gates, hydrated from /api/available-models (fetchAvailableModels).
     // Default permissive so the UI works before the fetch resolves; the backend
     // (get_llm / _build_message_content) is the authoritative gate either way.
-    // - modelSwitchingAllowed=false hides the model dropdown and pins DeepSeek.
+    // - modelSwitchingAllowed=false hides the model dropdown and pins the default.
     // - visionAllowed=false refuses images at attach time, with a support hand-off.
     this.modelSwitchingAllowed = true;
     this.visionAllowed = true;
+
+    // The model to reset to on a new thread / pin to under the switching lock.
+    // Replaced by the backend's resolved `default_model`.
+    this.defaultTextModel = DEFAULT_TEXT_MODEL;
+
+    // Whether this box has a usable vision model at all. Distinct from
+    // visionAllowed: that is the operator switching vision OFF, this is a box
+    // with no META key, where the only model it can run (DeepSeek) cannot read
+    // images. Both must refuse an image — sending one anyway reaches a text-only
+    // model and 400s with `unknown variant image_url`. Optimistic until the
+    // fetch resolves, matching the gates above.
+    this.visionModelAvailable = true;
 
     // Set once an image attach has been refused, so the banner still explains
     // itself even though nothing ended up in the composer.
@@ -880,7 +896,7 @@ class ChatApp {
       // A user-initiated new thread resets to the default text model. The
       // image auto-switch path calls createNewThread() directly (not via this
       // event), so it keeps the vision model it just selected.
-      this.setModel(DEFAULT_TEXT_MODEL);
+      this.setModel(this.defaultTextModel);
       this.updateImageSwitchBanner();
       // Reset token indicator for new conversation
       if (this.tokenIndicator) {
@@ -1246,7 +1262,7 @@ class ChatApp {
     }
     if (locked) {
       // Pin to the default text model regardless of any saved cookie/URL param.
-      this.setModel(DEFAULT_TEXT_MODEL);
+      this.setModel(this.defaultTextModel);
     }
   }
 
@@ -1303,8 +1319,18 @@ class ChatApp {
    */
   applyVisionPolicy() {
     if (!this.fileAttachmentManager) return;
-    this.fileAttachmentManager.blockImages = !this.visionAllowed;
+    this.fileAttachmentManager.blockImages = !this.visionUsable();
     this.fileAttachmentManager.onImageBlocked = () => this.refuseImageAttachment();
+  }
+
+  /**
+   * Can an image actually be understood on this box? Two independent ways for
+   * the answer to be no — the operator turned vision off, or the box has no
+   * vision-capable model to switch to — and every image path has to honour
+   * both, so they are asked as one question.
+   */
+  visionUsable() {
+    return this.visionAllowed && this.visionModelAvailable;
   }
 
   /**
@@ -1326,20 +1352,27 @@ class ChatApp {
    */
   updateImageSwitchBanner() {
     const attachments = this.fileAttachmentManager?.getAttachments() || [];
-    const model = this.elements.modelSelect?.value || DEFAULT_TEXT_MODEL;
+    const model = this.elements.modelSelect?.value || this.defaultTextModel;
     const hasImage = this.hasImageAttachment(attachments);
 
-    // Vision disabled by operator takes precedence: images are refused at attach
-    // time, so show the support hand-off (not the auto-switch notice). The
-    // notice flag carries the case where the refused image never attached.
+    // Vision unavailable takes precedence: images are refused at attach time, so
+    // show the support hand-off (not the auto-switch notice). The notice flag
+    // carries the case where the refused image never attached.
     const visionBanner = this.container.querySelector('[data-llamabot="vision-disabled-banner"]');
     const visionBlocked =
-      (hasImage || this.visionBlockNoticeActive) && !this.visionAllowed;
+      (hasImage || this.visionBlockNoticeActive) && !this.visionUsable();
     if (visionBanner) {
       visionBanner.classList.toggle(
         'hidden',
         !visionBlocked || this.visionBannerDismissed,
       );
+      // Same banner, two different causes — say which one, so an operator
+      // reading a screenshot can tell "switched off" from "not configured".
+      const offReason = visionBanner.querySelector('[data-llamabot="vision-reason-disabled"]');
+      const noModelReason = visionBanner.querySelector('[data-llamabot="vision-reason-no-model"]');
+      const noModel = this.visionAllowed && !this.visionModelAvailable;
+      offReason?.classList.toggle('hidden', noModel);
+      noModelReason?.classList.toggle('hidden', !noModel);
     }
 
     const banner = this.container.querySelector('[data-llamabot="image-switch-banner"]');
@@ -1468,7 +1501,7 @@ class ChatApp {
 
     let message = input.value.trim();
     const agentMode = this.elements.agentModeSelect?.value;
-    const llmModel = this.elements.modelSelect?.value || DEFAULT_TEXT_MODEL;
+    const llmModel = this.elements.modelSelect?.value || this.defaultTextModel;
     // May be reassigned below if an attached image forces a vision model.
     let effectiveLlmModel = llmModel;
 
@@ -1532,7 +1565,7 @@ class ChatApp {
     // that seeds an attachment around the manager. Nothing destructive has
     // happened yet (the input still holds the text), so just stop and point at
     // support. The backend re-enforces this in _build_message_content anyway.
-    if (!this.visionAllowed && this.hasImageAttachment(attachments)) {
+    if (!this.visionUsable() && this.hasImageAttachment(attachments)) {
       this.refuseImageAttachment();
       return;
     }
@@ -1562,7 +1595,8 @@ class ChatApp {
           }
           this.slashCommandManager?.showToast(
             "You attached an image, but your current model can't see images. " +
-            "I switched to GPT-5 Nano and started a new conversation, carrying your previous messages over.",
+            `I switched to ${IMAGE_MODEL_LABEL} and started a new conversation, ` +
+            'carrying your previous messages over.',
             'info'
           );
           this.updateImageSwitchBanner();
@@ -1571,6 +1605,17 @@ class ChatApp {
           this.setModel(IMAGE_MODEL);
           effectiveLlmModel = IMAGE_MODEL;
         }
+      } else {
+        // Nowhere to switch to — this box has no vision-capable model it can
+        // run (no META key, so Muse is unavailable and DeepSeek is text-only).
+        // Sending anyway would put an image block in front of a text-only model
+        // and 400 mid-stream, which surfaces to the user as a stack trace. Stop
+        // and say so instead. Nothing destructive has happened yet — the input
+        // still holds their text.
+        this.visionModelAvailable = false;
+        this.applyVisionPolicy();
+        this.refuseImageAttachment();
+        return;
       }
     }
     // --- end auto-switch ---
@@ -1895,6 +1940,14 @@ class ChatApp {
       // Coarse operator gates (default permissive if the backend omits them).
       this.modelSwitchingAllowed = data.model_switching_allowed !== false;
       this.visionAllowed = data.vision_allowed !== false;
+      // Box-dependent since 0.7.0. Keep the seed if an older backend omits it.
+      if (data.default_model) this.defaultTextModel = data.default_model;
+      // Is there a vision-capable model this box can actually run? A box with no
+      // META key reports the auto-switch target unavailable, which is what turns
+      // the "vision unavailable" message on. Must be set BEFORE applyVisionPolicy.
+      this.visionModelAvailable = (data.models || []).some(
+        m => m.available && m.capabilities?.images,
+      );
       this.applyModelSwitchingPolicy();
       this.applyVisionPolicy();
       this.updateImageSwitchBanner();
@@ -2388,9 +2441,10 @@ class ChatApp {
       // Close toolbar
       this.closeToolsToolbar();
 
-      // Vision disabled: don't even open the screen picker — the capture would
-      // only attach an image Leo can't read (same gate as file/paste/drop).
-      if (!this.visionAllowed) {
+      // No usable vision: don't even open the screen picker — the capture
+      // would only attach an image Leo can't read (same gate as
+      // file/paste/drop).
+      if (!this.visionUsable()) {
         this.refuseImageAttachment();
         return;
       }

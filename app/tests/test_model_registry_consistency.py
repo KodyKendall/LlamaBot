@@ -171,7 +171,6 @@ def test_luna_is_not_the_default_model():
     """Adding an option must not change what the fleet actually runs."""
     from app.agents.leonardo.llm_factory import DEFAULT_LLM_MODEL
 
-    assert DEFAULT_LLM_MODEL == "deepseek-v4-flash"
     assert LUNA != DEFAULT_LLM_MODEL
 
 
@@ -232,12 +231,17 @@ def test_muse_pins_the_contributor_tier_id():
     assert '"muse-spark-1.2-contributor"' in branch
 
 
-def test_muse_is_not_the_default_model():
-    """Adding an option must not change what the fleet actually runs."""
+def test_muse_is_the_fleet_default():
+    """Kody's 0.7.0 call, made 2026-08-09/10.
+
+    This assertion was inverted a day earlier ("adding an option must not change
+    what the fleet runs") — the model landed in the dropdown before the decision
+    to run it. The tier caveat that motivated the original guard did not go away;
+    it is pinned by test_muse_contributor_tier_stays_escapable below.
+    """
     from app.agents.leonardo.llm_factory import DEFAULT_LLM_MODEL
 
-    assert DEFAULT_LLM_MODEL == "deepseek-v4-flash"
-    assert MUSE != DEFAULT_LLM_MODEL
+    assert DEFAULT_LLM_MODEL == MUSE
 
 
 def test_muse_never_sends_the_openai_key_to_meta(monkeypatch):
@@ -263,13 +267,42 @@ def test_muse_never_sends_the_openai_key_to_meta(monkeypatch):
     assert key.get_secret_value() != "sk-openai-should-never-leave"
 
 
-def test_muse_is_not_fail_open():
-    """A data-sharing tier must never be one of the always-on models.
+def test_muse_is_fail_open_but_still_disableable():
+    """Muse is one of the two always-on models as of 0.7.0 — with an escape hatch.
 
-    `_FAIL_OPEN_MODELS` entries stay enabled even when an operator's allow-list
-    omits them. Muse contributor trains on every prompt that reaches it, so an
-    operator who leaves it off an allow-list has to actually get it turned off.
+    It IS the fleet default now, so an allow-list that omits it must not strand
+    the box on nothing. But the tier trains on every prompt that reaches it, so
+    an operator who genuinely needs it off must still be able to get it off:
+    an explicit disable (step 1 of the resolution order) beats fail-open. That
+    escape is the whole reason this test still exists.
     """
-    from app.agents.leonardo.model_policy import _FAIL_OPEN_MODELS
+    from app.agents.leonardo import model_policy
 
-    assert MUSE not in _FAIL_OPEN_MODELS
+    assert MUSE in model_policy._FAIL_OPEN_MODELS
+
+    original = model_policy._read_instance_config
+    model_policy._read_instance_config = lambda: {"disabled_models": [MUSE]}
+    try:
+        assert model_policy.is_model_enabled(MUSE) is False
+    finally:
+        model_policy._read_instance_config = original
+
+
+def test_muse_contributor_tier_stays_escapable():
+    """The paid, non-training tier must remain reachable without a code change.
+
+    The two ids differ ~12x in price AND completely in data handling, and the
+    tier is encoded ONLY in the model id — so a compliance-bound box moves to
+    `muse-spark-1.2` via META_MUSE_MODEL. Making the contributor tier the fleet
+    default is exactly what makes that override load-bearing.
+    """
+    import inspect
+
+    from app.agents.leonardo import llm_factory
+
+    src = inspect.getsource(llm_factory.get_llm)
+    branch = src.split(f'model_name == "{MUSE}"', 1)[1]
+    assert 'os.getenv("META_MUSE_MODEL"' in branch, (
+        "the model id must stay overridable per box, or a compliance box has no "
+        "way off the training tier"
+    )

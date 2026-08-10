@@ -30,7 +30,16 @@ from langchain_qwq import ChatQwen
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_LLM_MODEL = "deepseek-v4-flash"
+# The fleet default (0.7.0). Note this is the CONTRIBUTOR tier — see the tier
+# warning on the `muse-spark-1.2-contributor` branch in `get_llm` before moving
+# any box onto it; an operator pins the paid, non-training tier per box with
+# META_MUSE_MODEL=muse-spark-1.2.
+DEFAULT_LLM_MODEL = "muse-spark-1.2-contributor"
+
+# What the default degrades to on a box with no usable META key. `get_llm` can
+# always build this one, so it is what keeps chat working on a box the Muse
+# rollout has not reached (or that deliberately opts out).
+FALLBACK_TEXT_MODEL = "deepseek-v4-flash"
 
 
 class FakeTestChatModel(BaseChatModel):
@@ -140,6 +149,34 @@ def provider_key(*env_vars: str) -> str:
         if value and value.strip():
             return value
     return _MISSING_KEY_PLACEHOLDER
+
+
+# Which env vars credential the two models the default can resolve to, in the
+# same precedence `get_llm` uses to build them. Only these two are listed: this
+# map answers "can this box actually construct its default model", not "what is
+# in the dropdown" — that question belongs to /api/available-models, which keeps
+# the full registry (test_model_registry_consistency pins the two in agreement).
+DEFAULT_MODEL_KEY_ENVS = {
+    "muse-spark-1.2-contributor": ("META_API_KEY", "MODEL_API_KEY"),
+    "deepseek-v4-flash": ("DEEPSEEK_API_KEY",),
+}
+
+
+def has_provider_key(model_name: str) -> bool:
+    """True if this box holds a credential for `model_name`.
+
+    Used by the model policy to keep the resolved default to something `get_llm`
+    can build — a default naming a keyless model is not a degraded box, it is a
+    box where every turn 401s.
+
+    A model absent from `DEFAULT_MODEL_KEY_ENVS` reports True: this is not a
+    general reachability check and must not start disabling models it has no
+    opinion about.
+    """
+    env_vars = DEFAULT_MODEL_KEY_ENVS.get(model_name)
+    if not env_vars:
+        return True
+    return provider_key(*env_vars) != _MISSING_KEY_PLACEHOLDER
 
 
 # Models served by the signed-in user's ChatGPT plan (Codex backend) rather than

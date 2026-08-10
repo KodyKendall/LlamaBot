@@ -8,6 +8,7 @@ the menu.
 """
 
 import asyncio
+import time
 
 import pytest
 
@@ -90,8 +91,14 @@ def test_a_failed_fetch_serves_the_last_good_list(monkeypatch):
     monkeypatch.setattr(api, "_fetch_cookbook_index", ok_fetch)
     asyncio.run(api.api_get_cookbook(username="tester"))
 
-    # Expire the cache, then make the upstream fail.
-    api._cookbook_cache["fetched_at"] = 0.0
+    # Expire the cache, then make the upstream fail. Age is measured against
+    # time.monotonic(), which counts from boot — so 0.0 is NOT reliably "long
+    # ago". On a freshly-booted CI runner monotonic() is a few hundred seconds,
+    # i.e. still inside the TTL, and the entry reads as fresh. Back-date it by
+    # the TTL instead.
+    api._cookbook_cache["fetched_at"] = (
+        time.monotonic() - api.COOKBOOK_CACHE_TTL_SECONDS - 1
+    )
 
     async def boom():
         raise RuntimeError("llamapress.ai unreachable")

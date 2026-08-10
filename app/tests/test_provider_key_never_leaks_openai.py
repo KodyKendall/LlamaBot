@@ -33,6 +33,11 @@ SENTINEL = "sk-openai-must-never-leave-this-process"
 def no_provider_keys(monkeypatch):
     """An instance with an OpenAI key but none of the third-party provider keys."""
     monkeypatch.setenv("MODEL_SWITCHING_ALLOWED", "true")
+    # Every model under test is outside the compiled two-model default set, so
+    # without an allow-list get_llm would swap it for the default and the leak
+    # branch under test would never be reached. Named explicitly rather than
+    # widened globally: this file is about what a client sends, not about policy.
+    monkeypatch.setenv("ENABLED_MODELS", ",".join(m for m, _ in THIRD_PARTY_ENDPOINT_MODELS))
     monkeypatch.setenv("OPENAI_API_KEY", SENTINEL)
     for _, env_var in THIRD_PARTY_ENDPOINT_MODELS:
         monkeypatch.delenv(env_var, raising=False)

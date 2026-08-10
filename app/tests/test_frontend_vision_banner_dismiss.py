@@ -70,7 +70,10 @@ def test_screenshot_capture_respects_the_vision_gate():
     # so the manager-level gate can't see it — the click handler must check first.
     handler = CHAT_JS[CHAT_JS.index("initScreenshotCapture() {"):]
     handler = handler[: handler.index("startCapture(")]
-    assert "!this.visionAllowed" in handler
+    # visionUsable() folds in BOTH refusal causes (operator switched vision off,
+    # and no vision-capable model on this box) — checking visionAllowed alone
+    # would let a capture through on a box that has no model to read it.
+    assert "!this.visionUsable()" in handler
     assert "this.refuseImageAttachment()" in handler
 
 
