@@ -12,6 +12,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 # imports MothershipClient: synthetic rows (summarization fixtures,
 # ws_integration_thread) were 94 of the 140 instance_errors occurrences tagged
 # with version 0.7.0. See app/services/mothership_client.py.
+#
+# This suppresses the REPORT paths only (report_message, report_error,
+# report_turn_metrics, submit_feedback, notify_teardown) — login verification,
+# the paywall check, update checks and lease renewal go through `enabled` and
+# keep working. Tests that assert the reported payloads themselves opt back in
+# with an autouse `_reporting_not_suppressed` fixture in their own module.
 os.environ["LLAMABOT_TELEMETRY_DISABLED"] = "1"
 
 # Disable LangSmith tracing completely for tests

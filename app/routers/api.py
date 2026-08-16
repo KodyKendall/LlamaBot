@@ -965,7 +965,7 @@ async def api_submit_feedback(request: Request, body: FeedbackRequest, username:
     if mothership is None:
         from app.services.mothership_client import MothershipClient
         mothership = MothershipClient()
-    if not mothership.enabled:
+    if not mothership.reporting_enabled:
         return {"success": False, "reason": "mothership_not_configured"}
 
     debug_context = body.debug_context
@@ -1037,7 +1037,7 @@ async def api_report_frontend_error(
     if mothership is None:
         from app.services.mothership_client import MothershipClient
         mothership = MothershipClient()
-    if not mothership.enabled:
+    if not mothership.reporting_enabled:
         return {"success": False, "reason": "mothership_not_configured"}
 
     error_message = (body.error_message or "")[:2000]

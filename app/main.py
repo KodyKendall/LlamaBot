@@ -276,7 +276,7 @@ async def graceful_shutdown(sig):
         await app.state.lease_manager.stop()
 
     # Notify mothership of teardown
-    if hasattr(app.state, 'mothership_client') and app.state.mothership_client.enabled:
+    if hasattr(app.state, 'mothership_client') and app.state.mothership_client.reporting_enabled:
         try:
             await app.state.mothership_client.notify_teardown(reason="sigterm")
             logger.info("Mothership notified of teardown")

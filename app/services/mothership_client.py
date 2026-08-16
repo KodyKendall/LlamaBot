@@ -64,20 +64,30 @@ class MothershipClient:
 
     @property
     def enabled(self) -> bool:
-        """Check if mothership integration is enabled.
+        """Check if mothership integration is configured.
 
-        Every reporter (errors, friction, disconnects, turn metrics, lease) gates
-        on this, so the harness kill switch here covers all of them at once.
+        Deliberately NOT where the harness kill switch lives. This property also
+        gates login verification, the paywall check, update checks and lease
+        renewal — none of which are telemetry, and one of which (lease renewal)
+        carries the instance-lock backstop. Suppressing those would turn "do not
+        report test traffic" into "sign-in is broken", which is what shipping the
+        switch here actually did (30 CI failures, 0.7.1).
         """
-        if telemetry_disabled():
-            return False
-
         return bool(
             self.config is not None
             and self.config.get("mothership_api_token")
             and self.config.get("mothership_url")
             and self.config.get("instance_name")
         )
+
+    @property
+    def reporting_enabled(self) -> bool:
+        """Configured AND allowed to send outbound reports about this box.
+
+        The narrow gate: only the report/feedback paths consult it, so a harness
+        stays silent without losing the product behavior it needs to run.
+        """
+        return self.enabled and not telemetry_disabled()
 
     @property
     def instance_name(self) -> Optional[str]:
@@ -151,7 +161,7 @@ class MothershipClient:
         mothership has a per-message performance series alongside token usage.
         See docs/dev/performance_telemetry.md.
         """
-        if not self.enabled:
+        if not self.reporting_enabled:
             return None
 
         try:
@@ -213,7 +223,7 @@ class MothershipClient:
         Best-effort, exactly like report_message: never raises, returns None on
         any failure so a reporting hiccup never blocks the chat.
         """
-        if not self.enabled:
+        if not self.reporting_enabled:
             return None
 
         try:
@@ -354,7 +364,7 @@ class MothershipClient:
         already saw. ``recovered`` distinguishes "handled by the graceful floor"
         from "hard failure the user is stuck on".
         """
-        if not self.enabled:
+        if not self.reporting_enabled:
             return None
 
         try:
@@ -427,7 +437,7 @@ class MothershipClient:
         always returns None. The turn is already over and the user has their
         answer; a metrics failure must be invisible to them.
         """
-        if not self.enabled:
+        if not self.reporting_enabled:
             return None
 
         # A turn that recorded nothing (e.g. interrupted before the first model
@@ -541,7 +551,7 @@ class MothershipClient:
 
         Called on SIGTERM to notify mothership to initiate backup and termination.
         """
-        if not self.enabled:
+        if not self.reporting_enabled:
             return None
 
         try:

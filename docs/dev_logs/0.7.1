@@ -89,7 +89,11 @@
 [x] - Stop dev-box test output landing in production telemetry. 94 of the 140
       instance_errors rows tagged 0.7.0 were synthetic — summarization fixtures
       and the WS integration harness. An env kill switch, set for the whole
-      suite in conftest.py.
+      suite in conftest.py. It gates a narrow `reporting_enabled`, NOT the
+      shared `enabled` property: that one also carries login verification, the
+      paywall check, update checks and lease renewal (which is where the
+      instance-lock backstop lives), so switching it off there did not silence
+      the harness — it signed it out. 30 CI failures on PR #83 said so.
 
 [x] - Add the Messages tab unread badge. The count is posted up from the Rails
       iframe — the chat window and the Rails app are different origins, so the

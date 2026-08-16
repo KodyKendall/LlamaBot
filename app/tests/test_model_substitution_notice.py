@@ -45,9 +45,17 @@ def _frames(websocket):
 
 @pytest.fixture
 def only_the_default_enabled(monkeypatch):
-    """A box whose allow-list does not carry the model the user selected."""
+    """A box whose allow-list does not carry the model the user selected.
+
+    The META key is part of the fixture, not an assumption about the runner:
+    `default_text_model()` degrades Muse to DeepSeek on a box that has no key,
+    so without this the substituted model is whatever the environment happens to
+    be credentialed for — Muse here, DeepSeek in CI. Pinning the box makes the
+    assertions about the notice, not about the runner.
+    """
     monkeypatch.setenv("MODEL_SWITCHING_ALLOWED", "true")
     monkeypatch.setenv("ENABLED_MODELS", ENABLED)
+    monkeypatch.setenv("META_API_KEY", "test-key-not-a-real-credential")
 
 
 @pytest.mark.asyncio
@@ -136,7 +144,7 @@ async def test_the_notice_matches_what_get_llm_actually_builds(only_the_default_
     ) as built:
         get_llm(DISABLED)
 
-    assert built.call_args.kwargs["model"] == "muse-spark-1.2-contributor", (
+    assert built.call_args.kwargs["model"] == ENABLED, (
         "get_llm built a different model than the banner promised"
     )
 

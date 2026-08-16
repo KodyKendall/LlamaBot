@@ -304,8 +304,8 @@ async def send_friction_report(report: dict, mothership: Any = None) -> bool:
             from app.services.mothership_client import MothershipClient
             mothership = MothershipClient()
 
-        if not mothership.enabled:
-            logger.info("Friction report dropped: mothership integration disabled")
+        if not mothership.reporting_enabled:
+            logger.info("Friction report dropped: mothership reporting disabled")
             return False
 
         await mothership.report_error(
