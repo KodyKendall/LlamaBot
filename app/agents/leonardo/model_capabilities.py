@@ -52,6 +52,22 @@ MODEL_CAPABILITIES = {
     # Qwen3.7 Plus (Alibaba) - multimodal agent model: images and video; PDFs
     # are ingested as page-images, not natively, so we leave pdf off.
     'qwen3.7-plus': {'images': True, 'video': True, 'pdf': False},
+
+    # Qwen3-8B on our own RunPod GPU (vLLM) - the dense text model, no vision.
+    'qwen3-8b-runpod': {'images': False, 'video': False, 'pdf': False},
+
+    # Muse Glimmer 30B on the same self-hosted pod. The base model is multimodal,
+    # but this community AWQ INT4 checkpoint's vision path is unverified — declared
+    # text-only until someone actually tests an image through it.
+    'muse-glimmer-30b-runpod': {'images': False, 'video': False, 'pdf': False},
+
+    # Nemotron 3.5 Lightning 30B-A3B (NVFP4) on its own RunPod pod. NemotronH
+    # causal LM — text-only, no vision path at all.
+    'nemotron-lightning-30b-runpod': {'images': False, 'video': False, 'pdf': False},
+
+    # Same model on Fireworks' serverless tier — same weights, so same
+    # (text-only) capabilities.
+    'nemotron-lightning-30b-fireworks': {'images': False, 'video': False, 'pdf': False},
 }
 
 

@@ -107,3 +107,112 @@ class TestAgentGraphCompileNoGeminiKey:
         from app.agents.leonardo.rails_user_feedback_agent.nodes import build_workflow
         graph = build_workflow()
         assert graph is not None
+
+
+# ---------------------------------------------------------------------------
+# A summary must be prose, not the model's tool-call syntax
+# ---------------------------------------------------------------------------
+
+class TestCorruptSummaryIsRejected:
+    """The summarization model can emit a tool call instead of a summary.
+
+    In the 2026-08-13 incident the stored summary was raw DeepSeek markup:
+    `<｜｜DSML｜｜tool_calls><｜｜DSML｜｜invoke name="read_file">...`. It carries no
+    information, it is re-preserved by every future compaction, and it reads to
+    the model as an instruction to go call a tool — so the agent re-derived
+    context it already had, generated more messages, and fed the loop that
+    compaction was supposed to end.
+    """
+
+    DEEPSEEK_MARKUP = (
+        '<｜｜DSML｜｜tool_calls><｜｜DSML｜｜invoke name="read_file">'
+        '<｜｜DSML｜｜parameter name="path">app/models/user.rb'
+    )
+
+    @pytest.mark.parametrize("markup", [
+        DEEPSEEK_MARKUP,
+        '<tool_call>{"name": "read_file"}</tool_call>',
+        '<function_call>read_file</function_call>',
+        '<invoke name="grep_files">',
+        "<|tool_calls_begin|>",
+    ])
+    def test_tool_call_markup_is_detected(self, markup):
+        from app.agents.leonardo.summarization import looks_like_tool_call_markup
+
+        assert looks_like_tool_call_markup(markup)
+
+    @pytest.mark.parametrize("prose", [
+        "The user asked for a blog. We scaffolded Post and Comment models.",
+        "Summary: fixed the failing test in spec/models/user_spec.rb.",
+        # Prose that merely mentions tools must NOT trip the check.
+        "I called read_file on app/models/user.rb and grep_files for 'confirm('.",
+        "We discussed the function call convention for the API.",
+    ])
+    def test_ordinary_summaries_are_left_alone(self, prose):
+        from app.agents.leonardo.summarization import (
+            looks_like_tool_call_markup,
+            validate_summary_text,
+        )
+
+        assert not looks_like_tool_call_markup(prose)
+        assert validate_summary_text(prose) is prose
+
+    def test_a_corrupt_summary_is_replaced_with_something_honest(self):
+        from app.agents.leonardo.summarization import validate_summary_text
+
+        out = validate_summary_text(self.DEEPSEEK_MARKUP)
+        assert out != self.DEEPSEEK_MARKUP
+        assert "DSML" not in out
+        # It must tell the agent the history is gone rather than let it invent one.
+        assert "not recoverable" in out.lower()
+
+    def test_it_fails_loud(self, caplog):
+        from app.agents.leonardo.summarization import validate_summary_text
+
+        with caplog.at_level("ERROR"):
+            validate_summary_text(self.DEEPSEEK_MARKUP)
+        assert [r for r in caplog.records if r.levelname == "ERROR"], (
+            "a corrupt summary is a provider bug we need to see fleet-wide"
+        )
+
+    def test_the_middleware_never_stores_markup_as_the_summary(self):
+        """End to end, through the real compaction path."""
+        from langchain_core.language_models.chat_models import BaseChatModel
+        from langchain_core.messages import AIMessage, HumanMessage
+        from langchain_core.outputs import ChatGeneration, ChatResult
+
+        from app.agents.leonardo.summarization import RailsSummarizationMiddleware
+
+        markup = self.DEEPSEEK_MARKUP
+
+        class _CorruptSummaryModel(BaseChatModel):
+            @property
+            def _llm_type(self):
+                return "corrupt-summary"
+
+            def _generate(self, messages, stop=None, run_manager=None, **kwargs):
+                return ChatResult(
+                    generations=[ChatGeneration(message=AIMessage(content=markup))]
+                )
+
+        mw = RailsSummarizationMiddleware(
+            model=_CorruptSummaryModel(),
+            trigger=("tokens", 5000),
+            keep=("tokens", 2000),
+            token_counter=lambda msgs: 1000 * len(list(msgs)),
+            trim_tokens_to_summarize=None,
+            summary_prompt="Summarize:\n{messages}",
+            keep_initial_human=1,
+        )
+        convo = [
+            HumanMessage(content="build a blog", id="h1"),
+            *[AIMessage(content=f"step {i}", id=f"a{i}") for i in range(8)],
+        ]
+        result = mw.before_model({"messages": convo}, runtime=None)
+        assert result is not None, "precondition: this conversation must summarize"
+
+        summary = next(
+            m for m in result["messages"]
+            if (getattr(m, "additional_kwargs", None) or {}).get("lc_source") == "summarization"
+        )
+        assert "DSML" not in summary.content

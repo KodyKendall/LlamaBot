@@ -753,7 +753,17 @@ async def available_models(request: Request):
         "deepseek-v4-pro": "DEEPSEEK_API_KEY",
         "deepseek-v4-flash-gmi": "GMI_DEEPSEEK_API_KEY",
         "deepseek-v4-flash-fireworks": "FIREWORKS_DEEPSEEK_API_KEY",
+        # Fireworks' account-wide key name, falling back to the DeepSeek-specific
+        # name already deployed on boxes — matches get_llm's precedence.
+        "nemotron-lightning-30b-fireworks": ("FIREWORKS_API_KEY", "FIREWORKS_DEEPSEEK_API_KEY"),
         "qwen3.7-plus": "ALIBABA_API_KEY",
+        # Self-hosted vLLM pod: the "key" here is deliberately the BASE URL, not
+        # an API key. Availability means "this box is pointed at a RunPod
+        # endpoint" — the pod may legitimately run unauthenticated, so keying it
+        # on RUNPOD_QWEN_API_KEY would grey out a working model everywhere.
+        "qwen3-8b-runpod": "RUNPOD_QWEN_BASE_URL",
+        "muse-glimmer-30b-runpod": "RUNPOD_GLIMMER_BASE_URL",
+        "nemotron-lightning-30b-runpod": "RUNPOD_NEMOTRON_BASE_URL",
         # Meta's docs call the key MODEL_API_KEY; their LiteLLM integration calls
         # it META_API_KEY. Accept either, matching get_llm's precedence.
         "muse-spark-1.2-contributor": ("META_API_KEY", "MODEL_API_KEY"),
@@ -955,7 +965,7 @@ async def api_submit_feedback(request: Request, body: FeedbackRequest, username:
     if mothership is None:
         from app.services.mothership_client import MothershipClient
         mothership = MothershipClient()
-    if not mothership.enabled:
+    if not mothership.reporting_enabled:
         return {"success": False, "reason": "mothership_not_configured"}
 
     debug_context = body.debug_context
@@ -1027,7 +1037,7 @@ async def api_report_frontend_error(
     if mothership is None:
         from app.services.mothership_client import MothershipClient
         mothership = MothershipClient()
-    if not mothership.enabled:
+    if not mothership.reporting_enabled:
         return {"success": False, "reason": "mothership_not_configured"}
 
     error_message = (body.error_message or "")[:2000]
@@ -1432,7 +1442,22 @@ async def set_visible_agents(
 
 # ============== Site Settings API ==============
 
-VALID_SITE_SETTINGS = {"show_token_wheel", "proactive_build_after_ticket", "enable_browser_inspect", "enable_live_browser_tools"}
+VALID_SITE_SETTINGS = {
+    "show_token_wheel",
+    "proactive_build_after_ticket",
+    "enable_browser_inspect",
+    "enable_live_browser_tools",
+    # The VS Code editor: one key owns both the Code tab and the code-server
+    # container. Writing it here only moves the tab — POST /api/vscode/enable is
+    # the route that also starts or stops the container, so no other setting
+    # write can ever reach docker.
+    "enable_vscode",
+    # Comma-separated tab targets for the chat browser pane. Unlike the others
+    # this is not a boolean; ui.resolve_visible_tabs() parses it and drops any
+    # name it doesn't recognize, so a bad write degrades to fewer tabs rather
+    # than to a broken pane.
+    "visible_tabs",
+}
 
 
 # ============== Role → agent-mode permissions (admin only) ==============
@@ -1569,6 +1594,166 @@ async def api_set_site_setting(
 
     logger.info(f"Site setting '{key}' set to '{value}' by {current_user.username}")
     return {"key": key, "value": value}
+
+
+# ============== Code editor (VS Code / code-server) ==============
+#
+# One setting, `enable_vscode`, owns both the Code tab in the chat browser pane
+# and the code-server container. These routes are the only place a setting write
+# also touches docker. See app/services/vscode_service.py for the two guards
+# that keep the editor from starting itself.
+
+
+def _write_site_setting(session: Session, key: str, value: str) -> None:
+    """Persist one site setting. Used by the code editor routes."""
+    from datetime import datetime, timezone
+
+    from app.models import SiteSetting
+
+    setting = session.get(SiteSetting, key)
+    if setting:
+        setting.value = value
+        setting.updated_at = datetime.now(timezone.utc)
+    else:
+        setting = SiteSetting(key=key, value=value)
+        session.add(setting)
+    session.commit()
+
+
+def _require_engineer_or_admin(current_user: User) -> None:
+    if current_user.role not in ("engineer",) and not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Only engineers or admins can change the code editor")
+
+
+@router.get("/api/vscode/status", response_class=JSONResponse)
+async def api_vscode_status(
+    username: str = Depends(auth),
+    session: Session = Depends(get_db_session),
+):
+    """Report whether the editor is switched on and whether it is running."""
+    from app.services import vscode_service
+
+    return {
+        "enabled": vscode_service.vscode_enabled(session),
+        "running": vscode_service.vscode_running(),
+    }
+
+
+@router.post("/api/vscode/enable", response_class=JSONResponse)
+async def api_vscode_enable(
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_db_session),
+):
+    """Start the editor container, then show the Code tab.
+
+    The setting is written only after the container starts. A failed start
+    therefore leaves the tab hidden, because a visible Code tab pointing at a
+    stopped editor is the failure this ordering avoids. The failure text (for
+    example a missing VSCODE_PASSWORD) comes back in `output` with a 200, so the
+    Settings page can show the reason instead of a bare error.
+    """
+    from app.services import vscode_service
+
+    _require_engineer_or_admin(current_user)
+
+    result = vscode_service.start_vscode()
+    if result["ok"]:
+        _write_site_setting(session, vscode_service.VSCODE_SETTING_KEY, "true")
+        logger.info(f"Code editor enabled by {current_user.username}")
+
+    return {"enabled": bool(result["ok"]), "ok": result["ok"], "output": result["output"]}
+
+
+@router.post("/api/vscode/disable", response_class=JSONResponse)
+async def api_vscode_disable(
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_db_session),
+):
+    """Hide the Code tab, then stop the editor container.
+
+    The setting is written first here, and it is written even when the stop
+    fails. Hiding the tab is what the user asked for, and a container that
+    refuses to stop must not block that request.
+    """
+    from app.services import vscode_service
+
+    _require_engineer_or_admin(current_user)
+
+    _write_site_setting(session, vscode_service.VSCODE_SETTING_KEY, "false")
+    result = vscode_service.stop_vscode()
+    logger.info(f"Code editor disabled by {current_user.username}")
+
+    return {"enabled": False, "ok": result["ok"], "output": result["output"]}
+
+
+# ============== Instance lock ("your free Leo is about to sleep") ==============
+#
+# The mothership decides; the instance obeys and remembers. The write path is
+# authenticated with the SAME shared secret the instance already uses to call the
+# mothership (``mothership_api_token`` in .leonardo/instance.json), so no new
+# credential has to be provisioned — and, importantly, the instance owner (who is
+# an admin on their own box) cannot unlock themselves through the UI.
+
+
+def _mothership_authorized(request: Request) -> bool:
+    """True when the caller presents the instance's mothership bearer token."""
+    import secrets
+
+    from app.services.mothership_client import MothershipClient
+
+    config = getattr(getattr(request.app.state, "mothership_client", None), "config", None)
+    if not config:
+        config = MothershipClient().config
+    expected = (config or {}).get("mothership_api_token")
+    if not expected:
+        return False
+
+    header = request.headers.get("authorization", "")
+    scheme, _, token = header.partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        return False
+    return secrets.compare_digest(token, str(expected))
+
+
+@router.get("/api/instance-lock", response_class=JSONResponse)
+async def api_get_instance_lock(
+    username: str = Depends(auth),
+    session: Session = Depends(get_db_session),
+):
+    """Lock state for the chat UI to poll. Signed-in users only, read-only."""
+    from app.services.instance_lock import get_lock_state
+
+    return get_lock_state(session)
+
+
+@router.post("/api/instance-lock", response_class=JSONResponse)
+async def api_set_instance_lock(
+    request: Request,
+    session: Session = Depends(get_db_session),
+):
+    """Lock or unlock this instance (mothership only).
+
+    Body: ``{"locked": true}``, optionally with ``title`` / ``body`` /
+    ``upgrade_url`` to override the modal copy without shipping a new image.
+    """
+    from app.services.instance_lock import set_lock_state
+
+    if not _mothership_authorized(request):
+        raise HTTPException(status_code=401, detail="Mothership authorization required")
+
+    body = await request.json()
+    if not isinstance(body, dict) or "locked" not in body:
+        raise HTTPException(status_code=400, detail="Body must be an object with a 'locked' boolean")
+
+    try:
+        state = set_lock_state(session, body)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # Mirror onto app.state so the WebSocket gate blocks the very next message
+    # even if the auth DB goes away afterwards.
+    request.app.state.instance_lock = state
+    return state
 
 
 # ============== Environment variables API ==============

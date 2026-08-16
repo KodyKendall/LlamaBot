@@ -1,0 +1,101 @@
+0.7.1:
+[x] - Add a remote sleep lock feature. The mothership POSTs /api/instance-lock
+      (bearer = the box's mothership token, not admin — an admin could unlock
+      themselves); the instance stores it in a SiteSetting so it survives a
+      restart, blocks turns before the paywall gate, and shows a non-dismissible
+      upgrade modal. Browser learns three ways: server-injected on first paint,
+      a 10s poll, and an instance_locked WS frame. Fails open — a down DB must
+      never lock a paying user out. Notes: docs/dev/instance_sleep_lock.md
+
+[x] - Add "Capped Tool Mode". A single grep_files match inside a minified vendor
+      bundle returned one 294,807-char ToolMessage (~74k tokens). Anything bigger
+      than the 30k keep-tail can never be compacted away — the thread
+      re-summarized forever and the user watched a spinner for 18 minutes.
+      grep_files now caps in BYTES (a line-count cap is what let this ship), and
+      cap_tool_result bounds EVERY tool result at both agent shapes:
+      ToolResultSizeLimitMiddleware in build_leonardo_agent (create_agent) and
+      CappedToolNode for the raw StateGraph agents. Truncation is head-and-tail
+      with a notice, so the agent can tell partial from broken. Third incident of
+      this class — the previous two fixes each capped the one input we happened
+      to be thinking about. Notes: app/agents/utils/tool_output_limits.py
+
+[x] - Harden summarization against the same loop. A message too big for the keep
+      tail is now shrunk instead of preserved forever, and a summary that comes
+      back as tool-call markup (DeepSeek emitted <｜｜DSML｜｜tool_calls> as the
+      stored summary) is rejected rather than saved as the thread's memory.
+
+[x] - Add settings for enabling/disabling Leo tabs, VS Code default OFF. One
+      setting owns the Code tab and the code-server container: /api/vscode/*
+      (engineer-or-admin) starts/stops it via nsenter on the host, compose gets
+      profiles: ["code"] so a reboot or bin/update never brings it back, and
+      reconcile_vscode at startup stops it if it is running while the setting
+      says off. Boot never STARTS the editor — an editor that isn't running
+      can't be attacked. Tab visibility ships as a pure isTabVisible() helper;
+      a hidden tab also skips its iframe src, or the browser retries a dead
+      address in the background. Absent/malformed setting = show everything.
+
+[x] - Add RunPod + Fireworks model entries. qwen3-8b-runpod (vLLM on our own
+      GPU; base_url is env-only, never committed — the pod URL is rotatable) and
+      nemotron-lightning-30b-fireworks (same weights on serverless, a sibling
+      entry so who bills the turn stays the user's choice). Both use
+      ChatDeepSeekWithReasoning — Fireworks returns thinking in a separate
+      reasoning_content field and a bare ChatOpenAI drops it — and neither sets
+      max_tokens, because reasoning bills against that cap while being stripped
+      from the response, so a small cap returns empty content with no error.
+
+[x] - Fix a substituted model running silently. get_llm swaps a policy-disabled
+      model for the box default; the dropdown kept showing the user's pick and
+      the only trace was a container WARNING. Live here 2026-08-16: every answer
+      came from Muse while the UI said Nemotron, including "who made you?".
+      Now a model_substituted frame raises a banner above the composer, asking
+      the same question get_llm answers rather than re-deriving the rule.
+
+[x] - Fix the recurring problems observed across all Leo apps (the 0.7.0
+      friction reports):
+      * Absolute paths resolved to the wrong file. The leading-slash guard
+        re-rooted every absolute path under RAILS_ROOT a second time, so
+        /app/app/rails/db/schema.rb became .../app/rails/db/schema.rb. Only
+        relative paths under app/ survived — hence "read_file works for app/ but
+        not spec/, db/ or config/", and agents falling back to `bash cat`
+        (unbounded output, feeding the loop above). Largest cluster: 8 reports,
+        4 boxes.
+      * Two edit_file calls in one message silently lost one. Tool calls in a
+        message run concurrently, both read the same base content, last write
+        wins — and each reports success against what it read.
+      * write_file succeeded on a file the running Rails app could not see. The
+        Rails container bind-mounts only part of the project, so a new
+        config/initializers/*.rb never loaded and the agent debugged code that
+        was never running. A new file is now checked against the container
+        rather than against a hardcoded mount list.
+      * A payload with no agent_name crashed inside the stream loop with
+        'NoneType' has no attribute 'astream' (an unknown agent already raised a
+        clear error; the missing key did not).
+      * Orphaned-tool-call repair was wired into rails_agent only, so every
+        other graph could still hard-400 with "insufficient tool messages"
+        forever. Now on all of them, with a structural test that fails any new
+        agent that forgets it.
+      * A stale cached sub-module could kill the whole chat panel: chat.html
+        cache-busts index.js but not the 36 modules it imports, so one missing
+        method threw inside initComponents. safeInit() contains it to one
+        feature instead of the panel.
+
+[x] - Add per-turn timing telemetry. We shipped token usage but not one
+      duration, so "Leo is slow" arrived with no way to separate a slow provider
+      from a huge prompt from a slow box. TurnMetrics records the turn as
+      segments and derives tokens/sec over DECODE time only (folding in
+      time-to-first-token makes a fast model look slow on a long prompt) with
+      overhead clamped at zero (concurrent tools can out-sum the wall clock).
+
+[x] - Stop dev-box test output landing in production telemetry. 94 of the 140
+      instance_errors rows tagged 0.7.0 were synthetic — summarization fixtures
+      and the WS integration harness. An env kill switch, set for the whole
+      suite in conftest.py. It gates a narrow `reporting_enabled`, NOT the
+      shared `enabled` property: that one also carries login verification, the
+      paywall check, update checks and lease renewal (which is where the
+      instance-lock backstop lives), so switching it off there did not silence
+      the harness — it signed it out. 30 CI failures on PR #83 said so.
+
+[x] - Add the Messages tab unread badge. The count is posted up from the Rails
+      iframe — the chat window and the Rails app are different origins, so the
+      chat window cannot count them itself and the render path has to be
+      defensive about whatever arrives on that channel.

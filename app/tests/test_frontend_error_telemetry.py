@@ -17,7 +17,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 
-from app.services.mothership_client import MothershipClient
+from app.services.mothership_client import MothershipClient, TELEMETRY_DISABLED_ENV
 
 
 FAKE_CONFIG = {
@@ -26,6 +26,14 @@ FAKE_CONFIG = {
     "mothership_api_token": "tok-test",
     "lease_duration_seconds": 300,
 }
+
+
+@pytest.fixture(autouse=True)
+def _reporting_not_suppressed(monkeypatch):
+    """These tests assert the reported payloads themselves, so the suite-wide
+    telemetry kill switch (app/tests/conftest.py) has to be off for them. httpx
+    is patched in every test below, so nothing leaves the process either way."""
+    monkeypatch.delenv(TELEMETRY_DISABLED_ENV, raising=False)
 
 
 def _make_client() -> MothershipClient:
@@ -109,6 +117,7 @@ def frontend_error_endpoint():
 
     class StubMothership:
         enabled = True
+        reporting_enabled = True
 
         async def report_error(self, **kwargs):
             calls.append(kwargs)
@@ -207,6 +216,7 @@ async def test_never_raises_when_the_mothership_errors(frontend_error_endpoint):
 
     class ExplodingMothership:
         enabled = True
+        reporting_enabled = True
 
         async def report_error(self, **kwargs):
             raise RuntimeError("mothership down")
@@ -223,6 +233,7 @@ async def test_no_op_when_mothership_disabled(frontend_error_endpoint):
 
     class DisabledMothership:
         enabled = False
+        reporting_enabled = False
 
         async def report_error(self, **kwargs):  # pragma: no cover
             calls.append(kwargs)

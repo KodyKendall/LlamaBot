@@ -24,6 +24,16 @@ THIRD_PARTY_ENDPOINT_MODELS = [
     ("deepseek-v4-flash-fireworks", "FIREWORKS_DEEPSEEK_API_KEY"),
     ("qwen3.7-plus", "ALIBABA_API_KEY"),
     ("muse-spark-1.2-contributor", "META_API_KEY"),
+    # Self-hosted vLLM on our own RunPod GPU. Unauthenticated today, which is
+    # exactly why it belongs here: "no key needed" is the case where api_key=None
+    # looks harmless and quietly ships OPENAI_API_KEY to the pod's proxy URL.
+    ("qwen3-8b-runpod", "RUNPOD_QWEN_API_KEY"),
+    ("muse-glimmer-30b-runpod", "RUNPOD_GLIMMER_API_KEY"),
+    ("nemotron-lightning-30b-runpod", "RUNPOD_NEMOTRON_API_KEY"),
+    # Fireworks serverless. Its key falls back to FIREWORKS_DEEPSEEK_API_KEY,
+    # which the fixture below already clears for the DeepSeek row — so the
+    # no-key leak case really is keyless here.
+    ("nemotron-lightning-30b-fireworks", "FIREWORKS_API_KEY"),
 ]
 
 SENTINEL = "sk-openai-must-never-leave-this-process"
@@ -39,6 +49,13 @@ def no_provider_keys(monkeypatch):
     # widened globally: this file is about what a client sends, not about policy.
     monkeypatch.setenv("ENABLED_MODELS", ",".join(m for m, _ in THIRD_PARTY_ENDPOINT_MODELS))
     monkeypatch.setenv("OPENAI_API_KEY", SENTINEL)
+    # The self-hosted RunPod entries have no committed default endpoint (the pod
+    # URL is sensitive), so give them dummy ones — otherwise the clients under
+    # test would be pointed at api.openai.com and the leak they guard against
+    # could not happen.
+    monkeypatch.setenv("RUNPOD_QWEN_BASE_URL", "http://runpod-qwen.invalid/v1")
+    monkeypatch.setenv("RUNPOD_GLIMMER_BASE_URL", "http://runpod-glimmer.invalid/v1")
+    monkeypatch.setenv("RUNPOD_NEMOTRON_BASE_URL", "http://runpod-nemotron.invalid/v1")
     for _, env_var in THIRD_PARTY_ENDPOINT_MODELS:
         monkeypatch.delenv(env_var, raising=False)
     monkeypatch.delenv("MODEL_API_KEY", raising=False)

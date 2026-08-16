@@ -207,3 +207,118 @@ def test_scan_covers_all_registered_leonardo_graphs():
     present = {p.parent.name for p in _agent_nodes_files()}
     missing = [k for k in LEONARDO_GRAPH_KEYS if k not in present]
     assert not missing, f"registered Leonardo graphs missing a nodes.py: {missing}"
+
+
+# ---------------------------------------------------------------------------
+# Repair layer 2 — the write has to be ACCEPTED, not just attempted
+# ---------------------------------------------------------------------------
+
+class TestRepairSurvivesAMiddlewareLastWriter:
+    """`aupdate_state` defaults `as_node` to the last checkpoint writer.
+
+    When that writer was summarization, the name LangGraph finds is
+    `RailsSummarizationMiddleware.before_model` — a middleware HOOK, not a graph
+    node — so the lookup raises `KeyError` and the update is rejected. It is
+    caught as non-fatal, which means repair has silently never worked on any
+    thread whose last write came from summarization. In the 2026-08-13 incident
+    it fired 5 times in 20 minutes and logged
+    `Thread state repair check failed (non-fatal):
+     'RailsSummarizationMiddleware.before_model'` every time; across 24 hours of
+    mothership logs there is exactly one success.
+    """
+
+    class _Graph:
+        def __init__(self, nodes):
+            self.nodes = nodes
+
+    class _App:
+        """Rejects an as_node that isn't a real node, exactly as LangGraph does."""
+
+        def __init__(self, messages, nodes=("__start__", "model", "tools", "__end__")):
+            self._messages = messages
+            self._nodes = nodes
+            self.updated_with = None
+            self.as_node = None
+
+        def get_graph(self):
+            return TestRepairSurvivesAMiddlewareLastWriter._Graph(self._nodes)
+
+        async def aget_state(self, config):
+            class _Snap:
+                values = {"messages": self._messages}
+
+            snap = _Snap()
+            snap.values = {"messages": self._messages}
+            return snap
+
+        async def aupdate_state(self, config, update, as_node=None):
+            resolved = as_node or "RailsSummarizationMiddleware.before_model"
+            if resolved not in self._nodes:
+                raise KeyError(resolved)
+            self.updated_with = update
+            self.as_node = resolved
+
+    def _bricked_history(self):
+        """An AIMessage with a tool_call nothing ever answered."""
+        return [
+            HumanMessage(content="build the thing", id="h1"),
+            AIMessage(content="", id="a1", tool_calls=[
+                {"name": "grep_files", "id": "call_1", "args": {"pattern": "x"}},
+            ]),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_repair_is_accepted_when_summarization_wrote_last(self):
+        from app.websocket.request_handler import RequestHandler
+
+        app = self._App(self._bricked_history())
+        await RequestHandler._repair_thread_state_if_needed(
+            RequestHandler.__new__(RequestHandler),
+            app,
+            {"configurable": {"thread_id": "t1"}},
+        )
+
+        assert app.updated_with is not None, (
+            "the repair was rejected — this thread stays bricked and the user's "
+            "only escape is starting a new one"
+        )
+        assert app.as_node == "tools", (
+            "answering dangling tool_calls should resume at the model, which is "
+            "the edge out of the tools node"
+        )
+
+    @pytest.mark.asyncio
+    async def test_it_falls_back_to_a_real_node_when_there_is_no_tools_node(self):
+        from app.websocket.request_handler import RequestHandler
+
+        app = self._App(
+            self._bricked_history(), nodes=("__start__", "leonardo_beginner", "__end__"),
+        )
+        await RequestHandler._repair_thread_state_if_needed(
+            RequestHandler.__new__(RequestHandler),
+            app,
+            {"configurable": {"thread_id": "t1"}},
+        )
+
+        assert app.as_node == "leonardo_beginner"
+
+    def test_the_node_it_picks_exists_in_every_real_agent_shape(self):
+        """`tools` must be a real node in both graph shapes, or this is a guess."""
+        from app.websocket.request_handler import RequestHandler
+
+        for nodes in (
+            ("__start__", "model", "tools", "__end__"),          # create_agent
+            ("__start__", "leonardo_beginner", "tools", "__end__"),  # raw StateGraph
+        ):
+            app = self._App([], nodes=nodes)
+            assert RequestHandler._repair_as_node(app) in nodes
+
+    def test_an_unreadable_graph_falls_back_to_the_old_default(self):
+        """Never turn a best-effort repair into a new failure."""
+        from app.websocket.request_handler import RequestHandler
+
+        class _Broken:
+            def get_graph(self):
+                raise RuntimeError("no graph")
+
+        assert RequestHandler._repair_as_node(_Broken()) is None

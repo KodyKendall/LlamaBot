@@ -8,12 +8,17 @@ from langgraph.graph import START, StateGraph, END
 from langgraph.types import Command, interrupt
 from langgraph.prebuilt import tools_condition
 from langgraph.prebuilt import ToolNode
+from app.agents.utils.tool_output_limits import CappedToolNode
 from langchain.tools import tool, ToolRuntime
 
 from pathlib import Path
 from typing import Literal
 
 from app.agents.leonardo.rails_agent.state import RailsAgentState
+# The box's resolved default (Muse where the box has a META key, DeepSeek
+# where it does not) — never a hardcoded id, or a turn that arrives without
+# an explicit llm_model silently ignores the fleet default.
+from app.agents.leonardo.model_policy import enabled_default_model
 from app.agents.leonardo.rails_agent.tools import (
     write_todos, write_file, read_file, ls, edit_file, bash_command, tail_rails_logs, hard_restart_rails, fix_permissions,
     glob_files, grep_files, internet_search,
@@ -149,7 +154,7 @@ def beginner_turn_tools(browser_inspect_on: bool = False) -> list:
 
 
 def leonardo_beginner(state: RailsAgentState, browser_inspect_on: bool = False) -> Command[Literal["tools"]]:
-    llm_model = state.get('llm_model') or 'deepseek-v4-flash'
+    llm_model = state.get('llm_model') or enabled_default_model()
     logger.info(f"Using LLM model: {llm_model}")
     llm = get_llm(llm_model)
 
@@ -212,7 +217,7 @@ def build_workflow(checkpointer=None):
         logger.info("browser_inspect tool enabled via site setting")
 
     builder.add_node("leonardo_beginner", partial(leonardo_beginner, browser_inspect_on=browser_inspect_on))
-    builder.add_node("tools", ToolNode(tool_list))
+    builder.add_node("tools", CappedToolNode(tool_list))
 
     builder.add_edge(START, "leonardo_beginner")
 

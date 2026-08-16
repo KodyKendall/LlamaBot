@@ -185,6 +185,11 @@ export class MessageHandler {
       this.handleBrowserCommand(data);
     } else if (data.type === 'delegation_progress') {
       window.chatApp?.handleDelegationProgress(data);
+    } else if (data.type === 'model_substituted') {
+      // Operator policy is running this turn on a different model than the
+      // dropdown shows. Needs its own branch: without one it falls through to
+      // handleGenericMessage and gets rendered as a chat message.
+      window.chatApp?.showModelSubstitutionNotice(data.requested, data.effective);
     } else {
       this.handleGenericMessage(data);
     }
@@ -1408,6 +1413,20 @@ export class MessageHandler {
    * Handle generic messages (tool, error, end, etc.)
    */
   handleGenericMessage(data) {
+    // Sleep lock — the server refused the turn because this instance is locked.
+    // Show the (non-dismissible) modal immediately rather than waiting up to
+    // 10s for chat.html's /api/instance-lock poll to notice.
+    if (data.type === 'instance_locked') {
+      if (typeof window.__llamabotApplyInstanceLock === 'function') {
+        window.__llamabotApplyInstanceLock(data);
+      }
+      this.messageRenderer.handleEndMessage();
+      window.dispatchEvent(new CustomEvent('agentTaskCompleted', {
+        detail: { elapsedTime: this.appState.getFormattedElapsedTime(), type: data.type }
+      }));
+      return;
+    }
+
     if (data.type === 'end' || data.type === 'system_message' || data.type === 'error' || data.type === 'paywall_hit') {
       this.messageRenderer.handleEndMessage();
       // Remove beginner mode overlay when agent finishes

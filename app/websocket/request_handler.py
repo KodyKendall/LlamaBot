@@ -38,7 +38,7 @@ from app.agents.leonardo.model_capabilities import (
     get_model_capabilities,
     get_file_category,
 )
-from app.agents.leonardo.model_policy import vision_allowed
+from app.agents.leonardo.model_policy import enabled_default_model, vision_allowed
 # Byte caps for inbound frames. Without these, anything a client sends becomes
 # unbounded LangGraph state — and therefore unbounded checkpoints and an
 # uncompactable thread (SupportIncident #246).
@@ -90,6 +90,117 @@ class RequestHandler:
         self.locks: Dict[int, Lock] = {}
         self.app = app
     
+    @staticmethod
+    def _repair_as_node(app):
+        """A real graph node to attribute the repair write to.
+
+        Without this, `aupdate_state` defaults `as_node` to whatever wrote the
+        last checkpoint — and when that was summarization, the name it finds is
+        `RailsSummarizationMiddleware.before_model`, a middleware HOOK, not a
+        node. LangGraph raises `KeyError` looking it up and the repair is
+        rejected. It is caught as non-fatal, so a thread whose last write came
+        from summarization has silently never been repairable: in 24 hours of
+        mothership logs the repair fired 5 times in one 20-minute window and
+        succeeded exactly once.
+
+        `tools` is the right attribution: the repair's whole job is to answer
+        dangling tool_calls, so the model should run next, which is precisely the
+        edge out of the tools node. Every agent shape here has one (`create_agent`
+        builds `model`/`tools`; the raw graphs build `<agent>`/`tools`). Falling
+        back to any real node still beats a hook name, and `None` restores the old
+        default behavior rather than inventing an error.
+        """
+        try:
+            nodes = list(app.get_graph().nodes)
+        except Exception as e:
+            logger.warning(f"Could not read graph nodes for repair attribution: {e}")
+            return None
+        if "tools" in nodes:
+            return "tools"
+        real = [n for n in nodes if not str(n).startswith("__")]
+        return real[0] if real else None
+
+    WEDGED_THREAD_MESSAGE = (
+        "⚠️ This conversation has gotten too large to work in — I had to compact "
+        "it several times during that turn, so some earlier context is gone and "
+        "answers will keep getting thinner. Please start a new chat. If you need "
+        "to carry something over, ask me to summarize where we got to first."
+    )
+
+    async def _warn_if_model_substituted(self, message: dict, websocket: WebSocket) -> None:
+        """Tell the user when their turn will not run on the model they picked.
+
+        ``get_llm`` swaps a policy-disabled model for the box default, and until
+        now did it silently: the dropdown went on showing the user's choice while
+        every turn ran on something else, and the only trace was a WARNING in the
+        container log. That is indistinguishable from "the model I picked is
+        answering me" — a user chose a newly-added model, got answers from the
+        fleet default, and had no way to see why.
+
+        Sent before the run starts, through the same sink as every other frame,
+        so it inherits thread_id/seq stamping and replay-on-reattach.
+
+        Best-effort: a notice is never worth failing the turn it describes.
+        """
+        try:
+            requested = (message or {}).get("llm_model")
+            if not requested:
+                return
+            # The offline e2e model bypasses the policy gate inside get_llm, so
+            # the policy's opinion about it is not what actually happens.
+            if requested == "fake-llm" and os.getenv(
+                "LLAMABOT_ENABLE_FAKE_LLM", ""
+            ).lower() == "true":
+                return
+
+            from app.agents.leonardo.model_policy import effective_model
+
+            actual = effective_model(requested)
+            if actual == requested:
+                return
+            if not self._is_websocket_open(websocket):
+                return
+            logger.info(
+                "Telling the user their turn runs on %r, not the %r they selected.",
+                actual, requested,
+            )
+            await websocket.send_json({
+                "type": "model_substituted",
+                "requested": requested,
+                "effective": actual,
+            })
+        except Exception as e:
+            logger.warning("Could not report a model substitution to the user: %s", e)
+
+    async def _warn_if_thread_is_wedged(self, turn, websocket: WebSocket) -> None:
+        """Tell the user in chat when a turn spent itself compacting.
+
+        Before this, the customer's only signal was that nothing happened: the
+        2026-08-13 incident ran 18 minutes and 22 compactions with no text, no
+        tool calls and no log line, and the only escape from a wedged thread is
+        starting a new one — which we never told them.
+
+        Best-effort: a warning is never worth failing a turn that otherwise
+        succeeded.
+        """
+        try:
+            if turn is None or not turn.thread_is_wedged():
+                return
+            if not self._is_websocket_open(websocket):
+                return
+            logger.error(
+                "Thread %s compacted %d times in one turn — warning the user that the "
+                "conversation has outgrown its context.",
+                turn.thread_id, turn.compaction_count,
+            )
+            await websocket.send_json({
+                "type": "system_message",
+                "content": self.WEDGED_THREAD_MESSAGE,
+                "thread_id": turn.thread_id,
+            })
+        except Exception as e:
+            logger.warning("Could not warn the user about a wedged thread: %s", e)
+
     def _report_turn_metrics(self, turn, started_at: float, message: dict) -> None:
         """Fire-and-forget the end-of-turn performance rollup.
 
@@ -435,7 +546,9 @@ class RequestHandler:
                     ))
 
             update_messages = remove_ops + repair_messages
-            await app.aupdate_state(config, {"messages": update_messages})
+            await app.aupdate_state(
+                config, {"messages": update_messages}, as_node=self._repair_as_node(app),
+            )
             logger.info(
                 f"Thread state repaired: removed {len(remove_ops)} message(s) "
                 f"({len(orphan_msgs)} orphan(s) + others), "
@@ -444,6 +557,34 @@ class RequestHandler:
 
         except Exception as e:
             logger.warning(f"Thread state repair check failed (non-fatal): {e}")
+
+    async def _check_instance_lock_or_block(self, websocket: WebSocket) -> bool:
+        """Sleep-lock gate. Returns True if the message should be dropped.
+
+        Reads the auth DB directly (one tiny query per user message, next to an
+        LLM turn) so there is no cache to go stale between the mothership's POST
+        and the next message. Fails OPEN: a down auth DB must never lock a paying
+        user out of their own Leo.
+        """
+        try:
+            from sqlmodel import Session
+
+            from app.db import engine
+            from app.services.instance_lock import get_lock_state
+
+            with Session(engine) as session:
+                state = get_lock_state(session)
+        except Exception as e:
+            logger.warning(f"instance lock check failed, allowing message: {e}")
+            return False
+
+        if not state.get("locked"):
+            return False
+
+        logger.info("instance lock: message BLOCKED (instance is sleeping)")
+        if self._is_websocket_open(websocket):
+            await websocket.send_json({"type": "instance_locked", **state})
+        return True
 
     async def _check_paywall_or_block(self, websocket: WebSocket) -> bool:
         """
@@ -659,6 +800,12 @@ class RequestHandler:
 
         self.app.state.timestamp = datetime.now(timezone.utc) # keep timestamp updated
 
+        # Sleep lock — a locked instance accepts no new turns. Checked before the
+        # paywall so a locked message never burns quota, and enforced here (not
+        # just in the modal) so hiding the overlay in devtools buys nothing.
+        if await self._check_instance_lock_or_block(websocket):
+            return
+
         # Paywall gate — must run before report_message so blocked messages
         # don't get counted against the user's quota.
         if await self._check_paywall_or_block(websocket):
@@ -690,6 +837,10 @@ class RequestHandler:
             return
 
         async with lock:
+            # Say so up front if policy is about to run this turn on a different
+            # model than the one selected in the dropdown.
+            await self._warn_if_model_substituted(incoming_message, websocket)
+
             # Start performance accounting for this turn. Installed in the
             # async context BEFORE astream so the timing middleware inside
             # LangGraph's node tasks resolves to this same recorder (tasks
@@ -702,6 +853,28 @@ class RequestHandler:
             turn_started_at = _time.monotonic()
             try:
                 app, state, agent_config = self.get_langgraph_app_and_state(incoming_message)
+
+                if app is None:
+                    # No agent_name on the frame (or a graph that did not build).
+                    # This used to fall all the way through to app.astream and
+                    # surface as `AttributeError: 'NoneType' object has no
+                    # attribute 'astream'` — a stack trace where a message
+                    # belongs. An *unknown* agent_name already raises a named
+                    # KeyError from the registry lookup; a missing one did not.
+                    logger.error(
+                        "No graph to run: agent_name="
+                        f"{incoming_message.get('agent_name')!r} thread="
+                        f"{incoming_message.get('thread_id')!r}"
+                    )
+                    if self._is_websocket_open(websocket):
+                        await websocket.send_json({
+                            "type": "error",
+                            "content": (
+                                "No agent selected for this request "
+                                "(missing 'agent_name'), so there was nothing to run."
+                            ),
+                        })
+                    return
 
                 # Default limits (can be overridden per-agent in langgraph.json)
                 DEFAULT_RECURSION_LIMIT = 900
@@ -1007,6 +1180,13 @@ class RequestHandler:
                         except Exception as e:
                             # Non-fatal - don't fail the request if cleanup fails
                             logger.warning(f"Post-run checkpoint cleanup failed (non-fatal): {e}")
+
+                    # A turn that spent itself compacting is a thread that has
+                    # outgrown its context. Say so, in chat, before "end" — the
+                    # loop-breaker keeps the thread moving but nothing else tells
+                    # the customer why their answers got thin, and there is no
+                    # in-chat recovery except starting over (2026-08-13).
+                    await self._warn_if_thread_is_wedged(turn, websocket)
 
                     if self._is_websocket_open(websocket):
                         await websocket.send_json({
@@ -1605,7 +1785,11 @@ class RequestHandler:
         # trigger. Cap it here, before it is ever a message.
         text = cap_message_text(message.get("message", ""))
         attachments = message.get("attachments", [])
-        llm_model = message.get("llm_model", "gemini-3-flash")
+        # The model that will actually run the turn, so the capability check
+        # below matches it. A frame without an explicit llm_model gets the box's
+        # resolved default (the same one get_llm would pick) — a hardcoded id
+        # here decided attachment support for a model we were not going to use.
+        llm_model = message.get("llm_model") or enabled_default_model()
 
         # If no attachments, return plain string for backwards compatibility
         if not attachments:

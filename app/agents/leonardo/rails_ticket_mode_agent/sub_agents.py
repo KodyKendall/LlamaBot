@@ -28,6 +28,10 @@ from app.agents.leonardo.rails_agent.tools import (
 )
 # Shared LLM factory - single source of truth for model selection
 from app.agents.leonardo.llm_factory import get_llm
+# The box's resolved default (Muse where the box has a META key, DeepSeek
+# where it does not) — never a hardcoded id, or a turn that arrives without
+# an explicit llm_model silently ignores the fleet default.
+from app.agents.leonardo.model_policy import enabled_default_model
 from app.agents.leonardo.friction import report_friction, with_friction_section
 from app.agents.leonardo.delegation import (
     DELEGATION_TIMEOUT_SECONDS,
@@ -179,7 +183,7 @@ def create_sub_agent(llm_model: str = None):
     ]
 
     # Use the same model as the main agent via the shared llm_factory
-    model = get_llm(llm_model or 'deepseek-v4-flash')
+    model = get_llm(llm_model or enabled_default_model())
 
     return create_agent(
         model=model,

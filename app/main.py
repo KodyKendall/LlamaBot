@@ -276,7 +276,7 @@ async def graceful_shutdown(sig):
         await app.state.lease_manager.stop()
 
     # Notify mothership of teardown
-    if hasattr(app.state, 'mothership_client') and app.state.mothership_client.enabled:
+    if hasattr(app.state, 'mothership_client') and app.state.mothership_client.reporting_enabled:
         try:
             await app.state.mothership_client.notify_teardown(reason="sigterm")
             logger.info("Mothership notified of teardown")
@@ -294,6 +294,18 @@ async def startup_event():
     # Migrate auth.json if it exists
     with Session(engine) as session:
         migrate_auth_json(session, LEGACY_AUTH_FILE)
+
+    # The code editor is opt-in. If the container is running while the setting
+    # says off, stop it. This covers a reboot on a box whose compose file does
+    # not have the `code` profile yet. It never STARTS the editor.
+    try:
+        from app.services.vscode_service import reconcile_vscode
+        with Session(engine) as session:
+            action = await reconcile_vscode(session)
+        if action == "stopped":
+            logger.info("Code editor container stopped (editor is off in Settings)")
+    except Exception as e:
+        logger.warning(f"Code editor startup check skipped: {e}")
 
     # Fetch any mothership-delivered system prompts BEFORE graphs compile, so the
     # Pattern-A agents (rails_agent, testing, ticket, user) bake the current prompt

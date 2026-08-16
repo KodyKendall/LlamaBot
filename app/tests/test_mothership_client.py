@@ -5,7 +5,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 
-from app.services.mothership_client import MothershipClient
+from app.services.mothership_client import MothershipClient, TELEMETRY_DISABLED_ENV
 
 
 FAKE_CONFIG = {
@@ -19,6 +19,14 @@ SAMPLE_TOOL_CALLS = [
     {"name": "create_file", "args": {"path": "foo.rb", "content": "puts 1"}, "id": "tc-1"},
     {"name": "run_shell", "args": {"command": "ls"}, "id": "tc-2"},
 ]
+
+
+@pytest.fixture(autouse=True)
+def _reporting_not_suppressed(monkeypatch):
+    """These tests assert the reported payloads themselves, so the suite-wide
+    telemetry kill switch (app/tests/conftest.py) has to be off for them. httpx
+    is patched in every test below, so nothing leaves the process either way."""
+    monkeypatch.delenv(TELEMETRY_DISABLED_ENV, raising=False)
 
 
 def _make_client() -> MothershipClient:

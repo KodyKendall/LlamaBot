@@ -12,10 +12,21 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from app.services.mothership_client import TELEMETRY_DISABLED_ENV
+
 
 # --------------------------------------------------------------------------
 # /api/feedback carries debug_context through to the mothership
 # --------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _reporting_not_suppressed(monkeypatch):
+    """These tests assert the reported payloads themselves, so the suite-wide
+    telemetry kill switch (app/tests/conftest.py) has to be off for them. httpx
+    is patched in every test below, so nothing leaves the process either way."""
+    monkeypatch.delenv(TELEMETRY_DISABLED_ENV, raising=False)
+
 
 @pytest.fixture
 def feedback_endpoint():
@@ -25,6 +36,7 @@ def feedback_endpoint():
 
     class StubMothership:
         enabled = True
+        reporting_enabled = True
 
         async def submit_feedback(self, **kwargs):
             calls.append(kwargs)

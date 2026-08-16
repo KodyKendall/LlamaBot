@@ -87,8 +87,33 @@ class LeaseManager:
                 logger.info(
                     f"LeaseManager: Lease renewed until {result.get('lease_expires_at')}"
                 )
+                self._sync_instance_lock(result)
         else:
             logger.info(
                 f"LeaseManager: User inactive ({seconds_since_activity:.0f}s ago), "
                 f"not renewing lease"
             )
+
+    def _sync_instance_lock(self, result: dict) -> None:
+        """Backstop for the sleep lock when the mothership can't reach us inbound.
+
+        ``POST /api/instance-lock`` is the fast path (instant). This picks the
+        same state off the lease-renew response, so a lock still lands within a
+        check interval if that POST failed. No-op unless the mothership actually
+        sends the key — an older mothership just never triggers it.
+        """
+        if "instance_lock" not in result:
+            return
+        try:
+            from sqlmodel import Session
+
+            from app.db import engine
+            from app.services.instance_lock import set_lock_state
+
+            payload = result["instance_lock"] or {}
+            with Session(engine) as session:
+                state = set_lock_state(session, payload)
+            self.app.state.instance_lock = state
+            logger.info(f"LeaseManager: instance lock synced from mothership (locked={state['locked']})")
+        except Exception as e:
+            logger.warning(f"LeaseManager: could not sync instance lock: {e}")

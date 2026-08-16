@@ -37,6 +37,10 @@ from app.agents.leonardo.rails_agent.tools import (
 )
 # Shared LLM factory - single source of truth for model selection
 from app.agents.leonardo.llm_factory import get_llm, system_message_for_model
+# The box's resolved default (Muse where the box has a META key, DeepSeek
+# where it does not) — never a hardcoded id, or a turn that arrives without
+# an explicit llm_model silently ignores the fleet default.
+from app.agents.leonardo.model_policy import enabled_default_model
 from app.agents.leonardo.delegation import (
     DELEGATION_TIMEOUT_SECONDS,
     DelegationTimedOut,
@@ -235,14 +239,14 @@ def create_sub_agent(llm_model: str = None):
     ]
 
     # Use the same model as the main agent via the shared llm_factory
-    model = get_llm(llm_model or 'deepseek-v4-flash')
+    model = get_llm(llm_model or enabled_default_model())
 
     return create_agent(
         model=model,
         tools=sub_agent_tools,
         # Sub-agents get no DynamicModelMiddleware, so the cache blocks are
         # flattened here for providers that reject list system content.
-        system_prompt=system_message_for_model(CACHED_SYSTEM_PROMPT, llm_model or 'deepseek-v4-flash'),
+        system_prompt=system_message_for_model(CACHED_SYSTEM_PROMPT, llm_model or enabled_default_model()),
         state_schema=RailsAgentState,
     )
 
@@ -384,13 +388,13 @@ def create_research_sub_agent(llm_model: str = None):
     ]
 
     # Use the same model as the main agent via the shared llm_factory
-    model = get_llm(llm_model or 'deepseek-v4-flash')
+    model = get_llm(llm_model or enabled_default_model())
 
     return create_agent(
         model=model,
         tools=research_tools,
         system_prompt=system_message_for_model(
-            get_research_system_prompt(), llm_model or 'deepseek-v4-flash'
+            get_research_system_prompt(), llm_model or enabled_default_model()
         ),  # Research-only prompt (block-list flattened for non-Anthropic)
         state_schema=RailsAgentState,
     )

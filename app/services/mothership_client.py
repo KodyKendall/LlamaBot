@@ -9,10 +9,28 @@ Handles communication with the LlamaPressLeo mothership for:
 import httpx
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+#: Set by any harness whose traffic must not reach production telemetry
+#: (app/tests/conftest.py sets it for the whole pytest suite; CI and scripted
+#: E2E runs should export it too).
+#:
+#: 94 of the 140 instance_errors occurrences tagged llamabot_version=0.7.0 were
+#: synthetic — summarization fixtures with numbers that repeated exactly across
+#: days, and the WebSocket integration thread. They landed in the production
+#: table and had to be filtered out of every triage query by hand.
+TELEMETRY_DISABLED_ENV = "LLAMABOT_TELEMETRY_DISABLED"
+
+_TRUTHY = {"1", "true", "yes", "on"}
+
+
+def telemetry_disabled() -> bool:
+    """True when this process must not report anything to the mothership."""
+    return os.environ.get(TELEMETRY_DISABLED_ENV, "").strip().lower() in _TRUTHY
 
 
 class MothershipClient:
@@ -46,13 +64,30 @@ class MothershipClient:
 
     @property
     def enabled(self) -> bool:
-        """Check if mothership integration is enabled."""
-        return (
+        """Check if mothership integration is configured.
+
+        Deliberately NOT where the harness kill switch lives. This property also
+        gates login verification, the paywall check, update checks and lease
+        renewal — none of which are telemetry, and one of which (lease renewal)
+        carries the instance-lock backstop. Suppressing those would turn "do not
+        report test traffic" into "sign-in is broken", which is what shipping the
+        switch here actually did (30 CI failures, 0.7.1).
+        """
+        return bool(
             self.config is not None
             and self.config.get("mothership_api_token")
             and self.config.get("mothership_url")
             and self.config.get("instance_name")
         )
+
+    @property
+    def reporting_enabled(self) -> bool:
+        """Configured AND allowed to send outbound reports about this box.
+
+        The narrow gate: only the report/feedback paths consult it, so a harness
+        stays silent without losing the product behavior it needs to run.
+        """
+        return self.enabled and not telemetry_disabled()
 
     @property
     def instance_name(self) -> Optional[str]:
@@ -126,7 +161,7 @@ class MothershipClient:
         mothership has a per-message performance series alongside token usage.
         See docs/dev/performance_telemetry.md.
         """
-        if not self.enabled:
+        if not self.reporting_enabled:
             return None
 
         try:
@@ -188,7 +223,7 @@ class MothershipClient:
         Best-effort, exactly like report_message: never raises, returns None on
         any failure so a reporting hiccup never blocks the chat.
         """
-        if not self.enabled:
+        if not self.reporting_enabled:
             return None
 
         try:
@@ -329,7 +364,7 @@ class MothershipClient:
         already saw. ``recovered`` distinguishes "handled by the graceful floor"
         from "hard failure the user is stuck on".
         """
-        if not self.enabled:
+        if not self.reporting_enabled:
             return None
 
         try:
@@ -402,7 +437,7 @@ class MothershipClient:
         always returns None. The turn is already over and the user has their
         answer; a metrics failure must be invisible to them.
         """
-        if not self.enabled:
+        if not self.reporting_enabled:
             return None
 
         # A turn that recorded nothing (e.g. interrupted before the first model
@@ -516,7 +551,7 @@ class MothershipClient:
 
         Called on SIGTERM to notify mothership to initiate backup and termination.
         """
-        if not self.enabled:
+        if not self.reporting_enabled:
             return None
 
         try:

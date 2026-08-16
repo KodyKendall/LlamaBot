@@ -119,7 +119,7 @@ class TestSendToMothership:
 
     @pytest.mark.asyncio
     async def test_send_posts_via_report_error_with_agent_friction_source(self):
-        mothership = SimpleNamespace(enabled=True, report_error=AsyncMock(return_value=None))
+        mothership = SimpleNamespace(enabled=True, reporting_enabled=True, report_error=AsyncMock(return_value=None))
         report = friction.build_friction_report(
             what_happened="tail_rails_logs returned binary garbage.",
             category="confusing_output",
@@ -145,7 +145,7 @@ class TestSendToMothership:
 
     @pytest.mark.asyncio
     async def test_blocked_severity_reports_as_not_recovered(self):
-        mothership = SimpleNamespace(enabled=True, report_error=AsyncMock(return_value=None))
+        mothership = SimpleNamespace(enabled=True, reporting_enabled=True, report_error=AsyncMock(return_value=None))
         report = friction.build_friction_report(
             what_happened="could not proceed", category="permissions",
             severity="blocked", thread_id="t",
@@ -155,7 +155,7 @@ class TestSendToMothership:
 
     @pytest.mark.asyncio
     async def test_send_is_a_noop_when_mothership_disabled(self):
-        mothership = SimpleNamespace(enabled=False, report_error=AsyncMock())
+        mothership = SimpleNamespace(enabled=False, reporting_enabled=False, report_error=AsyncMock())
         report = friction.build_friction_report(
             what_happened="x", category="other", severity="annoyance", thread_id="t",
         )
@@ -182,7 +182,7 @@ class TestSendToMothership:
     async def test_send_never_raises_when_the_post_fails(self):
         """A telemetry hiccup must never worsen the turn the agent is in."""
         mothership = SimpleNamespace(
-            enabled=True, report_error=AsyncMock(side_effect=RuntimeError("mothership down")),
+            enabled=True, reporting_enabled=True, report_error=AsyncMock(side_effect=RuntimeError("mothership down")),
         )
         report = friction.build_friction_report(
             what_happened="x", category="other", severity="annoyance", thread_id="t",

@@ -16,6 +16,10 @@ from dotenv import load_dotenv
 from langgraph.graph import END, START, StateGraph
 
 from app.agents.leonardo.llm_factory import get_llm, system_message_for_model
+# The box's resolved default (Muse where the box has a META key, DeepSeek
+# where it does not) — never a hardcoded id, or a turn that arrives without
+# an explicit llm_model silently ignores the fleet default.
+from app.agents.leonardo.model_policy import enabled_default_model
 from app.agents.leonardo.rails_agent.state import RailsAgentState
 from app.agents.leonardo.project_context import brand_context_section
 from app.agents.leonardo.resilience import invoke_with_transient_retry
@@ -51,7 +55,7 @@ def get_sys_msg():
 
 
 def plain_chat(state: RailsAgentState):
-    llm_model = state.get("llm_model") or "deepseek-v4-flash"
+    llm_model = state.get("llm_model") or enabled_default_model()
     logger.info(f"Using LLM model: {llm_model}")
 
     # No .bind_tools() — see the module docstring before adding any.

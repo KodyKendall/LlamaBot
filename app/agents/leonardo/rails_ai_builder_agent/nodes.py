@@ -9,6 +9,7 @@ from langgraph.graph import START, StateGraph, END
 from langgraph.types import Command
 from langgraph.prebuilt import tools_condition
 from langgraph.prebuilt import ToolNode
+from app.agents.utils.tool_output_limits import CappedToolNode
 
 import asyncio
 from pathlib import Path
@@ -19,6 +20,10 @@ from openai import OpenAI
 from app.agents.utils.images import encode_image
 
 from app.agents.leonardo.rails_agent.state import RailsAgentState
+# The box's resolved default (Muse where the box has a META key, DeepSeek
+# where it does not) — never a hardcoded id, or a turn that arrives without
+# an explicit llm_model silently ignores the fleet default.
+from app.agents.leonardo.model_policy import enabled_default_model
 from app.agents.leonardo.rails_agent.tools import (
     write_todos, write_file, read_file, ls, edit_file, glob_files, grep_files, bash_command,
     ls_agents, read_agent_file, write_agent_file, edit_agent_file,
@@ -76,7 +81,7 @@ default_tools = [
 def leonardo_ai_builder(state: RailsAgentState) -> Command[Literal["tools"]]:
    # ==================== LLM Model Selection ====================
    # Get model selection from state (passed from frontend)
-   llm_model = state.get('llm_model') or 'deepseek-v4-flash'
+   llm_model = state.get('llm_model') or enabled_default_model()
    logger.info(f"🤖 Using LLM model: {llm_model}")
    llm = get_llm(llm_model)
    # =============================================================
@@ -136,7 +141,7 @@ def build_workflow(checkpointer=None):
 
     # Define nodes: these do the work
     builder.add_node("leonardo_ai_builder", leonardo_ai_builder)
-    builder.add_node("tools", ToolNode(default_tools))
+    builder.add_node("tools", CappedToolNode(default_tools))
     
     # Define edges: these determine how the control flow moves
     builder.add_edge(START, "leonardo_ai_builder")

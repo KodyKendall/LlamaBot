@@ -13,7 +13,26 @@
  *    - Requires Rails debug info to maintain state
  */
 
-import { getRailsUrl, getVSCodeUrl, getTicketsUrl, getFeedbackUrl, DEFAULT_CONFIG } from '../config.js';
+import { getRailsUrl, getVSCodeUrl, getInboxUrl, getActivityUrl, DEFAULT_CONFIG } from '../config.js';
+import { isTabVisible } from '../utils/tabVisibility.js';
+
+/**
+ * data-target name → data-llamabot attribute, for every tab in the browser pane.
+ *
+ * Declared once at module scope: this map used to be duplicated inline in both
+ * initTabSwitching() and initExternalLinkButtons(), and a tab added to one copy
+ * but not the other silently loses either its click target or its pop-out.
+ */
+const TAB_TARGET_TO_FRAME = {
+  'liveSiteFrame': 'live-site-frame',
+  'vsCodeFrame': 'vscode-frame',
+  'inboxFrame': 'inbox-frame',
+  'activityFrame': 'activity-frame',
+  'contentFrame': 'content-frame',
+  'gitFrame': 'git-frame',
+  'logsFrame': 'logs-frame',
+  'pgWebFrame': 'pgweb-frame'
+};
 
 export class IframeManager {
   constructor(container = null) {
@@ -28,11 +47,14 @@ export class IframeManager {
     // VS CODE iframe
     this.vsCodeFrame = this.querySelector('[data-llamabot="vscode-frame"]');
 
-    // TICKETS iframe
-    this.ticketsFrame = this.querySelector('[data-llamabot="tickets-frame"]');
+    // INBOX iframe (tickets, feedback, requests, messages, notifications)
+    this.inboxFrame = this.querySelector('[data-llamabot="inbox-frame"]');
 
-    // FEEDBACK iframe
-    this.feedbackFrame = this.querySelector('[data-llamabot="feedback-frame"]');
+    // ACTIVITY iframe (audit log / record history)
+    this.activityFrame = this.querySelector('[data-llamabot="activity-frame"]');
+
+    // Unread-messages badge on the Messages tab
+    this.messagesUnreadBadge = this.querySelector('[data-llamabot="messages-unread-badge"]');
 
     // URL input element
     this.urlInput = this.querySelector('[data-llamabot="url-input"]');
@@ -58,6 +80,9 @@ export class IframeManager {
 
     // Listen for navigation messages from the Rails iframe
     this.initNavigationListener();
+
+    // Listen for unread-count pushes from the Rails messages iframe
+    this.initUnreadBadgeListener();
   }
 
   // ============================================================================
@@ -208,19 +233,25 @@ export class IframeManager {
       this.urlInput.value = this.currentPath;
     }
 
-    // Set VS Code iframe URL
-    if (this.vsCodeFrame) {
+    // Set VS Code iframe URL. Skipped when the Code tab is switched off: the
+    // editor container is off by default, so loading the frame would point the
+    // browser at a stopped editor.
+    const visibleTabs = (typeof window !== 'undefined' && window.LLAMABOT_VISIBLE_TABS) || null;
+    if (this.vsCodeFrame && isTabVisible('vsCodeFrame', visibleTabs)) {
       this.vsCodeFrame.src = getVSCodeUrl();
     }
 
-    // Set Tickets iframe URL
-    if (this.ticketsFrame) {
-      this.ticketsFrame.src = getTicketsUrl();
+    // Set Inbox iframe URL. Loaded eagerly, which is what keeps the unread
+    // badge live: the poller that feeds it runs inside this frame (the Rails
+    // inbox layout renders it on every inbox page), so the frame has to be
+    // loaded before the tab is ever opened.
+    if (this.inboxFrame) {
+      this.inboxFrame.src = getInboxUrl();
     }
 
-    // Set Feedback iframe URL
-    if (this.feedbackFrame) {
-      this.feedbackFrame.src = getFeedbackUrl();
+    // Set Activity iframe URL
+    if (this.activityFrame) {
+      this.activityFrame.src = getActivityUrl();
     }
   }
 
@@ -862,20 +893,71 @@ export class IframeManager {
   }
 
   /**
-   * Refresh the Tickets iframe
+   * Refresh the Inbox iframe.
+   *
+   * Re-assigning .src rather than calling getInboxUrl() so a refresh keeps
+   * whichever inbox page the user navigated to inside the frame, instead of
+   * bouncing them back through the /inbox entry redirect.
    */
-  refreshTicketsFrame() {
-    if (this.ticketsFrame && this.ticketsFrame.src) {
-      this.ticketsFrame.src = this.ticketsFrame.src;
+  refreshInboxFrame() {
+    if (this.inboxFrame && this.inboxFrame.src) {
+      this.inboxFrame.src = this.inboxFrame.src;
     }
   }
 
   /**
-   * Refresh the Feedback iframe
+   * Refresh the Activity iframe
    */
-  refreshFeedbackFrame() {
-    if (this.feedbackFrame && this.feedbackFrame.src) {
-      this.feedbackFrame.src = this.feedbackFrame.src;
+  refreshActivityFrame() {
+    if (this.activityFrame && this.activityFrame.src) {
+      this.activityFrame.src = this.activityFrame.src;
+    }
+  }
+
+  // ============================================================================
+  // Unread messages badge
+  // ============================================================================
+
+  /**
+   * Keep the red badge on the Messages tab in sync with the Rails app.
+   *
+   * The chat UI and the Rails app are different origins, so this window cannot
+   * read the unread count itself — a fetch would need CORS plus cross-site
+   * credentials. Instead the messages iframe (which already holds the Devise
+   * session and an ActionCable subscription) posts the count up to us whenever
+   * it changes, and we only render it.
+   */
+  initUnreadBadgeListener() {
+    if (!this.messagesUnreadBadge) return;
+
+    window.addEventListener('message', (event) => {
+      const data = event.data;
+      if (!data || data.source !== 'llamabot-notifications') return;
+      if (data.type !== 'unread-count') return;
+
+      // The frame is untrusted input like any other postMessage sender, so the
+      // count is coerced and clamped rather than injected as-is.
+      const count = Number(data.unreadMessages);
+      this.setUnreadMessagesCount(Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0);
+    });
+  }
+
+  /**
+   * Render the unread count. Zero hides the badge entirely — an empty red dot
+   * reads as "something is wrong" rather than "nothing to see".
+   */
+  setUnreadMessagesCount(count) {
+    const badge = this.messagesUnreadBadge;
+    if (!badge) return;
+
+    if (count > 0) {
+      badge.textContent = count > 99 ? '99+' : String(count);
+      badge.setAttribute('aria-label', `${count} unread message${count === 1 ? '' : 's'}`);
+      badge.classList.remove('hidden');
+    } else {
+      badge.textContent = '0';
+      badge.removeAttribute('aria-label');
+      badge.classList.add('hidden');
     }
   }
 
@@ -1128,16 +1210,7 @@ export class IframeManager {
     const iframes = this.querySelectorAll('.content-iframe');
 
     // Map old ID names to new data-llamabot attribute names
-    const idToDataAttrMap = {
-      'liveSiteFrame': 'live-site-frame',
-      'vsCodeFrame': 'vscode-frame',
-      'ticketsFrame': 'tickets-frame',
-      'feedbackFrame': 'feedback-frame',
-      'contentFrame': 'content-frame',
-      'gitFrame': 'git-frame',
-      'logsFrame': 'logs-frame',
-      'pgWebFrame': 'pgweb-frame'
-    };
+    const idToDataAttrMap = TAB_TARGET_TO_FRAME;
 
     tabs.forEach(tab => {
       tab.addEventListener('click', (e) => {
@@ -1193,6 +1266,12 @@ export class IframeManager {
     const role = (typeof window !== 'undefined' && window.LLAMABOT_USER_ROLE) || 'engineer';
     if (role === 'user' && tab.dataset.engineerOnly === 'true') return;
 
+    // Same reasoning for a tab switched off in Settings → Browser Tabs. The
+    // chat.html gate also catches this, but it runs on llamabot:ready — doing
+    // it here too means the hidden tab never flashes as active first.
+    const visibleTabs = (typeof window !== 'undefined' && window.LLAMABOT_VISIBLE_TABS) || null;
+    if (Array.isArray(visibleTabs) && savedTarget !== 'liveSiteFrame' && !visibleTabs.includes(savedTarget)) return;
+
     const dataAttrName = idToDataAttrMap[savedTarget] || savedTarget;
     const targetIframe = this.querySelector(`[data-llamabot="${dataAttrName}"]`);
     if (!targetIframe) return;
@@ -1210,16 +1289,7 @@ export class IframeManager {
     const externalLinkButtons = this.querySelectorAll('.tab-external-link');
 
     // Map old ID names to new data-llamabot attribute names
-    const idToDataAttrMap = {
-      'liveSiteFrame': 'live-site-frame',
-      'vsCodeFrame': 'vscode-frame',
-      'ticketsFrame': 'tickets-frame',
-      'feedbackFrame': 'feedback-frame',
-      'contentFrame': 'content-frame',
-      'gitFrame': 'git-frame',
-      'logsFrame': 'logs-frame',
-      'pgWebFrame': 'pgweb-frame'
-    };
+    const idToDataAttrMap = TAB_TARGET_TO_FRAME;
 
     externalLinkButtons.forEach(button => {
       button.addEventListener('click', (e) => {
