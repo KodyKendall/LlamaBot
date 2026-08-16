@@ -408,9 +408,9 @@ def get_llm(model_name: str):
     # disabled by policy is swapped for an enabled one here, before any client is
     # built — the dropdown filtering in /api/available-models is only UX on top.
     # Deferred import avoids a circular import (model_policy reads DEFAULT_LLM_MODEL).
-    from app.agents.leonardo.model_policy import enabled_default_model, is_model_enabled
-    if not is_model_enabled(model_name):
-        replacement = enabled_default_model()
+    from app.agents.leonardo.model_policy import effective_model, enabled_default_model
+    replacement = effective_model(model_name)
+    if replacement != model_name:
         logger.warning(
             "Requested model %r is disabled by policy; using %r instead.",
             model_name, replacement,
@@ -479,6 +479,132 @@ def get_llm(model_name: str):
                 "FIREWORKS_BASE_URL", "https://api.fireworks.ai/inference/v1"
             ),
             api_key=provider_key("FIREWORKS_DEEPSEEK_API_KEY"),
+            timeout=180,
+            max_retries=0,
+        )
+    if model_name == "nemotron-lightning-30b-fireworks":
+        # NVIDIA Nemotron 3.5 Lightning 30B-A3B on Fireworks' SERVERLESS tier —
+        # the same weights as `nemotron-lightning-30b-runpod`, with nobody having
+        # to keep a pod alive. A SIBLING entry, not a re-point of the RunPod one:
+        # who serves (and bills for) a turn stays an explicit user choice, and the
+        # self-hosted entry stays available for the boxes that have a pod.
+        #
+        # Client is ChatDeepSeekWithReasoning rather than a bare ChatOpenAI, and
+        # that is verified against the live endpoint (2026-08-16): Fireworks
+        # returns Nemotron's thinking in a separate `reasoning_content` field,
+        # streams it as deltas, and accepts assistant messages that carry it back
+        # — exactly the shape that client exists for, same as the Fireworks
+        # DeepSeek entry above. A plain ChatOpenAI drops the thinking on the floor.
+        #
+        # DO NOT add a max_tokens cap, same reason as the RunPod entry: reasoning
+        # bills against max_tokens while being stripped from the response, so a
+        # small cap returns EMPTY content with no error at all. Fireworks imposes
+        # no small default of its own (verified: an uncapped request ran to 2705
+        # completion tokens and finished with `stop`), so leaving it unset is safe.
+        #
+        # Key: FIREWORKS_API_KEY is the account-wide name from Fireworks' own
+        # docs; FIREWORKS_DEEPSEEK_API_KEY is accepted as a fallback because it is
+        # the name already deployed on boxes running the DeepSeek entry. One
+        # Fireworks account issues one key, so a per-model key name would be
+        # fiction — this is the same "accept either" precedent as Meta's
+        # META_API_KEY / MODEL_API_KEY. /api/available-models checks both, in this
+        # same order.
+        return ChatDeepSeekWithReasoning(
+            model=os.getenv(
+                "FIREWORKS_NEMOTRON_MODEL",
+                "accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b",
+            ),
+            api_base=os.getenv(
+                "FIREWORKS_BASE_URL", "https://api.fireworks.ai/inference/v1"
+            ),
+            api_key=provider_key("FIREWORKS_API_KEY", "FIREWORKS_DEEPSEEK_API_KEY"),
+            timeout=180,
+            max_retries=0,
+        )
+    if model_name == "qwen3-8b-runpod":
+        # Qwen3-8B served by vLLM on our own RunPod GPU. Same house pattern as
+        # the GMI/Fireworks entries: a SEPARATE, explicitly-named model rather
+        # than a hidden re-point of an existing one.
+        #
+        # vLLM speaks OpenAI-compatible chat completions, so a plain ChatOpenAI
+        # with an overridden base_url is the whole client (same precedent as the
+        # Meta branch below). The base_url has NO default on purpose: the pod URL
+        # is sensitive and rotatable, so it is env-only and never committed — a
+        # box without RUNPOD_QWEN_BASE_URL simply shows the model greyed out
+        # (/api/available-models keys this model's availability on that var).
+        #
+        # Enabling it on a box takes both RUNPOD_QWEN_BASE_URL *and* naming the
+        # model in ENABLED_MODELS — model_policy's default allow-list is the
+        # compiled two-model set, not "anything that happens to be configured".
+        #
+        # `provider_key` (not os.getenv) is load-bearing even though the pod is
+        # unauthenticated today — see its docstring: api_key=None would let the
+        # openai SDK fall back to OPENAI_API_KEY and address our OpenAI secret to
+        # a RunPod proxy URL. It also means a future `vllm serve --api-key` needs
+        # only RUNPOD_QWEN_API_KEY in .env, no code change.
+        #
+        # Thinking is disabled client-side: Qwen3 otherwise emits
+        # <think>...</think> inside `content`, which pollutes tool-calling turns.
+        # The alternative is pod-side (`--reasoning-parser qwen3`, which splits it
+        # into reasoning_content) — a serve-command change, so not this PR's call.
+        return ChatOpenAI(
+            model=os.getenv("RUNPOD_QWEN_MODEL", "Qwen/Qwen3-8B"),
+            base_url=os.getenv("RUNPOD_QWEN_BASE_URL"),
+            api_key=provider_key("RUNPOD_QWEN_API_KEY"),
+            timeout=180,
+            max_retries=0,
+            extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+        )
+    if model_name == "muse-glimmer-30b-runpod":
+        # Muse Glimmer 30B (community AWQ INT4 checkpoint) on the same
+        # self-hosted vLLM pod pattern as `qwen3-8b-runpod` above: env-only
+        # base_url, provider-explicit name, greyed out on a box without it.
+        #
+        # A SIBLING entry, not a re-point of the qwen one — deliberately its own
+        # RUNPOD_GLIMMER_* triple. One env triple per model identity: the pods
+        # are genuinely separate servers (the Nemotron entry below runs on a
+        # third pod concurrently), and aiming RUNPOD_QWEN_MODEL at a Meta
+        # checkpoint is exactly the hidden swap this house style forbids.
+        #
+        # NO `chat_template_kwargs`/`enable_thinking` here, unlike the qwen
+        # branch: that kwarg is a Qwen chat-template feature, and Glimmer's
+        # reasoning is already separated server-side by vLLM's
+        # `--reasoning-parser muse_glimmer`, so `content` arrives clean. Passing
+        # an unknown kwarg into a template that never declared it risks a 400 for
+        # no benefit.
+        return ChatOpenAI(
+            model=os.getenv(
+                "RUNPOD_GLIMMER_MODEL", "cyankiwi/Muse-Glimmer-30B-AWQ-INT4"
+            ),
+            base_url=os.getenv("RUNPOD_GLIMMER_BASE_URL"),
+            api_key=provider_key("RUNPOD_GLIMMER_API_KEY"),
+            timeout=180,
+            max_retries=0,
+        )
+    if model_name == "nemotron-lightning-30b-runpod":
+        # NVIDIA Nemotron 3.5 Lightning 30B-A3B (official NVFP4 checkpoint) on
+        # its OWN RunPod pod (RTX 5090) — a third pod running concurrently with
+        # the Glimmer one, hence a third independent env triple.
+        #
+        # Served with `--max-model-len 131072`, ~4x the other pod, which is what
+        # makes it the first self-hosted entry with real headroom over Leo's
+        # ~27k engineer-prompt floor.
+        #
+        # No `chat_template_kwargs` here, same as the Glimmer branch: reasoning
+        # is separated server-side by `--reasoning-parser nemotron_v3` and tool
+        # calls by `--tool-call-parser qwen3_coder`, so `content` arrives clean.
+        #
+        # DO NOT add a max_tokens cap to this path. The model spends ~250
+        # reasoning tokens even on trivial prompts, and that reasoning bills
+        # against max_tokens while being stripped from the response — so a small
+        # cap returns EMPTY content with no error at all (seen live at 500).
+        return ChatOpenAI(
+            model=os.getenv(
+                "RUNPOD_NEMOTRON_MODEL",
+                "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4",
+            ),
+            base_url=os.getenv("RUNPOD_NEMOTRON_BASE_URL"),
+            api_key=provider_key("RUNPOD_NEMOTRON_API_KEY"),
             timeout=180,
             max_retries=0,
         )

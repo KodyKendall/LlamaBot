@@ -9,10 +9,28 @@ Handles communication with the LlamaPressLeo mothership for:
 import httpx
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+#: Set by any harness whose traffic must not reach production telemetry
+#: (app/tests/conftest.py sets it for the whole pytest suite; CI and scripted
+#: E2E runs should export it too).
+#:
+#: 94 of the 140 instance_errors occurrences tagged llamabot_version=0.7.0 were
+#: synthetic — summarization fixtures with numbers that repeated exactly across
+#: days, and the WebSocket integration thread. They landed in the production
+#: table and had to be filtered out of every triage query by hand.
+TELEMETRY_DISABLED_ENV = "LLAMABOT_TELEMETRY_DISABLED"
+
+_TRUTHY = {"1", "true", "yes", "on"}
+
+
+def telemetry_disabled() -> bool:
+    """True when this process must not report anything to the mothership."""
+    return os.environ.get(TELEMETRY_DISABLED_ENV, "").strip().lower() in _TRUTHY
 
 
 class MothershipClient:
@@ -46,8 +64,15 @@ class MothershipClient:
 
     @property
     def enabled(self) -> bool:
-        """Check if mothership integration is enabled."""
-        return (
+        """Check if mothership integration is enabled.
+
+        Every reporter (errors, friction, disconnects, turn metrics, lease) gates
+        on this, so the harness kill switch here covers all of them at once.
+        """
+        if telemetry_disabled():
+            return False
+
+        return bool(
             self.config is not None
             and self.config.get("mothership_api_token")
             and self.config.get("mothership_url")

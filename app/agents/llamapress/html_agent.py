@@ -25,6 +25,7 @@ from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, Tool
 from langgraph.graph import START, END, StateGraph
 from langgraph.prebuilt import tools_condition
 from langgraph.prebuilt import ToolNode, InjectedState
+from app.agents.utils.tool_output_limits import CappedToolNode
 from langgraph.types import Command
 
 
@@ -441,7 +442,7 @@ def build_workflow(checkpointer=None):
 
     # Define nodes: these do the work
     builder.add_node("write_html_page_agent", write_html_page_agent)
-    builder.add_node("tools", ToolNode(tools))
+    builder.add_node("tools", CappedToolNode(tools))
 
     # Define edges: these determine how the control flow moves
     builder.add_edge(START, "write_html_page_agent")

@@ -190,13 +190,21 @@ export class MessageRenderer {
       // Extract agent depth for sub-agent badge display
       const agentDepth = baseMessage.agent_depth || 0;
 
-      messageDiv.innerHTML = this.toolRenderer.createCollapsibleToolMessage(
-        toolCall.name,
-        firstArgument,
-        JSON.stringify(toolCall.args),
-        '',
-        agentDepth
-      );
+      // A malformed tool payload must not escape into socket.onmessage — a
+      // throw here used to take down the whole chat panel for the rest of the
+      // page load, not just drop this one message.
+      try {
+        messageDiv.innerHTML = this.toolRenderer.createCollapsibleToolMessage(
+          toolCall.name,
+          firstArgument,
+          JSON.stringify(toolCall.args),
+          '',
+          agentDepth
+        );
+      } catch (e) {
+        console.error('[MessageRenderer] tool message failed to render:', e, toolCall);
+        messageDiv.innerHTML = `<div class="tool-message-fallback">${toolCall.name}</div>`;
+      }
       messageDiv.id = baseMessage.tool_calls[0].id;
 
       // Add agent depth data attribute to the message div for CSS styling

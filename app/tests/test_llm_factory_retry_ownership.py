@@ -17,6 +17,10 @@ from app.agents.leonardo import model_policy
         ("claude-4.5-haiku", "ChatAnthropic", "max_retries"),
         ("gemini-3-flash", "ChatGoogleGenerativeAI", "retries"),
         ("qwen3.7-plus", "ChatQwen", "max_retries"),
+        ("qwen3-8b-runpod", "ChatOpenAI", "max_retries"),
+        ("muse-glimmer-30b-runpod", "ChatOpenAI", "max_retries"),
+        ("nemotron-lightning-30b-runpod", "ChatOpenAI", "max_retries"),
+        ("nemotron-lightning-30b-fireworks", "ChatDeepSeekWithReasoning", "max_retries"),
     ],
 )
 def test_get_llm_disables_hidden_provider_retries(

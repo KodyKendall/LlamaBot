@@ -79,8 +79,13 @@ from app.agents.leonardo.rails_agent.state import Todo
 from pathlib import Path
 import subprocess
 import json
+import logging
 import re
 import difflib
+import shlex
+import threading
+
+logger = logging.getLogger(__name__)
 
 from jinja2 import Environment, FileSystemLoader
 
@@ -91,6 +96,30 @@ from jinja2 import Environment, FileSystemLoader
 
 # Maximum characters for bash command output before truncation
 BASH_OUTPUT_MAX_CHARS = 12000
+
+# ============================================================================
+# Code Search Configuration
+# ============================================================================
+
+# Longest match line ripgrep will print in full. Beyond this it prints a preview
+# plus "[... omitted end of long line]". Minified bundles have single lines in
+# the hundreds of thousands of characters; 400 is plenty to identify a match.
+GREP_MAX_COLUMNS = 400
+
+# Paths a code search is never actually asking about, and the ones most likely
+# to contain enormous single lines (compiled assets, vendored bundles, lockfiles).
+GREP_IGNORE_GLOBS = [
+    "!.git",
+    "!node_modules",
+    "!tmp",
+    "!log",
+    "!vendor",
+    "!assets/builds",
+    "!*.min.js",
+    "!*.min.css",
+    "!*-lock.json",
+    "!*.lock",
+]
 
 # Moderate error detection - permission errors + common Rails errors
 # (excludes test failure patterns like "FAILED" to avoid false positives on intentional test runs)
@@ -183,6 +212,27 @@ def chown_for_ubuntu(path: Path) -> None:
         # Silently ignore - this is a best-effort operation
         pass
 
+#: One lock per file, so a read-modify-write in edit_file cannot interleave with
+#: another edit of the SAME file. Tool calls in one assistant message execute
+#: concurrently: on leo-fotesu two edit_file calls against the same view both
+#: read the original content, both reported "Successfully replaced string", and
+#: only the last write survived — silent data loss the agent could not see.
+#: Different files still edit in parallel.
+_FILE_LOCKS: dict[str, threading.Lock] = {}
+_FILE_LOCKS_GUARD = threading.Lock()
+
+
+def file_lock(path: Path) -> threading.Lock:
+    """Return the process-wide lock for ``path`` (created on first use)."""
+    key = str(path)
+    with _FILE_LOCKS_GUARD:
+        lock = _FILE_LOCKS.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _FILE_LOCKS[key] = lock
+        return lock
+
+
 @tool(description=WRITE_TODOS_DESCRIPTION)
 def write_todos(
     todos: list[Todo],
@@ -198,28 +248,116 @@ def write_todos(
         }
     )
 
-def guard_against_beginning_slash_argument(argument: str) -> str:
-    """
-    Normalize file paths that LLMs might format incorrectly.
-    Handles cases like:
-    - /rails/app/views -> app/views
-    - rails/app/views -> app/views
-    - app/app/views -> app/views
-    - /app/views -> app/views
-    """
-    # Strip leading slashes
-    if argument.startswith("/"):
-        argument = argument[1:]
+def _normalize_relative_argument(argument: str) -> str:
+    """Prefix repairs for a *relative* path an LLM formatted loosely.
 
-    # Strip 'rails/' prefix if present
+    - rails/app/views -> app/views
+    - app/app/views   -> app/views
+    """
     if argument.startswith("rails/"):
         argument = argument[6:]  # len("rails/") = 6
 
-    # Reduce 'app/app/' to just 'app/'
     if argument.startswith("app/app/"):
         argument = argument[4:]  # Remove the first "app/"
 
     return argument
+
+
+def _absolute_path_candidates(path: Path) -> list[str]:
+    """Every RAILS_ROOT-relative reading of an absolute path, best guess first.
+
+    The system prompt documents the project's absolute root, so agents pass
+    absolute paths — and the container nests three plausible roots inside each
+    other (``/app`` -> ``/app/app`` -> ``/app/app/rails``). ``/app/spec/x.rb``
+    means ``<rails>/spec/x.rb`` while ``/app/models/x.rb`` means
+    ``<rails>/app/models/x.rb``; only the filesystem can tell them apart, which
+    is what ``guard_against_beginning_slash_argument`` uses this list for.
+    """
+    candidates = []
+    try:
+        candidates.append(str(path.relative_to(RAILS_ROOT)))
+    except ValueError:
+        pass
+
+    try:
+        below_project = str(path.relative_to(PROJECT_ROOT))
+    except ValueError:
+        pass
+    else:
+        candidates.append(below_project)
+        # ...and the other reading of the same prefix: '/app/views/x.erb' means
+        # the Rails project's own app/ directory, not the container's /app.
+        candidates.append(f"app/{below_project}")
+
+    parts = path.parts  # ('/', 'rails', 'app', ...)
+    if len(parts) > 1 and parts[1] == "rails":
+        candidates.append(str(Path(*parts[2:])) if len(parts) > 2 else "")
+
+    # Last resort: the historical behaviour — drop the slash and treat what is
+    # left as relative. This is what keeps '/app/views/x.erb' working.
+    candidates.append(_normalize_relative_argument(str(path).lstrip("/")))
+
+    return list(dict.fromkeys(candidates))
+
+
+def guard_against_beginning_slash_argument(argument: str) -> str:
+    """
+    Normalize file paths that LLMs might format incorrectly, to a path relative
+    to the Rails project root.
+    Handles cases like:
+    - /app/app/rails/db/schema.rb -> db/schema.rb   (the documented absolute root)
+    - /app/spec/requests/x_spec.rb -> spec/requests/x_spec.rb
+    - /rails/app/views -> app/views
+    - rails/app/views -> app/views
+    - app/app/views -> app/views
+    - /app/views -> app/views
+
+    Absolute paths used to be handled by stripping the leading slash and joining
+    the rest onto RAILS_ROOT, which re-rooted them a second time:
+    ``/app/app/rails/db/schema.rb`` became
+    ``/app/app/rails/app/rails/db/schema.rb``. A relative path under ``app/``
+    was the only shape that survived, which is why agents reported that
+    ``read_file`` worked for ``app/controllers`` but not for ``spec/``, ``db/``
+    or ``config/`` — and fell back to ``bash cat``, whose unbounded output is a
+    known summarization-loop trigger.
+    """
+    if not argument:
+        return argument
+
+    if not argument.startswith("/"):
+        return _normalize_relative_argument(argument)
+
+    path = Path(argument)
+    candidates = _absolute_path_candidates(path)
+
+    # An absolute path that points at a real file outside the project is a
+    # genuine escape: say so, rather than silently re-rooting it into a
+    # confusing "file not found" for a file the agent can see.
+    if not any(_is_under(path, root) for root in (RAILS_ROOT, PROJECT_ROOT)) and path.exists():
+        raise PathTraversalError(
+            f"Path '{argument}' is outside the Rails project and cannot be accessed. "
+            "File tools are scoped to the project directory."
+        )
+
+    # The filesystem disambiguates: prefer a candidate that exists, then one
+    # whose directory exists (write_file creates files that do not exist yet).
+    def score(candidate: str) -> int:
+        target = RAILS_ROOT / candidate
+        if target.exists():
+            return 2
+        if target.parent.is_dir():
+            return 1
+        return 0
+
+    return max(candidates, key=score)
+
+
+def _is_under(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
 
 
 #: Every file tool is scoped to the customer's Rails project. Nothing above it is
@@ -371,10 +509,15 @@ def write_file(
 
     # NOTE: Auto-checkpoint disabled. Users create checkpoints manually via History panel.
 
+    # Whether this call creates the file decides if we bother checking that the
+    # running Rails app can see it (see below) — read it before the write.
+    is_new_file = not full_path.exists()
+
     try:
-        full_path.parent.mkdir(parents=True, exist_ok=True)
-        full_path.write_text(content)
-        chown_for_ubuntu(full_path)  # Fix permissions for ubuntu user
+        with file_lock(full_path):  # never interleave with an edit_file on this path
+            full_path.parent.mkdir(parents=True, exist_ok=True)
+            full_path.write_text(content)
+            chown_for_ubuntu(full_path)  # Fix permissions for ubuntu user
     except Exception as e:
         error_message = f"Error writing file {file_path}: {e}"
         tool_output = {
@@ -394,6 +537,10 @@ def write_file(
         )
 
     success_message = f"Updated file {file_path}"
+
+    if is_new_file:
+        success_message += _mount_visibility_warning(file_path)
+
     tool_output = {
         "status": "success",
         "message": success_message
@@ -406,6 +553,57 @@ def write_file(
             ],
         }
     )
+
+
+def _mount_visibility_warning(file_path: str) -> str:
+    """Warn when a newly created file is invisible to the running Rails app.
+
+    The Rails container bind-mounts only PART of the project (``app/``, ``db/``,
+    ``spec/``, ``config/routes.rb``, ``config/initializers/custom/`` …), so a
+    new file elsewhere is written, listed by ``ls`` and reported as a success
+    while the running app never loads it. On leo-fotesu that cost a whole turn:
+    ``config/initializers/source_admin.rb`` was created and
+    ``rails runner "puts defined?(SOURCE_EDIT_PASSWORD)"`` still said NOT DEFINED.
+
+    The mount set lives in Leonardo's compose file, not here, so we ask the
+    container itself rather than hardcoding a list that would silently go stale.
+    """
+    try:
+        visible = rails_app_can_see(file_path)
+    except Exception as e:  # no docker socket, no container, a timeout…
+        logger.warning(f"Could not check mount visibility for {file_path}: {e}")
+        return ""
+
+    if visible is not False:  # True, or None for "could not tell"
+        return ""
+
+    return (
+        f"\n\n⚠️ WARNING: '{file_path}' was written, but it is NOT visible to the "
+        "running Rails app — that path is not bind-mounted into the Rails "
+        "container, so the app will never load this file. Nothing you put here "
+        "takes effect. Use a mounted path instead: app/, db/, spec/, "
+        "config/routes.rb, or config/initializers/custom/ for initializers."
+    )
+
+
+def rails_app_can_see(file_path: str) -> Optional[bool]:
+    """Can the running Rails container see ``file_path`` (relative to the project)?
+
+    Returns True/False, or None when the answer could not be read — "don't know"
+    must never become a false alarm.
+    """
+    relative = guard_against_beginning_slash_argument(file_path)
+    target = shlex.quote(f"{WORKDIR}/{relative}")
+    answer = rails_api_sh(
+        f"test -e {target} && echo VISIBLE || echo MISSING",
+        timeout_seconds=30,
+    )
+
+    if "VISIBLE" in answer:
+        return True
+    if "MISSING" in answer:
+        return False
+    return None
 
 
 @tool(description=EDIT_DESCRIPTION)
@@ -425,6 +623,24 @@ def edit_file(
 
     # NOTE: Auto-checkpoint disabled. Users create checkpoints manually via History panel.
 
+    # Read-modify-write, serialized per file: two edit_file calls in one message
+    # run concurrently, and without this the second one replaces the first one's
+    # work while reporting success. See file_lock.
+    with file_lock(full_path):
+        return _apply_edit(
+            full_path, file_path, old_string, new_string, replace_all, tool_call_id
+        )
+
+
+def _apply_edit(
+    full_path: Path,
+    file_path: str,
+    old_string: str,
+    new_string: str,
+    replace_all: bool,
+    tool_call_id: str,
+) -> Command:
+    """The body of edit_file. Always called holding that file's lock."""
     if not full_path.exists():
         error_message = f"Error: File '{file_path}' not found"
         tool_output = {
@@ -677,8 +893,19 @@ def grep_files(
             "messages": [ToolMessage(f"Directory not found: {path or 'rails root'}", tool_call_id=tool_call_id)]
         })
 
-    # Build ripgrep command
-    cmd = ["rg", "--line-number", "--no-heading", "--color", "never"]
+    # Build ripgrep command.
+    #
+    # --max-columns/--max-columns-preview stop rg emitting a whole minified line
+    # as one "match". A vendored bundle can have a single 289k-character line;
+    # printed in full it becomes a ~74k-token ToolMessage that is bigger than the
+    # summarization keep-tail and therefore can never be compacted away — the
+    # thread re-summarizes forever and the user just sees a spinner (2026-08-13).
+    # The preview still shows the first 400 chars plus an "omitted end of long
+    # line" note, so the agent learns the file matched without eating the bundle.
+    cmd = [
+        "rg", "--line-number", "--no-heading", "--color", "never",
+        "--max-columns", str(GREP_MAX_COLUMNS), "--max-columns-preview",
+    ]
 
     # Add options
     if case_insensitive:
@@ -688,8 +915,10 @@ def grep_files(
     if glob:
         cmd.extend(["--glob", glob])
 
-    # Always ignore common directories
-    cmd.extend(["--glob", "!.git", "--glob", "!node_modules", "--glob", "!tmp", "--glob", "!log"])
+    # Always ignore common directories, plus the compiled/vendored/lock files a
+    # code search never wants — which are exactly the files with 300 KB lines.
+    for ignore in GREP_IGNORE_GLOBS:
+        cmd.extend(["--glob", ignore])
 
     # Add pattern and path
     cmd.append(pattern)
@@ -720,6 +949,10 @@ def grep_files(
             msg = f"Found matches for pattern '{pattern}':\n\n" + "\n".join(output_lines)
             if truncated:
                 msg += f"\n\n(Results truncated. Use max_results parameter for more.)"
+            # max_results is a LINE cap, and 50 lines of minified JavaScript is
+            # 400 KB. Cap the assembled message in BYTES too — the line cap is
+            # exactly what let the 2026-08-13 incident ship.
+            msg = truncate_output(msg, BASH_OUTPUT_MAX_CHARS)
         elif result.returncode == 1:
             msg = f"No matches found for pattern '{pattern}'"
         else:

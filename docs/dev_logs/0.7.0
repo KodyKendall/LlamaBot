@@ -125,3 +125,34 @@
       2026-08-09, a day before the decision, and now pin the decision instead.
       NOT done: the META key itself is distributed by the mothership, and no
       image is built here — this ships on the gated 0.7.0 tag.
+[x] - Fix the Muse default never actually engaging in chat. The 0.7.0 QA gate
+      caught it: /api/available-models was correct on the candidate box
+      (`default_model: muse-spark-1.2-contributor`), yet every real browser turn
+      arrived as `llm_model: 'deepseek-v4-flash'` and was served by
+      api.deepseek.com. The server default never got a say, because the frontend
+      ALWAYS sends an explicit model and the dropdown's initial selection was
+      compile-time DeepSeek — a `selected` attribute in chat.html, plus
+      DEFAULT_TEXT_MODEL and a send-path `|| 'deepseek-v4-flash'` in index.js.
+      Two sources of truth for one decision, guaranteed to disagree the moment
+      DEFAULT_LLM_MODEL moves, which is exactly what 0.7.0 did.
+      There is no compile-time default model in the frontend now. The <select>
+      opens on a hidden empty placeholder, and fetchAvailableModels() picks the
+      initial selection from the backend's `default_model` — falling to the first
+      AVAILABLE model when the box can't run it, which is the keyless-box
+      DeepSeek experience. A choice of the user's own still wins and still
+      persists: cookie restore, the ?llm_model= pin and a manual dropdown change
+      each set userChoseModel, and the resolved default is deliberately NOT
+      written to the llmModel cookie — persisting it would freeze today's default
+      onto the user and a later fleet change would never reach them.
+      The same bug had a backend twin worth sweeping for: thirteen sites across
+      the rails_* agents resolved a missing `state['llm_model']` with a literal
+      `or 'deepseek-v4-flash'` (and _build_message_content used 'gemini-3-flash',
+      so attachment support was decided for a model we weren't going to run).
+      A turn without an explicit model therefore ignored the fleet default
+      outright. All of them now call enabled_default_model().
+      Tests: app/tests/js/default_model_follows_server.test.mjs (the selection
+      decision as a pure function, plus grep-level sweeps that no model id is
+      written down as a selection fallback in chat.html/index.js) and
+      app/tests/test_agent_default_model_fallback.py (the backend sweep + the
+      Muse/DeepSeek resolution it protects). Verified the source-pinning tests
+      fail against pre-fix HEAD.

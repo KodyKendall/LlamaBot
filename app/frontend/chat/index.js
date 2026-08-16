@@ -34,15 +34,17 @@ import { CheckpointManager } from './checkpoints/CheckpointManager.js';
 import { DiffViewer } from './checkpoints/DiffViewer.js';
 import { FaviconBadgeManager } from './ui/FaviconBadgeManager.js';
 import { StallMonitor } from './ui/StallMonitor.js';
+import { chooseInitialModel } from './utils/modelDefaults.js';
+import { safeInit, selectedElementsOf } from './utils/safeInit.js';
 
 // Image auto-switch: when a user attaches an image while on a text-only model,
 // we move them onto an image-capable model so the image is actually seen.
 const IMAGE_MODEL = 'muse-spark-1.2-contributor';   // vision-capable target
 const IMAGE_MODEL_LABEL = 'Muse Spark 1.2';
-// Seed only. The real default is box-dependent (Muse where the box has a META
-// key, DeepSeek where it does not), so /api/available-models reports it as
-// `default_model` and this.defaultTextModel takes over as soon as that lands.
-const DEFAULT_TEXT_MODEL = 'deepseek-v4-flash';
+// There is deliberately NO compile-time default model here. It is box-dependent
+// (Muse where the box has a META key, DeepSeek where it does not), so it is
+// resolved server-side by model_policy and reported as `default_model` on
+// /api/available-models; this.defaultTextModel holds it from then on.
 
 /**
  * Main application class - LlamaBot Client
@@ -120,6 +122,14 @@ class ChatApp {
       // /api/available-models fetch resolves (the unknown-model default is
       // permissive, but a stale/missing fetch previously bounced it off Qwen).
       ['qwen3.7-plus', { images: true }],
+      // Qwen3-8B on our RunPod pod is the dense TEXT model — seed it false so an
+      // image upload auto-switches instead of 400ing on image_url.
+      ['qwen3-8b-runpod', { images: false }],
+      // Glimmer's base model is multimodal, but the AWQ checkpoint we serve has
+      // an unverified vision path — declared text-only on the backend too.
+      ['muse-glimmer-30b-runpod', { images: false }],
+      ['nemotron-lightning-30b-runpod', { images: false }],
+      ['nemotron-lightning-30b-fireworks', { images: false }],
     ]);
 
     // Operator gates, hydrated from /api/available-models (fetchAvailableModels).
@@ -130,9 +140,17 @@ class ChatApp {
     this.modelSwitchingAllowed = true;
     this.visionAllowed = true;
 
-    // The model to reset to on a new thread / pin to under the switching lock.
-    // Replaced by the backend's resolved `default_model`.
-    this.defaultTextModel = DEFAULT_TEXT_MODEL;
+    // The model to reset to on a new thread / pin to under the switching lock,
+    // and the initial dropdown selection. Null until fetchAvailableModels()
+    // hydrates it from the backend's resolved `default_model` — never a
+    // hardcoded id, or the frontend and model_policy disagree the moment the
+    // fleet default changes.
+    this.defaultTextModel = null;
+
+    // Whether the user has a model choice of their own — a saved cookie, an
+    // `?llm_model=` pin, or a manual dropdown pick. Their choice always wins;
+    // only when it is absent does the dropdown follow the server default.
+    this.userChoseModel = false;
 
     // Whether this box has a usable vision model at all. Distinct from
     // visionAllowed: that is the operator switching vision OFF, this is a box
@@ -378,122 +396,154 @@ class ChatApp {
           thread_id,
           agent_name,
           agent_mode: this.elements.agentModeSelect?.value,
-          llm_model: this.elements.modelSelect?.value || 'deepseek-v4-flash',
+          // Never a hardcoded id: fall back to the server's resolved default,
+          // and if even that hasn't landed yet omit the key so the backend
+          // applies its own default rather than us guessing wrong.
+          llm_model: this.elements.modelSelect?.value || this.defaultTextModel || undefined,
           origin: window.location.host,
           ask_before_edits: true,
         });
       }, 500);
     });
 
+    // Everything below is a feature, not the panel. Each step is wrapped so a
+    // module that has drifted out of sync with this file (see safeInit.js)
+    // costs its own feature and nothing else — on leo-tama a single missing
+    // method here left the whole chat panel dead for the page load.
+
     // Initialize event listeners
     this.initEventListeners();
 
-    // Initialize iframe controls
-    this.iframeManager.initNavigationButtons();
-    this.iframeManager.initTabSwitching();
-    this.iframeManager.initViewModeToggle();
-    this.iframeManager.initUrlNavigation();
-
-    // Initialize element selector
-    this.elementSelector = new ElementSelector(this.iframeManager);
-    this.elementSelector.init(this.elements.elementSelectorBtn, this.elements.messageInput);
-
-    // Initialize quoted-reply manager (reply button on hovered messages)
-    this.quotedReplyManager = new QuotedReplyManager();
-    this.quotedReplyManager.init(this.elements.messageInput);
-    this.elements.messageHistory?.addEventListener('llamabot:reply-to-message', (e) => {
-      this.quotedReplyManager.setQuote(e.detail);
+    safeInit('iframe controls', () => {
+      this.iframeManager.initNavigationButtons();
+      this.iframeManager.initTabSwitching();
+      this.iframeManager.initViewModeToggle();
+      this.iframeManager.initUrlNavigation();
     });
 
-    // Initialize prompt manager
-    this.promptManager = new PromptManager();
-    const inputArea = this.container.querySelector('.input-area');
-    this.promptManager.init(this.elements.promptLibraryBtn, this.elements.messageInput, inputArea);
+    safeInit('element selector', () => {
+      this.elementSelector = new ElementSelector(this.iframeManager);
+      this.elementSelector.init(this.elements.elementSelectorBtn, this.elements.messageInput);
+    });
 
-    // Close toolbar when prompt library is clicked
-    if (this.elements.promptLibraryBtn) {
-      this.elements.promptLibraryBtn.addEventListener('click', () => {
-        this.closeToolsToolbar();
+    safeInit('quoted replies', () => {
+      // Reply button on hovered messages
+      this.quotedReplyManager = new QuotedReplyManager();
+      this.quotedReplyManager.init(this.elements.messageInput);
+      this.elements.messageHistory?.addEventListener('llamabot:reply-to-message', (e) => {
+        this.quotedReplyManager.setQuote(e.detail);
       });
-    }
+    });
 
-    // Initialize the brand guide (lives in the tools toolbar)
-    this.brandGuide = new BrandGuide();
-    this.brandGuide.init(
-      this.elements.brandGuideBtn,
-      this.elements.brandGuideContainer,
-      this.elements.messageInput,
-      (src, name) => this.fileAttachmentManager?.openImagePreview(src, name)
-    );
-    // Collapse the tools toolbar once the brand guide opens, like the other tools.
-    if (this.elements.brandGuideBtn) {
-      this.elements.brandGuideBtn.addEventListener('click', () => {
-        this.closeToolsToolbar();
-      });
-    }
+    safeInit('prompt library', () => {
+      this.promptManager = new PromptManager();
+      const inputArea = this.container.querySelector('.input-area');
+      this.promptManager.init(this.elements.promptLibraryBtn, this.elements.messageInput, inputArea);
 
-    // Initialize the standalone color selector (attaches a color to the message)
-    this.colorAttach = new ColorAttach();
-    this.colorAttach.init(
-      this.elements.colorAttachBtn,
-      this.elements.messageInput
-    );
-    if (this.elements.colorAttachBtn) {
-      this.elements.colorAttachBtn.addEventListener('click', () => {
-        this.closeToolsToolbar();
-      });
-    }
+      // Close toolbar when prompt library is clicked
+      if (this.elements.promptLibraryBtn) {
+        this.elements.promptLibraryBtn.addEventListener('click', () => {
+          this.closeToolsToolbar();
+        });
+      }
+    });
 
-    // Initialize file attachment manager
-    this.fileAttachmentManager = new FileAttachmentManager();
-    this.fileAttachmentManager.init(
-      this.elements.fileAttachBtn,
-      this.elements.fileInput,
-      this.elements.attachmentsPreview
-    );
-    this.applyVisionPolicy();
-    this.fileAttachmentManager.initUploadMenu(
-      this.container.querySelector('[data-llamabot="file-attach-menu"]'),
-      this.container.querySelector('[data-llamabot="attach-for-ai-btn"]'),
-      this.container.querySelector('[data-llamabot="upload-to-assets-btn"]'),
-      this.container.querySelector('[data-llamabot="upload-file-input"]')
-    );
-    this.fileAttachmentManager.initFileBrowser(
-      this.container.querySelector('[data-llamabot="browse-files-btn"]'),
-      this.container.querySelector('[data-llamabot="file-browser-panel"]'),
-      this.container.querySelector('[data-llamabot="file-browser-list"]'),
-      this.container.querySelector('[data-llamabot="file-browser-close"]')
-    );
-    this.fileAttachmentManager.initAssetModal(
-      document.querySelector('[data-llamabot="asset-modal"]'),
-      this.container.querySelector('[data-llamabot="file-browser-expand"]')
-    );
-    this.fileAttachmentManager.setupDragAndDrop(
-      this.elements.inputArea,
-      this.elements.dropZoneOverlay
-    );
-    this.fileAttachmentManager.setupPaste(this.elements.messageInput);
-    // Re-evaluate the image-switch banner whenever attachments change.
-    this.fileAttachmentManager.onChange = () => this.updateImageSwitchBanner();
+    safeInit('brand guide', () => {
+      // Lives in the tools toolbar
+      this.brandGuide = new BrandGuide();
+      this.brandGuide.init(
+        this.elements.brandGuideBtn,
+        this.elements.brandGuideContainer,
+        this.elements.messageInput,
+        (src, name) => this.fileAttachmentManager?.openImagePreview(src, name)
+      );
+      // Collapse the tools toolbar once the brand guide opens, like the other tools.
+      if (this.elements.brandGuideBtn) {
+        this.elements.brandGuideBtn.addEventListener('click', () => {
+          this.closeToolsToolbar();
+        });
+      }
+    });
 
+    safeInit('color attach', () => {
+      // Standalone color selector (attaches a color to the message)
+      this.colorAttach = new ColorAttach();
+      this.colorAttach.init(
+        this.elements.colorAttachBtn,
+        this.elements.messageInput
+      );
+      if (this.elements.colorAttachBtn) {
+        this.elements.colorAttachBtn.addEventListener('click', () => {
+          this.closeToolsToolbar();
+        });
+      }
+    });
 
-    // Initialize screen recorder
-    this.screenRecorder = new ScreenRecorder();
-    this.initScreenRecording();
+    // The step that failed on leo-tama (initAssetModal). Attaching, uploads and
+    // the asset modal are wired separately so a skew in one does not cost the
+    // others — and none of them can stop the steps below.
+    safeInit('file attachments', () => {
+      this.fileAttachmentManager = new FileAttachmentManager();
+      this.fileAttachmentManager.init(
+        this.elements.fileAttachBtn,
+        this.elements.fileInput,
+        this.elements.attachmentsPreview
+      );
+      this.applyVisionPolicy();
+      this.fileAttachmentManager.setupDragAndDrop(
+        this.elements.inputArea,
+        this.elements.dropZoneOverlay
+      );
+      this.fileAttachmentManager.setupPaste(this.elements.messageInput);
+      // Re-evaluate the image-switch banner whenever attachments change.
+      this.fileAttachmentManager.onChange = () => this.updateImageSwitchBanner();
+    });
 
-    // Initialize screenshot annotator
-    this.screenshotAnnotator = new ScreenshotAnnotator();
-    this.initScreenshotCapture();
+    safeInit('upload menu', () => {
+      this.fileAttachmentManager.initUploadMenu(
+        this.container.querySelector('[data-llamabot="file-attach-menu"]'),
+        this.container.querySelector('[data-llamabot="attach-for-ai-btn"]'),
+        this.container.querySelector('[data-llamabot="upload-to-assets-btn"]'),
+        this.container.querySelector('[data-llamabot="upload-file-input"]')
+      );
+    });
 
-    // Initialize slash command manager
-    this.slashCommandManager = new SlashCommandManager(this.container);
-    this.slashCommandManager.init(this.elements.messageInput, this);
+    safeInit('file browser', () => {
+      this.fileAttachmentManager.initFileBrowser(
+        this.container.querySelector('[data-llamabot="browse-files-btn"]'),
+        this.container.querySelector('[data-llamabot="file-browser-panel"]'),
+        this.container.querySelector('[data-llamabot="file-browser-list"]'),
+        this.container.querySelector('[data-llamabot="file-browser-close"]')
+      );
+    });
+
+    safeInit('asset modal', () => {
+      this.fileAttachmentManager.initAssetModal(
+        document.querySelector('[data-llamabot="asset-modal"]'),
+        this.container.querySelector('[data-llamabot="file-browser-expand"]')
+      );
+    });
+
+    safeInit('screen recording', () => {
+      this.screenRecorder = new ScreenRecorder();
+      this.initScreenRecording();
+    });
+
+    safeInit('screenshot capture', () => {
+      this.screenshotAnnotator = new ScreenshotAnnotator();
+      this.initScreenshotCapture();
+    });
+
+    safeInit('slash commands', () => {
+      this.slashCommandManager = new SlashCommandManager(this.container);
+      this.slashCommandManager.init(this.elements.messageInput, this);
+    });
 
     // Load threads
-    this.threadManager.fetchThreads();
+    safeInit('thread list', () => this.threadManager.fetchThreads());
 
     // Setup activity tracking for lease management
-    this.setupActivityTracking();
+    safeInit('activity tracking', () => this.setupActivityTracking());
 
     // Load settings from cookies
     this.loadSettingsFromCookies();
@@ -704,6 +754,16 @@ class ChatApp {
     // "How is Leo doing this session?" bottom banner (Good/Bad + dismiss)
     this.setupSessionFeedback();
 
+    // Dismiss (×) on the model-substitution notice.
+    this.container
+      .querySelector('[data-llamabot="model-switch-dismiss"]')
+      ?.addEventListener('click', () => {
+        clearTimeout(this.modelSwitchNoticeTimer);
+        this.container
+          .querySelector('[data-llamabot="model-switch-banner"]')
+          ?.classList.add('hidden');
+      });
+
     // Dismiss (×) on the "Leo can't view images" banner — until the next refusal.
     this.container
       .querySelector('[data-llamabot="vision-disabled-dismiss"]')
@@ -753,6 +813,10 @@ class ChatApp {
     if (this.elements.modelSelect) {
       this.elements.modelSelect.addEventListener('change', (e) => {
         setCookie('llmModel', e.target.value, this.config.cookieExpiryDays);
+        // A manual pick outranks the server default for the rest of the session
+        // (a later fetchAvailableModels — e.g. after connecting a ChatGPT
+        // account — must not yank the user back onto the default).
+        this.userChoseModel = true;
         this.updateDropdownLabel(this.elements.modelSelect);
         this.updateImageSwitchBanner();
       });
@@ -863,8 +927,7 @@ class ChatApp {
     window.addEventListener('iframeRefreshRequested', () => {
       // Refresh Rails app to show latest changes
       this.iframeManager.refreshRailsApp((callback) => this.getRailsDebugInfo(callback));
-      this.iframeManager.refreshTicketsFrame();
-      this.iframeManager.refreshFeedbackFrame();
+      this.iframeManager.refreshInboxFrame();
     });
 
     // Listen for thread change
@@ -1188,6 +1251,8 @@ class ChatApp {
     if (!isValid) return;
 
     this.elements.modelSelect.value = model;
+    // An explicit pin beats the server default (see fetchAvailableModels).
+    this.userChoseModel = true;
     setCookie('llmModel', model, this.config.cookieExpiryDays);
     this.updateDropdownLabel(this.elements.modelSelect);
   }
@@ -1386,6 +1451,50 @@ class ChatApp {
   }
 
   /**
+   * The human label for a model value, straight from the dropdown so the notice
+   * never invents a name the user has not seen. Falls back to the raw value for
+   * a model the dropdown doesn't carry (frontend/backend version skew).
+   */
+  modelLabel(value) {
+    if (!value) return 'another model';
+    const option = this.elements.modelSelect
+      ? Array.from(this.elements.modelSelect.options).find(o => o.value === value)
+      : null;
+    return option?.dataset.shortLabel || option?.textContent?.trim() || value;
+  }
+
+  /**
+   * Say, above the composer, that operator policy ran this turn on a different
+   * model than the dropdown shows (`model_substituted` frame).
+   *
+   * This used to be invisible: the substitution happens inside get_llm, so the
+   * dropdown went on showing the user's pick while every turn ran on the box
+   * default and the only trace was a container-log WARNING.
+   *
+   * Auto-hides like a flash — the notice is about the turn that just started,
+   * not a standing condition — but is dismissable for a user who reads faster.
+   */
+  showModelSubstitutionNotice(requested, effective) {
+    const banner = this.container.querySelector('[data-llamabot="model-switch-banner"]');
+    if (!banner) return;
+
+    const text = banner.querySelector('[data-llamabot="model-switch-text"]');
+    if (text) {
+      text.textContent =
+        `${this.modelLabel(requested)} isn't enabled on this instance — ` +
+        `answering with ${this.modelLabel(effective)} instead.`;
+    }
+    banner.classList.remove('hidden');
+
+    // Restart the clock on a repeat notice rather than letting the first
+    // timer hide a banner the second turn just raised.
+    clearTimeout(this.modelSwitchNoticeTimer);
+    this.modelSwitchNoticeTimer = setTimeout(() => {
+      banner.classList.add('hidden');
+    }, 12000);
+  }
+
+  /**
    * Check for ?welcome_prompt= URL parameter.
    * Same as ?prompt= but also triggers a fade-in on the UI and confetti on completion.
    */
@@ -1501,7 +1610,10 @@ class ChatApp {
 
     let message = input.value.trim();
     const agentMode = this.elements.agentModeSelect?.value;
-    const llmModel = this.elements.modelSelect?.value || this.defaultTextModel;
+    // Dropdown first, then the server's resolved default. `undefined` (rather
+    // than a hardcoded id) when neither has landed, so the key drops out of the
+    // frame and the backend applies its own default.
+    const llmModel = this.elements.modelSelect?.value || this.defaultTextModel || undefined;
     // May be reassigned below if an attached image forces a vision model.
     let effectiveLlmModel = llmModel;
 
@@ -1532,7 +1644,10 @@ class ChatApp {
 
     // Check if there are selected elements and append each to the message.
     // Multiple elements can be selected (1st, 2nd, ...); emit one block each.
-    const selectedElements = this.elementSelector?.getSelectedElements() || [];
+    // Never let a skewed/broken ElementSelector block a send — selected
+    // elements are optional context. (`?.` guards a null selector, not a live
+    // one missing the method: fe-f52fb6bd, 8 occurrences on leo-tama.)
+    const selectedElements = selectedElementsOf(this.elementSelector);
     if (selectedElements.length === 1) {
       message = `${message}\n\n<SELECTED_ELEMENT>\n${selectedElements[0].html}\n</SELECTED_ELEMENT>`;
     } else if (selectedElements.length > 1) {
@@ -1914,9 +2029,13 @@ class ChatApp {
     if (this.elements.modelSelect) {
       if (savedModel && Array.from(this.elements.modelSelect.options).some(option => option.value === savedModel)) {
         this.elements.modelSelect.value = savedModel;
+        // The user's own choice — fetchAvailableModels() must not overwrite it
+        // with the server default.
+        this.userChoseModel = true;
         this.updateDropdownLabel(this.elements.modelSelect);
       } else {
-        // No cookie - just update the label to match current dropdown state
+        // No cookie — the dropdown sits on its empty placeholder until
+        // fetchAvailableModels() selects the server's default_model.
         this.updateDropdownLabel(this.elements.modelSelect);
       }
     }
@@ -2021,15 +2140,45 @@ class ChatApp {
         }
       });
 
+      // The server owns the default. With no choice of the user's own (no
+      // cookie, no ?llm_model= pin, no manual pick) the dropdown follows
+      // `default_model`, falling to the first available model when this box
+      // can't run it. Deliberately NOT persisted to the llmModel cookie —
+      // writing it would freeze today's default onto the user forever, so a
+      // later fleet default change would never reach them.
+      if (!this.userChoseModel) {
+        const initial = chooseInitialModel({
+          options: Array.from(this.elements.modelSelect.options),
+          defaultModel: this.defaultTextModel,
+        });
+        if (initial) {
+          this.elements.modelSelect.value = initial;
+          // We just picked an available model, so the stale-selection repair
+          // below has nothing left to fix.
+          needsNewSelection = false;
+        }
+      }
+
       // If current selection is unavailable, switch to first available model
       if (needsNewSelection) {
+        const unavailable = currentValue;
         const firstAvailable = Array.from(this.elements.modelSelect.options)
           .find(opt => !opt.disabled);
 
         if (firstAvailable) {
           this.elements.modelSelect.value = firstAvailable.value;
-          setCookie('llmModel', firstAvailable.value, this.config.cookieExpiryDays);
+          // The llmModel cookie is deliberately NOT overwritten here. This
+          // branch is a repair of a selection this box can't run *right now*
+          // (a key not yet in .env, a model missing from instance.json's
+          // enabled_models) — not a change of mind by the user. Overwriting
+          // destroyed their pick permanently: every reload silently landed on
+          // the fallback and the chosen model was never returned to once it
+          // became available, which reads as "it doesn't remember my model".
           this.updateDropdownLabel(this.elements.modelSelect);
+          // Same notice the backend raises when policy substitutes mid-turn —
+          // a swap the user didn't ask for should never be silent, whichever
+          // side notices it first.
+          this.showModelSubstitutionNotice(unavailable, firstAvailable.value);
           console.info(`Switched to ${firstAvailable.value} (previous model unavailable)`);
         }
       }

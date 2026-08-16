@@ -100,3 +100,68 @@ def test_reporting_never_raises_when_the_snapshot_blows_up():
 
     asyncio.run(main())  # must not raise
     mothership.report_turn_metrics.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# A wedged thread has to be visible to the USER, not only to telemetry
+# ---------------------------------------------------------------------------
+
+class TestWedgedThreadWarning:
+    """The 2026-08-13 incident ran 18 minutes and 22 compactions and told the
+    customer nothing. There is no in-chat recovery from a thread that has
+    outgrown its context — the only escape is starting a new one, and we never
+    said so.
+    """
+
+    def _websocket(self, open_=True):
+        ws = MagicMock()
+        ws.send_json = AsyncMock(return_value=None)
+        ws.client_state = MagicMock()
+        return ws
+
+    def _handler(self, ws_open=True):
+        handler = _handler_with_mothership(_mothership())
+        handler._is_websocket_open = lambda ws: ws_open
+        return handler
+
+    def _wedged_turn(self):
+        from app.lib.turn_metrics import COMPACTIONS_BEFORE_USER_WARNING
+
+        turn = TurnMetrics(thread_id="t1", agent_mode="rails_agent")
+        for _ in range(COMPACTIONS_BEFORE_USER_WARNING):
+            turn.record_compaction()
+        return turn
+
+    def test_the_user_is_told_when_a_turn_spent_itself_compacting(self):
+        handler, ws = self._handler(), self._websocket()
+        asyncio.run(handler._warn_if_thread_is_wedged(self._wedged_turn(), ws))
+
+        ws.send_json.assert_called_once()
+        frame = ws.send_json.call_args[0][0]
+        assert frame["type"] == "system_message"
+        assert "new chat" in frame["content"].lower()
+        # Frames must carry their thread so the client renders them in the right one.
+        assert frame["thread_id"] == "t1"
+
+    def test_an_ordinary_turn_says_nothing(self):
+        handler, ws = self._handler(), self._websocket()
+        turn = TurnMetrics(thread_id="t1")
+        turn.record_compaction()  # one compaction is normal work on a long turn
+
+        asyncio.run(handler._warn_if_thread_is_wedged(turn, ws))
+        ws.send_json.assert_not_called()
+
+    def test_nothing_is_sent_on_a_closed_socket(self):
+        handler, ws = self._handler(ws_open=False), self._websocket()
+        asyncio.run(handler._warn_if_thread_is_wedged(self._wedged_turn(), ws))
+        ws.send_json.assert_not_called()
+
+    def test_a_failure_to_warn_never_breaks_the_turn(self):
+        handler, ws = self._handler(), self._websocket()
+        ws.send_json = AsyncMock(side_effect=RuntimeError("socket died"))
+        asyncio.run(handler._warn_if_thread_is_wedged(self._wedged_turn(), ws))
+
+    def test_no_turn_recorder_is_harmless(self):
+        handler, ws = self._handler(), self._websocket()
+        asyncio.run(handler._warn_if_thread_is_wedged(None, ws))
+        ws.send_json.assert_not_called()

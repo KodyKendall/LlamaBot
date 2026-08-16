@@ -45,6 +45,11 @@ _current_turn: ContextVar[Optional["TurnMetrics"]] = ContextVar(
     "llamabot_turn_metrics", default=None
 )
 
+# Compactions within a single turn before we tell the user the conversation has
+# outgrown its context. Two is ordinary on a long working turn; three means each
+# pass is reclaiming almost nothing and the thread will not recover on its own.
+COMPACTIONS_BEFORE_USER_WARNING = 3
+
 
 class TurnMetrics:
     """Mutable, I/O-free recorder for one chat turn.
@@ -62,6 +67,7 @@ class TurnMetrics:
         self._model_calls: list[dict] = []
         self._tool_calls: list[dict] = []
         self._ttft_ms: Optional[float] = None
+        self._compactions: int = 0
 
     # -- recording ---------------------------------------------------------
 
@@ -95,6 +101,25 @@ class TurnMetrics:
 
     def record_tool_call(self, *, name: Optional[str], duration_ms: float) -> None:
         self._tool_calls.append({"name": name, "duration_ms": duration_ms})
+
+    def record_compaction(self) -> None:
+        """One summarization pass happened during this turn."""
+        self._compactions += 1
+
+    @property
+    def compaction_count(self) -> int:
+        return self._compactions
+
+    def thread_is_wedged(self) -> bool:
+        """Has this turn compacted so often that the thread has outgrown context?
+
+        One or two compactions in a long turn is normal work. Repeated ones mean
+        something in the history cannot be reclaimed, so every pass buys a step
+        or two and the user waits without seeing anything — 22 compactions and
+        18 minutes in the 2026-08-13 incident. The loop-breaker keeps the thread
+        moving; this is what lets us actually tell the customer.
+        """
+        return self._compactions >= COMPACTIONS_BEFORE_USER_WARNING
 
     # -- derived -----------------------------------------------------------
 
@@ -158,6 +183,9 @@ class TurnMetrics:
             # to see the spike that actually cost the user their wait.
             "input_tokens": max((c["input_tokens"] for c in self._model_calls), default=0),
             "tokens_per_second": round(output_tokens / decode_s, 2) if decode_s > 0 else None,
+            # Summarization passes in this turn. >1 means the thread is spending
+            # the user's wait compacting instead of working.
+            "compactions": self._compactions,
         }
 
         if self._tool_calls:

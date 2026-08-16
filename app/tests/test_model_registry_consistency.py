@@ -306,3 +306,533 @@ def test_muse_contributor_tier_stays_escapable():
         "the model id must stay overridable per box, or a compliance box has no "
         "way off the training tier"
     )
+
+
+# --------------------------------------------------------------------------
+# Qwen3-8B on our own RunPod GPU (self-hosted vLLM)
+# --------------------------------------------------------------------------
+
+RUNPOD_QWEN = "qwen3-8b-runpod"
+
+# Never the real pod URL — the endpoint is env-config-only and must not be
+# committed (it is unauthenticated today).
+FAKE_POD_URL = "http://runpod-qwen.invalid/v1"
+
+
+@pytest.fixture
+def runpod_qwen_env(monkeypatch):
+    """A box pointed at a RunPod endpoint, with the model allowed by policy."""
+    monkeypatch.setenv("MODEL_SWITCHING_ALLOWED", "true")
+    monkeypatch.setenv("ENABLED_MODELS", RUNPOD_QWEN)
+    monkeypatch.setenv("RUNPOD_QWEN_BASE_URL", FAKE_POD_URL)
+    monkeypatch.delenv("RUNPOD_QWEN_MODEL", raising=False)
+    monkeypatch.delenv("RUNPOD_QWEN_API_KEY", raising=False)
+
+
+def test_runpod_qwen_is_offered_in_the_dropdown():
+    assert RUNPOD_QWEN in _dropdown_models()
+
+
+def test_runpod_qwen_is_text_only():
+    """Qwen3-8B is the dense text model — no image/video/pdf input."""
+    assert MODEL_CAPABILITIES[RUNPOD_QWEN] == {
+        "images": False,
+        "video": False,
+        "pdf": False,
+    }
+
+
+def test_runpod_qwen_availability_is_keyed_on_the_base_url():
+    """Availability means "this box is pointed at a pod", not "has a secret".
+
+    The endpoint is self-hosted vLLM and may legitimately run with no API key,
+    so keying the dropdown on RUNPOD_QWEN_API_KEY would grey out a working
+    model on every box.
+    """
+    import inspect
+
+    from app.routers import api
+
+    src = inspect.getsource(api.available_models)
+    body = src.split("model_api_keys = {", 1)[1].split("}", 1)[0]
+    assert f'"{RUNPOD_QWEN}": "RUNPOD_QWEN_BASE_URL"' in body
+
+
+def test_runpod_qwen_is_known_to_the_policy():
+    assert RUNPOD_QWEN in _KNOWN_MODELS
+
+
+def test_runpod_qwen_base_url_comes_from_the_env(runpod_qwen_env):
+    """vLLM is OpenAI-compatible, so this is ChatOpenAI + a base_url — and the
+    base_url is load-bearing: without it ChatOpenAI talks to api.openai.com,
+    which has never heard of `Qwen/Qwen3-8B`."""
+    from app.agents.leonardo.llm_factory import get_llm
+
+    llm = get_llm(RUNPOD_QWEN)
+
+    assert str(llm.openai_api_base).rstrip("/") == FAKE_POD_URL.rstrip("/")
+
+
+def test_runpod_qwen_pod_url_is_never_hardcoded():
+    """The pod URL is sensitive and rotatable — it lives in .env, never in git."""
+    import inspect
+
+    from app.agents.leonardo import llm_factory
+
+    src = inspect.getsource(llm_factory.get_llm)
+    branch = src.split(f'model_name == "{RUNPOD_QWEN}"', 1)[1].split("if model_name ==", 1)[0]
+    assert 'os.getenv("RUNPOD_QWEN_BASE_URL")' in branch
+    assert "proxy.runpod.net" not in branch, "the pod URL must not be committed"
+
+
+def test_runpod_qwen_model_id_defaults_but_stays_overridable(runpod_qwen_env, monkeypatch):
+    from app.agents.leonardo.llm_factory import get_llm
+
+    assert get_llm(RUNPOD_QWEN).model_name == "Qwen/Qwen3-8B"
+
+    monkeypatch.setenv("RUNPOD_QWEN_MODEL", "Qwen/Qwen3-14B")
+    assert get_llm(RUNPOD_QWEN).model_name == "Qwen/Qwen3-14B"
+
+
+def test_runpod_qwen_disables_thinking(runpod_qwen_env):
+    """Qwen3 emits <think>...</think> inside `content` unless thinking is off,
+    which pollutes tool-calling turns. Disabled client-side via the vLLM
+    chat_template_kwargs passthrough."""
+    from app.agents.leonardo.llm_factory import get_llm
+
+    extra_body = get_llm(RUNPOD_QWEN).extra_body or {}
+    assert extra_body["chat_template_kwargs"]["enable_thinking"] is False
+
+
+def test_runpod_qwen_never_sends_the_openai_key_to_the_pod(runpod_qwen_env, monkeypatch):
+    """The pod is unauthenticated today, so api_key=None is tempting — but that
+    is exactly what makes the openai SDK fall back to OPENAI_API_KEY and put our
+    OpenAI secret in an Authorization header addressed to a RunPod proxy URL."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-should-never-leave")
+
+    from app.agents.leonardo.llm_factory import get_llm
+
+    key = get_llm(RUNPOD_QWEN).openai_api_key
+
+    assert key is not None, "api_key=None lets the OpenAI SDK fall back to OPENAI_API_KEY"
+    assert key.get_secret_value() != "sk-openai-should-never-leave"
+
+
+def test_runpod_qwen_uses_the_configured_key_when_the_pod_gets_one(runpod_qwen_env, monkeypatch):
+    """vLLM can be started with --api-key later; the plumbing must already work."""
+    monkeypatch.setenv("RUNPOD_QWEN_API_KEY", "real-runpod-key")
+
+    from app.agents.leonardo.llm_factory import get_llm
+
+    assert get_llm(RUNPOD_QWEN).openai_api_key.get_secret_value() == "real-runpod-key"
+
+
+def test_runpod_qwen_is_not_the_fleet_default():
+    """Adding an option must not change what the fleet actually runs."""
+    from app.agents.leonardo.llm_factory import DEFAULT_LLM_MODEL
+
+    assert RUNPOD_QWEN != DEFAULT_LLM_MODEL
+
+
+# --------------------------------------------------------------------------
+# Muse Glimmer 30B on our own RunPod GPU (self-hosted vLLM)
+# --------------------------------------------------------------------------
+
+GLIMMER = "muse-glimmer-30b-runpod"
+
+FAKE_GLIMMER_URL = "http://runpod-glimmer.invalid/v1"
+
+
+@pytest.fixture
+def glimmer_env(monkeypatch):
+    monkeypatch.setenv("MODEL_SWITCHING_ALLOWED", "true")
+    monkeypatch.setenv("ENABLED_MODELS", GLIMMER)
+    monkeypatch.setenv("RUNPOD_GLIMMER_BASE_URL", FAKE_GLIMMER_URL)
+    monkeypatch.delenv("RUNPOD_GLIMMER_MODEL", raising=False)
+    monkeypatch.delenv("RUNPOD_GLIMMER_API_KEY", raising=False)
+
+
+def test_glimmer_is_offered_in_the_dropdown():
+    assert GLIMMER in _dropdown_models()
+
+
+def test_glimmer_is_text_only():
+    """The base model is multimodal, but this community AWQ checkpoint's vision
+    path is unverified — don't advertise what we haven't tested."""
+    assert MODEL_CAPABILITIES[GLIMMER] == {
+        "images": False,
+        "video": False,
+        "pdf": False,
+    }
+
+
+def test_glimmer_availability_is_keyed_on_the_base_url():
+    import inspect
+
+    from app.routers import api
+
+    src = inspect.getsource(api.available_models)
+    body = src.split("model_api_keys = {", 1)[1].split("}", 1)[0]
+    assert f'"{GLIMMER}": "RUNPOD_GLIMMER_BASE_URL"' in body
+
+
+def test_glimmer_is_known_to_the_policy():
+    assert GLIMMER in _KNOWN_MODELS
+
+
+def test_glimmer_base_url_comes_from_the_env(glimmer_env):
+    from app.agents.leonardo.llm_factory import get_llm
+
+    llm = get_llm(GLIMMER)
+
+    assert str(llm.openai_api_base).rstrip("/") == FAKE_GLIMMER_URL.rstrip("/")
+
+
+def test_glimmer_pod_url_is_never_hardcoded():
+    import inspect
+
+    from app.agents.leonardo import llm_factory
+
+    src = inspect.getsource(llm_factory.get_llm)
+    branch = src.split(f'model_name == "{GLIMMER}"', 1)[1].split("if model_name ==", 1)[0]
+    assert 'os.getenv("RUNPOD_GLIMMER_BASE_URL")' in branch
+    assert "proxy.runpod.net" not in branch, "the pod URL must not be committed"
+
+
+def test_glimmer_model_id_defaults_but_stays_overridable(glimmer_env, monkeypatch):
+    from app.agents.leonardo.llm_factory import get_llm
+
+    assert get_llm(GLIMMER).model_name == "cyankiwi/Muse-Glimmer-30B-AWQ-INT4"
+
+    monkeypatch.setenv("RUNPOD_GLIMMER_MODEL", "cyankiwi/Muse-Glimmer-30B")
+    assert get_llm(GLIMMER).model_name == "cyankiwi/Muse-Glimmer-30B"
+
+
+def test_glimmer_does_not_send_qwens_thinking_kwarg(glimmer_env):
+    """`enable_thinking` is a QWEN chat-template feature, not a portable flag.
+
+    Glimmer's reasoning is separated server-side by vLLM's
+    `--reasoning-parser muse_glimmer`, so `content` already arrives clean.
+    Forwarding Qwen's kwarg to a template that has never heard of it risks a
+    400 for no benefit — copying the sibling branch wholesale is the mistake
+    this pins.
+    """
+    from app.agents.leonardo.llm_factory import get_llm
+
+    extra_body = get_llm(GLIMMER).extra_body or {}
+    assert "chat_template_kwargs" not in extra_body
+    assert "enable_thinking" not in str(extra_body)
+
+
+def test_glimmer_never_sends_the_openai_key_to_the_pod(glimmer_env, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-should-never-leave")
+
+    from app.agents.leonardo.llm_factory import get_llm
+
+    key = get_llm(GLIMMER).openai_api_key
+
+    assert key is not None, "api_key=None lets the OpenAI SDK fall back to OPENAI_API_KEY"
+    assert key.get_secret_value() != "sk-openai-should-never-leave"
+
+
+def test_glimmer_uses_the_configured_key_when_the_pod_gets_one(glimmer_env, monkeypatch):
+    monkeypatch.setenv("RUNPOD_GLIMMER_API_KEY", "real-glimmer-key")
+
+    from app.agents.leonardo.llm_factory import get_llm
+
+    assert get_llm(GLIMMER).openai_api_key.get_secret_value() == "real-glimmer-key"
+
+
+def test_glimmer_does_not_reuse_the_qwen_env_vars(glimmer_env, monkeypatch):
+    """Two self-hosted entries, two independent env triples.
+
+    The pod serves one model at a time today, but a second pod is one API call
+    away — and re-pointing RUNPOD_QWEN_MODEL at a Meta checkpoint is exactly the
+    hidden provider swap the separate-entry house style exists to prevent.
+    """
+    monkeypatch.setenv("RUNPOD_QWEN_BASE_URL", "http://wrong-pod.invalid/v1")
+    monkeypatch.setenv("RUNPOD_QWEN_MODEL", "Qwen/Qwen3-8B")
+
+    from app.agents.leonardo.llm_factory import get_llm
+
+    llm = get_llm(GLIMMER)
+
+    assert str(llm.openai_api_base).rstrip("/") == FAKE_GLIMMER_URL.rstrip("/")
+    assert llm.model_name == "cyankiwi/Muse-Glimmer-30B-AWQ-INT4"
+
+
+def test_glimmer_is_not_the_fleet_default():
+    from app.agents.leonardo.llm_factory import DEFAULT_LLM_MODEL
+
+    assert GLIMMER != DEFAULT_LLM_MODEL
+
+
+def test_the_two_selfhosted_entries_stay_distinct():
+    """Glimmer is a sibling entry, not a rename of the qwen one."""
+    assert RUNPOD_QWEN in _dropdown_models()
+    assert GLIMMER in _dropdown_models()
+    assert RUNPOD_QWEN != GLIMMER
+
+
+# --------------------------------------------------------------------------
+# NVIDIA Nemotron 3.5 Lightning 30B-A3B on its own RunPod GPU (self-hosted vLLM)
+# --------------------------------------------------------------------------
+
+NEMOTRON = "nemotron-lightning-30b-runpod"
+
+FAKE_NEMOTRON_URL = "http://runpod-nemotron.invalid/v1"
+
+
+@pytest.fixture
+def nemotron_env(monkeypatch):
+    monkeypatch.setenv("MODEL_SWITCHING_ALLOWED", "true")
+    monkeypatch.setenv("ENABLED_MODELS", NEMOTRON)
+    monkeypatch.setenv("RUNPOD_NEMOTRON_BASE_URL", FAKE_NEMOTRON_URL)
+    monkeypatch.delenv("RUNPOD_NEMOTRON_MODEL", raising=False)
+    monkeypatch.delenv("RUNPOD_NEMOTRON_API_KEY", raising=False)
+
+
+def test_nemotron_is_offered_in_the_dropdown():
+    assert NEMOTRON in _dropdown_models()
+
+
+def test_nemotron_is_text_only():
+    """NemotronH causal LM — no vision path at all."""
+    assert MODEL_CAPABILITIES[NEMOTRON] == {
+        "images": False,
+        "video": False,
+        "pdf": False,
+    }
+
+
+def test_nemotron_availability_is_keyed_on_the_base_url():
+    import inspect
+
+    from app.routers import api
+
+    src = inspect.getsource(api.available_models)
+    body = src.split("model_api_keys = {", 1)[1].split("}", 1)[0]
+    assert f'"{NEMOTRON}": "RUNPOD_NEMOTRON_BASE_URL"' in body
+
+
+def test_nemotron_is_known_to_the_policy():
+    assert NEMOTRON in _KNOWN_MODELS
+
+
+def test_nemotron_base_url_comes_from_the_env(nemotron_env):
+    from app.agents.leonardo.llm_factory import get_llm
+
+    llm = get_llm(NEMOTRON)
+
+    assert str(llm.openai_api_base).rstrip("/") == FAKE_NEMOTRON_URL.rstrip("/")
+
+
+def test_nemotron_pod_url_is_never_hardcoded():
+    """The pod has NO auth — the unguessable URL is the only thing protecting it."""
+    import inspect
+
+    from app.agents.leonardo import llm_factory
+
+    src = inspect.getsource(llm_factory.get_llm)
+    branch = src.split(f'model_name == "{NEMOTRON}"', 1)[1].split("if model_name ==", 1)[0]
+    assert 'os.getenv("RUNPOD_NEMOTRON_BASE_URL")' in branch
+    assert "proxy.runpod.net" not in branch, "the pod URL must not be committed"
+
+
+def test_nemotron_model_id_defaults_but_stays_overridable(nemotron_env, monkeypatch):
+    from app.agents.leonardo.llm_factory import get_llm
+
+    assert get_llm(NEMOTRON).model_name == (
+        "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4"
+    )
+
+    monkeypatch.setenv("RUNPOD_NEMOTRON_MODEL", "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B")
+    assert get_llm(NEMOTRON).model_name == (
+        "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B"
+    )
+
+
+def test_nemotron_does_not_send_a_thinking_kwarg(nemotron_env):
+    """Reasoning is separated server-side by vLLM's `--reasoning-parser nemotron_v3`,
+    so `content` already arrives clean. Qwen's `enable_thinking` is a Qwen
+    chat-template feature and has no business on this template."""
+    from app.agents.leonardo.llm_factory import get_llm
+
+    extra_body = get_llm(NEMOTRON).extra_body or {}
+    assert "chat_template_kwargs" not in extra_body
+    assert "enable_thinking" not in str(extra_body)
+
+
+def test_nemotron_does_not_cap_completion_tokens(nemotron_env):
+    """The model burns ~250 reasoning tokens even on trivial prompts, and that
+    reasoning is billed against max_tokens while being stripped server-side. A
+    low completion cap therefore returns EMPTY content with no error at all —
+    verified live on the pod at max_tokens=500. Leave the cap unset."""
+    from app.agents.leonardo.llm_factory import get_llm
+
+    llm = get_llm(NEMOTRON)
+
+    assert getattr(llm, "max_tokens", None) is None
+    assert not (llm.extra_body or {}).get("max_tokens")
+
+
+def test_nemotron_never_sends_the_openai_key_to_the_pod(nemotron_env, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-should-never-leave")
+
+    from app.agents.leonardo.llm_factory import get_llm
+
+    key = get_llm(NEMOTRON).openai_api_key
+
+    assert key is not None, "api_key=None lets the OpenAI SDK fall back to OPENAI_API_KEY"
+    assert key.get_secret_value() != "sk-openai-should-never-leave"
+
+
+def test_nemotron_uses_the_configured_key_when_the_pod_gets_one(nemotron_env, monkeypatch):
+    monkeypatch.setenv("RUNPOD_NEMOTRON_API_KEY", "real-nemotron-key")
+
+    from app.agents.leonardo.llm_factory import get_llm
+
+    assert get_llm(NEMOTRON).openai_api_key.get_secret_value() == "real-nemotron-key"
+
+
+def test_nemotron_does_not_reuse_the_sibling_env_vars(nemotron_env, monkeypatch):
+    """Three self-hosted entries, three independent env triples — and these are
+    genuinely separate pods running concurrently, not one box swapping models."""
+    monkeypatch.setenv("RUNPOD_QWEN_BASE_URL", "http://wrong-pod.invalid/v1")
+    monkeypatch.setenv("RUNPOD_GLIMMER_BASE_URL", "http://also-wrong.invalid/v1")
+    monkeypatch.setenv("RUNPOD_GLIMMER_MODEL", "cyankiwi/Muse-Glimmer-30B-AWQ-INT4")
+
+    from app.agents.leonardo.llm_factory import get_llm
+
+    llm = get_llm(NEMOTRON)
+
+    assert str(llm.openai_api_base).rstrip("/") == FAKE_NEMOTRON_URL.rstrip("/")
+    assert llm.model_name == "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4"
+
+
+def test_nemotron_is_not_the_fleet_default():
+    from app.agents.leonardo.llm_factory import DEFAULT_LLM_MODEL
+
+    assert NEMOTRON != DEFAULT_LLM_MODEL
+
+
+def test_the_three_selfhosted_entries_stay_distinct():
+    """Each pod is its own dropdown entry — never a hidden re-point of another."""
+    dropdown = _dropdown_models()
+    assert {RUNPOD_QWEN, GLIMMER, NEMOTRON} <= set(dropdown)
+    assert len({RUNPOD_QWEN, GLIMMER, NEMOTRON}) == 3
+
+
+# --------------------------------------------------------------------------
+# NVIDIA Nemotron 3.5 Lightning 30B-A3B on Fireworks (serverless)
+# --------------------------------------------------------------------------
+
+NEMOTRON_FW = "nemotron-lightning-30b-fireworks"
+
+FIREWORKS_NEMOTRON_ID = "accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b"
+
+
+@pytest.fixture
+def nemotron_fw_env(monkeypatch):
+    monkeypatch.setenv("MODEL_SWITCHING_ALLOWED", "true")
+    monkeypatch.setenv("ENABLED_MODELS", NEMOTRON_FW)
+    monkeypatch.setenv("FIREWORKS_API_KEY", "fw-test-key")
+    monkeypatch.delenv("FIREWORKS_DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.delenv("FIREWORKS_NEMOTRON_MODEL", raising=False)
+    monkeypatch.delenv("FIREWORKS_BASE_URL", raising=False)
+
+
+def test_nemotron_fw_is_offered_in_the_dropdown():
+    assert NEMOTRON_FW in _dropdown_models()
+
+
+def test_nemotron_fw_is_text_only():
+    """Same weights as the RunPod entry — NemotronH causal LM, no vision path."""
+    assert MODEL_CAPABILITIES[NEMOTRON_FW] == {
+        "images": False,
+        "video": False,
+        "pdf": False,
+    }
+
+
+def test_nemotron_fw_is_known_to_the_policy():
+    assert NEMOTRON_FW in _KNOWN_MODELS
+
+
+def test_nemotron_fw_availability_accepts_either_fireworks_key():
+    """The endpoint must agree with get_llm's precedence, or a box with only one
+    of the two key names shows the model greyed out while it would work fine."""
+    import inspect
+
+    from app.routers import api
+
+    src = inspect.getsource(api.available_models)
+    body = src.split("model_api_keys = {", 1)[1].split("}", 1)[0]
+    assert (
+        f'"{NEMOTRON_FW}": ("FIREWORKS_API_KEY", "FIREWORKS_DEEPSEEK_API_KEY")' in body
+    )
+
+
+def test_nemotron_fw_routes_to_fireworks(nemotron_fw_env):
+    """The whole point of the separate name: Fireworks' endpoint, Fireworks' id."""
+    from app.agents.leonardo.llm_factory import get_llm
+
+    llm = get_llm(NEMOTRON_FW)
+
+    assert str(llm.client._client.base_url).rstrip("/") == (
+        "https://api.fireworks.ai/inference/v1"
+    )
+    assert llm.model_name == FIREWORKS_NEMOTRON_ID
+
+
+def test_nemotron_fw_model_id_stays_overridable(nemotron_fw_env, monkeypatch):
+    from app.agents.leonardo.llm_factory import get_llm
+
+    monkeypatch.setenv("FIREWORKS_NEMOTRON_MODEL", "accounts/fireworks/models/other")
+    assert get_llm(NEMOTRON_FW).model_name == "accounts/fireworks/models/other"
+
+
+def test_nemotron_fw_falls_back_to_the_deployed_key_name(monkeypatch):
+    """Boxes today carry FIREWORKS_DEEPSEEK_API_KEY, not FIREWORKS_API_KEY — the
+    model must light up on those without an env change."""
+    monkeypatch.setenv("MODEL_SWITCHING_ALLOWED", "true")
+    monkeypatch.setenv("ENABLED_MODELS", NEMOTRON_FW)
+    monkeypatch.delenv("FIREWORKS_API_KEY", raising=False)
+    monkeypatch.setenv("FIREWORKS_DEEPSEEK_API_KEY", "fw-deepseek-key")
+
+    from app.agents.leonardo.llm_factory import get_llm
+
+    assert get_llm(NEMOTRON_FW).client._client.api_key == "fw-deepseek-key"
+
+
+def test_nemotron_fw_preserves_reasoning_content(nemotron_fw_env):
+    """Fireworks returns Nemotron's thinking in a separate `reasoning_content`
+    field and streams it as deltas (verified live 2026-08-16), so this entry needs
+    the reasoning-preserving client — a bare ChatOpenAI drops the thinking."""
+    from app.agents.leonardo.llm_factory import ChatDeepSeekWithReasoning, get_llm
+
+    assert isinstance(get_llm(NEMOTRON_FW), ChatDeepSeekWithReasoning)
+
+
+def test_nemotron_fw_does_not_cap_completion_tokens(nemotron_fw_env):
+    """Reasoning bills against max_tokens while being stripped from the response,
+    so a cap returns EMPTY content with no error — the same trap as the RunPod
+    entry. Fireworks imposes no small default of its own."""
+    from app.agents.leonardo.llm_factory import get_llm
+
+    llm = get_llm(NEMOTRON_FW)
+
+    assert getattr(llm, "max_tokens", None) in (None, -1)
+
+
+def test_nemotron_fw_is_a_sibling_of_the_selfhosted_entry():
+    """Serverless and self-hosted are separate choices, not a re-point of one."""
+    dropdown = _dropdown_models()
+    assert {NEMOTRON, NEMOTRON_FW} <= set(dropdown)
+    assert NEMOTRON != NEMOTRON_FW
+
+
+def test_nemotron_fw_is_not_the_fleet_default():
+    from app.agents.leonardo.llm_factory import DEFAULT_LLM_MODEL
+
+    assert NEMOTRON_FW != DEFAULT_LLM_MODEL

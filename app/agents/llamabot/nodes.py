@@ -9,6 +9,7 @@ from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 from langgraph.graph import START, StateGraph
 from langgraph.prebuilt import tools_condition
 from langgraph.prebuilt import ToolNode
+from app.agents.utils.tool_output_limits import CappedToolNode
 from langgraph.prebuilt.chat_agent_executor import AgentState
 from app.agents.utils.delta_state import DeltaMessages
 
@@ -64,7 +65,7 @@ def build_workflow(checkpointer=None):
 
     # Define nodes: these do the work
     builder.add_node("leo", leo)
-    builder.add_node("tools", ToolNode(tools))
+    builder.add_node("tools", CappedToolNode(tools))
 
     # Define edges: these determine how the control flow moves
     builder.add_edge(START, "leo")

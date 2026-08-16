@@ -169,6 +169,17 @@
                 </div>
                 <button class="image-switch-banner-dismiss" data-llamabot="vision-disabled-dismiss" data-tooltip="Dismiss" aria-label="Dismiss">&times;</button>
             </div>
+            <!-- Model substitution notice: operator policy ran the turn on a model
+                 other than the one selected in the dropdown. Raised by the
+                 `model_substituted` websocket frame; see showModelSubstitutionNotice()
+                 in index.js. Auto-hides, and is dismissable. -->
+            <div class="image-switch-banner model-switch-banner hidden" data-llamabot="model-switch-banner">
+                <div class="warning-content">
+                    <i class="fa-solid fa-triangle-exclamation"></i>
+                    <span data-llamabot="model-switch-text"></span>
+                </div>
+                <button class="image-switch-banner-dismiss" data-llamabot="model-switch-dismiss" data-tooltip="Dismiss" aria-label="Dismiss">&times;</button>
+            </div>
             <!-- Session feedback banner — appears once per thread after a few turns -->
             <div class="session-feedback-banner hidden" data-llamabot="session-feedback-banner">
                 <span class="session-feedback-prompt">How is Leo doing this session?</span>
@@ -238,6 +249,15 @@
             <div class="model-selector-container hidden" data-llamabot="model-selector-container">
                 <div class="custom-dropdown-container">
                     <select data-llamabot="model-select" class="custom-dropdown">
+                        <!-- Nothing is pre-selected on purpose. The default model is
+                             box-dependent (Muse vs DeepSeek) and lives server-side in
+                             model_policy, so fetchAvailableModels() picks the initial
+                             selection from /api/available-models `default_model`. A
+                             hardcoded `selected` here is how 0.7.0 shipped every chat
+                             turn to DeepSeek while the server default said Muse. This
+                             placeholder holds the selection for the few ms before that
+                             fetch resolves; it is hidden, so it never appears in the list. -->
+                        <option value="" data-llamabot="model-default-placeholder" hidden selected></option>
                         <option value="gemini-3-flash" data-short-label="Gemini Flash">Gemini 3 Flash</option>
                         <option value="gemini-3-pro" data-short-label="Gemini Pro">Gemini 3 Pro</option>
                         <option value="gemini-3.1-flash-lite" data-short-label="Gemini Lite">Gemini 3.1 Flash Lite</option>
@@ -248,11 +268,15 @@
                         <option value="gpt-5.6-luna" data-short-label="GPT-5.6 Luna">GPT-5.6 Luna</option>
                         <option value="gpt-5.6-luna-chatgpt" data-short-label="Luna (ChatGPT)">GPT-5.6 Luna — my ChatGPT plan</option>
                         <option value="gpt-5.6-sol-chatgpt" data-short-label="Sol (ChatGPT)">GPT-5.6 Sol — my ChatGPT plan</option>
-                        <option value="deepseek-v4-flash" data-short-label="DeepSeek" selected>DeepSeek V4 Flash</option>
+                        <option value="deepseek-v4-flash" data-short-label="DeepSeek">DeepSeek V4 Flash</option>
                         <option value="deepseek-v4-pro" data-short-label="DeepSeek Pro">DeepSeek V4 Pro</option>
                         <option value="deepseek-v4-flash-gmi" data-short-label="DeepSeek GMI">DeepSeek V4 Flash (GMI)</option>
                         <option value="deepseek-v4-flash-fireworks" data-short-label="DeepSeek FW">DeepSeek V4 Flash (Fireworks)</option>
                         <option value="qwen3.7-plus" data-short-label="Qwen">Qwen3.7 Plus</option>
+                        <option value="qwen3-8b-runpod" data-short-label="Qwen3 8B" title="Qwen3-8B served by vLLM on our own RunPod GPU. Needs RUNPOD_QWEN_BASE_URL on this box.">Qwen3 8B (RunPod self-hosted)</option>
+                        <option value="muse-glimmer-30b-runpod" data-short-label="Glimmer 30B" title="Muse Glimmer 30B (AWQ INT4) served by vLLM on our own RunPod GPU. Needs RUNPOD_GLIMMER_BASE_URL on this box.">Muse Glimmer 30B (RunPod self-hosted)</option>
+                        <option value="nemotron-lightning-30b-runpod" data-short-label="Nemotron 30B" title="NVIDIA Nemotron 3.5 Lightning 30B-A3B (NVFP4) served by vLLM on our own RunPod GPU, 131k context. Needs RUNPOD_NEMOTRON_BASE_URL on this box.">Nemotron 3.5 Lightning 30B (RunPod self-hosted)</option>
+                        <option value="nemotron-lightning-30b-fireworks" data-short-label="Nemotron FW" title="NVIDIA Nemotron 3.5 Lightning 30B-A3B on Fireworks serverless — same model as the RunPod entry, no pod to keep alive. Needs FIREWORKS_API_KEY (or FIREWORKS_DEEPSEEK_API_KEY) on this box.">Nemotron 3.5 Lightning 30B (Fireworks)</option>
                         <option value="muse-spark-1.2-contributor" data-short-label="Muse" title="Contributor tier: Meta may use these prompts and completions to train future models.">Muse Spark 1.2 (Contributor)</option>
                     </select>
                 </div>
@@ -378,9 +402,25 @@
                             </svg>
                         </button>
                     </div>
-                    <div class="tab" data-target="ticketsFrame" data-engineer-only="true">
-                        <span class="tab-text">Tickets</span>
-                        <button class="tab-external-link" data-iframe="ticketsFrame" data-tooltip="Open tickets in a new browser tab" data-tooltip-pos="bottom" aria-label="Open tickets in a new tab">
+                    <!-- One tab for Tickets, Feedback, Requests, Messages and
+                         Notifications. The Rails app renders its own tab bar
+                         inside this frame to switch between them, so this tab is
+                         deliberately NOT data-engineer-only: the surfaces behind
+                         it have different access levels, and Rails hides the ones
+                         a given user may not open (see InboxHelper). Gating the
+                         whole tab would take Feedback and Messages away from
+                         ordinary users, who can reach both today. -->
+                    <div class="tab" data-target="inboxFrame">
+                        <span class="tab-text">Inbox</span>
+                        <!-- Unread count. Fed by postMessage from the Rails inbox
+                             iframe (see IframeManager.initUnreadBadgeListener) — the
+                             chat UI and Rails are different origins, so a fetch here
+                             would be a CORS/credentials problem; the iframe already
+                             holds the session, so it does the counting. Every inbox
+                             page publishes it, not just Messages, so the badge stays
+                             current wherever the user is inside the tab. -->
+                        <span class="tab-unread-badge hidden" data-llamabot="messages-unread-badge" aria-live="polite">0</span>
+                        <button class="tab-external-link" data-iframe="inboxFrame" data-tooltip="Open the inbox in a new browser tab" data-tooltip-pos="bottom" aria-label="Open the inbox in a new tab">
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
                                 <polyline points="15 3 21 3 21 9"></polyline>
@@ -388,9 +428,9 @@
                             </svg>
                         </button>
                     </div>
-                    <div class="tab" data-target="feedbackFrame">
-                        <span class="tab-text">Feedback</span>
-                        <button class="tab-external-link" data-iframe="feedbackFrame" data-tooltip="Open feedback in a new browser tab" data-tooltip-pos="bottom" aria-label="Open feedback in a new tab">
+                    <div class="tab" data-target="activityFrame" data-engineer-only="true">
+                        <span class="tab-text">Activity</span>
+                        <button class="tab-external-link" data-iframe="activityFrame" data-tooltip="Open the activity &amp; audit log in a new browser tab" data-tooltip-pos="bottom" aria-label="Open activity in a new tab">
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
                                 <polyline points="15 3 21 3 21 9"></polyline>
@@ -437,8 +477,10 @@
             <div class="browser-content">
                 <iframe data-llamabot="live-site-frame" title="Live Site Frame" class="content-iframe active" allow="display-capture"></iframe>
                 <iframe data-llamabot="vscode-frame" title="VS Code Frame" class="content-iframe" allow="clipboard-read; clipboard-write">  </iframe>
-                <iframe data-llamabot="tickets-frame" title="Tickets Frame" class="content-iframe"></iframe>
-                <iframe data-llamabot="feedback-frame" title="Feedback Frame" class="content-iframe"></iframe>
+                <!-- One frame for all five inbox surfaces. The Rails app's own
+                     tab bar switches between them inside this frame. -->
+                <iframe data-llamabot="inbox-frame" title="Inbox Frame" class="content-iframe"></iframe>
+                <iframe data-llamabot="activity-frame" title="Activity Frame" class="content-iframe"></iframe>
                 <!-- <iframe src="/agent_page/rails_agent" title="Git Status Frame" data-llamabot="git-frame" class="content-iframe"></iframe> -->
                 <!-- <iframe src="/logs" title="Logs Frame" data-llamabot="logs-frame" class="content-iframe"></iframe> -->
                 <!-- <iframe src="/page" title="Content Frame" data-llamabot="content-frame" class="content-iframe"></iframe> -->
@@ -882,7 +924,44 @@
                     tab.style.display = 'none';
                 });
             }
+
+            // Hide tabs the instance has switched off in Settings → Browser Tabs.
+            // LLAMABOT_VISIBLE_TABS is a list of data-target names; absent or
+            // malformed means "show everything", so an older box (or a failed
+            // settings read) degrades to the pre-setting behavior rather than to
+            // a chrome-less browser pane.
+            applyTabVisibilitySetting();
         });
+
+        // The App tab is deliberately not switchable off — it is the only surface
+        // that shows the user their own application, and a box with no visible
+        // tab strip has no way back to it.
+        const ALWAYS_VISIBLE_TAB = 'liveSiteFrame';
+
+        function applyTabVisibilitySetting() {
+            const visibleTabs = window.LLAMABOT_VISIBLE_TABS;
+            if (!Array.isArray(visibleTabs)) return;
+
+            const tabs = Array.from(document.querySelectorAll('.browser-tabs .tab'));
+            let activeWasHidden = false;
+
+            tabs.forEach(tab => {
+                const target = tab.dataset.target;
+                if (target === ALWAYS_VISIBLE_TAB) return;
+                if (visibleTabs.includes(target)) return;
+
+                tab.style.display = 'none';
+                if (tab.classList.contains('active')) activeWasHidden = true;
+            });
+
+            // The last-used tab is restored from localStorage before this runs, so
+            // it can be one we just hid. Fall back to the App tab so the pane is
+            // never left showing a frame with no highlighted tab.
+            if (activeWasHidden) {
+                const appTab = tabs.find(t => t.dataset.target === ALWAYS_VISIBLE_TAB);
+                if (appTab) appTab.click();
+            }
+        }
     </script>
 
     <!-- Token wheel visibility (controlled by site setting) -->
@@ -1021,6 +1100,122 @@
             </div>
         </div>
     </div>
+
+    <!-- ===================== Instance sleep lock =====================
+         Hard lock: no close button, Esc does nothing, the composer is disabled
+         behind it. The only way out is upgrading. Server-side the WebSocket
+         refuses turns too, so hiding this in devtools buys nothing. -->
+    <div class="update-modal-overlay lock-modal-overlay hidden" data-llamabot="lock-modal">
+        <div class="update-modal-card lock-modal-card" role="alertdialog" aria-modal="true" aria-labelledby="lock-modal-title">
+            <div class="update-modal-head">
+                <span class="update-modal-badge lock"><i class="fa-solid fa-moon"></i></span>
+                <h2 id="lock-modal-title" data-llamabot="lock-modal-title">Your free Leo is about to sleep</h2>
+            </div>
+            <p class="update-modal-sub" data-llamabot="lock-modal-body">
+                We are backing up your Leo so you don't lose your work.
+                Upgrade for a Leo that never sleeps.
+            </p>
+            <div class="update-modal-actions">
+                <a class="update-modal-btn primary lock-modal-cta"
+                   data-llamabot="lock-modal-cta"
+                   href="https://llamapress.ai/pricing"
+                   target="_blank" rel="noopener noreferrer">Upgrade</a>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ===================== Instance sleep lock =====================
+        //
+        // The mothership flips the lock (POST /api/instance-lock, authenticated
+        // with the instance's own mothership token). The browser learns about it
+        // three ways, cheapest first:
+        //
+        //   1. window.LLAMABOT_INSTANCE_LOCK — injected server-side, so a locked
+        //      instance paints the modal on the first frame (no usable flash).
+        //   2. a 10s poll of /api/instance-lock — catches a lock that lands while
+        //      the tab is already open, with no refresh.
+        //   3. the `instance_locked` WebSocket frame — instant, when a locked
+        //      instance rejects a message the user just sent.
+        //
+        // Unlock is handled too: the poll clears the overlay when the mothership
+        // sets locked:false, so an upgrade doesn't require a reload.
+        (function () {
+            const POLL_MS = 10000;
+            const qs = (name) => document.querySelector(`[data-llamabot="${name}"]`);
+            let locked = false;
+
+            function setComposerEnabled(enabled) {
+                const input = qs('message-input');
+                const send = qs('send-button');
+                if (input) {
+                    input.disabled = !enabled;
+                    if (!enabled) input.blur();
+                }
+                // Re-enabling the send button is NOT ours to do — it is driven by
+                // whether the textarea has content. We only ever force it off.
+                if (send && !enabled) send.disabled = true;
+            }
+
+            function apply(state) {
+                state = state || {};
+                const overlay = qs('lock-modal');
+                if (!overlay) return;
+
+                if (!state.locked) {
+                    if (locked) setComposerEnabled(true);
+                    locked = false;
+                    overlay.classList.add('hidden');
+                    document.body.classList.remove('instance-locked');
+                    return;
+                }
+
+                const title = qs('lock-modal-title');
+                const body = qs('lock-modal-body');
+                const cta = qs('lock-modal-cta');
+                if (title && state.title) title.textContent = state.title;
+                if (body && state.body) body.textContent = state.body;
+                if (cta && state.upgrade_url) cta.href = state.upgrade_url;
+
+                locked = true;
+                overlay.classList.remove('hidden');
+                document.body.classList.add('instance-locked');
+                setComposerEnabled(false);
+            }
+
+            // Exposed so the WebSocket layer can lock instantly on an
+            // `instance_locked` frame instead of waiting for the next poll.
+            window.__llamabotApplyInstanceLock = apply;
+
+            // Esc must not close this one — it is a lock, not a notice.
+            document.addEventListener('keydown', function (e) {
+                if (locked && e.key === 'Escape') {
+                    e.stopPropagation();
+                    e.preventDefault();
+                }
+            }, true);
+
+            async function poll() {
+                try {
+                    const r = await fetch('/api/instance-lock', { cache: 'no-store' });
+                    if (r.ok) apply(await r.json());
+                } catch (e) {
+                    // Offline or mid-restart — keep whatever state we last had.
+                }
+            }
+
+            function start() {
+                apply(window.LLAMABOT_INSTANCE_LOCK);
+                setInterval(poll, POLL_MS);
+            }
+
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', start);
+            } else {
+                start();
+            }
+        })();
+    </script>
 
     <script>
         // ============== Connect your own ChatGPT plan (Codex OAuth) ==============

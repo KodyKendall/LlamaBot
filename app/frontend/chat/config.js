@@ -136,17 +136,23 @@ export function getVSCodeUrl() {
 }
 
 /**
- * Get Tickets URL based on current protocol
+ * Get Inbox URL based on current protocol.
+ *
+ * Tickets, Feedback, Requests, Messages and Notifications all live behind this
+ * one tab; the Rails app renders a tab bar inside the frame to move between
+ * them. /llama_bot/inbox is an entry point that redirects to the first of those
+ * pages the signed-in user is allowed to open, because Tickets is
+ * engineers-only and landing everyone there would dead-end the rest.
  */
-export function getTicketsUrl() {
-  return getRailsUrl() + '/llama_bot/tickets';
+export function getInboxUrl() {
+  return getRailsUrl() + '/llama_bot/inbox';
 }
 
 /**
- * Get Feedback URL based on current protocol
+ * Get Activity (audit / PaperTrail history) URL based on current protocol
  */
-export function getFeedbackUrl() {
-  return getRailsUrl() + '/llama_bot/feedback';
+export function getActivityUrl() {
+  return getRailsUrl() + '/llama_bot/activity';
 }
 
 /**

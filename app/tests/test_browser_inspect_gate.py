@@ -56,8 +56,10 @@ class TestBeginnerAgentGate:
             captured["tools"] = tools
             return MagicMock()
 
+        # The agent registers a CappedToolNode (a ToolNode subclass that bounds
+        # oversized tool results), so that is what has to be intercepted here.
         from app.agents.leonardo.rails_beginner_agent import nodes
-        with patch.object(nodes, "ToolNode", side_effect=fake_toolnode), \
+        with patch.object(nodes, "CappedToolNode", side_effect=fake_toolnode), \
              patch.object(nodes, "browser_inspect_enabled", return_value=enabled):
             nodes.build_workflow()
         return _tool_names(captured["tools"])

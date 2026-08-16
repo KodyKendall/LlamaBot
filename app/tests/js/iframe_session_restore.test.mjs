@@ -51,8 +51,7 @@ function makeEnv({ storage = makeStorage(), search = '', role = 'engineer' } = {
   const els = {
     'live-site-frame': new FakeElement({ classes: ['content-iframe', 'active'] }),
     'vscode-frame': new FakeElement({ classes: ['content-iframe'] }),
-    'tickets-frame': new FakeElement({ classes: ['content-iframe'] }),
-    'feedback-frame': new FakeElement({ classes: ['content-iframe'] }),
+    'inbox-frame': new FakeElement({ classes: ['content-iframe'] }),
     'url-input': new FakeElement(),
     'url-dropdown': new FakeElement(),
   };
@@ -60,10 +59,9 @@ function makeEnv({ storage = makeStorage(), search = '', role = 'engineer' } = {
   const tabs = [
     new FakeElement({ classes: ['tab', 'active'], dataset: { target: 'liveSiteFrame' } }),
     new FakeElement({ classes: ['tab'], dataset: { target: 'vsCodeFrame', engineerOnly: 'true' } }),
-    new FakeElement({ classes: ['tab'], dataset: { target: 'ticketsFrame', engineerOnly: 'true' } }),
-    new FakeElement({ classes: ['tab'], dataset: { target: 'feedbackFrame' } }),
+    new FakeElement({ classes: ['tab'], dataset: { target: 'inboxFrame' } }),
   ];
-  const iframes = ['live-site-frame', 'vscode-frame', 'tickets-frame', 'feedback-frame'].map((k) => els[k]);
+  const iframes = ['live-site-frame', 'vscode-frame', 'inbox-frame'].map((k) => els[k]);
 
   const container = {
     querySelector(sel) {
@@ -187,16 +185,16 @@ test('the last tab is remembered and reopened', () => {
   const first = makeEnv({ storage });
   const mgr = new IframeManager(first.container);
   mgr.initTabSwitching();
-  first.tabs[3].click(); // Feedback
-  assert.equal(storage.map.get(TAB_KEY), 'feedbackFrame');
+  first.tabs[2].click(); // Inbox
+  assert.equal(storage.map.get(TAB_KEY), 'inboxFrame');
 
   const second = makeEnv({ storage });
   const restored = new IframeManager(second.container);
   restored.initTabSwitching();
 
-  assert.equal(second.tabs[3].classList.contains('active'), true, 'Feedback tab should be active');
+  assert.equal(second.tabs[2].classList.contains('active'), true, 'Inbox tab should be active');
   assert.equal(second.tabs[0].classList.contains('active'), false, 'Your App tab should no longer be active');
-  assert.equal(second.els['feedback-frame'].classList.contains('active'), true);
+  assert.equal(second.els['inbox-frame'].classList.contains('active'), true);
   assert.equal(second.els['live-site-frame'].classList.contains('active'), false);
 });
 
