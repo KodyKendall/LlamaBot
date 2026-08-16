@@ -64,8 +64,12 @@ class _FakeApp:
     async def aget_state(self, config):
         return self._snapshot
 
-    async def aupdate_state(self, config, update):
+    async def aupdate_state(self, config, update, as_node=None):
+        # `as_node` is passed explicitly now: LangGraph's default is the last
+        # checkpoint writer, which is a middleware HOOK name after a
+        # summarization and makes the update raise KeyError.
         self.updated_with = update
+        self.as_node = as_node
 
 
 @pytest.mark.asyncio

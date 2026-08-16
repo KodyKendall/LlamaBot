@@ -136,6 +136,10 @@ _KNOWN_MODELS = [
     "gemini-3-pro",
     "gemini-3.1-flash-lite",
     "qwen3.7-plus",
+    "qwen3-8b-runpod",
+    "muse-glimmer-30b-runpod",
+    "nemotron-lightning-30b-runpod",
+    "nemotron-lightning-30b-fireworks",
     "muse-spark-1.2-contributor",
 ]
 
@@ -297,3 +301,17 @@ def enabled_default_model() -> str:
         FALLBACK_TEXT_MODEL,
     )
     return FALLBACK_TEXT_MODEL
+
+
+def effective_model(model_name: str) -> str:
+    """The model a request for ``model_name`` will actually run on.
+
+    Single source of truth for the substitution :func:`get_llm` performs, so the
+    websocket layer can warn the user that their pick was swapped without
+    re-deriving the rule here and drifting from it later. Substitution used to be
+    silent: the dropdown kept showing the model the user chose while every turn
+    ran on the default, and the only trace was a WARNING in the container log.
+    """
+    if is_model_enabled(model_name):
+        return model_name
+    return enabled_default_model()

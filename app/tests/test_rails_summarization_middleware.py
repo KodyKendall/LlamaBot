@@ -20,6 +20,7 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
 
 from app.agents.leonardo.summarization import (
+    POST_COMPACTION_TARGET_RATIO,
     RailsSummarizationMiddleware,
     make_summarization_middleware,
 )
@@ -565,3 +566,200 @@ class TestCeilingWhenSummarizationDeclines:
         mw = _prod_mw()
         convo = [HumanMessage(content="hi", id="h1"), AIMessage(content="hello", id="a1")]
         assert mw.before_model({"messages": convo}, runtime=None) is None
+
+
+class TestLoopBreakerCatchesPermanentBallast:
+    """The 2026-08-13 incident: compaction reclaiming nothing, silently.
+
+    A 74k-token `grep_files` result (one match inside a minified vendor bundle)
+    is larger than the 30k keep-tail, and `SummarizationMiddleware` never splits
+    a tool-call group — so it was re-preserved by every compaction for the rest
+    of the thread's life. Each pass shed only the ordinary history around it,
+    bought two or three steps of headroom, and re-fired. 22 times, 18 minutes,
+    no output.
+
+    Note what the totals looked like while that happened: ~90-101k against a
+    150k trigger. Under the trigger AND under the 0.8 post-compaction target, so
+    neither a trigger check nor a target check would have said a word. The thing
+    that makes a thread doomed is not its total — it is carrying a message no
+    future compaction can remove.
+    """
+
+    TARGET = int(_THRESHOLD * POST_COMPACTION_TARGET_RATIO)
+
+    def _incident_shape(self, ballast_tokens=None):
+        """A compacted thread at the incident's real numbers: ~101k, doomed.
+
+        Summary + an uncompactable 74k tool result + ordinary tail.
+        """
+        if ballast_tokens is None:
+            ballast_tokens = int(_THRESHOLD * 0.49)
+        summary = HumanMessage(
+            content="SUMMARY OF THE CONVERSATION SO FAR",
+            id="sum",
+            additional_kwargs={"lc_source": "summarization"},
+        )
+        caller = AIMessage(content="", id="grepper", tool_calls=[
+            {"name": "grep_files", "id": "tcg", "args": {"pattern": r"confirm\("}},
+        ])
+        ballast = ToolMessage(
+            content=_text_of_tokens(ballast_tokens), tool_call_id="tcg", id="tg",
+        )
+        tail = AIMessage(content="ok " + _text_of_tokens(20000), id="tail")
+        return [summary, caller, ballast, tail]
+
+    def test_precondition_the_incident_looked_healthy_by_every_total(self):
+        messages = self._incident_shape()
+        total = _COUNTER(messages)
+        assert total < _THRESHOLD, "under the trigger — the old guard returned here"
+        assert total < self.TARGET, (
+            "and under the target too, so comparing against the target instead "
+            "of the trigger would ALSO have missed this incident"
+        )
+        ballast = next(m for m in messages if getattr(m, "id", None) == "tg")
+        assert _COUNTER([ballast]) > SUMMARIZATION_KEEP_TOKENS, (
+            "this is what actually makes it fatal: bigger than the preserved "
+            "tail means no future compaction can ever remove it"
+        )
+
+    def test_an_uncompactable_message_is_cut_down_to_size(self):
+        mw = _prod_mw()
+        out = mw._break_loop_if_still_oversized(self._incident_shape(), None)
+        for m in out:
+            assert _COUNTER([m]) <= SUMMARIZATION_KEEP_TOKENS, (
+                "nothing may remain that a future compaction cannot shed"
+            )
+
+    def test_it_fails_loud(self, caplog):
+        with caplog.at_level("ERROR"):
+            _prod_mw()._break_loop_if_still_oversized(self._incident_shape(), None)
+        errors = [r for r in caplog.records if r.levelname == "ERROR"]
+        assert errors, (
+            "a compaction that leaves the thread doomed logged absolutely "
+            "nothing — which is why this looked like a hang, not a known bug"
+        )
+
+    def test_it_files_a_friction_report(self, monkeypatch):
+        import app.agents.leonardo.friction as friction
+
+        friction.reset_friction_tracking()
+        sent = []
+        monkeypatch.setattr(friction, "dispatch_friction_report", sent.append)
+
+        _prod_mw()._break_loop_if_still_oversized(self._incident_shape(), None)
+        assert sent, "we only see this fleet-wide if it reaches /admin/agent_friction"
+
+    def test_the_tool_call_pair_survives_being_cut_down(self):
+        """Truncating ballast must never orphan a tool_call — that 400s."""
+        out = _prod_mw()._break_loop_if_still_oversized(self._incident_shape(), None)
+        answered = {m.tool_call_id for m in out if isinstance(m, ToolMessage)}
+        for m in out:
+            for tc in (getattr(m, "tool_calls", None) or []):
+                assert tc["id"] in answered
+
+    def test_a_healthy_compaction_is_left_completely_alone(self, monkeypatch, caplog):
+        """No noise and no truncation when nothing is uncompactable."""
+        import app.agents.leonardo.friction as friction
+
+        friction.reset_friction_tracking()
+        sent = []
+        monkeypatch.setattr(friction, "dispatch_friction_report", sent.append)
+
+        mw = _prod_mw()
+        messages = self._incident_shape(ballast_tokens=int(SUMMARIZATION_KEEP_TOKENS * 0.5))
+        assert _COUNTER(messages) < self.TARGET  # precondition
+        with caplog.at_level("ERROR"):
+            out = mw._break_loop_if_still_oversized(messages, None)
+
+        assert out is messages
+        assert not sent
+        assert not [r for r in caplog.records if r.levelname == "ERROR"]
+
+    def test_a_compaction_over_the_target_is_still_forced_under_it(self):
+        """The other half of the guard: the target, not just the trigger.
+
+        A pass landing at 0.9x the trigger has only a step or two of headroom
+        left, so it is a loop even if nothing single message is oversized.
+        """
+        mw = _prod_mw()
+        messages = [
+            HumanMessage(
+                content="SUMMARY", id="sum",
+                additional_kwargs={"lc_source": "summarization"},
+            ),
+        ] + [
+            AIMessage(content="step " + _text_of_tokens(20000), id=f"a{i}")
+            for i in range(7)
+        ]
+        total = _COUNTER(messages)
+        assert self.TARGET < total < _THRESHOLD, "precondition: the missed window"
+        assert _COUNTER(mw._break_loop_if_still_oversized(messages, None)) <= self.TARGET
+
+    def test_the_thread_does_not_grow_pass_over_pass(self):
+        """The ground truth from the incident, end to end.
+
+        The "compacted" payload written to `checkpoint_writes` GREW on every
+        pass — 342 KB -> 457 KB across five — which is what reclaiming nothing
+        looks like from the outside. Run several turns of real work through the
+        middleware and every compaction must land under the target, with no
+        upward drift.
+        """
+        mw = _prod_mw()
+        convo = _wedged_by_newest_message()
+        compacted_sizes = []
+        for _ in range(6):
+            result = mw.before_model({"messages": convo}, runtime=None)
+            if result is not None:
+                convo = messages_delta_reducer(convo, [result["messages"]])
+                compacted_sizes.append(_COUNTER(convo))
+            # a turn's worth of ordinary work on top
+            convo.append(AIMessage(content="more " + _text_of_tokens(30000), id=None))
+            convo.append(HumanMessage(content="continue", id=None))
+
+        assert len(compacted_sizes) >= 2, "precondition: several compactions ran"
+        assert max(compacted_sizes) <= self.TARGET, (
+            f"a compaction landed over the target: {compacted_sizes}"
+        )
+        # Every pass must settle at roughly the keep-tail plus a summary. The
+        # incident's signature was the opposite: each "compacted" payload bigger
+        # than the last, because the ballast was all that ever survived.
+        assert max(compacted_sizes) <= SUMMARIZATION_KEEP_TOKENS * 2, (
+            f"compaction is not reclaiming the history it should: {compacted_sizes}"
+        )
+
+
+class TestWedgedThreadIsVisibleToTheUser:
+    """Today the customer's only signal is that nothing happens.
+
+    A turn that compacts repeatedly is a thread that has outgrown its context.
+    The middleware records that on the turn so the request handler can say so in
+    chat instead of spinning silently.
+    """
+
+    @pytest.fixture
+    def turn(self):
+        from app.lib.turn_metrics import _current_turn, start_turn
+
+        token = _current_turn.set(None)
+        yield start_turn(thread_id="t1", agent_mode="rails_agent")
+        _current_turn.reset(token)
+
+    def test_a_compaction_is_recorded_on_the_current_turn(self, turn):
+        _compact(_prod_mw(), _wedged_by_initial_messages())
+        assert turn.compaction_count == 1
+
+    def test_repeated_compactions_in_one_turn_mark_the_thread_wedged(self, turn):
+        from app.lib.turn_metrics import COMPACTIONS_BEFORE_USER_WARNING
+
+        assert not turn.thread_is_wedged()
+        for _ in range(COMPACTIONS_BEFORE_USER_WARNING):
+            turn.record_compaction()
+        assert turn.thread_is_wedged()
+
+    def test_compaction_count_rides_along_in_the_metrics_snapshot(self, turn):
+        turn.record_compaction()
+        assert turn.snapshot(total_ms=10.0)["compactions"] == 1
+
+    def test_recording_without_a_turn_is_harmless(self):
+        """Headless runs and tests have no recorder installed."""
+        _compact(_prod_mw(), _wedged_by_initial_messages())

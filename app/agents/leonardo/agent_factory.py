@@ -30,6 +30,7 @@ from langchain.agents import create_agent
 from langchain.agents.middleware import AgentMiddleware
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from app.agents.leonardo.turn_metrics_middleware import TurnMetricsMiddleware
+from app.agents.leonardo.tool_output_middleware import ToolResultSizeLimitMiddleware
 import logging
 
 logger = logging.getLogger(__name__)
@@ -371,6 +372,12 @@ def build_leonardo_agent(*, middleware=None, **kwargs):
       it sits OUTERMOST at the model-call boundary and therefore measures what
       the user actually waits for, including whatever the inner middleware
       (summarization, repair, brand injection) costs. Purely observational.
+    - ``ToolResultSizeLimitMiddleware`` — bounds every tool result. APPENDED
+      last so it is outermost at the TOOL boundary and sees the final result
+      whatever the inner middleware did to it. A single result bigger than the
+      summarization keep-tail can never be compacted away and wedges the thread
+      permanently (2026-08-13), so this must apply to every agent and every tool,
+      including the ones that don't exist yet.
     """
     mw = list(middleware or [])
     if not any(isinstance(m, RepairOrphanedToolCallsMiddleware) for m in mw):
@@ -381,4 +388,6 @@ def build_leonardo_agent(*, middleware=None, **kwargs):
         mw.insert(2, BrandContextMiddleware())
     if not any(isinstance(m, TurnMetricsMiddleware) for m in mw):
         mw.append(TurnMetricsMiddleware())
+    if not any(isinstance(m, ToolResultSizeLimitMiddleware) for m in mw):
+        mw.append(ToolResultSizeLimitMiddleware())
     return create_agent(middleware=mw, **kwargs)

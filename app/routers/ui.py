@@ -38,6 +38,68 @@ from app.permissions import BUILTIN_AGENT_MODE_KEYS, visible_modes  # noqa: F401
 logger = logging.getLogger(__name__)
 
 
+# ============== Browser-pane tabs ==============
+#
+# Which tabs the chat UI's browser pane shows, as a site setting. The App tab is
+# deliberately NOT in this catalog: it is the only surface that shows the user
+# their own application, so it is always visible and is never offered as a
+# choice — a box whose tab strip could be emptied has no way back to itself.
+
+ALWAYS_VISIBLE_TAB = "liveSiteFrame"
+VISIBLE_TABS_SETTING_KEY = "visible_tabs"
+
+#: The Code tab is deliberately NOT in OPTIONAL_BROWSER_TABS. It is owned by the
+#: `enable_vscode` setting instead, because the tab and the code-server
+#: container have to move together — see app/services/vscode_service.py.
+VSCODE_TAB = "vsCodeFrame"
+
+#: Tickets, Feedback and Messages used to be three separate tabs here. They are
+#: one "Inbox" tab now, because they are one place: the Rails app renders its own
+#: tab bar across all five inbox surfaces (Tickets, Feedback, Requests, Messages,
+#: Notifications), so switching between them no longer needs a browser tab each.
+#: Requests and Notifications never had a tab at all and were reachable only by
+#: links inside other pages; folding them into that bar is what made them
+#: navigable. Activity stays separate — it is an audit log, not a queue.
+OPTIONAL_BROWSER_TABS = [
+    {"target": "inboxFrame", "label": "Inbox", "icon": "fa-inbox",
+     "description": "Tickets, feedback, requests, messages and notifications, with an unread count on the tab"},
+    {"target": "activityFrame", "label": "Activity", "icon": "fa-clock-rotate-left",
+     "description": "Audit log, record history, and adoption metrics"},
+]
+
+
+def resolve_visible_tabs(session) -> list[str]:
+    """The tab targets the browser pane should show, App always included.
+
+    The setting is stored as a comma-separated list of targets. Never having
+    touched it means "show everything", so an existing box keeps its current tab
+    strip after this ships rather than silently losing tabs. An empty stored
+    value is a real choice (App only) and is honored.
+
+    Unknown names in a stored value are dropped, so a tab that is renamed or
+    removed later can't leave a dead entry switched on forever. "vsCodeFrame" is
+    one of those unknown names now: an old stored value that still lists it
+    cannot switch the Code tab back on, because only `enable_vscode` can.
+    """
+    from app.routers.api import get_site_setting
+    from app.services.vscode_service import vscode_enabled
+
+    known = [t["target"] for t in OPTIONAL_BROWSER_TABS]
+    raw = get_site_setting(session, VISIBLE_TABS_SETTING_KEY, default=None)
+
+    if raw is None:
+        chosen = known
+    else:
+        wanted = {name.strip() for name in raw.split(",") if name.strip()}
+        chosen = [target for target in known if target in wanted]
+
+    # The Code tab appears only when the editor itself is switched on.
+    if vscode_enabled(session):
+        chosen = [VSCODE_TAB] + chosen
+
+    return [ALWAYS_VISIBLE_TAB] + chosen
+
+
 def load_custom_agent_modes(overlay_path, graphs):
     """Load + validate per-instance custom agent modes from an overlay file.
 
@@ -200,6 +262,13 @@ async def root(request: Request):
         from app.routers.api import get_site_setting
         show_token_wheel = get_site_setting(session, "show_token_wheel", "false") == "true"
         proactive_build = get_site_setting(session, "proactive_build_after_ticket", "false") == "true"
+        visible_tabs = resolve_visible_tabs(session)
+
+        # Sleep lock, injected so a locked instance paints the modal on the FIRST
+        # frame — the /api/instance-lock poll is what catches a lock that lands
+        # while the tab is already open.
+        from app.services.instance_lock import get_lock_state
+        instance_lock = get_lock_state(session)
 
         # Inject user role, visible agents, and PostHog config as global variables for the frontend
         posthog_key = os.getenv("LLAMABOT_POSTHOG_KEY", "")
@@ -211,6 +280,7 @@ async def root(request: Request):
 window.LLAMABOT_USER_ROLE = "{getattr(user, "role", "engineer")}";
 window.LLAMABOT_IS_ADMIN = {"true" if getattr(user, "is_admin", False) else "false"};
 window.LLAMABOT_VISIBLE_AGENTS = {json.dumps(visible_agents)};
+window.LLAMABOT_VISIBLE_TABS = {json.dumps(visible_tabs)};
 window.LLAMABOT_SHOW_TOKEN_WHEEL = {"true" if show_token_wheel else "false"};
 window.LLAMABOT_POSTHOG_KEY = {json.dumps(posthog_key) if posthog_key else "null"};
 window.LLAMABOT_POSTHOG_HOST = {json.dumps(posthog_host) if posthog_host else "null"};
@@ -219,6 +289,7 @@ window.LLAMAPRESS_EMAIL = {json.dumps(llamapress_email) if llamapress_email else
 window.ENABLE_GITHUB_BUTTON = {"true" if enable_github_button else "false"};
 window.LLAMABOT_PROACTIVE_BUILD = {"true" if proactive_build else "false"};
 window.LLAMABOT_CUSTOM_AGENT_MODES = {json.dumps(custom_agent_modes)};
+window.LLAMABOT_INSTANCE_LOCK = {json.dumps(instance_lock)};
 </script>'''
         html = html.replace('</head>', f'{config_script}</head>')
         return HTMLResponse(content=html)
@@ -1451,9 +1522,49 @@ async def settings_page(
     from app.routers.api import get_site_setting
     show_token_wheel = get_site_setting(session, "show_token_wheel", "false") == "true"
     proactive_build = get_site_setting(session, "proactive_build_after_ticket", "false") == "true"
+    vscode_on = get_site_setting(session, "enable_vscode", "false") == "true"
     browser_inspect_on = get_site_setting(session, "enable_browser_inspect", "false") == "true"
     live_browser_tools_on = get_site_setting(session, "enable_live_browser_tools", "false") == "true"
     is_engineer_or_admin = current_user.role == "engineer" or current_user.is_admin
+
+    # Browser-tab rows. Built here rather than inside the page f-string because
+    # the page body uses doubled braces for CSS, which a nested loop would make
+    # unreadable. The App row is rendered first, checked and disabled, so the
+    # rule ("App is always on") is visible rather than merely implied by absence.
+    visible_tabs = resolve_visible_tabs(session)
+    browser_tab_rows = """
+            <div class="menu-item" style="cursor: default; opacity: 0.6;">
+                <i class="fa-solid fa-window-restore"></i>
+                <span>Your App</span>
+                <label style="position: relative; display: inline-block; width: 44px; height: 24px;"
+                    title="The App tab is always visible">
+                    <input type="checkbox" checked disabled style="opacity: 0; width: 0; height: 0;">
+                    <span style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; background-color: #8b5cf6; border-radius: 24px;"></span>
+                    <span style="position: absolute; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; border-radius: 50%; transform: translateX(20px);"></span>
+                </label>
+            </div>
+            <div style="padding: 4px 0 12px 36px; font-size: 0.75rem; color: rgba(255,255,255,0.35);">
+                Always shown &mdash; this is the only view of your own application
+            </div>
+"""
+    for tab in OPTIONAL_BROWSER_TABS:
+        on = tab["target"] in visible_tabs
+        browser_tab_rows += f"""
+            <div class="menu-item" style="cursor: default;">
+                <i class="fa-solid {tab['icon']}"></i>
+                <span>{escape(tab['label'])}</span>
+                <label style="position: relative; display: inline-block; width: 44px; height: 24px;">
+                    <input type="checkbox" class="browser-tab-toggle" data-target="{tab['target']}"
+                        {'checked' if on else ''} style="opacity: 0; width: 0; height: 0;"
+                        onchange="saveVisibleTabs()">
+                    <span style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: {'#8b5cf6' if on else '#555'}; border-radius: 24px; transition: 0.3s;"></span>
+                    <span style="position: absolute; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; border-radius: 50%; transition: 0.3s; transform: translateX({'20px' if on else '0'});"></span>
+                </label>
+            </div>
+            <div style="padding: 4px 0 12px 36px; font-size: 0.75rem; color: rgba(255,255,255,0.35);">
+                {escape(tab['description'])}
+            </div>
+"""
 
     html = f"""
 <!DOCTYPE html>
@@ -1713,6 +1824,37 @@ async def settings_page(
         </div>'''}
 
         {"" if not is_engineer_or_admin else f'''<div class="card">
+            <div class="card-header">Code Editor</div>
+            <div style="padding: 0 0 12px 0; font-size: 0.75rem; color: rgba(255,255,255,0.35);">
+                The VS Code editor runs in its own container. It is off by default.
+                Turning it on starts the container and shows the Code tab in chat.
+                Turning it off stops the container and hides the Code tab.
+                The editor stays off after a restart until you turn it on again.
+            </div>
+            <div class="menu-item" style="cursor: default;">
+                <i class="fa-solid fa-code"></i>
+                <span>Enable VS Code</span>
+                <label style="position: relative; display: inline-block; width: 44px; height: 24px;">
+                    <input type="checkbox" id="vscodeToggle" {'checked' if vscode_on else ''}
+                        style="opacity: 0; width: 0; height: 0;" onchange="toggleVSCode(this.checked)">
+                    <span style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: {'#8b5cf6' if vscode_on else '#555'}; border-radius: 24px; transition: 0.3s;"></span>
+                    <span id="vscodeSlider" style="position: absolute; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; border-radius: 50%; transition: 0.3s; transform: translateX({'20px' if vscode_on else '0'});"></span>
+                </label>
+            </div>
+            <div id="vscodeStatus" style="padding: 4px 0 0 36px; font-size: 0.75rem; color: rgba(255,255,255,0.35);">
+                {'Editor is on. Reload the chat page to see the Code tab.' if vscode_on else 'Editor is off.'}
+            </div>
+        </div>'''}
+
+        {"" if not is_engineer_or_admin else f'''<div class="card">
+            <div class="card-header">Browser Tabs</div>
+            <div style="padding: 0 0 12px 0; font-size: 0.75rem; color: rgba(255,255,255,0.35);">
+                Which tabs appear above the app preview. Reload the chat page to see changes.
+            </div>
+            {browser_tab_rows}
+        </div>'''}
+
+        {"" if not is_engineer_or_admin else f'''<div class="card">
             <div class="card-header">Automation</div>
             <div class="menu-item" style="cursor: default;">
                 <i class="fa-solid fa-bolt"></i>
@@ -1869,6 +2011,71 @@ async def settings_page(
                 headers: {{ 'Content-Type': 'application/json' }},
                 body: JSON.stringify({{ value: enabled ? 'true' : 'false' }})
             }});
+        }}
+
+        // Code editor. One request both writes the setting and starts or stops
+        // the editor container, so the toggle is disabled while docker works.
+        // Starting can take a while on the first run, because docker may have to
+        // pull the editor image.
+        function toggleVSCode(enabled) {{
+            const toggle = document.getElementById('vscodeToggle');
+            const status = document.getElementById('vscodeStatus');
+            toggle.disabled = true;
+            status.textContent = enabled ? 'Starting the editor…' : 'Stopping the editor…';
+
+            fetch(enabled ? '/api/vscode/enable' : '/api/vscode/disable', {{ method: 'POST' }})
+                .then(function (r) {{ return r.json(); }})
+                .then(function (body) {{
+                    // The server decides the final state. A failed start leaves
+                    // the editor off, so the toggle follows `enabled` from the
+                    // response, not the click.
+                    toggle.checked = !!body.enabled;
+                    updateVSCodeSlider(toggle.checked);
+                    if (body.ok) {{
+                        status.textContent = toggle.checked
+                            ? 'Editor is on. Reload the chat page to see the Code tab.'
+                            : 'Editor is off. Reload the chat page to hide the Code tab.';
+                    }} else {{
+                        status.textContent = 'Editor command failed: ' + (body.output || 'unknown error');
+                    }}
+                }})
+                .catch(function (e) {{
+                    status.textContent = 'Editor command failed: ' + e;
+                }})
+                .finally(function () {{ toggle.disabled = false; }});
+        }}
+
+        function updateVSCodeSlider(enabled) {{
+            const slider = document.getElementById('vscodeSlider');
+            if (!slider) return;
+            const track = slider.previousElementSibling;
+            track.style.backgroundColor = enabled ? '#8b5cf6' : '#555';
+            slider.style.transform = enabled ? 'translateX(20px)' : 'translateX(0)';
+        }}
+
+        // Browser tab visibility. The whole set is written as one comma-separated
+        // value on every change — sending the full list rather than a per-tab
+        // delta means two quick toggles can't interleave into a half-applied set.
+        function saveVisibleTabs() {{
+            const toggles = Array.from(document.querySelectorAll('.browser-tab-toggle'));
+            toggles.forEach(function (t) {{ updateBrowserTabSlider(t); }});
+
+            const chosen = toggles.filter(function (t) {{ return t.checked; }})
+                                  .map(function (t) {{ return t.dataset.target; }});
+
+            fetch('/api/site-settings/visible_tabs', {{
+                method: 'PUT',
+                headers: {{ 'Content-Type': 'application/json' }},
+                body: JSON.stringify({{ value: chosen.join(',') }})
+            }});
+        }}
+
+        function updateBrowserTabSlider(toggle) {{
+            const track = toggle.nextElementSibling;
+            const knob = track && track.nextElementSibling;
+            if (!track || !knob) return;
+            track.style.backgroundColor = toggle.checked ? '#8b5cf6' : '#555';
+            knob.style.transform = toggle.checked ? 'translateX(20px)' : 'translateX(0)';
         }}
 
         function updateTokenWheelSlider(enabled) {{

@@ -8,6 +8,12 @@ import os
 from httpx import AsyncClient
 from unittest.mock import AsyncMock, MagicMock, patch
 
+# Never report test traffic to the production mothership. Set before anything
+# imports MothershipClient: synthetic rows (summarization fixtures,
+# ws_integration_thread) were 94 of the 140 instance_errors occurrences tagged
+# with version 0.7.0. See app/services/mothership_client.py.
+os.environ["LLAMABOT_TELEMETRY_DISABLED"] = "1"
+
 # Disable LangSmith tracing completely for tests
 os.environ["LANGCHAIN_TRACING_V2"] = "false"
 os.environ.pop("LANGSMITH_ENDPOINT", None)

@@ -36,6 +36,27 @@ already handled centrally: `supports_prompt_caching()` returns False for any
 non-Anthropic name, and `system_message_for_model()` flattens accordingly. Don't
 re-derive either check at a call site.
 
+## Registering a model is not the same as enabling it
+
+All five registrations can be correct and the model still never runs. `model_policy`
+resolves an **allow-list**, and the allow sources **intersect**: `.leonardo/instance.json`
+`enabled_models` ∩ `ENABLED_MODELS`. A model absent from either is swapped for the box
+default inside `get_llm`, so the dropdown keeps showing the user's pick while every turn
+runs on something else. On the dev box, `instance.json` carries a real `enabled_models`
+list — add the new name there (`~/dev/Leonardo/.leonardo/instance.json`, read per request,
+no restart needed) or nothing you added will be reachable.
+
+The symptom is one log line per turn:
+
+```
+WARNING - Requested model 'x' is disabled by policy; using 'muse-spark-1.2-contributor' instead.
+```
+
+Since 0.7.0e that substitution also raises a `model_substituted` websocket frame, shown as
+a banner above the composer — check the UI before digging through logs. Fleet-wide the
+allow-list is mothership-owned, so a model that ships in the dropdown but not in
+`enabled_models` is invisible on every real box.
+
 ## Verifying on the dev box
 
 `MODEL_SWITCHING_ALLOWED` defaults to False and is unset in the container, so
@@ -74,3 +95,14 @@ print(type(m).__name__, m.model_name, m.openai_api_base)"'
   to the contributor tier. So there is nothing for `request_handler`'s extractor to
   pick up — do not "fix" it by adding a reasoning shape for Meta, and don't reach for
   `use_responses_api=True` expecting summaries the way the GPT-5 entries get them.
+
+- **`nemotron-lightning-30b-fireworks`** — the same weights as the self-hosted
+  `nemotron-lightning-30b-runpod`, on Fireworks serverless, and a sibling entry rather
+  than a re-point of it. Verified live 2026-08-16: Fireworks returns Nemotron's thinking
+  in a separate `reasoning_content` field (streamed as deltas, and accepted back on
+  assistant messages), so it uses `ChatDeepSeekWithReasoning` — a bare `ChatOpenAI`
+  would drop the thinking. It sets **no** `max_tokens`: reasoning bills against that cap
+  while being stripped from the response, so a small cap returns empty content with no
+  error, and Fireworks imposes no small default of its own. Key: `FIREWORKS_API_KEY`,
+  falling back to the `FIREWORKS_DEEPSEEK_API_KEY` name already deployed on boxes (one
+  Fireworks account issues one key, so a per-model key name would be fiction).

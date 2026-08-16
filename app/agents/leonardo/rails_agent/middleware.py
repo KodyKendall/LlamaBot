@@ -16,6 +16,10 @@ import time
 
 from app.agents.leonardo.rails_agent.state import RailsAgentState
 from app.agents.leonardo.llm_factory import get_llm, system_message_for_model
+# The box's resolved default (Muse where the box has a META key, DeepSeek
+# where it does not) — never a hardcoded id, or a turn that arrives without
+# an explicit llm_model silently ignores the fleet default.
+from app.agents.leonardo.model_policy import enabled_default_model
 from app.agents.leonardo.resilience import (
     is_transient_error,
     _MODEL_RETRY_MAX_ATTEMPTS,
@@ -302,14 +306,14 @@ class StripUnsupportedMultimodalMiddleware(AgentMiddleware):
         return modified if any_changed else messages
 
     def wrap_model_call(self, request, handler):
-        model_name = request.state.get('llm_model') or 'deepseek-v4-flash'
+        model_name = request.state.get('llm_model') or enabled_default_model()
         messages = self._strip_unsupported(request.messages, model_name)
         if messages is not request.messages:
             return handler(request.override(messages=messages))
         return handler(request)
 
     async def awrap_model_call(self, request, handler):
-        model_name = request.state.get('llm_model') or 'deepseek-v4-flash'
+        model_name = request.state.get('llm_model') or enabled_default_model()
         messages = self._strip_unsupported(request.messages, model_name)
         if messages is not request.messages:
             return await handler(request.override(messages=messages))
@@ -423,7 +427,7 @@ class DynamicModelMiddleware(AgentMiddleware):
 
     def wrap_model_call(self, request, handler):
         """Sync: select the model, then retry the call on transient failures."""
-        llm_model = request.state.get('llm_model') or 'deepseek-v4-flash'
+        llm_model = request.state.get('llm_model') or enabled_default_model()
         logger.info(f"Using LLM model: {llm_model}")
         req = self._override(request, llm_model)
         attempt = 0
@@ -446,7 +450,7 @@ class DynamicModelMiddleware(AgentMiddleware):
         The async path previously had NO retry at all — this closes that gap for
         the websocket chat path, which runs through here.
         """
-        llm_model = request.state.get('llm_model') or 'deepseek-v4-flash'
+        llm_model = request.state.get('llm_model') or enabled_default_model()
         logger.info(f"Using LLM model: {llm_model}")
         req = self._override(request, llm_model)
         attempt = 0

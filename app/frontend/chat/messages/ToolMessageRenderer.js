@@ -228,14 +228,43 @@ export class ToolMessageRenderer {
   _extractFilename(path) {
     if (!path) return '';
 
+    // The caller hands us a tool call's first argument verbatim, so it is not
+    // necessarily a string. Coercing here (rather than type-guarding each
+    // branch) is what stops `path.replace is not a function` from escaping
+    // into socket.onmessage and killing the chat panel.
+    const text = this._asDisplayString(path);
+    if (!text) return '';
+
     // For bash commands, strip out "bundle exec" prefix
-    if (typeof path === 'string' && path.startsWith('bundle exec ')) {
-      return path.replace(/^bundle exec /, '');
+    if (text.startsWith('bundle exec ')) {
+      return text.replace(/^bundle exec /, '');
     }
 
     // Handle both forward and backward slashes
-    const parts = path.replace(/\\/g, '/').split('/');
+    const parts = text.replace(/\\/g, '/').split('/');
     return parts[parts.length - 1];
+  }
+
+  /**
+   * Coerce any tool-argument value to something displayable.
+   * Objects prefer their path-ish field so `{file_path: 'app/models/user.rb'}`
+   * still renders as `user.rb` rather than `[object Object]`.
+   */
+  _asDisplayString(value) {
+    if (value === null || value === undefined) return '';
+    if (typeof value === 'string') return value;
+
+    if (typeof value === 'object' && !Array.isArray(value)) {
+      const pathish = value.file_path || value.path || value.filename || value.task;
+      if (typeof pathish === 'string') return pathish;
+      try {
+        return JSON.stringify(value);
+      } catch (e) {
+        return '';
+      }
+    }
+
+    return String(value);
   }
 
   /**
@@ -249,11 +278,15 @@ export class ToolMessageRenderer {
 
     // For delegate tools, truncate the task description
     if (toolName === 'delegate_task' || toolName === 'delegate_research') {
+      // Same coercion as _extractFilename: `.length` on a non-string is
+      // undefined, so this branch used to fall through and return the raw
+      // value, which the DOM rendered as [object Object].
+      const task = this._asDisplayString(firstArgument);
       const maxLength = 60;
-      if (firstArgument.length > maxLength) {
-        return firstArgument.substring(0, maxLength) + '...';
+      if (task.length > maxLength) {
+        return task.substring(0, maxLength) + '...';
       }
-      return firstArgument;
+      return task;
     }
 
     // For other tools, use existing filename extraction

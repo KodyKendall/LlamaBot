@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 
 from langchain.agents.middleware import SummarizationMiddleware
 from langchain_core.messages import HumanMessage
@@ -65,6 +66,12 @@ MIN_PRESERVE_TOKENS = 400
 # headroom for the next turn. Landing at 0.99 of the trigger is still a loop.
 POST_COMPACTION_TARGET_RATIO = 0.8
 
+# A message larger than the preserved tail can never be compacted away. When one
+# is found it is fitted to this fraction of the keep budget — small enough that
+# the tail still holds a real conversation around it, big enough that the content
+# is not reduced to a stub.
+BALLAST_FIT_RATIO = 0.5
+
 _TRUNCATION_NOTICE = (
     "\n\n## NOTE: OVERSIZED CONTENT WAS TRUNCATED\n"
     "This conversation contains content too large to keep in context (usually a very "
@@ -74,6 +81,73 @@ _TRUNCATION_NOTICE = (
     "tell the user that some earlier content was dropped — if the thread keeps "
     "struggling, suggest they start a new one."
 )
+
+
+# A summarizer that emits a tool call instead of prose stores markup as the
+# thread's summary. In the 2026-08-13 incident the stored summary was
+# `<｜｜DSML｜｜tool_calls><｜｜DSML｜｜invoke name="read_file">...` — so the agent
+# re-derived context it already had, generated more messages, and fed the loop it
+# was supposed to end. Matched loosely on purpose: every provider spells its
+# tool-call markup differently and a false positive only costs one summary.
+_TOOL_CALL_MARKUP_RE = re.compile(
+    r"DSML"
+    r"|<\s*(function|tool)[_\s]*call"
+    r"|<\s*invoke\s+name\s*="
+    r"|<\|[^|]*tool[^|]*\|>"
+    r"|<\s*antml:",
+    re.IGNORECASE,
+)
+
+_CORRUPT_SUMMARY_REPLACEMENT = (
+    "The automatic summary of this conversation could not be produced (the "
+    "summarization model returned a tool call instead of a summary). Earlier "
+    "history has been compacted away and is not recoverable from this "
+    "conversation. Do NOT guess at what was discussed: if you need earlier "
+    "context, re-read the relevant files directly, and ask the user to confirm "
+    "anything you are unsure about."
+)
+
+
+def looks_like_tool_call_markup(text) -> bool:
+    """True if `text` is a model's tool-call syntax rather than prose."""
+    return isinstance(text, str) and bool(_TOOL_CALL_MARKUP_RE.search(text))
+
+
+def validate_summary_text(text):
+    """Return `text`, or a safe replacement if it isn't actually a summary.
+
+    Storing markup as the summary is worse than storing nothing: it is carried
+    forward by every future compaction, it tells the agent nothing, and it reads
+    to the model as an instruction to go call a tool.
+    """
+    if not looks_like_tool_call_markup(text):
+        return text
+    logger.error(
+        "RailsSummarizationMiddleware: the summarization model returned tool-call "
+        "markup instead of a summary (%d chars, starts %r). Storing a placeholder "
+        "instead — a corrupt summary makes the agent re-derive context it already "
+        "had and feeds the compaction loop.",
+        len(text), text[:120],
+    )
+    return _CORRUPT_SUMMARY_REPLACEMENT
+
+
+def _record_compaction_on_turn():
+    """Count this compaction against the turn the user is waiting on.
+
+    The request handler reads the count when the turn ends and tells the user in
+    chat if the thread has been compacting instead of working. Best-effort in
+    every direction: there is no recorder installed in headless runs or tests,
+    and telemetry must never be the reason a compaction fails.
+    """
+    try:
+        from app.lib.turn_metrics import current_turn
+
+        turn = current_turn()
+        if turn is not None:
+            turn.record_compaction()
+    except Exception:  # pragma: no cover - defensive
+        pass
 
 
 def _strip_images_then_count(counter):
@@ -248,7 +322,7 @@ class RailsSummarizationMiddleware(SummarizationMiddleware):
             # Unexpected shape (upstream changed); leave the stock result alone.
             return result
 
-        summary_msg = body[summary_idx]
+        summary_msg = self._validate_summary(body[summary_idx])
         preserved = body[summary_idx + 1:]
         preserved_ids = {getattr(m, "id", None) for m in preserved}
 
@@ -273,6 +347,7 @@ class RailsSummarizationMiddleware(SummarizationMiddleware):
         compacted = self._break_loop_if_still_oversized(
             [*initial, summary_msg, *preserved], runtime,
         )
+        _record_compaction_on_turn()
         return {"messages": [remove_op, *compacted]}
 
     def _first_human_messages(self, messages, exclude_ids):
@@ -340,7 +415,7 @@ class RailsSummarizationMiddleware(SummarizationMiddleware):
     # -- loop breaker ---------------------------------------------------------
 
     def _break_loop_if_still_oversized(self, messages, runtime=None):
-        """Guarantee the compacted thread is actually under the trigger.
+        """Guarantee the compacted thread lands under the post-compaction TARGET.
 
         If a compaction lands back above the trigger, `before_model` fires again
         on the very next step and the agent spends every turn summarizing instead
@@ -349,39 +424,131 @@ class RailsSummarizationMiddleware(SummarizationMiddleware):
         `SummarizationMiddleware` never summarizes away the current turn's
         message, so it is always in the preserved tail).
 
-        So: fail loud, and force the count under the target instead of handing
-        back a state we know will loop.
+        Why the TARGET and not the trigger
+        ----------------------------------
+        This guard used to return happy at `total < threshold`, and that is how
+        the 2026-08-13 incident stayed invisible for 18 minutes. A 74k-token
+        `grep_files` result — bigger than the 30k keep-tail, so uncompactable by
+        construction — left every pass landing at ~90-101k against a 150k
+        trigger. Under the trigger, so the guard said fine and logged nothing;
+        but with only ~49k of headroom against permanent ballast, two or three
+        ordinary steps crossed 150k again and it re-summarized. Forever.
+
+        A compaction that does not get under `POST_COMPACTION_TARGET_RATIO` of
+        the trigger has not reclaimed enough to buy a turn's work, so it IS the
+        loop, whichever side of the trigger it landed on. Treat it as one: fail
+        loud, file the friction report, and force the count under the target
+        instead of handing back a state we know will re-fire.
         """
         threshold = self._trigger_token_threshold()
         if threshold is None:
             return messages
 
-        counts = [self._count([m]) for m in messages]
-        total = sum(counts)
-        if total < threshold:
-            return messages
-
         target = int(threshold * POST_COMPACTION_TARGET_RATIO)
+        counts = [self._count([m]) for m in messages]
+
+        # Permanent ballast first: a single message bigger than the keep-tail
+        # survives every future compaction, so the total being fine today says
+        # nothing about tomorrow. This is the check that actually catches the
+        # 2026-08-13 shape — that thread compacted to ~101k against a 150k
+        # trigger, comfortably under BOTH the trigger and the 120k target, and
+        # was still doomed, because 74k of what remained could never be removed.
+        messages, counts, shrank_ballast = self._shrink_permanent_ballast(
+            messages, counts, threshold, runtime,
+        )
+
+        total = sum(counts)
+        if total <= target:
+            # Content was still dropped if ballast was cut, and the agent has to
+            # know that so it can tell the user rather than answering confidently
+            # from a conversation with a hole in it.
+            return self._note_truncation(messages) if shrank_ballast else messages
+
         biggest = max(range(len(messages)), key=lambda i: counts[i])
         logger.error(
-            "RailsSummarizationMiddleware: summarization did NOT get under the trigger "
-            "(%d tokens after compaction vs trigger %d) — this thread would re-summarize "
-            "on every step forever. Force-truncating to %d tokens. Largest contributor: "
-            "%s id=%s (%d tokens).",
-            total, threshold, target, type(messages[biggest]).__name__,
+            "RailsSummarizationMiddleware: compaction did not reclaim enough — %d tokens "
+            "remain against a post-compaction target of %d (trigger %d). This thread "
+            "re-summarizes every few steps and never completes a turn. Force-truncating "
+            "to %d tokens. Largest contributor: %s id=%s (%d tokens).",
+            total, target, threshold, target, type(messages[biggest]).__name__,
             getattr(messages[biggest], "id", None), counts[biggest],
         )
 
-        out = self._force_under_target(list(messages), counts, target)
-
-        # Tell the agent what happened, so it can tell the user instead of
-        # silently answering from a conversation with holes in it.
-        out = [
-            self._with_appended_note(m, _TRUNCATION_NOTICE) if self._is_summary(m) else m
-            for m in out
-        ]
+        out = self._note_truncation(self._force_under_target(list(messages), counts, target))
         self._report_compaction_friction(total, threshold, messages[biggest], runtime)
         return out
+
+    @staticmethod
+    def _validate_summary(summary_msg):
+        """Never store tool-call markup as a thread's summary."""
+        content = getattr(summary_msg, "content", None)
+        if not isinstance(content, str):
+            return summary_msg
+        checked = validate_summary_text(content)
+        if checked is content:
+            return summary_msg
+        return summary_msg.model_copy(update={"content": checked})
+
+    def _note_truncation(self, messages):
+        """Tell the agent content was dropped, so it can tell the user."""
+        return [
+            self._with_appended_note(m, _TRUNCATION_NOTICE) if self._is_summary(m) else m
+            for m in messages
+        ]
+
+    def _keep_token_budget(self):
+        """Tokens the middleware preserves as the recent tail, if token-based."""
+        keep = getattr(self, "keep", None)
+        if isinstance(keep, (tuple, list)) and len(keep) == 2 and keep[0] == "tokens":
+            return int(keep[1])
+        return None
+
+    def _shrink_permanent_ballast(self, messages, counts, threshold, runtime):
+        """Fit any message too big for the preserved tail to ever shed it.
+
+        `SummarizationMiddleware` never splits a tool-call group and never
+        summarizes the preserved tail, so a single message larger than the
+        keep-tail budget is immortal: it is re-preserved by every compaction for
+        the rest of the thread's life. Each pass then reclaims only the ordinary
+        history around it, buys a step or two of headroom, and re-fires. The
+        totals look healthy the whole time — the thread just never finishes a
+        turn, and the user sees a spinner.
+
+        Nothing should reach here now that tool results are capped at source
+        (`app/agents/utils/tool_output_limits.py`) and inbound frames before that
+        (`app/websocket/payload_limits.py`). That is the point: this is the
+        backstop for the next unbounded string we have not thought of, and it is
+        loud so we find out about it from telemetry rather than from a customer.
+        """
+        keep_budget = self._keep_token_budget()
+        if keep_budget is None:
+            return messages, counts, False
+
+        if all(c <= keep_budget for c in counts):
+            return messages, counts, False
+
+        allowance = max(MIN_PRESERVE_TOKENS, int(keep_budget * BALLAST_FIT_RATIO))
+        messages = list(messages)
+        counts = list(counts)
+        for i, msg in enumerate(list(messages)):
+            if counts[i] <= keep_budget:
+                continue
+            fitted = self._fit_message(msg, allowance)
+            fitted_cost = self._count([fitted])
+            logger.error(
+                "RailsSummarizationMiddleware: message %s id=%s is %d tokens — larger "
+                "than the %d-token preserved tail, so no future compaction can ever "
+                "remove it and this thread would re-summarize every few steps forever. "
+                "Truncating it to %d tokens. Something produced an uncapped payload; "
+                "find it and cap it at the source.",
+                type(msg).__name__, getattr(msg, "id", None), counts[i],
+                keep_budget, fitted_cost,
+            )
+            self._report_compaction_friction(sum(counts), threshold, msg, runtime)
+            if fitted_cost < counts[i]:
+                messages[i] = fitted
+                counts[i] = fitted_cost
+        return messages, counts, True
 
     def _force_under_target(self, messages, counts, target):
         """Get `messages` under `target` tokens, escalating until it is.
@@ -547,6 +714,7 @@ class RailsSummarizationMiddleware(SummarizationMiddleware):
         from langgraph.graph.message import REMOVE_ALL_MESSAGES
 
         self._report_compaction_friction(sum(counts), threshold, messages[-1], runtime)
+        _record_compaction_on_turn()
         return {"messages": [RemoveMessage(id=REMOVE_ALL_MESSAGES), *fixed]}
 
     @staticmethod
@@ -567,12 +735,13 @@ class RailsSummarizationMiddleware(SummarizationMiddleware):
             from app.agents.leonardo import friction
 
             thread_id = self._thread_id(runtime)
+            target = int(threshold * POST_COMPACTION_TARGET_RATIO)
             report = friction.build_friction_report(
                 what_happened=(
-                    f"Summarization could not get the conversation under its own trigger: "
-                    f"{total} tokens remained after compaction (trigger {threshold}). "
-                    f"Without force-truncation this thread re-summarizes on every step and "
-                    f"never completes a turn."
+                    f"Summarization did not reclaim enough to buy a turn's work: "
+                    f"{total} tokens remained after compaction, against a post-compaction "
+                    f"target of {target} (trigger {threshold}). Without force-truncation "
+                    f"this thread re-summarizes every few steps and never completes a turn."
                 ),
                 category="environment",
                 severity="workaround",
@@ -583,8 +752,10 @@ class RailsSummarizationMiddleware(SummarizationMiddleware):
                     f"id={getattr(biggest, 'id', None)} ({self._count([biggest])} tokens)"
                 ),
                 suggested_fix=(
-                    "Find the oversized payload that reached the conversation and cap it at "
-                    "ingestion (see app/websocket/payload_limits.py)."
+                    "Find the oversized payload that reached the conversation and cap it "
+                    "where it enters: app/websocket/payload_limits.py for anything the "
+                    "browser sent, app/agents/utils/tool_output_limits.py for anything a "
+                    "tool produced."
                 ),
             )
             accepted, _reason = friction.claim_report_slot(

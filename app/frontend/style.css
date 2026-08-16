@@ -2014,6 +2014,49 @@ button.brand-logo-thumb:hover .brand-logo-zoom {
 
 .update-modal-badge.success { background: #22c55e; }
 .update-modal-badge.warn { background: #f59e0b; }
+.update-modal-badge.lock { background: #8b5cf6; }
+
+/* ===================== Instance sleep lock =====================
+   Same card as the update modal, but genuinely blocking: it sits above every
+   other overlay and there is no dismiss affordance. */
+.lock-modal-overlay {
+    z-index: 10050;
+    background: rgba(0, 0, 0, 0.78);
+    backdrop-filter: blur(6px);
+}
+
+.lock-modal-card {
+    text-align: center;
+}
+
+.lock-modal-card .update-modal-head {
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.lock-modal-card .update-modal-actions {
+    justify-content: center;
+}
+
+.lock-modal-cta {
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Nothing behind the lock is interactive, even if a stray handler fires. */
+body.instance-locked .chat-section,
+body.instance-locked .iframe-section,
+body.instance-locked .resize-handle {
+    pointer-events: none;
+    user-select: none;
+}
+
+body.instance-locked .lock-modal-overlay {
+    pointer-events: auto;
+}
 
 .update-modal-sub {
     font-size: 0.9rem;
@@ -3841,6 +3884,28 @@ button.brand-logo-thumb:hover .brand-logo-zoom {
 
 .tab-external-link svg {
     display: block;
+}
+
+/* Unread-messages count on the Messages tab.
+   min-width + border-radius on a fixed height keeps a one-digit count a circle
+   and lets two or three digits grow into a pill, instead of clipping. */
+.tab-unread-badge {
+    flex: 0 0 auto;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 9px;
+    background-color: #ef4444;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 18px;
+    text-align: center;
+    white-space: nowrap;
+}
+
+.tab-unread-badge.hidden {
+    display: none;
 }
 
 /* Browser title bar */
@@ -6613,6 +6678,18 @@ button.brand-logo-thumb:hover .brand-logo-zoom {
     /* .input-area button:hover lifts and shadows every composer button. */
     transform: none;
     box-shadow: none;
+}
+
+/* Model substitution notice — same banner shape as the image notice above, in
+   amber rather than blue: this one says something the user asked for is NOT
+   happening, so it should not read as the same kind of message as an FYI. */
+.image-switch-banner.model-switch-banner {
+    background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+    border-color: #f59e0b;
+}
+
+.image-switch-banner.model-switch-banner .warning-content {
+    color: #92400e;
 }
 
 @keyframes slideDown {
