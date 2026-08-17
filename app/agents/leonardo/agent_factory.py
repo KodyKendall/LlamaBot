@@ -146,6 +146,18 @@ def repair_orphaned_tool_calls_in_messages(messages: list) -> list:
     :func:`emitted_tool_calls` for why they are just as fatal — and an id-less
     call, which nothing can answer, is dropped from the outgoing message.
 
+    The mirror-image break is repaired here too: an ORPHAN ``ToolMessage`` whose
+    ``tool_call_id`` no ``AIMessage`` in the thread ever announced (left behind
+    when summarization or an older repair dropped the anchoring ``AIMessage``).
+    The provider rejects that just as hard, and dropping it from the outgoing
+    payload is the whole fix — it never has to be deleted from the checkpoint.
+
+    Doing BOTH shapes here is what keeps repair out of stored history: this
+    function rebuilds the list, so it can place a placeholder immediately after
+    the call it answers. A state-level fix cannot (``add_messages`` only
+    appends), which is why the state layer used to delete the messages in
+    between. See app/tests/test_thread_repair_is_non_destructive.py.
+
     This scans the whole thread and injects placeholders so the history is valid
     before the model sees it. Idempotent: returns the SAME list object when
     nothing needed repair (so callers can cheaply detect "no change").
@@ -156,10 +168,30 @@ def repair_orphaned_tool_calls_in_messages(messages: list) -> list:
         for msg in messages
         if isinstance(msg, ToolMessage) and msg.tool_call_id
     }
+    # Every tool_call_id any AIMessage announced. A ToolMessage outside this set
+    # answers nothing. Deliberately whole-thread rather than "announced so far":
+    # we drop only genuinely unanchored results, never a real answer that merely
+    # sits in an odd position.
+    announced_ids = {
+        tc["id"]
+        for msg in messages
+        if isinstance(msg, AIMessage)
+        for tc in emitted_tool_calls(msg)
+        if tc.get("id")
+    }
 
     result = []
     any_repaired = False
     for msg in messages:
+        if isinstance(msg, ToolMessage) and getattr(msg, "tool_call_id", None) not in announced_ids:
+            logger.warning(
+                "repair_orphaned_tool_calls: dropping orphan ToolMessage "
+                "tool_call_id=%s (no AIMessage announced it)",
+                getattr(msg, "tool_call_id", None),
+            )
+            any_repaired = True
+            continue
+
         if isinstance(msg, AIMessage) and emitted_tool_calls(msg):
             msg, dropped = _drop_idless_tool_calls(msg)
             any_repaired = any_repaired or dropped

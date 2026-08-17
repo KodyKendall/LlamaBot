@@ -403,6 +403,19 @@ class RequestHandler:
         return None
 
     @staticmethod
+    def _snapshot_has_pending_interrupt(state_snapshot) -> bool:
+        """True if the graph is paused inside an `interrupt()` on this snapshot.
+
+        Same source `_pending_question_interrupt` reads, but for ANY interrupt
+        type — a paused graph is a paused graph regardless of what it is waiting
+        for.
+        """
+        for task in getattr(state_snapshot, "tasks", None) or []:
+            if getattr(task, "interrupts", None):
+                return True
+        return False
+
+    @staticmethod
     def _normalize_messages(raw):
         """Return a plain message list from a possibly DeltaChannel-wrapped value.
 
@@ -422,7 +435,9 @@ class RequestHandler:
             return list(raw.value) if raw.value is not None else []
         return list(raw) if isinstance(raw, (list, tuple)) else raw
 
-    async def _repair_thread_state_if_needed(self, app, config):
+    async def _repair_thread_state_if_needed(
+        self, app, config, *, preserve_pending_interrupts: bool = True,
+    ):
         """
         Detect and repair two shapes of corrupted thread state that violate
         the LLM contract `every tool message must follow an assistant message
@@ -437,8 +452,24 @@ class RequestHandler:
             corresponding following ToolMessage. Cause: task cancelled
             mid-tool-execution, or the model emitted a call whose arguments JSON
             did not parse (`invalid_tool_calls`) — no executor ever runs it, so
-            nothing ever answers it. Fix: remove anything after the corrupted
-            AIMessage and inject synthetic "[Cancelled]" ToolMessages.
+            nothing ever answers it. Fix: append synthetic "[Cancelled]"
+            ToolMessages, and ONLY when the dangling AIMessage is the trailing
+            one (see below).
+
+        This layer is a backstop, not the primary defence. The primary one is
+        `repair_orphaned_tool_calls_in_messages` /
+        `RepairOrphanedToolCallsMiddleware`, which rebuilds the outgoing message
+        list on EVERY model call for all 11 Leonardo graphs and persists nothing.
+
+        Why this layer must stay narrow: state updates go through `add_messages`,
+        which can only APPEND. So a state write can only produce a correctly
+        positioned ToolMessage when the dangling AIMessage is at the END of the
+        thread. It used to buy that adjacency everywhere else by deleting every
+        message after the offending AIMessage — which silently destroyed the rest
+        of the user's conversation over a single stale tool_call. It no longer
+        does: a dangling call with live history after it is left to the
+        request-time layer, which places the placeholder correctly and throws
+        nothing away.
 
         Both passes scan `emitted_tool_calls` — what the serializer actually puts
         on the wire (tool_calls + invalid_tool_calls) — not just the executable
@@ -447,6 +478,21 @@ class RequestHandler:
         re-bricking the thread on the next turn.
 
         Both fixes are applied in a single aupdate_state call.
+
+        `preserve_pending_interrupts` (default True) is the safety guard: when
+        the graph is paused inside an `interrupt()`, the waiting tool_call has no
+        ToolMessage yet BY DESIGN — that is the pause, not corruption. Repairing
+        it writes state that supersedes the pending interrupt, so the
+        `Command(resume=...)` that follows lands on a thread with no interrupt
+        and the user's answer is silently discarded (0.7.1 fleet-wide bug: every
+        ask_user_question card click lost its answer and the agent re-asked).
+        A paused graph is not corrupted, so we do nothing and let the resume run.
+
+        Pass False only where abandoning the pause is the intent — the main-chat
+        path, where a user message arriving during a `browser_command` interrupt
+        must cancel that tool_call cleanly (its answer can only come from the
+        frontend, never from chat text). See the `_QUESTION_INTERRUPT_TYPES`
+        comment above.
         """
         from langchain_core.messages import AIMessage, ToolMessage as LCToolMessage
         from langchain_core.messages import RemoveMessage
@@ -455,6 +501,16 @@ class RequestHandler:
         try:
             state_snapshot = await app.aget_state(config)
             if not state_snapshot or not state_snapshot.values:
+                return
+
+            # A graph paused on an interrupt is waiting, not broken. Any write
+            # here would supersede that interrupt and throw away the resume value
+            # the caller is about to deliver.
+            if preserve_pending_interrupts and self._snapshot_has_pending_interrupt(state_snapshot):
+                logger.info(
+                    "Skipping thread state repair: graph is paused on a pending "
+                    "interrupt (its unanswered tool_call is the pause, not corruption)."
+                )
                 return
 
             messages = self._normalize_messages(state_snapshot.values.get("messages", []))
@@ -501,15 +557,31 @@ class RequestHandler:
                     corrupted_index = i
                     break
 
+            # An append only lands adjacent to its AIMessage if nothing but that
+            # call's own ToolMessages follows. Anything else (a later AIMessage,
+            # a HumanMessage — i.e. the conversation moved on) is not repairable
+            # from here without deleting it, so hand it to the request-time layer.
+            if corrupted_index is not None and not all(
+                isinstance(m, LCToolMessage) for m in messages[corrupted_index + 1:]
+            ):
+                logger.info(
+                    f"Dangling tool_call at index {corrupted_index} has live history "
+                    f"after it; leaving it to the request-time repair rather than "
+                    f"deleting {len(messages) - corrupted_index - 1} message(s)."
+                )
+                corrupted_index = None
+
             if not orphan_msgs and corrupted_index is None:
                 return
 
             remove_ops = []
             repair_messages = []
 
-            # Shape A: RemoveMessage each orphan ToolMessage. Orphans removed
-            # here will not be in the messages_to_remove slice below because
-            # the dangling-tool_calls fix only looks after `corrupted_index`.
+            # Shape A: RemoveMessage each orphan ToolMessage. This is a targeted
+            # delete of a message that answers nothing — never a real result, and
+            # never the surrounding conversation. The request-time layer also
+            # drops these from the outgoing payload, so this is belt-and-braces
+            # rather than the thing standing between the user and a 400.
             if orphan_msgs:
                 logger.warning(
                     f"Corrupted thread state detected: {len(orphan_msgs)} orphan ToolMessage(s) "
@@ -520,18 +592,24 @@ class RequestHandler:
                     if mid:
                         remove_ops.append(RemoveMessage(id=mid))
 
-            # Shape B: drop everything after the corrupted AIMessage and inject
-            # synthetic ToolMessages for its dangling tool_calls.
+            # Shape B: append synthetic ToolMessages for the trailing AIMessage's
+            # unanswered tool_calls. Nothing is deleted — the calls already
+            # answered keep their real results, and the appended placeholders
+            # complete the block.
             if corrupted_index is not None:
                 corrupted_msg = messages[corrupted_index]
-                tool_calls = [tc for tc in emitted_tool_calls(corrupted_msg) if tc.get("id")]
+                answered_ids = {
+                    getattr(m, "tool_call_id", None)
+                    for m in messages[corrupted_index + 1:]
+                }
+                tool_calls = [
+                    tc for tc in emitted_tool_calls(corrupted_msg)
+                    if tc.get("id") and tc["id"] not in answered_ids
+                ]
                 logger.warning(
                     f"Corrupted thread state detected at message index {corrupted_index}: "
                     f"AIMessage with {len(tool_calls)} dangling tool_call(s). Repairing..."
                 )
-                for m in messages[corrupted_index + 1:]:
-                    if hasattr(m, "id") and m.id:
-                        remove_ops.append(RemoveMessage(id=m.id))
                 for tc in tool_calls:
                     is_invalid = bool(tc.get("error")) or tc.get("type") == "invalid_tool_call"
                     repair_messages.append(LCToolMessage(
@@ -912,8 +990,16 @@ class RequestHandler:
                     stream_input = Command(resume=resume_value)
                 else:
                     # Auto-repair corrupted thread state (dangling tool_calls without ToolMessages)
-                    # This can happen when a previous task was cancelled mid-tool-execution
-                    await self._repair_thread_state_if_needed(app, config)
+                    # This can happen when a previous task was cancelled mid-tool-execution.
+                    #
+                    # preserve_pending_interrupts=False: we already know no QUESTION
+                    # interrupt is pending here, and a still-pending browser_command
+                    # one must be cancelled — the user typed instead of letting the
+                    # frontend answer it, so we abandon the pause deliberately and
+                    # send their message as a normal turn.
+                    await self._repair_thread_state_if_needed(
+                        app, config, preserve_pending_interrupts=False,
+                    )
                     stream_input = state
 
                 async for chunk in app.astream(stream_input, config=config, stream_mode=["updates", "messages", "custom"], subgraphs=True):
@@ -1245,7 +1331,9 @@ class RequestHandler:
                     "recursion_limit": recursion_limit
                 }
 
-                # Auto-repair corrupted thread state (defensive - less likely in HITL flow)
+                # Auto-repair corrupted thread state (defensive - less likely in HITL flow).
+                # No-ops while the graph is paused on the interrupt we are about to
+                # resume — repairing there would discard the user's decision.
                 await self._repair_thread_state_if_needed(app, config)
 
                 # Build HITLResponse from user decisions
@@ -1472,7 +1560,9 @@ class RequestHandler:
                     "recursion_limit": recursion_limit
                 }
 
-                # Auto-repair corrupted thread state
+                # Auto-repair corrupted thread state. No-ops while the graph is
+                # paused on the question interrupt we are about to resume —
+                # repairing there would discard the user's answer (0.7.1 bug).
                 await self._repair_thread_state_if_needed(app, config)
 
                 # Resume the graph — interrupt() returns this answer string
