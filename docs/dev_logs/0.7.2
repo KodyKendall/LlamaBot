@@ -1,0 +1,36 @@
+0.7.2:
+[x] - Fix question-card answers being silently discarded (P0, every 0.7.1 box).
+      Click an option on an ask_user_question card and the agent re-asked the
+      same question 2-3 times; the answer wasn't truncated, it was replaced.
+      Both resume handlers called _repair_thread_state_if_needed BEFORE
+      Command(resume=answer). A tool frozen in interrupt() legitimately has no
+      ToolMessage yet, so the repair read that as a dangling tool_call and wrote
+      a synthetic "[Cancelled]" — and that state write superseded the pending
+      interrupt, so the resume landed on a thread with nothing to resume. The
+      model then saw [Cancelled] where the answer belonged. Checkpoint ground
+      truth on the mothership: 5 [Cancelled] ToolMessages, ZERO "User answered:".
+      Present in 0.7.0 too, but the repair write failed silently there; the
+      0.7.1 as_node fix made it succeed, which armed the mis-detection.
+      Repair is now interrupt-aware — a paused graph is not corrupted, so it
+      no-ops and lets the resume through. HITL approvals had the identical
+      clobber and are fixed by the same guard. The main-chat path opts out
+      (preserve_pending_interrupts=False): cancelling a pending browser_command
+      there is deliberate, since only the frontend can answer that one.
+
+[x] - Stop thread repair from deleting the rest of the conversation. To make an
+      injected ToolMessage sit next to its AIMessage, shape-B repair removed
+      EVERY message after the offending one — so a single stale tool_call
+      anywhere in a thread permanently wiped all history after it. Found while
+      fixing the above; latent since the repair shipped, never diagnosed.
+      Root cause is the layer, not the loop: state updates go through
+      add_messages, which only APPENDS, so a checkpoint write can never place a
+      ToolMessage positionally, and the deletion was buying that adjacency with
+      the user's data. The request-time layer
+      (repair_orphaned_tool_calls_in_messages, wired into all 11 graphs) rebuilds
+      the outgoing list and has no such limit. So: orphan-ToolMessage dropping
+      moved there too — it was the last shape only the state layer covered —
+      and the state layer is now a narrow backstop that appends only when the
+      dangling AIMessage is trailing (where an append is already adjacent),
+      declines anything with live history after it, and deletes no conversation.
+      Rule going forward: repair the payload, never the past.
+      Notes: app/tests/test_thread_repair_is_non_destructive.py

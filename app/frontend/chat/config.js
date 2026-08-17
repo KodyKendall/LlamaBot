@@ -138,11 +138,13 @@ export function getVSCodeUrl() {
 /**
  * Get Inbox URL based on current protocol.
  *
- * Tickets, Feedback, Requests, Messages and Notifications all live behind this
+ * Messages, Tickets, Feedback, Requests and Notifications all live behind this
  * one tab; the Rails app renders a tab bar inside the frame to move between
  * them. /llama_bot/inbox is an entry point that redirects to the first of those
- * pages the signed-in user is allowed to open, because Tickets is
- * engineers-only and landing everyone there would dead-end the rest.
+ * pages the signed-in user is allowed to open — Messages today, since it is
+ * first in InboxHelper::INBOX_TABS and ungated. Keep the URL as the entry
+ * point rather than a page: tab order is owned by the Rails side, and Tickets
+ * is engineers-only, so a hardcoded page would dead-end whoever loses access.
  */
 export function getInboxUrl() {
   return getRailsUrl() + '/llama_bot/inbox';

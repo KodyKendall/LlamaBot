@@ -47,7 +47,7 @@ export class IframeManager {
     // VS CODE iframe
     this.vsCodeFrame = this.querySelector('[data-llamabot="vscode-frame"]');
 
-    // INBOX iframe (tickets, feedback, requests, messages, notifications)
+    // INBOX iframe (messages, tickets, feedback, requests, notifications)
     this.inboxFrame = this.querySelector('[data-llamabot="inbox-frame"]');
 
     // ACTIVITY iframe (audit log / record history)
