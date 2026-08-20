@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Leonardo</title>
     <!-- Favicon -->
-    <link rel="icon" type="image/png" id="favicon" href="https://llamapress-ai-image-uploads.s3.us-west-2.amazonaws.com/4bmqe5iolvp84ceyk9ttz8vylrym">
+    <link rel="icon" type="image/png" id="favicon" href="/frontend/leonardo-icon.png">
     <!-- Add marked.js for markdown parsing -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <!-- Fabric.js for screenshot annotation -->
@@ -149,6 +149,11 @@
             <div data-llamabot="thinking-area" class="thinking-area hidden"></div>
             <!-- File attachments preview area -->
             <div data-llamabot="attachments-preview" class="attachments-preview hidden"></div>
+            <!-- JavaScript errors pushed up from the Rails preview iframe.
+                 Rendered entirely by ui/ErrorAttach.js; the app's own errors reach
+                 us over postMessage (llamapress/console_capture.js), since the
+                 preview is a different origin and cannot be read directly. -->
+            <div class="js-error-banner hidden" data-llamabot="js-error-banner"></div>
             <!-- Image auto-switch notice (non-blocking, informational) -->
             <div class="image-switch-banner hidden" data-llamabot="image-switch-banner">
                 <div class="warning-content">

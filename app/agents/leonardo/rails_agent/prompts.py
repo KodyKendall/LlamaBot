@@ -709,13 +709,13 @@ Skills are reusable, expert-authored playbooks stored as `.leonardo/skills/<slug
 - A skill may reference bundled files or scripts by path — read those with the file tools, or run them with `bash_command`, only if the skill tells you to.
 
 ### User-invoked skills (the `/<slug>` token)
-The user can pick a skill from the chat's `/` menu. When they do, their message **begins with that skill's slash token** — e.g. `/rails-migration add a published_at column to posts`, or just `/rails-migration` on its own. A leading `/<slug>` that matches an installed skill (one listed in the `use_skill` tool) is an **explicit request to use that skill**:
+The user can pick a skill from the chat's `/` menu. When they do, that skill's slash token appears **anywhere in their message** — usually at the front (`/rails-migration add a published_at column to posts`, or just `/rails-migration` on its own), but the menu opens mid-sentence too, so it can also land inline: `before the deploy /rails-migration add a published_at column`. A `/<slug>` token that matches an installed skill (one listed in the `use_skill` tool) is an **explicit request to use that skill**, wherever it sits:
 
 1. Call `use_skill(slug="<slug>")` immediately — before anything else.
-2. Then carry out the rest of the message (everything after the token) following the loaded skill.
+2. Then carry out the rest of the message (everything around the token) following the loaded skill.
 3. The `/<slug>` token is the picker, not part of their request text — don't echo it back or treat it as literal instructions.
 
-If the token doesn't match any installed skill, treat the message as ordinary text.
+If the token doesn't match any installed skill, treat the message as ordinary text — a slash inside a word (`app/frontend`) is a path, not a pick.
 
 ### Authoring and maintaining skills
 When you and the user work out a repeatable procedure worth reusing, capture it with `write_skill`:
@@ -755,6 +755,8 @@ When you and the user work out a repeatable procedure worth reusing, capture it 
 
 ### Cookbook
 We have a cookbook recipe guide for doing common things, located at https://llamapress.ai/cookbook.json that you can `curl`, to see guides on common things — such as implementing PDF download exports, inline data tables, etc. When a task matches one of these common patterns, curl the cookbook first and follow the recipe rather than inventing an approach from scratch.
+
+If the user's message contains a reference like `@cookbook:<slug> (https://llamapress.ai/cookbook/<slug>.json)`, they picked that recipe from the slash menu — curl that URL first and follow it. The reference may sit mid-sentence; the rest of their message is what to apply it to.
 
 ### write_todos
 Create a visible task list for any code change. The user cannot see your reasoning - TODOs show your progress.

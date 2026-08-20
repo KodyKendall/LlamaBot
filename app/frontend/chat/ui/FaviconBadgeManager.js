@@ -71,9 +71,10 @@ export class FaviconBadgeManager {
     };
 
     this.originalFaviconImage.onerror = () => {
+      // No remote fallback on purpose: the old S3 icon is the white llama that
+      // disappears on light tab bars, and every badge redraw would repaint it.
+      // Badges stay off rather than restoring the wrong base icon.
       console.warn('FaviconBadgeManager: Could not load local favicon');
-      // Try the S3 URL as fallback
-      this.originalFaviconImage.src = 'https://llamapress-ai-image-uploads.s3.us-west-2.amazonaws.com/4bmqe5iolvp84ceyk9ttz8vylrym';
     };
 
     this.originalFaviconImage.src = this.originalFaviconUrl;

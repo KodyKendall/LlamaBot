@@ -1532,6 +1532,278 @@ button.brand-logo-thumb:hover .brand-logo-zoom {
     opacity: 1;
 }
 
+/* ===== Preview JavaScript errors (one quiet line above the composer) ===== */
+/* Deliberately understated. This sits under the composer for as long as the app
+   is broken, so it reads as a footnote — a dim row and a small amber dot, no
+   panel, no red fill. The error text itself lives in the row's tooltip. */
+.js-error-banner {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 2px 2px 6px;
+    font-size: 0.7rem;
+    color: rgba(255, 255, 255, 0.42);
+    line-height: 1.3;
+}
+
+.js-error-banner.hidden { display: none; }
+
+.js-error-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: #F59E0B;
+    flex-shrink: 0;
+    opacity: 0.75;
+}
+
+.js-error-count {
+    white-space: nowrap;
+}
+
+/* Pushed to the right so the row reads "N errors detected ......... Show Leo ×" */
+.js-error-show {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.js-error-show input {
+    width: 11px;
+    height: 11px;
+    margin: 0;
+    cursor: pointer;
+    accent-color: #8B5CF6;
+}
+
+.js-error-banner:hover { color: rgba(255, 255, 255, 0.6); }
+
+/* Nested selector on purpose: `.input-area button` styles every button in the
+   composer as a filled pill, and would turn this × into a chunky box. */
+.js-error-banner .js-error-x {
+    background: none;
+    border: none;
+    box-shadow: none;
+    border-radius: 0;
+    color: rgba(255, 255, 255, 0.28);
+    cursor: pointer;
+    font-size: 13px;
+    line-height: 1;
+    padding: 0 1px;
+    margin: 0;
+    width: auto;
+    height: auto;
+    min-width: 0;
+    min-height: 0;
+}
+
+.js-error-banner .js-error-x:hover {
+    background: none;
+    color: rgba(255, 255, 255, 0.65);
+    transform: none;
+}
+
+/* The "Read more" affordance. Hidden until the row is hovered, so the resting
+   state is just "N errors detected" and nothing else competes with the composer.
+   Faded with opacity rather than display/visibility on purpose: the link keeps
+   its space either way, so revealing it cannot shift the row's layout. */
+.js-error-banner .js-error-more {
+    background: none;
+    border: none;
+    box-shadow: none;
+    border-radius: 0;
+    padding: 0;
+    margin: 0;
+    width: auto;
+    height: auto;
+    min-width: 0;
+    font-size: 0.63rem;
+    font-weight: 400;
+    color: rgba(255, 255, 255, 0.34);
+    cursor: pointer;
+    text-decoration: none;
+    opacity: 0;
+    transition: opacity 0.15s ease, color 0.15s ease;
+}
+
+/* Keyboard users never hover — focus has to reveal it too, or the popup is
+   unreachable without a mouse. */
+.js-error-banner:hover .js-error-more,
+.js-error-banner .js-error-more:focus-visible {
+    opacity: 1;
+}
+
+.js-error-banner .js-error-more:hover {
+    background: none;
+    color: rgba(255, 255, 255, 0.62);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    transform: none;
+}
+
+/* --- "Read more" popup: same card language as the update/lock modals --- */
+.js-error-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(3px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+    padding: 16px;
+}
+
+.js-error-modal-card {
+    background: #241f3d;
+    border: 1px solid var(--border-color);
+    border-radius: 14px;
+    width: 100%;
+    max-width: 520px;
+    max-height: 80vh;
+    overflow-y: auto;
+    padding: 22px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    color: var(--text-color);
+    animation: update-modal-in 0.18s ease-out;
+}
+
+.js-error-modal-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.js-error-modal-head h2 {
+    font-size: 1.05rem;
+    font-weight: 600;
+    margin: 0;
+    flex: 1;
+}
+
+.js-error-modal-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: #f59e0b;
+    color: #fff;
+    font-size: 0.85rem;
+    flex-shrink: 0;
+}
+
+.js-error-modal-card .js-error-modal-x {
+    background: none;
+    border: none;
+    box-shadow: none;
+    color: rgba(255, 255, 255, 0.45);
+    cursor: pointer;
+    font-size: 20px;
+    line-height: 1;
+    padding: 0 2px;
+}
+
+.js-error-modal-card .js-error-modal-x:hover {
+    background: none;
+    color: rgba(255, 255, 255, 0.85);
+    transform: none;
+}
+
+.js-error-modal-sub {
+    font-size: 0.85rem;
+    color: rgba(255, 255, 255, 0.7);
+    line-height: 1.5;
+    margin: 0 0 16px;
+}
+
+.js-error-modal-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.js-error-item {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 10px;
+    padding: 10px 12px;
+}
+
+/* The plain-language line leads — the jargon is support, not the headline. */
+.js-error-item-plain {
+    font-size: 0.86rem;
+    color: rgba(255, 255, 255, 0.92);
+    margin-bottom: 4px;
+}
+
+.js-error-item-tech {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.72rem;
+    color: rgba(255, 255, 255, 0.55);
+    word-break: break-word;
+}
+
+.js-error-item-meta {
+    font-size: 0.7rem;
+    color: rgba(255, 255, 255, 0.38);
+    margin-top: 4px;
+}
+
+.js-error-item-meta code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: rgba(255, 255, 255, 0.5);
+}
+
+.js-error-item-stack {
+    margin-top: 8px;
+}
+
+.js-error-item-stack summary {
+    font-size: 0.7rem;
+    color: rgba(255, 255, 255, 0.4);
+    cursor: pointer;
+}
+
+.js-error-item-stack pre {
+    margin: 6px 0 0;
+    padding: 8px;
+    background: rgba(0, 0, 0, 0.28);
+    border-radius: 6px;
+    font-size: 0.68rem;
+    color: rgba(255, 255, 255, 0.6);
+    overflow-x: auto;
+    white-space: pre;
+}
+
+.js-error-modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 16px;
+}
+
+.js-error-modal-card .js-error-modal-btn {
+    background: rgba(139, 92, 246, 0.18);
+    border: 1px solid rgba(139, 92, 246, 0.35);
+    border-radius: 8px;
+    color: rgba(255, 255, 255, 0.9);
+    cursor: pointer;
+    font-size: 0.82rem;
+    padding: 7px 16px;
+}
+
+.js-error-modal-card .js-error-modal-btn:hover {
+    background: rgba(139, 92, 246, 0.28);
+}
+
 /* ===== Standalone color attach (toolbar) ===== */
 /* Attached color chips (above the input, like image attachments) */
 .color-attach-chips {
