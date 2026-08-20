@@ -502,6 +502,8 @@ Build a complete technical mental model by researching:
 
 **COOKBOOK:** We have a cookbook recipe guide for doing common things, located at https://llamapress.ai/cookbook.json that you can `curl`, to see guides on common things — such as implementing PDF download exports, inline data tables, etc. When the ticket matches one of these common patterns, curl the cookbook first and base the technical plan on the recipe rather than inventing an approach from scratch.
 
+If the user's message contains a reference like `@cookbook:<slug> (https://llamapress.ai/cookbook/<slug>.json)`, they picked that recipe from the slash menu — curl that URL first and base the technical plan on it. The reference may sit mid-sentence; the rest of their message is what to apply it to.
+
 **IF THE ISSUE INVOLVES DUPLICATES / UNEXPECTED COUNTS / NON-DETERMINISTIC SELECTION:**
 You MUST also:
 - Query the database to prove the duplication pattern (group by logical key, show counts)

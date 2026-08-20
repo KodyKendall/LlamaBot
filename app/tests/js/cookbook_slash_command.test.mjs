@@ -1,9 +1,11 @@
 // "/cookbook" turns the slash menu into a search over the published recipes at
 // llamapress.ai/cookbook — the list opens on "/cookbook" and anything typed after
-// it filters. Every other slash command closes the menu at the first space, so the
-// cookbook path needs its own parsing; these tests pin that it stays open, that a
-// pick fills the composer (and never sends or executes anything on the host), and
-// that a failed fetch doesn't wipe a list we already had.
+// it filters. Every other slash command closes the menu at the first space and owns
+// the whole composer, so the cookbook path needs its own parsing; these tests pin
+// that it triggers mid-sentence, that it stays open while you type the search, that
+// a pick swaps ONLY the "/cookbook …" text for a short @cookbook: reference (never
+// sending or executing anything on the host), and that a failed fetch doesn't wipe
+// a list we already had.
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -13,9 +15,10 @@ import { dirname, resolve } from 'node:path';
 const APP_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const {
   SlashCommandManager,
-  parseCookbookInput,
+  findCookbookTrigger,
   filterCookbookGuides,
-  cookbookDirective,
+  cookbookMention,
+  cookbookJsonUrl,
 } = await import(resolve(APP_ROOT, 'frontend', 'chat', 'ui', 'SlashCommandManager.js'));
 
 const GUIDES = [
@@ -49,8 +52,9 @@ const GUIDES = [
 function fakeInput(value = '') {
   return {
     value,
+    selectionStart: value.length,
     focus() {},
-    setSelectionRange() {},
+    setSelectionRange(start) { this.selectionStart = start; },
     dispatchEvent() {},
   };
 }
@@ -82,13 +86,41 @@ function makeManager(guides = GUIDES) {
   return manager;
 }
 
+/** Type `value` into the composer with the caret at `caret` (default: the end). */
+function setInput(manager, value, caret = null) {
+  manager.messageInput.value = value;
+  manager.messageInput.selectionStart = caret == null ? value.length : caret;
+}
+
 test('"/cookbook" and its search text are recognized, including with spaces', () => {
-  assert.deepEqual(parseCookbookInput('/cookbook'), { query: '' });
-  assert.deepEqual(parseCookbookInput('/cookbook '), { query: '' });
-  assert.deepEqual(parseCookbookInput('/cookbook pdf export'), { query: 'pdf export' });
-  assert.equal(parseCookbookInput('/skills'), null);
-  assert.equal(parseCookbookInput('/cookbooks'), null);
-  assert.equal(parseCookbookInput('tell me about /cookbook'), null);
+  assert.deepEqual(findCookbookTrigger('/cookbook'), { query: '', start: 0, end: 9 });
+  assert.deepEqual(findCookbookTrigger('/cookbook '), { query: '', start: 0, end: 10 });
+  assert.deepEqual(findCookbookTrigger('/cookbook pdf export'),
+    { query: 'pdf export', start: 0, end: 20 });
+  assert.equal(findCookbookTrigger('/skills'), null);
+  assert.equal(findCookbookTrigger('/cookbooks'), null);
+  assert.equal(findCookbookTrigger(''), null);
+});
+
+test('the trigger fires mid-sentence and reports what a pick replaces', () => {
+  // The whole point: you are half way through a thought when you reach for a
+  // recipe, and only the "/cookbook …" fragment may be touched.
+  const value = 'add a pdf export /cookbook pdf and make it purple';
+  const caret = value.indexOf(' and make');
+  const trigger = findCookbookTrigger(value, caret);
+
+  assert.deepEqual(trigger, { query: 'pdf', start: 17, end: caret });
+  assert.equal(value.slice(trigger.start, trigger.end), '/cookbook pdf');
+});
+
+test('the trigger only counts at a word boundary, at or before the caret', () => {
+  assert.equal(findCookbookTrigger('see docs/cookbook'), null);   // mid-word slash
+  assert.equal(findCookbookTrigger('/cookbook pdf', 3), null);    // caret inside the word
+  // Text typed AFTER the caret is not part of the query.
+  assert.deepEqual(findCookbookTrigger('/cookbook pdf later', 13),
+    { query: 'pdf', start: 0, end: 13 });
+  // A newline ends the search — the recipe list shouldn't span paragraphs.
+  assert.equal(findCookbookTrigger('/cookbook pdf\nsecond line'), null);
 });
 
 test('no query lists every recipe', () => {
@@ -119,12 +151,14 @@ test('typing after /cookbook keeps the menu open and filtering', () => {
   const seen = [];
   manager.showCookbookDropdown = (q) => seen.push(q);
 
-  manager.messageInput.value = '/cookbook';
+  setInput(manager, '/cookbook');
   manager.handleInput();
-  manager.messageInput.value = '/cookbook pdf';
+  setInput(manager, '/cookbook pdf');
+  manager.handleInput();
+  setInput(manager, 'halfway through a thought /cookbook pdf');
   manager.handleInput();
 
-  assert.deepEqual(seen, ['', 'pdf']);
+  assert.deepEqual(seen, ['', 'pdf', 'pdf']);
 });
 
 test('the recipe list renders and is selectable', () => {
@@ -176,30 +210,51 @@ test('a query matching nothing says so instead of closing the menu', () => {
   assert.ok(manager.dropdown.innerHTML.includes('No recipes match'));
 });
 
-test('picking a recipe fills the composer and executes nothing', () => {
+test('picking a recipe drops a short reference in and executes nothing', () => {
   const manager = makeManager();
   let executed = 0;
   manager.executeCommand = () => { executed += 1; };
   manager.showConfirmModal = () => { executed += 1; };
 
-  manager.showCookbookDropdown('pdf');
+  setInput(manager, '/cookbook pdf');
+  manager.handleInput();
   manager.executeSelected();
 
   assert.equal(executed, 0, 'a recipe must never run a host command');
   assert.equal(manager.isOpen, false);
-  assert.ok(manager.messageInput.value.includes('PDF Download Export'));
-  assert.ok(manager.messageInput.value.includes(
-    'https://llamapress.ai/cookbook/pdf-download-export.json'));
+  assert.equal(
+    manager.messageInput.value,
+    '@cookbook:pdf-download-export '
+      + '(https://llamapress.ai/cookbook/pdf-download-export.json) ',
+  );
   assert.ok(!manager.messageInput.value.startsWith('/'),
     'the slash token must be replaced, not sent to the agent');
 });
 
-test('the directive points at the recipe JSON the agent can curl', () => {
-  assert.ok(cookbookDirective(GUIDES[0]).includes(
-    'curl https://llamapress.ai/cookbook/pdf-download-export.json'));
+test('a mid-sentence pick keeps everything already typed', () => {
+  const manager = makeManager();
+  const value = 'add a pdf export /cookbook pdf and make it purple';
+  setInput(manager, value, value.indexOf(' and make'));
+
+  manager.handleInput();
+  manager.executeSelected();
+
+  const mention = '@cookbook:pdf-download-export '
+    + '(https://llamapress.ai/cookbook/pdf-download-export.json)';
+  assert.equal(manager.messageInput.value,
+    `add a pdf export ${mention} and make it purple`);
+  // Caret sits right after the reference so the user can keep typing.
+  assert.equal(manager.messageInput.selectionStart,
+    `add a pdf export ${mention}`.length);
+});
+
+test('the reference points at the recipe JSON the agent can curl', () => {
+  assert.equal(cookbookMention(GUIDES[0]),
+    '@cookbook:pdf-download-export '
+      + '(https://llamapress.ai/cookbook/pdf-download-export.json)');
   // Missing url (older payload) still yields a usable link from the slug.
-  assert.ok(cookbookDirective({ slug: 'x', title: 'X' }).includes(
-    'https://llamapress.ai/cookbook/x.json'));
+  assert.equal(cookbookJsonUrl({ slug: 'x', title: 'X' }),
+    'https://llamapress.ai/cookbook/x.json');
 });
 
 test('/cookbook appears in the slash menu as its own entry', () => {

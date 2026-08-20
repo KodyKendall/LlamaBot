@@ -7,16 +7,60 @@
  */
 
 /**
- * Recognize the cookbook search. "/cookbook" lists every published recipe;
- * anything typed after it filters the list. Unlike every other slash command
- * this one stays open once a space is typed — the space starts the search.
+ * Find a "/cookbook" search at the caret. The trigger is a "/cookbook" token at a
+ * word boundary ANYWHERE in the message — mid-sentence counts — and everything
+ * typed after it up to the caret is the search query. Unlike every other slash
+ * command this one stays open once a space is typed: the space starts the search.
  *
- * @returns {{query: string}|null} null when the input isn't a cookbook search.
+ * @param {string} value   the whole composer contents
+ * @param {number} [caret] cursor offset; defaults to the end of the text
+ * @returns {{query: string, start: number, end: number}|null} start/end delimit
+ *          the text a picked recipe replaces — the rest of the message is left
+ *          exactly as the user typed it.
  */
-export function parseCookbookInput(value) {
-  const match = /^\/cookbook(?:\s+([\s\S]*))?$/i.exec(value || '');
+export function findCookbookTrigger(value, caret) {
+  const text = String(value == null ? '' : value);
+  const pos = (typeof caret === 'number' && caret >= 0 && caret <= text.length)
+    ? caret
+    : text.length;
+  // [ \t] rather than \s: a newline ends the search instead of swallowing the
+  // next paragraph into the query.
+  const match = /(^|\s)\/cookbook(?:[ \t]+([^\n]*))?$/i.exec(text.slice(0, pos));
   if (!match) return null;
-  return { query: (match[1] || '').trim() };
+  return {
+    query: (match[2] || '').trim(),
+    start: match.index + match[1].length,
+    end: pos,
+  };
+}
+
+/**
+ * Find the slash token the user is typing at the caret — the menu opens on a "/"
+ * at any word boundary, not just at the start of the message, so you can reach for
+ * a command mid-thought. "app/frontend" is a path, not a menu.
+ *
+ * A bare "/" only opens the whole menu when it starts the message: mid-sentence a
+ * stray slash ("what is 5 / 2") would otherwise leave a menu open that the next
+ * Enter fires.
+ *
+ * @returns {{kind: 'cookbook'|'command', query: string, start: number, end: number}|null}
+ *          start/end delimit the text a pick replaces.
+ */
+export function findSlashTrigger(value, caret) {
+  const cookbook = findCookbookTrigger(value, caret);
+  if (cookbook) return { kind: 'cookbook', ...cookbook };
+
+  const text = String(value == null ? '' : value);
+  const pos = (typeof caret === 'number' && caret >= 0 && caret <= text.length)
+    ? caret
+    : text.length;
+  const match = /(^|\s)\/([A-Za-z0-9_-]*)$/.exec(text.slice(0, pos));
+  if (!match) return null;
+
+  const start = match.index + match[1].length;
+  const query = match[2].toLowerCase();
+  if (query === '' && start !== 0) return null;
+  return { kind: 'command', query, start, end: pos };
 }
 
 /**
@@ -53,11 +97,20 @@ export function filterCookbookGuides(guides, query) {
   return scored.map(s => s.g);
 }
 
-/** The message a picked recipe drops into the composer. */
-export function cookbookDirective(guide) {
-  const title = guide.title || guide.slug;
-  const url = guide.url || `https://llamapress.ai/cookbook/${guide.slug}`;
-  return `Follow the LlamaPress cookbook recipe "${title}" — curl ${url}.json for the full guide, then apply it to my app. `;
+/** The machine-readable URL for a recipe — what the agent curls for the guide. */
+export function cookbookJsonUrl(guide) {
+  const page = guide.url || `https://llamapress.ai/cookbook/${guide.slug}`;
+  return `${page}.json`;
+}
+
+/**
+ * The short reference a picked recipe drops into the composer. It replaces only
+ * the "/cookbook …" the user typed, so it can land mid-sentence without wiping
+ * the thought already in the box. The agent prompts recognize this shape and
+ * curl the URL for the full recipe.
+ */
+export function cookbookMention(guide) {
+  return `@cookbook:${guide.slug} (${cookbookJsonUrl(guide)})`;
 }
 
 export class SlashCommandManager {
@@ -71,6 +124,7 @@ export class SlashCommandManager {
     this.cookbookGuides = null;   // published recipes (/api/cookbook), lazily fetched
     this.cookbookFetchedAt = 0;
     this.cookbookLoading = false;
+    this.slashRange = null;       // the "/…" span a pick writes over
     this.isOpen = false;
     this.selectedIndex = -1;
     this.confirmModal = null;
@@ -412,38 +466,14 @@ export class SlashCommandManager {
       this.handleInput();
     });
 
-    // Keyboard navigation
-    this.messageInput.addEventListener('keydown', (e) => {
-      if (!this.isOpen) return;
-
-      switch (e.key) {
-        case 'ArrowDown':
-          e.preventDefault();
-          this.selectNext();
-          break;
-        case 'ArrowUp':
-          e.preventDefault();
-          this.selectPrevious();
-          break;
-        case 'Enter':
-          if (this.selectedIndex >= 0) {
-            e.preventDefault();
-            e.stopPropagation();
-            this.executeSelected();
-          }
-          break;
-        case 'Escape':
-          e.preventDefault();
-          this.hideDropdown();
-          break;
-        case 'Tab':
-          if (this.selectedIndex >= 0) {
-            e.preventDefault();
-            this.autocomplete();
-          }
-          break;
-      }
-    });
+    // Keyboard navigation. This has to WIN over ChatApp's Enter-to-send listener,
+    // which sits on this same textarea and is registered earlier in boot — two
+    // listeners on one element always fire in registration order, so a listener
+    // here (or stopPropagation from one) is too late: the message would already
+    // have been sent. A capture-phase listener on the document runs before every
+    // listener on the input, so the menu gets first refusal on the key.
+    const doc = this.messageInput.ownerDocument || document;
+    doc.addEventListener('keydown', (e) => this.handleKeydown(e), true);
 
     // Close dropdown on outside click
     document.addEventListener('click', (e) => {
@@ -454,35 +484,78 @@ export class SlashCommandManager {
   }
 
   /**
+   * Menu keys, seen before the composer sees them (capture phase). Anything the
+   * menu doesn't claim is left alone so the composer behaves normally.
+   */
+  handleKeydown(e) {
+    if (!this.isOpen) return;
+    if (e.target !== this.messageInput) return;
+
+    // Consume the key: the composer must neither send nor type it.
+    const claim = () => {
+      e.preventDefault();
+      e.stopPropagation();
+    };
+
+    switch (e.key) {
+      case 'ArrowDown':
+        claim();
+        this.selectNext();
+        break;
+      case 'ArrowUp':
+        claim();
+        this.selectPrevious();
+        break;
+      case 'Enter':
+        // Enter picks the highlighted row and leaves the message in the box — a
+        // second Enter is the send. Shift+Enter stays a newline, and with nothing
+        // highlighted (an empty search) the menu has nothing to give, so it steps
+        // aside rather than eating the send key.
+        if (e.shiftKey || this.selectedIndex < 0) {
+          this.hideDropdown();
+          return;
+        }
+        claim();
+        this.executeSelected();
+        break;
+      case 'Escape':
+        claim();
+        this.hideDropdown();
+        break;
+      case 'Tab':
+        if (this.selectedIndex >= 0) {
+          claim();
+          this.autocomplete();
+        }
+        break;
+    }
+  }
+
+  /**
    * Handle input changes
    */
   handleInput() {
-    const value = this.messageInput.value;
-
-    // The cookbook search owns everything after "/cookbook", spaces included.
-    const cookbook = parseCookbookInput(value);
-    if (cookbook) {
-      this.showCookbookDropdown(cookbook.query);
+    const trigger = findSlashTrigger(this.messageInput.value, this.caretPosition());
+    if (!trigger) {
+      this.hideDropdown();
       return;
     }
 
-    // Check if input starts with "/" and only contains command text (no spaces)
-    if (value.startsWith('/') && !value.includes(' ')) {
-      const query = value.slice(1).toLowerCase();
-      this.showDropdown(query);
+    // The cookbook search owns everything after "/cookbook", spaces included.
+    if (trigger.kind === 'cookbook') {
+      this.showCookbookDropdown(trigger.query, trigger);
+      return;
+    }
 
-      // On menu open (value === "/") refresh skills so newly authored ones
-      // appear without a page reload, then re-render if still open.
-      if (value === '/') {
-        this.refreshSkills().then(() => {
-          const v = this.messageInput.value;
-          if (v.startsWith('/') && !v.includes(' ')) {
-            this.showDropdown(v.slice(1).toLowerCase());
-          }
-        });
-      }
-    } else {
-      this.hideDropdown();
+    this.showDropdown(trigger.query, trigger);
+
+    // On menu open (a bare "/") refresh skills so newly authored ones appear
+    // without a page reload, then re-render if still open.
+    if (trigger.query === '') {
+      this.refreshSkills().then(() => {
+        const still = findSlashTrigger(this.messageInput.value, this.caretPosition());
+        if (still && still.kind === 'command') this.showDropdown(still.query, still);
+      });
     }
   }
 
@@ -558,6 +631,7 @@ export class SlashCommandManager {
       if (!this.cookbookGuides) this.cookbookGuides = [];
     } finally {
       this.cookbookLoading = false;
+    this.slashRange = null;       // the "/…" span a pick writes over
     }
     return this.cookbookGuides;
   }
@@ -567,7 +641,12 @@ export class SlashCommandManager {
    * filters. Renders immediately from cache (or a loading note) and re-renders
    * once the fetch lands, if the user is still searching the cookbook.
    */
-  showCookbookDropdown(query = '') {
+  showCookbookDropdown(query = '', range = null) {
+    // Where a pick writes back to. Recomputed on every keystroke; kept so a click
+    // on a row still knows which "/cookbook …" fragment to swap out.
+    this.slashRange = range || findCookbookTrigger(
+      this.messageInput.value, this.caretPosition());
+
     // Recipe rows are two-line prose, and there are ~30 of them — the cookbook
     // list gets its own (much taller) panel height, see .cookbook-mode.
     this.dropdown.classList.add('cookbook-mode');
@@ -575,8 +654,8 @@ export class SlashCommandManager {
     if (!this.cookbookGuides) {
       if (!this.cookbookLoading) {
         this.fetchCookbook().then(() => {
-          const still = parseCookbookInput(this.messageInput.value);
-          if (still) this.showCookbookDropdown(still.query);
+          const still = findCookbookTrigger(this.messageInput.value, this.caretPosition());
+          if (still) this.showCookbookDropdown(still.query, still);
         });
       }
       this.dropdown.innerHTML =
@@ -648,29 +727,68 @@ export class SlashCommandManager {
    * filter) and the pick fills the composer.
    */
   showAllCookbook() {
-    this.messageInput.value = '/cookbook ';
-    this.messageInput.focus();
-    const len = this.messageInput.value.length;
-    if (this.messageInput.setSelectionRange) {
-      this.messageInput.setSelectionRange(len, len);
-    }
-    this.showCookbookDropdown('');
+    // notify:false — we open the recipe list ourselves right below, and an input
+    // event would only make handleInput render the same list a second time.
+    const caret = this.replaceSlashToken('/cookbook ', { notify: false });
+    const start = caret - '/cookbook '.length;
+    this.showCookbookDropdown('', { query: '', start, end: caret });
+  }
+
+  /** Current caret offset, or the end of the text when the host can't say. */
+  caretPosition() {
+    const pos = this.messageInput ? this.messageInput.selectionStart : null;
+    return typeof pos === 'number' ? pos : undefined;
   }
 
   /**
-   * Picking a recipe fills the composer with a directive naming it (and its
-   * JSON URL, which the agent curls for the full guide) — it does NOT send, so
-   * the user can add "…for my invoices page" before hitting enter.
+   * Picking a recipe swaps the "/cookbook …" the user typed for a short
+   * "@cookbook:<slug> (<json url>)" reference — everything else in the composer
+   * survives, so you can reach for a recipe mid-thought. It does NOT send, so
+   * the user can keep typing "…for my invoices page" before hitting enter.
    */
-  insertCookbookRecipe(guide) {
-    this.hideDropdown();
-    this.messageInput.value = cookbookDirective(guide);
-    this.messageInput.focus();
-    const len = this.messageInput.value.length;
-    if (this.messageInput.setSelectionRange) {
-      this.messageInput.setSelectionRange(len, len);
+  insertCookbookMention(guide) {
+    this.replaceSlashToken(cookbookMention(guide), { pad: true });
+  }
+
+  /**
+   * Swap the "/…" the user typed for `text`, leaving the rest of the message
+   * exactly as it was, and drop the caret straight after it. Every pick goes
+   * through here — that's what lets you reach for a command mid-thought.
+   *
+   * @param {string} text            what the token becomes ('' removes it)
+   * @param {{pad?: boolean, notify?: boolean}} [options]
+   *        pad: keep a space between the insert and the neighbouring words.
+   *        notify: fire an input event afterwards (re-renders the menu). Off for
+   *        picks that open a menu themselves, so they don't render twice.
+   */
+  replaceSlashToken(text, { pad = false, notify = true } = {}) {
+    const range = this.slashRange;
+    this.hideDropdown();                 // every pick closes the menu it came from
+
+    const value = String(this.messageInput.value || '');
+    const start = range ? Math.min(range.start, value.length) : 0;
+    const end = range ? Math.min(Math.max(range.end, start), value.length) : value.length;
+    let before = value.slice(0, start);
+    let after = value.slice(end);
+
+    let inserted = text;
+    if (text === '') {
+      // The token is going away entirely — don't leave its spaces behind.
+      if (/[ \t]$/.test(before) && /^[ \t]/.test(after)) after = after.replace(/^[ \t]/, '');
+    } else if (pad) {
+      const lead = before && !/\s$/.test(before) ? ' ' : '';
+      const trail = after && !/^\s/.test(after) ? ' ' : (after ? '' : ' ');
+      inserted = `${lead}${text}${trail}`;
     }
-    this.messageInput.dispatchEvent(new Event('input', { bubbles: true }));
+
+    this.messageInput.value = before + inserted + after;
+    this.messageInput.focus();
+    const caret = (before + inserted).length;
+    if (this.messageInput.setSelectionRange) {
+      this.messageInput.setSelectionRange(caret, caret);
+    }
+    if (notify) this.messageInput.dispatchEvent(new Event('input', { bubbles: true }));
+    return caret;
   }
 
   /** Merge host commands + the /cookbook entry + the /skills entry + skills. */
@@ -706,8 +824,10 @@ export class SlashCommandManager {
   /**
    * Show dropdown with filtered commands
    */
-  showDropdown(query = '') {
+  showDropdown(query = '', range = null) {
     this.dropdown.classList.remove('cookbook-mode');
+    this.slashRange = range || findSlashTrigger(
+      this.messageInput.value, this.caretPosition());
 
     // Typing "/skills" (or picking the /skills entry) lists EVERY installed skill,
     // even ones whose slug doesn't contain the word "skills".
@@ -781,6 +901,7 @@ export class SlashCommandManager {
   hideDropdown() {
     this.dropdown.classList.add('hidden');
     this.dropdown.classList.remove('cookbook-mode');
+    this.slashRange = null;
     this.isOpen = false;
     this.selectedIndex = -1;
     this.filteredCommands = [];
@@ -831,10 +952,10 @@ export class SlashCommandManager {
     const cmd = this.filteredCommands[this.selectedIndex];
     if (!cmd) return;
 
-    // Cookbook recipes have no slash token to complete — Tab fills the composer
-    // with the recipe directive, same as Enter.
+    // Cookbook recipes have no slash token to complete — Tab drops the recipe
+    // reference into the composer, same as Enter.
     if (cmd.is_cookbook) {
-      this.insertCookbookRecipe(cmd);
+      this.insertCookbookMention(cmd);
       return;
     }
 
@@ -857,7 +978,7 @@ export class SlashCommandManager {
 
     // A picked cookbook recipe fills the composer; nothing runs on the host.
     if (cmd.is_cookbook) {
-      this.insertCookbookRecipe(cmd);
+      this.insertCookbookMention(cmd);
       return;
     }
 
@@ -889,8 +1010,9 @@ export class SlashCommandManager {
       this.showConfirmModal(cmd);
     }
 
-    this.hideDropdown();
-    this.messageInput.value = '';
+    // The command isn't part of the message — drop its token and keep the rest of
+    // what the user was writing.
+    this.replaceSlashToken('', { notify: false });
   }
 
   /**
@@ -901,17 +1023,11 @@ export class SlashCommandManager {
    * for that slug — see the "User-invoked skills" section of the agent prompt.
    */
   evokeSkill(cmd) {
-    this.hideDropdown();
     const slug = cmd.skill_slug || cmd.name;
-    // Trailing space closes the dropdown (value now contains a space) and lets
-    // the user type their request right after the token.
-    this.messageInput.value = `/${slug} `;
-    this.messageInput.focus();
-    const len = this.messageInput.value.length;
-    if (this.messageInput.setSelectionRange) {
-      this.messageInput.setSelectionRange(len, len);
-    }
-    this.messageInput.dispatchEvent(new Event('input', { bubbles: true }));
+    // Only the "/…" the user typed is replaced, so a skill can be picked in the
+    // middle of a sentence. The trailing space closes the menu (the token is done)
+    // and lets the user type their request right after it.
+    this.replaceSlashToken(`/${slug}`, { pad: true });
   }
 
   /**
@@ -920,12 +1036,13 @@ export class SlashCommandManager {
    * the list is current. Picking one from the list then evokes it.
    */
   showAllSkills() {
-    this.messageInput.value = '/skills';
-    this.messageInput.focus();
-    this.showDropdown('skills');                         // immediate (cached)
+    const caret = this.replaceSlashToken('/skills', { notify: false });
+    const range = { query: 'skills', start: caret - '/skills'.length, end: caret };
+    this.showDropdown('skills', range);                  // immediate (cached)
     this.refreshSkills().then(() => {                    // then refresh + re-render
-      if (this.messageInput.value === '/skills') {
-        this.showDropdown('skills');
+      const still = findSlashTrigger(this.messageInput.value, this.caretPosition());
+      if (still && still.kind === 'command' && still.query === 'skills') {
+        this.showDropdown('skills', still);
       }
     });
   }

@@ -83,6 +83,9 @@ export class IframeManager {
 
     // Listen for unread-count pushes from the Rails messages iframe
     this.initUnreadBadgeListener();
+
+    // Escape dismisses the building overlay
+    this.initOverlayEscapeListener();
   }
 
   // ============================================================================
@@ -825,6 +828,29 @@ export class IframeManager {
     this._setOverlayTitle?.(this._overlayBaseTitle || 'Your App is Building!');
     // Recompute building-vs-plan from the current chat state.
     this._overlayDoMirror?.();
+  }
+
+  /**
+   * Escape dismisses the "Your App is Building!" overlay.
+   *
+   * It HIDES, it does not cancel — same contract as the "Hide" pill in the
+   * overlay's corner, which is why this routes through the identical teardown.
+   * Leo keeps working and the run's own completion path is unaffected.
+   *
+   * Bound on `document` with no check on the event target: the whole point is
+   * that the user can be typing in the composer, hit Escape, and see the
+   * preview again. Guarding on focus would defeat that.
+   *
+   * The overlay-exists check keeps this inert the rest of the time, so Escape
+   * still belongs to whatever else wants it (modals, the slash menu) whenever no
+   * build is on screen.
+   */
+  initOverlayEscapeListener() {
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      if (!document.getElementById('streamingOverlay')) return;
+      this.removeStreamingOverlay();
+    });
   }
 
   /**

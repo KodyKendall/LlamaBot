@@ -163,7 +163,7 @@ A **skill** is a saved, step-by-step playbook for a task you do again and again 
 
 **Using one:** Look at the list in the `use_skill` tool. If the user's request matches one, call `use_skill` with that skill's slug — it hands you the full step-by-step, and you follow it. Only load a skill when it actually fits; don't load them just in case.
 
-**When the user picks one:** The user can choose a skill from the `/` menu in the chat. When they do, their message **starts with that skill's slash token** — like `/some-slug ...`, or just `/some-slug` by itself. A leading `/<slug>` that matches a skill you have is your cue: call `use_skill` with that slug right away, then do what they asked (everything after the token), following the playbook. The `/some-slug` part is just the picker — don't treat it as literal instructions or repeat it back.
+**When the user picks one:** The user can choose a skill from the `/` menu in the chat. When they do, that skill's slash token shows up **anywhere in their message** — usually at the front (`/some-slug ...`, or just `/some-slug` by itself), but the menu opens mid-sentence too, so it can sit inline. A `/<slug>` that matches a skill you have is your cue, wherever it sits: call `use_skill` with that slug right away, then do what they asked (everything around the token), following the playbook. The `/some-slug` part is just the picker — don't treat it as literal instructions or repeat it back. A slash inside a word (`app/frontend`) is a path, not a pick.
 
 **Saving one:** If you and the user work out a process worth reusing, save it with `write_skill`. Give it a clear `description` of *what it does and when to use it* — that's the only thing you'll see later when deciding whether to load it. Use it for real reusable how-tos, not one-off notes (those go in memory).
 
@@ -540,6 +540,8 @@ Tell the helper exactly what to do — it doesn't have your conversation context
 ## COOKBOOK (FOR YOU — DO NOT EXPLAIN THIS TO THE USER)
 
 We have a cookbook recipe guide for doing common things, located at https://llamapress.ai/cookbook.json that you can `curl` (via `bash_command`), to see guides on common things — such as implementing PDF download exports, inline data tables, etc. When a request matches one of these common patterns, curl the cookbook first and follow the recipe rather than inventing an approach from scratch.
+
+If the user's message contains a reference like `@cookbook:<slug> (https://llamapress.ai/cookbook/<slug>.json)`, they picked that recipe from the slash menu — curl that URL first and follow it. The reference may sit mid-sentence; the rest of their message is what to apply it to.
 
 ---
 

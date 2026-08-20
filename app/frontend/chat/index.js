@@ -22,6 +22,7 @@ import { TokenIndicator } from './ui/TokenIndicator.js';
 import { PromptManager } from './ui/PromptManager.js';
 import { BrandGuide } from './ui/BrandGuide.js';
 import { ColorAttach } from './ui/ColorAttach.js';
+import { ErrorAttach } from './ui/ErrorAttach.js';
 import { FileAttachmentManager } from './ui/FileAttachmentManager.js';
 import { ScreenRecorder } from './ui/ScreenRecorder.js';
 import { ScreenshotAnnotator } from './ui/ScreenshotAnnotator.js';
@@ -479,6 +480,17 @@ class ChatApp {
       }
     });
 
+    safeInit('js error attach', () => {
+      // Errors from the Rails preview iframe, offered for attaching to a message.
+      // Own safeInit: this listens on a postMessage channel the app pushes to, and
+      // a skew in the preview must not cost the composer any of the steps below.
+      this.errorAttach = new ErrorAttach();
+      this.errorAttach.init(
+        this.elements.jsErrorBanner,
+        this.elements.messageInput
+      );
+    });
+
     // The step that failed on leo-tama (initAssetModal). Attaching, uploads and
     // the asset modal are wired separately so a skew in one does not cost the
     // others — and none of them can stop the steps below.
@@ -605,6 +617,7 @@ class ChatApp {
       brandGuideBtn: this.container.querySelector('[data-llamabot="brand-guide-btn"]'),
       brandGuideContainer: this.container.querySelector('[data-llamabot="brand-guide-container"]'),
       colorAttachBtn: this.container.querySelector('[data-llamabot="color-attach-btn"]'),
+      jsErrorBanner: this.container.querySelector('[data-llamabot="js-error-banner"]'),
       fileAttachBtn: this.container.querySelector('[data-llamabot="file-attach-btn"]'),
       fileInput: this.container.querySelector('[data-llamabot="file-input"]'),
       attachmentsPreview: this.container.querySelector('[data-llamabot="attachments-preview"]'),
@@ -1665,6 +1678,13 @@ class ChatApp {
       message = `${message}\n\n<SELECTED_COLORS>\nThe user selected the following brand color${plural}: ${list}\n</SELECTED_COLORS>`;
     }
 
+    // Append the app preview's JavaScript errors, when "Show Leo" is checked
+    // (it is by default) — see ui/ErrorAttach.js.
+    const errorBlock = this.errorAttach?.buildMessageBlock() || '';
+    if (errorBlock) {
+      message = `${message}\n\n${errorBlock}`;
+    }
+
     // Get file attachments before clearing (needed for display)
     const attachments = this.fileAttachmentManager?.getAttachments() || [];
 
@@ -1823,6 +1843,11 @@ class ChatApp {
     // Clear attached color chips
     if (this.colorAttach) {
       this.colorAttach.clear();
+    }
+
+    // Consume the JS errors that just went out (a no-op if they didn't)
+    if (this.errorAttach) {
+      this.errorAttach.clear();
     }
 
     // Ensure thread ID exists

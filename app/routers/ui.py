@@ -485,7 +485,7 @@ async def users_page(admin: User = Depends(admin_required)):
 <html>
 <head>
     <title>LlamaBot User Management</title>
-    <link rel="icon" type="image/png" href="https://llamapress-ai-image-uploads.s3.us-west-2.amazonaws.com/4bmqe5iolvp84ceyk9ttz8vylrym">
+    <link rel="icon" type="image/png" href="/frontend/leonardo-icon.png">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <style>
         :root {
@@ -918,7 +918,7 @@ async def prompt_library_page(current_user: User = Depends(get_current_user)):
 <html>
 <head>
     <title>LlamaBot Prompt Library</title>
-    <link rel="icon" type="image/png" href="https://llamapress-ai-image-uploads.s3.us-west-2.amazonaws.com/4bmqe5iolvp84ceyk9ttz8vylrym">
+    <link rel="icon" type="image/png" href="/frontend/leonardo-icon.png">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <style>
         :root {
@@ -1571,7 +1571,7 @@ async def settings_page(
 <html>
 <head>
     <title>LlamaBot Settings</title>
-    <link rel="icon" type="image/png" href="https://llamapress-ai-image-uploads.s3.us-west-2.amazonaws.com/4bmqe5iolvp84ceyk9ttz8vylrym">
+    <link rel="icon" type="image/png" href="/frontend/leonardo-icon.png">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <style>
         :root {{
@@ -2241,7 +2241,7 @@ async def leonardo_md_page(current_user: User = Depends(get_current_user)):
 <html>
 <head>
     <title>LlamaBot - LEONARDO.md</title>
-    <link rel="icon" type="image/png" href="https://llamapress-ai-image-uploads.s3.us-west-2.amazonaws.com/4bmqe5iolvp84ceyk9ttz8vylrym">
+    <link rel="icon" type="image/png" href="/frontend/leonardo-icon.png">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <style>
         :root {{
@@ -2502,7 +2502,7 @@ async def git_history_page(current_user: User = Depends(get_current_user)):
 <html>
 <head>
     <title>Git History - LlamaBot</title>
-    <link rel="icon" type="image/png" href="https://llamapress-ai-image-uploads.s3.us-west-2.amazonaws.com/4bmqe5iolvp84ceyk9ttz8vylrym">
+    <link rel="icon" type="image/png" href="/frontend/leonardo-icon.png">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <style>
         :root {
@@ -3446,7 +3446,7 @@ async def scheduled_jobs_page(user: User = Depends(engineer_or_admin_required)):
 <html>
 <head>
     <title>LlamaBot Scheduled Jobs</title>
-    <link rel="icon" type="image/png" href="https://llamapress-ai-image-uploads.s3.us-west-2.amazonaws.com/4bmqe5iolvp84ceyk9ttz8vylrym">
+    <link rel="icon" type="image/png" href="/frontend/leonardo-icon.png">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <style>
         :root {
@@ -4282,7 +4282,7 @@ async def backup_history_page(current_user: User = Depends(get_current_user)):
 <html>
 <head>
     <title>Backup History</title>
-    <link rel="icon" type="image/png" href="https://llamapress-ai-image-uploads.s3.us-west-2.amazonaws.com/4bmqe5iolvp84ceyk9ttz8vylrym">
+    <link rel="icon" type="image/png" href="/frontend/leonardo-icon.png">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <style>
         :root {
