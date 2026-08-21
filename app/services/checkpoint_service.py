@@ -182,6 +182,59 @@ def _restore_ubuntu_ownership() -> int:
     return changed
 
 
+DISCARD_BACKUP_REF_PREFIX = "refs/llamabot/discards"
+
+
+def _snapshot_working_tree(label: str) -> Dict[str, str]:
+    """Save every uncommitted file to a snapshot commit, and clear the working tree.
+
+    `git stash push --include-untracked` does both halves at once: it writes the
+    modified files AND the untracked ones into a commit, then resets the tree to
+    HEAD. Untracked files matter most here — a young customer app is *entirely*
+    untracked, which is how a Discard once wiped a whole paying customer's app.
+
+    The stash stack alone is not a safe home for that snapshot: `git stash clear`,
+    `git stash pop` or a gc pass can all take it away. So the snapshot commit is
+    also pinned under its own `refs/llamabot/discards/*` ref, which keeps it
+    reachable forever, independent of the stash stack.
+
+    Raises on any failure — the caller must NOT proceed to destroy anything.
+    """
+    stash = subprocess.run(
+        ["git", "-C", str(LEONARDO_PATH), "stash", "push",
+         "--include-untracked", "--message", label],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    if stash.returncode != 0:
+        raise Exception(f"Git stash failed: {stash.stderr.strip() or stash.stdout.strip()}")
+
+    sha = subprocess.run(
+        ["git", "-C", str(LEONARDO_PATH), "rev-parse", "--verify", "refs/stash"],
+        capture_output=True,
+        text=True,
+        timeout=5,
+    ).stdout.strip()
+    if not sha:
+        raise Exception("Git stash reported success but wrote no snapshot commit")
+
+    # Microseconds, not seconds: two discards in the same second must still sort
+    # deterministically, since the ref name IS the sort key (see list_discard_backups).
+    ref = f"{DISCARD_BACKUP_REF_PREFIX}/{datetime.now(timezone.utc):%Y%m%dT%H%M%S%fZ}-{sha[:8]}"
+    pin = subprocess.run(
+        ["git", "-C", str(LEONARDO_PATH), "update-ref", ref, sha],
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    if pin.returncode != 0:
+        raise Exception(f"Failed to pin backup ref: {pin.stderr.strip()}")
+
+    logger.info(f"Snapshotted working tree to {ref} ({sha[:8]}) before discard")
+    return {"ref": ref, "sha": sha}
+
+
 class CheckpointService:
     """Service for managing git-based checkpoints for code rollback."""
 
@@ -603,14 +656,19 @@ Timestamp: {timestamp}
 
     @staticmethod
     def discard_uncommitted_changes() -> dict:
-        """Discard all uncommitted changes (reset to HEAD).
+        """Discard all uncommitted changes (reset to HEAD), keeping a way back.
+
+        A snapshot of everything about to be thrown away is taken FIRST, and the
+        discard is abandoned if that snapshot cannot be written. Without it this was
+        a one-click, no-confirmation, unrecoverable delete of a customer's whole app.
 
         This performs:
-        - git checkout -- . (discard modified files)
-        - git clean -fd (remove untracked files and directories)
+        - git stash push --include-untracked (snapshot + reset the tree to HEAD)
+        - git checkout -- . / git clean -fd (belt-and-braces, normally no-ops)
 
         Returns:
-            Dict with discarded file counts
+            Dict with discarded file counts plus `backup_ref` / `backup_sha`, which
+            `restore_discarded_changes` takes to put it all back.
         """
         try:
             # First get what we're about to discard for reporting
@@ -620,8 +678,21 @@ Timestamp: {timestamp}
                 return {
                     "success": True,
                     "message": "No changes to discard",
-                    "discarded_count": 0
+                    "discarded_count": 0,
+                    "backup_ref": None,
+                    "backup_sha": None,
                 }
+
+            # Snapshot BEFORE destroying anything. If this raises, nothing is lost.
+            try:
+                backup = _snapshot_working_tree(
+                    f"llamabot-discard {datetime.now(timezone.utc).isoformat()} "
+                    f"({changes['total_count']} file(s))"
+                )
+            except Exception as e:
+                raise Exception(
+                    f"Refusing to discard: could not back up your changes first ({e})"
+                )
 
             # Discard modified files (checkout to HEAD)
             checkout_result = subprocess.run(
@@ -656,13 +727,145 @@ Timestamp: {timestamp}
                 "message": f"Discarded {changes['total_count']} file(s)",
                 "discarded_modified": len(changes["changed_files"]),
                 "discarded_untracked": len(changes["untracked_files"]),
-                "discarded_count": changes["total_count"]
+                "discarded_count": changes["total_count"],
+                "backup_ref": backup["ref"],
+                "backup_sha": backup["sha"],
+                "undo_command": f"git stash apply {backup['sha']}",
             }
 
         except subprocess.TimeoutExpired:
             raise Exception("Git operation timed out")
         except Exception as e:
             raise Exception(f"Failed to discard changes: {str(e)}")
+
+    @staticmethod
+    def list_discard_backups(limit: int = 20) -> List[Dict[str, Any]]:
+        """The snapshots taken by past discards, newest first.
+
+        Returns:
+            List of dicts with ref, sha, created_at and file_count.
+        """
+        result = subprocess.run(
+            [
+                "git", "-C", str(LEONARDO_PATH), "for-each-ref",
+                # By ref name, which embeds a microsecond timestamp: `creatordate`
+                # ties whenever two discards land in the same second.
+                "--sort=-refname",
+                f"--count={limit}",
+                "--format=%(refname)%09%(objectname)%09%(creatordate:iso-strict)",
+                DISCARD_BACKUP_REF_PREFIX,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode != 0:
+            logger.error(f"Failed to list discard backups: {result.stderr}")
+            return []
+
+        backups = []
+        for line in result.stdout.splitlines():
+            if not line.strip():
+                continue
+            ref, sha, created_at = line.split("\t")
+            backups.append({
+                "ref": ref,
+                "sha": sha,
+                "created_at": created_at,
+                "file_count": len(CheckpointService._backup_files(sha)),
+            })
+        return backups
+
+    @staticmethod
+    def _backup_files(sha: str) -> List[str]:
+        """The files held in a discard snapshot — tracked edits and untracked alike."""
+        files = set()
+        # Tracked changes: the snapshot commit against its first parent (HEAD then).
+        tracked = subprocess.run(
+            ["git", "-C", str(LEONARDO_PATH), "diff", "--name-only", f"{sha}^1", sha],
+            capture_output=True, text=True, timeout=15,
+        )
+        files.update(f for f in tracked.stdout.splitlines() if f.strip())
+        # Untracked files live in the stash's third parent, when there is one.
+        untracked = subprocess.run(
+            ["git", "-C", str(LEONARDO_PATH), "ls-tree", "-r", "--name-only", f"{sha}^3"],
+            capture_output=True, text=True, timeout=15,
+        )
+        if untracked.returncode == 0:
+            files.update(f for f in untracked.stdout.splitlines() if f.strip())
+        return sorted(files)
+
+    @staticmethod
+    def restore_discarded_changes(backup_ref: Optional[str] = None) -> dict:
+        """Undo a discard: put the snapshotted working tree back.
+
+        Args:
+            backup_ref: Which snapshot to restore. Defaults to the most recent one.
+
+        Returns:
+            Dict with success flag, a human message and the restored file list. A
+            snapshot that cannot be applied cleanly (because the tree has moved on
+            since) is reported as a failure, never forced.
+        """
+        try:
+            if backup_ref is None:
+                backups = CheckpointService.list_discard_backups(limit=1)
+                if not backups:
+                    return {
+                        "success": False,
+                        "message": "No discarded changes to restore",
+                        "restored_files": [],
+                    }
+                backup_ref = backups[0]["ref"]
+
+            sha = subprocess.run(
+                ["git", "-C", str(LEONARDO_PATH), "rev-parse", "--verify", f"{backup_ref}^{{commit}}"],
+                capture_output=True, text=True, timeout=5,
+            ).stdout.strip()
+            if not sha:
+                return {
+                    "success": False,
+                    "message": f"No such backup: {backup_ref}",
+                    "restored_files": [],
+                }
+
+            files = CheckpointService._backup_files(sha)
+
+            apply_result = subprocess.run(
+                ["git", "-C", str(LEONARDO_PATH), "stash", "apply", sha],
+                capture_output=True, text=True, timeout=60,
+            )
+            if apply_result.returncode != 0:
+                return {
+                    "success": False,
+                    "message": (
+                        "Could not restore automatically — the files have changed "
+                        f"since they were discarded. Your snapshot is safe at {sha[:8]}. "
+                        f"Details: {apply_result.stderr.strip()}"
+                    ),
+                    "backup_ref": backup_ref,
+                    "backup_sha": sha,
+                    "restored_files": [],
+                }
+
+            # git ran as root here too, so the agent must get the tree back.
+            fixed = _restore_ubuntu_ownership()
+            if fixed:
+                logger.info(f"Restored agent ownership on {fixed} path(s) after undo")
+
+            logger.info(f"Restored {len(files)} discarded file(s) from {backup_ref}")
+            return {
+                "success": True,
+                "message": f"Restored {len(files)} file(s)",
+                "backup_ref": backup_ref,
+                "backup_sha": sha,
+                "restored_files": files,
+            }
+
+        except subprocess.TimeoutExpired:
+            raise Exception("Git operation timed out")
+        except Exception as e:
+            raise Exception(f"Failed to restore discarded changes: {str(e)}")
 
     @staticmethod
     def get_git_graph(limit: int = 50) -> Dict[str, Any]:

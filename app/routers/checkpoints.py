@@ -41,6 +41,11 @@ class RollbackRequest(BaseModel):
     checkpoint_id: str
 
 
+class UndoDiscardRequest(BaseModel):
+    # Which discard snapshot to restore; omitted means the most recent one.
+    backup_ref: Optional[str] = None
+
+
 # ============== Checkpoint Endpoints ==============
 
 @router.post("/api/checkpoints")
@@ -248,10 +253,11 @@ def get_uncommitted_changes():
 def discard_uncommitted_changes():
     """Discard all uncommitted changes (reset to last commit).
 
-    This performs git checkout -- . and git clean -fd
+    A snapshot is taken first, so this is undoable via /api/checkpoints/discard/undo.
+    If the snapshot can't be written, nothing is discarded.
 
     Returns:
-        Success status and count of discarded files
+        Success status, count of discarded files, and the backup ref to undo with
     """
     try:
         result = checkpoint_service.discard_uncommitted_changes()
@@ -259,6 +265,38 @@ def discard_uncommitted_changes():
 
     except Exception as e:
         logger.error(f"Failed to discard changes: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/checkpoints/discard/backups")
+def list_discard_backups():
+    """List the snapshots taken by past discards, newest first.
+
+    Returns:
+        Dict with the backup list, so the UI knows whether an undo is available
+    """
+    try:
+        backups = checkpoint_service.list_discard_backups()
+        return JSONResponse(content={"backups": backups, "has_backups": bool(backups)})
+
+    except Exception as e:
+        logger.error(f"Failed to list discard backups: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/checkpoints/discard/undo")
+def undo_discard(request: UndoDiscardRequest = UndoDiscardRequest()):
+    """Restore the changes a discard threw away.
+
+    Returns:
+        Success status, a human-readable message, and the restored file list
+    """
+    try:
+        result = checkpoint_service.restore_discarded_changes(request.backup_ref)
+        return JSONResponse(content=result)
+
+    except Exception as e:
+        logger.error(f"Failed to undo discard: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

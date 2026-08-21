@@ -156,6 +156,15 @@ export class CheckpointManager {
           <i class="fa-solid fa-trash"></i> Discard
         </button>
       </div>
+      <div class="discard-undo-banner hidden">
+        <div class="discard-undo-info">
+          <i class="fa-solid fa-rotate-left"></i>
+          <span class="discard-undo-text">Discarded changes are recoverable</span>
+        </div>
+        <button class="btn-undo-discard" title="Restore the changes you last discarded">
+          Undo discard
+        </button>
+      </div>
       <div class="uncommitted-file-list hidden"></div>
       <div class="save-checkpoint-form hidden">
         <input type="text" class="checkpoint-message-input" placeholder="Describe your changes...">
@@ -240,6 +249,11 @@ export class CheckpointManager {
     // Add discard changes button handler
     const discardBtn = panel.querySelector('.btn-discard-changes');
     discardBtn.onclick = () => this.discardUncommittedChanges();
+
+    // Undo the last discard — a discard now snapshots first, so it is recoverable
+    const undoDiscardBtn = panel.querySelector('.btn-undo-discard');
+    undoDiscardBtn.onclick = () => this.undoDiscard();
+    this.refreshDiscardUndo();
 
     // Add uncommitted changes info click handler for expand/collapse
     const uncommittedInfo = panel.querySelector('.uncommitted-changes-info');
@@ -455,8 +469,9 @@ export class CheckpointManager {
    * Discard all uncommitted changes
    */
   async discardUncommittedChanges() {
-    // Confirm with user
-    if (!confirm('Are you sure you want to discard all uncommitted changes? This cannot be undone.')) {
+    // Confirm with user. The backend snapshots everything first, so this is
+    // recoverable — say so rather than scaring people with the old "cannot be undone".
+    if (!confirm('Discard all uncommitted changes?\n\nA backup is saved first, so you can undo this.')) {
       return;
     }
 
@@ -478,13 +493,83 @@ export class CheckpointManager {
         this.chatApp.iframeManager.refreshRailsApp((callback) => this.chatApp.getRailsDebugInfo(callback));
       }
 
-      this.showSuccess(data.message);
+      this.showSuccess(data.backup_ref
+        ? `${data.message} — click "Undo discard" to get them back.`
+        : data.message);
       this.checkUncommittedChanges(); // Update banner
       this.updateUnsavedBadge(); // Update badge after discarding
+      this.refreshDiscardUndo(); // Offer the way back
 
     } catch (error) {
       console.error('Error discarding changes:', error);
       this.showError('Failed to discard changes: ' + error.message);
+    }
+  }
+
+  /**
+   * Show or hide the "Undo discard" banner based on whether a snapshot exists.
+   */
+  async refreshDiscardUndo() {
+    const banner = this.checkpointPanel?.querySelector('.discard-undo-banner');
+    if (!banner) return;
+
+    try {
+      const response = await fetch('/api/checkpoints/discard/backups', {
+        credentials: 'same-origin'
+      });
+      if (!response.ok) throw new Error(response.statusText);
+
+      const data = await response.json();
+      banner.classList.toggle('hidden', !data.has_backups);
+
+      if (data.has_backups) {
+        const latest = data.backups[0];
+        banner.querySelector('.discard-undo-text').textContent =
+          `${latest.file_count} discarded file(s) can still be restored`;
+      }
+    } catch (error) {
+      // Never block the panel on this — worst case the undo button stays hidden.
+      console.error('Error checking discard backups:', error);
+      banner.classList.add('hidden');
+    }
+  }
+
+  /**
+   * Restore the changes the last discard threw away.
+   */
+  async undoDiscard() {
+    try {
+      const response = await fetch('/api/checkpoints/discard/undo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({})
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || `Failed to undo: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+
+      if (!data.success) {
+        this.showError(data.message);
+        return;
+      }
+
+      if (this.chatApp.iframeManager) {
+        this.chatApp.iframeManager.refreshRailsApp((callback) => this.chatApp.getRailsDebugInfo(callback));
+      }
+
+      this.showSuccess(data.message);
+      this.checkUncommittedChanges();
+      this.updateUnsavedBadge();
+      this.refreshDiscardUndo();
+
+    } catch (error) {
+      console.error('Error undoing discard:', error);
+      this.showError('Failed to undo discard: ' + error.message);
     }
   }
 
