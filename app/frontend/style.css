@@ -9250,6 +9250,44 @@ body.instance-locked .lock-modal-overlay {
     color: #fff;
 }
 
+/* Undo-discard banner: shown while a discard snapshot is still restorable */
+.discard-undo-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 16px;
+    background: rgba(52, 211, 153, 0.12);
+    border-bottom: 1px solid rgba(52, 211, 153, 0.3);
+}
+
+.discard-undo-banner.hidden {
+    display: none;
+}
+
+.discard-undo-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #34d399;
+    font-size: 0.85rem;
+}
+
+.btn-undo-discard {
+    padding: 5px 10px;
+    border: 1px solid #34d399;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    background: rgba(52, 211, 153, 0.2);
+    color: #34d399;
+    transition: all 0.2s ease;
+}
+
+.btn-undo-discard:hover {
+    background: #34d399;
+    color: #052e21;
+}
+
 .uncommitted-changes-info {
     cursor: pointer;
 }
