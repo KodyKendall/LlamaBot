@@ -326,7 +326,7 @@
                                 <i class="fa-solid fa-upload"></i> Upload file
                             </button>
                             <button data-llamabot="browse-files-btn" class="file-attach-menu-item">
-                                <i class="fa-solid fa-folder-open"></i> Browse and attach
+                                <i class="fa-solid fa-folder-open"></i> My Uploads
                             </button>
                         </div>
                         <!-- File browser panel -->
@@ -1019,6 +1019,11 @@
                 <div class="asset-modal-header-actions">
                     <button data-llamabot="asset-modal-refresh" class="asset-modal-icon-btn" data-tooltip="Refresh the asset list" data-tooltip-pos="bottom" aria-label="Refresh">
                         <i class="fa-solid fa-rotate"></i>
+                    </button>
+                    <!-- Fills the screen and hides the file list — a spreadsheet in the
+                         default 1100px modal only gets ~800px of width. -->
+                    <button data-llamabot="asset-modal-expand" class="asset-modal-icon-btn" data-tooltip="Expand to full screen" data-tooltip-pos="bottom" aria-label="Expand preview to full screen" aria-pressed="false">
+                        <i class="fa-solid fa-up-right-and-down-left-from-center"></i>
                     </button>
                     <button data-llamabot="asset-modal-close" class="asset-modal-icon-btn" data-tooltip="Close (Esc)" data-tooltip-pos="bottom" aria-label="Close">
                         <i class="fa-solid fa-xmark"></i>

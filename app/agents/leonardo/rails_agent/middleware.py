@@ -399,6 +399,27 @@ class DeepSeekReasoningMiddleware(AgentMiddleware):
 # tests reaching mw._MODEL_RETRY_MAX_ATTEMPTS) resolve unchanged.
 
 
+def _record_bad_request_shape(exc, request, llm_model):
+    """Attach a redacted description of a rejected request to the exception."""
+    from app.agents.leonardo.message_invariants import (
+        log_bad_request_shape,
+        looks_like_bad_request,
+    )
+
+    if not looks_like_bad_request(exc):
+        return
+    try:
+        log_bad_request_shape(
+            exc,
+            list(getattr(request, "messages", None) or []),
+            tools=getattr(request, "tools", None),
+            model=llm_model,
+            label=f"model={llm_model}",
+        )
+    except Exception:  # noqa: BLE001 - diagnosis must never mask the real error
+        logger.debug("could not describe the rejected request", exc_info=True)
+
+
 class DynamicModelMiddleware(AgentMiddleware):
     """Middleware that dynamically switches LLM based on state.llm_model.
 
@@ -437,6 +458,12 @@ class DynamicModelMiddleware(AgentMiddleware):
             except Exception as e:
                 attempt += 1
                 if attempt >= _MODEL_RETRY_MAX_ATTEMPTS or not is_transient_error(e):
+                    # A provider that rejects the REQUEST tells us nothing
+                    # actionable ("'param': None" — 32 occurrences on 7 boxes in
+                    # 7 days for our own default model). Describe the shape of
+                    # what we sent, redacted, so the fleet report has something
+                    # to diagnose from.
+                    _record_bad_request_shape(e, req, llm_model)
                     raise
                 logger.warning(
                     f"Transient model error on {llm_model} (attempt {attempt}/"
@@ -460,6 +487,12 @@ class DynamicModelMiddleware(AgentMiddleware):
             except Exception as e:
                 attempt += 1
                 if attempt >= _MODEL_RETRY_MAX_ATTEMPTS or not is_transient_error(e):
+                    # A provider that rejects the REQUEST tells us nothing
+                    # actionable ("'param': None" — 32 occurrences on 7 boxes in
+                    # 7 days for our own default model). Describe the shape of
+                    # what we sent, redacted, so the fleet report has something
+                    # to diagnose from.
+                    _record_bad_request_shape(e, req, llm_model)
                     raise
                 logger.warning(
                     f"Transient model error on {llm_model} (attempt {attempt}/"

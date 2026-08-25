@@ -72,7 +72,7 @@ class TestEngineerPlanComposition:
         # Plan-first preamble.
         assert "Engineer Plan Mode" in ENGINEER_PLAN_PROMPT
         assert "6-PHASE WORKFLOW" in ENGINEER_PLAN_PROMPT
-        assert "One question per turn" in ENGINEER_PLAN_PROMPT
+        assert "Batch your questions" in ENGINEER_PLAN_PROMPT
         # Full engineer playbook is composed in (single source of truth).
         assert RAILS_AGENT_PROMPT in ENGINEER_PLAN_PROMPT
         # Therefore the softened voice flows through automatically.

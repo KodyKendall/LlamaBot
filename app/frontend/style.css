@@ -1738,6 +1738,36 @@ button.brand-logo-thumb:hover .brand-logo-zoom {
     padding: 10px 12px;
 }
 
+/* Which half of the stack this came from. Small and quiet — it labels the entry,
+   it is not the headline — but coloured differently per kind so a list of mixed
+   errors can be scanned without reading any of them. */
+.js-error-kind {
+    display: inline-block;
+    float: right;
+    margin-left: 8px;
+    padding: 1px 7px;
+    border-radius: 999px;
+    font-size: 0.62rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    background: rgba(129, 178, 255, 0.16);
+    color: rgba(168, 202, 255, 0.95);
+    border: 1px solid rgba(129, 178, 255, 0.28);
+}
+
+/* A server crash is the more serious of the two — the request never completed —
+   so it gets the warmer colour and a marked edge. */
+.js-error-item--rails .js-error-kind {
+    background: rgba(255, 138, 128, 0.16);
+    color: rgba(255, 176, 168, 0.95);
+    border-color: rgba(255, 138, 128, 0.3);
+}
+
+.js-error-item--rails {
+    border-left: 3px solid rgba(255, 138, 128, 0.45);
+}
+
 /* The plain-language line leads — the jargon is support, not the headline. */
 .js-error-item-plain {
     font-size: 0.86rem;
@@ -3418,7 +3448,8 @@ body.instance-locked .lock-modal-overlay {
 }
 
 /* Skip button */
-.plan-skip-btn {
+.plan-skip-btn,
+.plan-skip-all-btn {
     background: transparent;
     border: 1px solid rgba(255, 255, 255, 0.15);
     color: rgba(255, 255, 255, 0.35);
@@ -3429,11 +3460,13 @@ body.instance-locked .lock-modal-overlay {
     transition: color 0.15s ease;
 }
 
-.plan-skip-btn:hover:not(:disabled) {
+.plan-skip-btn:hover:not(:disabled),
+.plan-skip-all-btn:hover:not(:disabled) {
     color: rgba(255, 255, 255, 0.6);
 }
 
-.plan-skip-btn:disabled {
+.plan-skip-btn:disabled,
+.plan-skip-all-btn:disabled {
     opacity: 0.5;
     cursor: default;
 }
@@ -3532,6 +3565,97 @@ body.instance-locked .lock-modal-overlay {
     font-style: italic;
     text-align: right;
     padding: 4px 0;
+    /* A batched answer is one "question → answer" line per question. */
+    white-space: pre-line;
+}
+
+
+/* ===== Batched questions (2-4 asked at once, answered together) ===== */
+/* One card, one block per question, one Continue. Saves a round-trip per question. */
+.plan-question-card.batched {
+    border: 1px solid rgba(139, 92, 246, 0.2);
+    border-radius: 12px;
+    background: rgba(139, 92, 246, 0.04);
+    padding: 6px 16px 14px;
+}
+
+.plan-question-card.batched .plan-question-item {
+    position: relative;
+    padding: 12px 0 14px 26px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.plan-question-card.batched .plan-question-item:last-of-type {
+    border-bottom: none;
+    padding-bottom: 4px;
+}
+
+/* Numbered so the user can see at a glance how many are left. */
+.plan-question-num {
+    position: absolute;
+    left: 0;
+    top: 12px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: rgba(139, 92, 246, 0.2);
+    border: 1px solid rgba(139, 92, 246, 0.4);
+    color: #c4b5fd;
+    font-size: 11px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* The free-text box is the fallback in a batch (options are the fast path), so it
+   sits quieter and shorter than on a single-question card. */
+.plan-question-card.batched .plan-question-input {
+    font-size: 13px;
+    padding: 6px 10px;
+    background: rgba(255, 255, 255, 0.03);
+    border-color: rgba(139, 92, 246, 0.15);
+}
+
+.plan-question-card.batched .plan-question-options {
+    margin-top: 8px;
+}
+
+.plan-question-card.batched .plan-question-input-row {
+    margin-top: 8px;
+}
+
+/* A skipped question stays visibly skipped so the count makes sense. */
+.plan-skip-btn.selected {
+    border-color: rgba(255, 255, 255, 0.35);
+    color: rgba(255, 255, 255, 0.7);
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.plan-question-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.plan-question-progress {
+    font-size: 12px;
+    color: #64748b;
+}
+
+.plan-question-foot-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.plan-question-card.batched .plan-continue-btn {
+    margin-top: 0;
 }
 
 /* ===== UI/UX visual question (ask_user_uiux_question) ===== */
@@ -7109,6 +7233,22 @@ body.instance-locked .lock-modal-overlay {
     overflow: hidden;
 }
 
+/* Full-screen mode: the preview takes the whole viewport and the file list steps
+   aside. Toggled by the expand button in the modal header (Esc steps back out). */
+.asset-modal--expanded .asset-modal-content {
+    width: 98vw;
+    height: 96vh;
+    border-radius: 10px;
+}
+
+.asset-modal--expanded .asset-modal-list {
+    display: none;
+}
+
+.asset-modal--expanded .asset-preview-body {
+    margin: 0 12px 12px;
+}
+
 .asset-modal-header {
     display: flex;
     align-items: center;
@@ -7419,32 +7559,13 @@ body.instance-locked .lock-modal-overlay {
     color: rgba(255, 255, 255, 0.35);
 }
 
-.asset-office-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    padding: 9px 16px;
-    border-radius: 8px;
-    border: 1px solid rgba(139, 92, 246, 0.5);
-    background: rgba(139, 92, 246, 0.18);
-    color: #c4b5fd;
-    font-size: 13px;
-    cursor: pointer;
-    transition: all 0.15s;
-}
-
-.asset-office-btn:hover {
-    background: rgba(139, 92, 246, 0.3);
-    color: #fff;
-}
-
 .asset-office-note {
     font-size: 11px;
     color: rgba(255, 255, 255, 0.35);
     max-width: 320px;
 }
 
-/* Spreadsheet (SheetJS) preview */
+/* Spreadsheet cell-grid preview */
 .asset-sheet-tabs {
     display: flex;
     gap: 4px;

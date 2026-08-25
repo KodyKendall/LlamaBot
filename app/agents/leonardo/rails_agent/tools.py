@@ -35,6 +35,7 @@ from app.agents.leonardo.rails_agent.tool_prompts import (
     WRITE_LEONARDO_MD_DESCRIPTION,
     TAIL_RAILS_LOGS_DESCRIPTION,
     HARD_RESTART_RAILS_DESCRIPTION,
+    CHECK_PAGE_DESCRIPTION,
     FIX_PERMISSIONS_DESCRIPTION,
     BROWSER_INSPECT_DESCRIPTION,
     NAVIGATE_BROWSER_DESCRIPTION,
@@ -415,6 +416,125 @@ def normalize_whitespace(s: str) -> str:
     return s.strip()
 
 
+def _drop_line_indentation(chars: list, spans: list):
+    """Remove the single leading space at each line start (post-normalization).
+
+    ``normalize_whitespace`` collapses a run of spaces/tabs to ONE space, so an
+    indented line still starts with a space and an agent that gets indentation
+    wrong still fails to match. Matching ignores that leading space; the raw span
+    is contiguous, so the file's own indentation inside the region is untouched.
+    """
+    out_chars: list = []
+    out_spans: list = []
+    at_line_start = True
+    for c, span in zip(chars, spans):
+        if at_line_start and c == " ":
+            continue  # skip indentation for matching purposes only
+        out_chars.append(c)
+        out_spans.append(span)
+        at_line_start = c == "\n"
+    return out_chars, out_spans
+
+
+def _normalized_spans(text: str, *, ignore_indentation: bool = False):
+    """``normalize_whitespace(text)`` plus, per output char, its raw span.
+
+    ``edit_file``'s "normalized" match path used to hand
+    ``content.replace(normalized_old, ...)`` a string that had been normalized —
+    which, by definition, is usually NOT present in the raw file. The replace
+    matched nothing, the file was written back unchanged, and the tool reported
+    ``Successfully replaced string (match type: normalized)``. That silent no-op
+    is what blanked a customer's Sales Funnel page: the agent believed the fix
+    had landed and moved on (8 friction reports, 6 boxes, 30 days).
+
+    This maps the normalized text back onto the real bytes, so a normalized match
+    can be applied to the region it actually corresponds to.
+
+    Mirrors ``normalize_whitespace`` exactly: CRLF -> LF, runs of spaces/tabs ->
+    one space, runs of 3+ newlines -> two, then strip.
+    """
+    chars: list = []
+    spans: list = []
+    i, n = 0, len(text)
+    while i < n:
+        c = text[i]
+        if c == "\r" and i + 1 < n and text[i + 1] == "\n":
+            chars.append("\n")
+            spans.append((i, i + 2))
+            i += 2
+        elif c in " \t":
+            start = i
+            while i < n and text[i] in " \t":
+                i += 1
+            chars.append(" ")
+            spans.append((start, i))
+        else:
+            chars.append(c)
+            spans.append((i, i + 1))
+            i += 1
+
+    # Collapse runs of 3+ newlines down to two (the surviving pair keeps the
+    # span of the whole run, so a replacement covers all of it).
+    collapsed_chars: list = []
+    collapsed_spans: list = []
+    j = 0
+    while j < len(chars):
+        if chars[j] == "\n":
+            k = j
+            while k < len(chars) and chars[k] == "\n":
+                k += 1
+            run = k - j
+            keep = min(run, 2)
+            for offset in range(keep):
+                collapsed_chars.append("\n")
+                if offset == keep - 1:
+                    collapsed_spans.append((spans[j + offset][0], spans[k - 1][1]))
+                else:
+                    collapsed_spans.append(spans[j + offset])
+            j = k
+        else:
+            collapsed_chars.append(chars[j])
+            collapsed_spans.append(spans[j])
+            j += 1
+
+    if ignore_indentation:
+        collapsed_chars, collapsed_spans = _drop_line_indentation(
+            collapsed_chars, collapsed_spans
+        )
+
+    # .strip()
+    start_i, end_i = 0, len(collapsed_chars)
+    while start_i < end_i and collapsed_chars[start_i].isspace():
+        start_i += 1
+    while end_i > start_i and collapsed_chars[end_i - 1].isspace():
+        end_i -= 1
+
+    return "".join(collapsed_chars[start_i:end_i]), collapsed_spans[start_i:end_i]
+
+
+def locate_normalized_span(content: str, old_string: str, *, ignore_indentation: bool = False):
+    """Raw ``(start, end)`` in ``content`` matching ``old_string`` modulo whitespace.
+
+    Returns ``None`` when there is no such region, or when there is more than one
+    (ambiguous: picking one silently is how you edit the wrong method). Refusing
+    an ambiguous match is deliberate — the caller falls through to a truthful
+    "could not find it", which costs one retry.
+    """
+    needle_chars, _ = _normalized_spans(old_string, ignore_indentation=ignore_indentation)
+    needle = "".join(needle_chars) if isinstance(needle_chars, list) else needle_chars
+    if not needle:
+        return None
+
+    normalized, spans = _normalized_spans(content, ignore_indentation=ignore_indentation)
+    first = normalized.find(needle)
+    if first == -1:
+        return None
+    if normalized.find(needle, first + 1) != -1:
+        return None
+
+    return spans[first][0], spans[first + len(needle) - 1][1]
+
+
 # NOTE: Auto-checkpoint functionality has been disabled.
 # Users now manually create checkpoints via the History panel UI.
 # The checkpoint_service is still used by the /api/checkpoints endpoint for manual creation.
@@ -536,10 +656,31 @@ def write_file(
             }
         )
 
+    verification = verify_write(full_path, content)
+    if verification is not None:
+        error_message = (
+            f"Error: writing '{file_path}' did NOT persist. {verification}\n\n"
+            f"Do not assume this write landed — read the file back and try again."
+        )
+        return Command(
+            update={
+                "messages": [ToolMessage(
+                    error_message,
+                    artifact={"status": "error", "message": error_message},
+                    tool_call_id=runtime.tool_call_id,
+                )],
+                "failed_tool_calls_count": 1,
+            }
+        )
+
     success_message = f"Updated file {file_path}"
 
     if is_new_file:
         success_message += _mount_visibility_warning(file_path)
+
+    # A migration that is written but not run takes the whole app down. Run it
+    # here, at the write, so no mode and no prompt can skip it.
+    success_message += migration_followup(file_path)
 
     tool_output = {
         "status": "success",
@@ -553,6 +694,105 @@ def write_file(
             ],
         }
     )
+
+
+# =============================================================================
+# Pending migrations — run them, never leave them
+# =============================================================================
+#
+# `ActiveRecord::PendingMigrationError` is the highest-occurrence error anywhere
+# in the fleet: 288 occurrences across 21 customer boxes in 7 days (2026-08-23).
+# Rails checks for pending migrations on EVERY request, so one unrun migration
+# does not break one page — it breaks the customer's whole app, instantly, with a
+# stack trace. To a non-technical user that reads as "my app is destroyed".
+#
+# The agent's own write is the trigger, so this is enforced at the write, not in
+# the prompt: a prompt rule is something the agent can talk past, and 288
+# occurrences say it did. Enforcing here also covers every mode at once,
+# including the raw StateGraph ones that run no middleware.
+
+_MIGRATION_TIMEOUT_SECONDS = 180
+
+
+def is_migration_path(file_path: str) -> bool:
+    """True for a Rails migration file — the write that arms this rule."""
+    normalized = str(file_path or "").replace("\\", "/").lstrip("./")
+    return "db/migrate/" in f"/{normalized}" and normalized.endswith(".rb")
+
+
+def run_pending_migrations() -> str:
+    """Run ``db:migrate`` in the Rails container and describe what happened.
+
+    Always returns prose for the agent to read; never raises. A failure has to be
+    reported honestly — a half-applied schema with the agent claiming success is
+    strictly worse than the pending migration it replaced.
+    """
+    try:
+        output = rails_api_sh(
+            "bin/rails db:migrate 2>&1", WORKDIR, _MIGRATION_TIMEOUT_SECONDS
+        )
+    except Exception as e:  # noqa: BLE001
+        output = f"could not run the migration: {e}"
+
+    output = truncate_output((output or "").strip(), 4000)
+    failed = (not output) or bool(
+        re.search(
+            r"(rails aborted!|StandardError|error|Error:|Migration\w*Error|"
+            r"could not run the migration|EXEC ERROR|Bundler::)",
+            output,
+        )
+    ) and "migrated (" not in output
+
+    if failed:
+        return (
+            "\n\n<PENDING_MIGRATION>\n"
+            "You wrote a migration, so `bin/rails db:migrate` was run for you "
+            "automatically — and it FAILED. Until it succeeds, EVERY page of the "
+            "user's app returns ActiveRecord::PendingMigrationError, not just the "
+            "feature you were building.\n\n"
+            "Fix the migration and it will run again on your next write to it, or "
+            "run `bin/rails db:migrate` yourself once you have. Do NOT tell the "
+            "user the feature is ready, and do not write a second migration for "
+            "the same change — edit this one.\n\n"
+            f"Output:\n{output}\n"
+            "</PENDING_MIGRATION>"
+        )
+
+    return (
+        "\n\nRan `bin/rails db:migrate` automatically (an unrun migration breaks "
+        f"every page of the app, not just this feature):\n{output}"
+    )
+
+
+def migration_followup(file_path: str) -> str:
+    """The text to append to a write tool's result, if it touched a migration."""
+    if not is_migration_path(file_path):
+        return ""
+    return run_pending_migrations()
+
+
+def verify_write(full_path: Path, expected: str):
+    """Read the file back and confirm it holds ``expected``. None means it does.
+
+    A write tool that reports success without reading back is reporting an
+    intention. On the fleet that intention was wrong often enough to blank a
+    customer's page (8 friction reports, 6 boxes, 30 days) — and because the
+    agent believed it, it told the customer the fix had landed and moved on.
+    Returns a short reason string when the bytes on disk do not match.
+    """
+    try:
+        actual = full_path.read_text()
+    except Exception as e:  # noqa: BLE001
+        return f"the file could not be read back after writing ({e})"
+
+    if actual == expected:
+        return None
+    if len(actual) != len(expected):
+        return (
+            f"the file on disk is {len(actual)} characters, the content written "
+            f"was {len(expected)}"
+        )
+    return "the file on disk differs from what was written"
 
 
 def _mount_visibility_warning(file_path: str) -> str:
@@ -668,45 +908,30 @@ def _apply_edit(
             }
         )
 
-    # Try exact match first
+    # Match ladder: exact, then whitespace-normalized — and nothing looser.
+    #
+    # There used to be two "fuzzy" rungs that took difflib's longest common
+    # substring when it covered >50-70% of old_string. A longest-common-substring
+    # is not a match; on leo-* boxes it landed mid-string in an unrelated method
+    # and truncated it, while reporting success. A truthful failure costs one
+    # retry. A false success costs a customer's page.
     search_string = old_string
     match_found = old_string in content
     match_type = "exact"
 
-    # If exact match fails, try normalized matching
     if not match_found:
-        normalized_content = normalize_whitespace(content)
-        normalized_old = normalize_whitespace(old_string)
-
-        if normalized_old in normalized_content:
-            # Find the actual substring in the original content that matches the normalized version
-            # We'll use fuzzy matching to locate it
+        # Rung 2: whitespace-normalized. Rung 3 additionally forgives the leading
+        # indentation of each line — the single most common way an agent's
+        # old_string differs from the file it just read.
+        span = (locate_normalized_span(content, old_string)
+                or locate_normalized_span(content, old_string, ignore_indentation=True))
+        if span is not None:
+            # The REAL bytes of that region, not the normalized text — replacing
+            # with the normalized string matches nothing and writes back
+            # unchanged content under a success message.
+            search_string = content[span[0]:span[1]]
             match_found = True
             match_type = "normalized"
-            search_string = normalized_old
-
-            # Use difflib to find the best matching region
-            matcher = difflib.SequenceMatcher(None, content, old_string)
-            match = matcher.find_longest_match(0, len(content), 0, len(old_string))
-
-            if match.size > len(old_string) * 0.7:  # At least 70% match
-                # Extract the actual substring from content
-                search_string = content[match.a:match.a + match.size]
-                match_found = True
-                match_type = "fuzzy"
-
-    # If still no match, try fuzzy matching as last resort
-    if not match_found:
-        matcher = difflib.SequenceMatcher(None, content, old_string)
-        similarity = matcher.ratio()
-
-        if similarity > 0.6:  # 60% similarity threshold
-            match = matcher.find_longest_match(0, len(content), 0, len(old_string))
-
-            if match.size > len(old_string) * 0.5:  # At least 50% of the string
-                search_string = content[match.a:match.a + match.size]
-                match_found = True
-                match_type = "fuzzy"
 
     # If still no match found, provide detailed error with diff
     if not match_found:
@@ -777,6 +1002,25 @@ def _apply_edit(
         new_content = content.replace(search_string, new_string, 1)
         result_msg = f"Successfully replaced string in '{file_path}' (match type: {match_type})"
 
+    # Never report a replacement that did not change anything.
+    if new_content == content:
+        error_message = (
+            f"Error: the edit to '{file_path}' would not change the file — "
+            f"old_string and new_string produce identical content. Nothing was "
+            f"written. Re-read the file and check you are editing what you think "
+            f"you are."
+        )
+        return Command(
+            update={
+                "messages": [ToolMessage(
+                    error_message,
+                    artifact={"status": "error", "message": error_message},
+                    tool_call_id=tool_call_id,
+                )],
+                "failed_tool_calls_count": 1,
+            }
+        )
+
     try:
         full_path.write_text(new_content)
         chown_for_ubuntu(full_path)  # Fix permissions for ubuntu user
@@ -794,7 +1038,29 @@ def _apply_edit(
             }
         )
 
+    # Read-after-write. Say "success" only about bytes we have read back off the
+    # disk. Everything upstream of this line is an intention, not a fact.
+    verification = verify_write(full_path, new_content)
+    if verification is not None:
+        error_message = (
+            f"Error: the edit to '{file_path}' did NOT persist. {verification}\n\n"
+            f"The file on disk does not contain your change. Re-read it and try "
+            f"again — do not assume this edit landed."
+        )
+        return Command(
+            update={
+                "messages": [ToolMessage(
+                    error_message,
+                    artifact={"status": "error", "message": error_message},
+                    tool_call_id=tool_call_id,
+                )],
+                "failed_tool_calls_count": 1,
+            }
+        )
+
     # git_status(tool_call_id) # hacky - this will update the git status page so the user can see the changes.
+    result_msg += migration_followup(file_path)
+
     tool_output = {
         "status": "success",
         "message": result_msg
@@ -1053,6 +1319,10 @@ _EXEC_ENV_ALLOWLIST = frozenset({
     # Where the app calls back to
     "LLAMABOT_API_URL", "LLAMABOT_WEBSOCKET_URL", "LLAMAPRESS_API_URL",
     "RAILS_BASE_URL", "INSTANCE_NAME",
+    # The box's public hostname. The prompts tell the agent to read this to give
+    # the user their shareable URL, and declare it safe to share; scrubbing it
+    # made the documented command return an empty string.
+    "HOSTED_DOMAIN",
 })
 
 #: Cache of container name -> list of env var NAMES it defines. The container's
@@ -1399,6 +1669,176 @@ def tail_rails_logs(
     )
 
 
+# =============================================================================
+# check_page — the always-available page verifier
+# =============================================================================
+#
+# 2026-08-23: the Rails prompts told the agent to self-verify pages with
+# `browser_inspect`, which is gated OFF by default, so on a default box the call
+# came back "browser_inspect is not a valid tool" and the agent shipped the page
+# unverified. The customer-app error stream is dominated by failures a single
+# page load catches instantly (NoMethodError 16 boxes / NameError 13 /
+# ActionView::SyntaxErrorInTemplate 10, in 7 days). `browser_inspect` is heavy
+# for good reason — headless Chromium and a 25-50k-token screenshot — so this is
+# the cheap always-on counterpart: one HTTP GET, and the exception off the Rails
+# log when it fails.
+
+# The base URL that works from INSIDE the container. Shared with the Rails error
+# feed so there is one answer to "where is the app", and named in the prompt as
+# the same string.
+RAILS_BASE_URL = os.getenv("RAILS_BASE_URL", "http://llamapress:3000")
+
+# The whole point is to stay tiny — this tool is called after every view edit.
+CHECK_PAGE_MAX_CHARS = 2500
+CHECK_PAGE_BACKTRACE_LINES = 6
+CHECK_PAGE_TIMEOUT_SECONDS = 20
+
+
+def _rails_exception_from_logs(log_text: str) -> Optional[str]:
+    """Pull the most recent exception out of a Rails log tail.
+
+    Rails logs an unhandled exception as a header line naming the class, then an
+    indented backtrace::
+
+        NoMethodError (undefined method `any?' for nil):
+
+        app/views/comments/index.html.erb:67:in `_app_views...'
+        app/controllers/comments_controller.rb:8:in `index'
+
+    Pure string work so it can be tested without Docker or a Rails app. Returns
+    None when the tail holds no exception, which is itself information: the
+    failure did not come from the app.
+    """
+    if not log_text:
+        return None
+
+    lines = log_text.splitlines()
+    header_re = re.compile(r"^\s*([A-Z][A-Za-z0-9_]*(?:::[A-Z][A-Za-z0-9_]*)*)\s*\((.*)\):\s*$")
+
+    for i in range(len(lines) - 1, -1, -1):
+        match = header_re.match(lines[i])
+        if not match:
+            continue
+        exception_class, message = match.group(1), match.group(2)
+        frames = []
+        for line in lines[i + 1:]:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            # App frames first; stop once the trace leaves the user's code, since
+            # everything after that is framework noise.
+            if not (stripped.startswith("app/") or stripped.startswith("lib/")
+                    or stripped.startswith("config/") or stripped.startswith("db/")):
+                break
+            frames.append(stripped)
+            if len(frames) >= CHECK_PAGE_BACKTRACE_LINES:
+                break
+        report = f"{exception_class}: {message}"
+        if frames:
+            report += "\n" + "\n".join(frames)
+        return report
+
+    return None
+
+
+def _tail_rails_log_text(lines: int = 300) -> str:
+    """Best-effort read of the Rails container's recent log output."""
+    try:
+        container_name = get_rails_container_name()
+        result = subprocess.run(
+            [
+                "curl", "--silent", "--show-error",
+                "--unix-socket", "/var/run/docker.sock",
+                f"http://localhost/containers/{container_name}/logs"
+                f"?stdout=true&stderr=true&tail={lines}",
+            ],
+            capture_output=True, timeout=15,
+        )
+        if result.returncode != 0:
+            return ""
+        return _demultiplex_docker_log_stream(result.stdout)
+    except Exception as e:  # noqa: BLE001 - diagnosis must never raise
+        logging.getLogger(__name__).debug("check_page could not read Rails logs: %s", e)
+        return ""
+
+
+def _check_page_url(path: str) -> str:
+    """Resolve what the model passed into a URL on the user's own app."""
+    path = (path or "").strip()
+    if path.startswith("http://") or path.startswith("https://"):
+        return path
+    if not path.startswith("/"):
+        path = "/" + path
+    return RAILS_BASE_URL + path
+
+
+@tool(description=CHECK_PAGE_DESCRIPTION)
+def check_page(
+    path: str,
+    runtime: ToolRuntime,
+) -> Command:
+    """GET one page of the Rails app and report the status, plus the exception if it broke."""
+    from app.agents.utils.url_guard import UrlNotAllowed, validate_outbound_url
+
+    tool_call_id = runtime.tool_call_id
+    url = _check_page_url(path)
+
+    # Same SSRF guard as browser_inspect: `path` comes from the model, which can
+    # be steered by untrusted page content, so it may only reach the app's own
+    # origin or the public internet.
+    try:
+        validate_outbound_url(url)
+    except UrlNotAllowed as e:
+        return Command(update={"messages": [ToolMessage(
+            f"Refused to load {url}: {e}", tool_call_id=tool_call_id)]})
+
+    try:
+        import httpx
+        response = httpx.get(
+            url, timeout=CHECK_PAGE_TIMEOUT_SECONDS, follow_redirects=False,
+        )
+        status = response.status_code
+    except Exception as e:  # noqa: BLE001
+        # The app not answering at all is a real, reportable result — usually a
+        # boot failure, which the log will name.
+        detail = _rails_exception_from_logs(_tail_rails_log_text())
+        message = f"Could not reach {url}: {e}"
+        if detail:
+            message += f"\n\nMost recent exception in the Rails log:\n{detail}"
+        else:
+            message += (
+                "\n\nNothing in the Rails log explains it — the app may still be "
+                "booting, or the container may be down (try tail_rails_logs)."
+            )
+        return Command(update={"messages": [ToolMessage(
+            truncate_output(message, CHECK_PAGE_MAX_CHARS), tool_call_id=tool_call_id)]})
+
+    if 200 <= status < 300:
+        # Deliberately says nothing else. This runs after every view edit; if it
+        # returned page content it would become the next context-bloat source.
+        return Command(update={"messages": [ToolMessage(
+            f"{status} OK — {url} rendered.", tool_call_id=tool_call_id)]})
+
+    if 300 <= status < 400:
+        location = response.headers.get("location", "(no Location header)")
+        return Command(update={"messages": [ToolMessage(
+            f"{status} redirect — {url} sent you to {location}. The route works, but "
+            f"the page itself did not render (this is usually a login redirect, not a bug).",
+            tool_call_id=tool_call_id)]})
+
+    detail = _rails_exception_from_logs(_tail_rails_log_text())
+    message = f"{status} — {url} did NOT render."
+    if detail:
+        message += f"\n\n{detail}"
+    else:
+        message += (
+            "\n\nNo exception in the recent Rails log. A 404 usually means the route "
+            "is missing (check config/routes.rb); for anything else try tail_rails_logs."
+        )
+    return Command(update={"messages": [ToolMessage(
+        truncate_output(message, CHECK_PAGE_MAX_CHARS), tool_call_id=tool_call_id)]})
+
+
 @tool(description=HARD_RESTART_RAILS_DESCRIPTION)
 def hard_restart_rails(
     runtime: ToolRuntime,
@@ -1549,19 +1989,16 @@ def bash_command(
 ) -> Command:
     """Execute a bash command in the Rails container."""
     tool_call_id = runtime.tool_call_id
-    # Safeguard against secret exfiltration attempts
-    forbidden_patterns = [".env", "ENV["]
-    for pattern in forbidden_patterns:
-        if pattern.lower() in command.lower():
-            result = f"Blocked: use of '{pattern}' is not allowed for security reasons. Contact a LlamaPress admin for guidance in retrieving sensitive .env information."
-            return Command(
-                update={
-                    "messages": [
-                        ToolMessage(result, tool_call_id=tool_call_id)
-                    ],
-                }
-            )
 
+    # NOTE: there used to be a `[".env", "ENV["]` substring blocklist here. It is
+    # gone, and deliberately not replaced with a better pattern: secrets are taken
+    # away at the exec instead (see _EXEC_ENV_ALLOWLIST — every variable the
+    # container defines is blanked unless it is named there). The blocklist could
+    # not win a string match against a shell (`printenv`, `export -p`,
+    # `ruby -e 'p ENV'`, any base64 of those), and meanwhile it blocked ordinary
+    # Ruby: `Rails.env` contains ".env", and the system prompt told the agent to
+    # run `rails runner "puts ENV['HOSTED_DOMAIN']"` — a command the filter then
+    # refused. Two friction reports, both false positives.
     raw_result = rails_api_sh(command, workdir, timeout_seconds)
 
     # Truncate large outputs to prevent context window explosion

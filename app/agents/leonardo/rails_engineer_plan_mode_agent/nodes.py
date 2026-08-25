@@ -29,7 +29,7 @@ from datetime import date
 
 from app.agents.leonardo.rails_agent.state import RailsAgentState
 from app.agents.leonardo.rails_agent.tools import (
-    write_todos, ls, read_file, write_file, edit_file, bash_command,
+    write_todos, ls, read_file, write_file, edit_file, check_page, bash_command,
     tail_rails_logs, hard_restart_rails, fix_permissions,
     glob_files, grep_files, internet_search,
     read_leonardo_md, write_leonardo_md, edit_leonardo_md,
@@ -49,6 +49,7 @@ from app.agents.leonardo.rails_engineer_plan_mode_agent.middleware import (
 from app.agents.utils.token_counter import SUMMARIZATION_TOKEN_THRESHOLD
 from app.agents.leonardo.rails_agent.sub_agents import delegate_task, delegate_research
 # Reuse the plan-mode interaction tools + summarization prompt verbatim (DRY).
+from app.agents.leonardo.rails_plan_mode_agent.prompts import BATCHED_QUESTIONS_DIRECTIVE
 from app.agents.leonardo.rails_plan_mode_agent.nodes import (
     ask_user_question,
     ask_user_uiux_question,
@@ -63,6 +64,9 @@ def get_cached_system_prompt():
     """Build system message with project context, personality files, date, and prompt caching."""
     current_date = date.today().strftime("%Y-%m-%d")
     date_suffix = f"\n\n---\n**Today's Date:** {current_date}"
+    # Appended last so it also overrides a mothership-delivered prompt, which
+    # still carries the old "one question per turn" rule.
+    date_suffix += BATCHED_QUESTIONS_DIRECTIVE
     full_prompt = with_friction_section(build_beginner_system_prompt(
         ENGINEER_PLAN_PROMPT,
         suffix=date_suffix,
@@ -90,7 +94,7 @@ default_tools = [
     ask_user_uiux_question,
     # Standard tools (same as engineer)
     write_todos,
-    ls, read_file, write_file, edit_file, bash_command,
+    ls, read_file, write_file, edit_file, check_page, bash_command,
     tail_rails_logs, hard_restart_rails, fix_permissions,
     glob_files, grep_files, internet_search,
     read_leonardo_md, write_leonardo_md, edit_leonardo_md,

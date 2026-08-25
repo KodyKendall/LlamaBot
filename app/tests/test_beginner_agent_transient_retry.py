@@ -54,7 +54,7 @@ def _no_backoff(monkeypatch):
     monkeypatch.setattr(res.time, "sleep", lambda *_: None)
     # Isolate the retry behavior from prompt/brand/skill machinery.
     monkeypatch.setattr(nb, "get_sys_msg", lambda: {"role": "system", "content": "sys"})
-    monkeypatch.setattr(nb, "repair_orphaned_tool_calls_in_messages", lambda m: m)
+    monkeypatch.setattr(nb, "normalize_messages_for_provider", lambda m: m)
 
 
 def test_beginner_node_retries_transient_then_succeeds(monkeypatch):

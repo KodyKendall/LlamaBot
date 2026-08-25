@@ -354,6 +354,14 @@ Every UI you touch should clear this bar before you mark a TODO complete:
 5. Refine view to use real data
 ```
 
+### Migrations: Run It or the App Is Down
+
+**Never end a turn with an unrun migration.** Rails checks for pending migrations on every request, so one unrun migration does not break one page — it breaks *every* page of the user's app, immediately, with a stack trace.
+
+- Write a migration, run it in the same turn. `write_file`/`edit_file` on anything under `db/migrate/` runs `bin/rails db:migrate` for you and reports the result — read that result.
+- If it fails, the app is down. Fix the migration; do not move on, and do not tell the user the feature is ready.
+- Never write a second migration for a change the first one already covers — edit the existing one. Two migrations for one change is `ActiveRecord::DuplicateMigrationNameError`.
+
 ### When the User Is on a Specific Page
 
 If `<CONTEXT>` indicates the user is on, e.g., `/tenders/5/builder`, and they ask for ANY change:
@@ -1364,6 +1372,19 @@ The chat interface has a debug recording feature hidden behind the **+** button 
 
 Tell the user: "Add some `console.log('🪲 DEBUG:', yourVariable)` statements where you think the issue is. Then click the **+** button next to the chat input, click the bug icon 🐛 (it'll turn red), and reproduce the problem. The logs will appear in your message box — just hit send and I'll help debug."
 
+### Load Every Page You Touch (Do This — Don't Wait for the User)
+
+After writing or editing any view, controller, route, helper or partial, call `check_page` on the route it affects. If it does not come back 2xx, fix it before you reply to the user.
+
+```
+check_page(path="/leads")
+```
+
+It returns the status, and on a failure the exception class, message and the first app frames of the backtrace. It is cheap — no browser, no screenshot — so call it freely. The app answers on `http://llamapress:3000` from inside the container; `check_page` already knows that, so pass the path only.
+
+A 302 means the route works but redirected you (usually to a login page). That is not a bug, but it did not prove the page renders — sign in the way the app expects, or check a page that does not require it.
+
+<!--IF:browser_inspect-->
 ### Self-Verifying UI Changes with browser_inspect (Do This — Don't Wait for the User)
 
 After editing any view, JS, or CSS file, call the `browser_inspect` tool to verify the page renders correctly. You don't need to ask the user to test it — do it yourself.
@@ -1382,6 +1403,22 @@ Returns: HTTP status, page title, all console errors, network failures (CDN miss
 - After any `.html.erb`, `.js`, `.css` edit — confirm the page loads without JS errors
 - When a JS library or Stimulus controller might not have mounted — check with selectors + js_evaluate
 - When the user reports "the page looks broken" or "something isn't working" — see the actual page
+<!--END:browser_inspect-->
+
+### Never Call a Method on Something That Might Be Nil
+
+`undefined method 'any?' for nil` and `undefined method '[]' for nil` are the two most common ways a page you just wrote 500s. Two rules:
+
+1. A view must not call a method on a value that may be nil. Guard it.
+2. A controller must assign every instance variable its view reads, on **every** path — including the early returns.
+
+```erb
+<%# wrong — @comments is nil when the controller returned early %>
+<% if @comments.any? %>
+
+<%# right %>
+<% if @comments.present? %>
+```
 
 ### Viewing Logs Manually
 **Rails logs:** Guide user to run `./bin/rails_logs` in Leonardo terminal
@@ -1794,6 +1831,8 @@ Usage:
 - The edit will FAIL if `old_string` is not unique in the file. Either provide a larger string with more surrounding context to make it unique or use `replace_all` to change every instance of `old_string`.
 - Use `replace_all` for replacing and renaming strings across the file. This parameter is useful if you want to rename a variable for instance.
 - You may need to escape quotes in the old_string to match properly, especially for longer multi-line strings.
+- **One edit per file per response.** Several `edit_file` calls in one response run at the same time and all read the same starting content, so later edits are written against a file that no longer looks like that. Make several changes to one file either as one larger edit, or one at a time across responses. Editing DIFFERENT files in one response is fine.
+- Success means the bytes are on disk: this tool re-reads the file and will tell you plainly if the edit did not persist. If it says the edit did not land, it did not land — re-read the file, do not carry on as if it had.
 
 If a tool call fails with an error or "old_string not found," you must stop retrying.
 Instead:
@@ -1814,7 +1853,7 @@ Usage:
 - You can optionally specify a line offset and limit (especially handy for long files), but it's recommended to read the whole file by not providing these parameters
 - Any lines longer than 2000 characters will be truncated
 - Results are returned using cat -n format, with line numbers starting at 1
-- You have the capability to call multiple tools in a single response. It is always better to speculatively read multiple files as a batch that are potentially useful.
+- You have the capability to call multiple tools in a single response. It is always better to speculatively read multiple files as a batch that are potentially useful. Batch READS freely; batch WRITES only across DIFFERENT files. Two edits to the same file in one response are edits to the same base content — sequence them instead.
 - If you read a file that exists but has empty contents you will receive a system reminder warning in place of file contents."""
 
 LIST_DIRECTORY_DESCRIPTION = """

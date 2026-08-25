@@ -35,6 +35,7 @@ from app.agents.leonardo.llm_factory import get_llm
 from app.agents.leonardo.model_policy import enabled_default_model
 from app.agents.leonardo.delegation import (
     DELEGATION_TIMEOUT_SECONDS,
+    summarize_partial_work,
     DelegationTimedOut,
     run_delegation,
 )
@@ -238,15 +239,16 @@ async def delegate_task(
             ]
         })
 
-    except DelegationTimedOut:
+    except DelegationTimedOut as timeout:
         logger.warning("User Mode sub-agent delegation timed out")
         return Command(update={
             "messages": [
                 ToolMessage(
                     content=(
-                        "[DELEGATED RESEARCH FAILED]\n\n"
-                        f"Timed out after {DELEGATION_TIMEOUT_SECONDS}s — you may retry "
-                        "delegate_task once."
+                        "[DELEGATED RESEARCH TIMED OUT]\n\n"
+                        f"It ran out of time after {DELEGATION_TIMEOUT_SECONDS}s. "
+                        "What it had looked at so far:\n\n"
+                        + summarize_partial_work(timeout.partial_messages)
                     ),
                     tool_call_id=tool_call_id
                 )

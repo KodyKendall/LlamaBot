@@ -9,6 +9,13 @@ from typing import Optional
 import jwt
 
 from app.models import User
+from app.services import rails_message_verifier
+
+# Role a verified Rails-gem caller is authorized as. The gem's token proves the
+# box's own Rails app sent the frame, but a Rails user id maps to no LlamaBot
+# account, so there is no per-user role to look up — the whole surface gets one
+# grant, which an operator can narrow like any other role.
+RAILS_ROLE = "rails"
 
 logger = logging.getLogger(__name__)
 
@@ -185,42 +192,75 @@ def verify_ws_token(token: str) -> Optional[dict]:
 
 
 def is_rails_token(token: str) -> bool:
-    """
-    Check if a token appears to be a Rails MessageVerifier token.
-    Rails tokens are base64-encoded and contain '--' separator.
+    """Does this look like a Rails MessageVerifier token rather than a JWT?
 
-    Args:
-        token: Token string to check
-
-    Returns:
-        True if it looks like a Rails token
+    Purely a router between the two verifiers — it decides nothing about trust.
+    Rails tokens are ``<base64>--<hex signature>``; JWTs are three dot-separated
+    segments. Testing for the JWT shape beats the old ``startswith("eyJ")``
+    check, which misread a *JSON*-serialized Rails token (its base64 also starts
+    ``eyJ``) as a JWT and refused it.
     """
-    # Rails MessageVerifier tokens have format: base64_data--base64_signature
-    return '--' in token and not token.startswith('eyJ')
+    if not token or not isinstance(token, str):
+        return False
+    if "--" not in token:
+        return False
+    return len(token.split(".")) != 3
 
 
 def verify_rails_token(token: str) -> Optional[dict]:
-    """
-    Verify a Rails MessageVerifier token.
+    """Verify a token minted by ``llama_bot_rails`` for the chat WebSocket.
 
-    Since we trust the Rails app as an internal service, we don't cryptographically
-    verify the token. We just check it looks valid and extract minimal info.
+    This used to verify nothing — it returned a ``rails_auth`` payload for any
+    string containing ``--``, on the stated premise that Rails is "a trusted
+    internal service". Nothing established that the caller *was* Rails, so the
+    premise was assumed rather than checked, and ``{"api_token": "x--y"}`` was
+    enough to authenticate from the public internet and skip the agent-mode
+    gate. The signature is now checked against the ``SECRET_KEY_BASE`` both
+    containers share, which is what makes that premise true.
 
-    Args:
-        token: Rails MessageVerifier token string
-
-    Returns:
-        Minimal payload dict if valid-looking, None otherwise
+    Returns the caller's identity, or None if the token does not verify.
     """
     if not is_rails_token(token):
         return None
 
-    # Trust the Rails token - return a minimal payload indicating Rails origin
-    # The actual session/user info is managed by the Rails app
+    secret = rails_message_verifier.secret_key_base()
+    if not secret:
+        # Nothing to check the signature against, so every token is
+        # indistinguishable from a forgery. Refuse rather than trust.
+        logger.error(
+            "Rails token refused: SECRET_KEY_BASE is not set in this container, "
+            "so gem tokens cannot be verified. The Rails-embedded chat needs the "
+            "same SECRET_KEY_BASE as the Rails app."
+        )
+        return None
+
+    try:
+        payload = rails_message_verifier.verify(token, secret)
+    except rails_message_verifier.InvalidRailsToken as e:
+        logger.warning(f"Rails token rejected: {e}")
+        return None
+    except Exception as e:  # a malformed payload must not 500 the socket
+        logger.warning(f"Rails token rejected (malformed): {e}")
+        return None
+
+    if not isinstance(payload, dict):
+        logger.warning("Rails token rejected: payload is not a hash")
+        return None
+
+    rails_user_id = payload.get("user_id")
+
+    # `user_id` is deliberately absent. It names a LlamaBot auth-DB user and is
+    # stamped as the turn owner (request_context.set_current_user_id); a Rails
+    # app's user id is a different namespace and would resolve to the wrong
+    # account. The Rails id travels under its own key.
     return {
-        "sub": "rails_gem",
+        "sub": f"rails_user:{rails_user_id}" if rails_user_id is not None else "rails_gem",
         "type": "rails_auth",
-        "source": "llama_bot_rails"
+        "source": "llama_bot_rails",
+        "rails_user_id": rails_user_id,
+        "session_id": payload.get("session_id"),
+        "role": RAILS_ROLE,
+        "is_admin": False,
     }
 
 

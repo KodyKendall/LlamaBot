@@ -164,13 +164,19 @@ class TestAskUserQuestionUiRelated:
                 ui_related=True,
             )
 
-            mock_interrupt.assert_called_once_with({
-                "type": "user_question",
+            payload = mock_interrupt.call_args[0][0]
+            # The legacy top-level fields are still mirrored (a stale cached frontend
+            # reads those), and the question also rides in the `questions` batch.
+            assert payload["type"] == "user_question"
+            assert payload["question"] == "How should the hero look?"
+            assert payload["options"] == ["Big and bold", "Minimal"]
+            assert payload["context"] == "Phase 1: Clarify"
+            assert payload["ui_related"] is True
+            assert payload["questions"] == [{
                 "question": "How should the hero look?",
                 "options": ["Big and bold", "Minimal"],
-                "context": "Phase 1: Clarify",
                 "ui_related": True,
-            })
+            }]
 
     def test_ui_related_defaults_to_false(self):
         """ui_related defaults to False when the agent omits it."""

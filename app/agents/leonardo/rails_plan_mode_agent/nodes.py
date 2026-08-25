@@ -31,7 +31,7 @@ from datetime import date
 
 from app.agents.leonardo.rails_agent.state import RailsAgentState
 from app.agents.leonardo.rails_agent.tools import (
-    write_todos, ls, read_file, write_file, edit_file, bash_command,
+    write_todos, ls, read_file, write_file, edit_file, check_page, bash_command,
     tail_rails_logs, hard_restart_rails, fix_permissions,
     glob_files, grep_files, internet_search,
     read_leonardo_md, write_leonardo_md, edit_leonardo_md,
@@ -39,7 +39,10 @@ from app.agents.leonardo.rails_agent.tools import (
     build_use_skill_tool, list_skills, read_skill, write_skill, edit_skill, delete_skill,
     write_personality_file,
 )
-from app.agents.leonardo.rails_plan_mode_agent.prompts import PLAN_MODE_AGENT_PROMPT
+from app.agents.leonardo.rails_plan_mode_agent.prompts import (
+    PLAN_MODE_AGENT_PROMPT,
+    BATCHED_QUESTIONS_DIRECTIVE,
+)
 from app.agents.leonardo.project_context import build_beginner_system_prompt
 from app.agents.leonardo.friction import report_friction, with_friction_section
 from app.agents.leonardo.rails_plan_mode_agent.middleware import (
@@ -99,6 +102,9 @@ def get_cached_system_prompt():
     """Build system message with project context, personality files, date, and prompt caching."""
     current_date = date.today().strftime("%Y-%m-%d")
     date_suffix = f"\n\n---\n**Today's Date:** {current_date}"
+    # Appended last so it also overrides a mothership-delivered prompt, which
+    # still carries the old "one question per turn" rule.
+    date_suffix += BATCHED_QUESTIONS_DIRECTIVE
     full_prompt = with_friction_section(build_beginner_system_prompt(
         PLAN_MODE_AGENT_PROMPT,
         suffix=date_suffix,
@@ -120,54 +126,137 @@ def get_cached_system_prompt():
 # Plan Mode Tools
 # =============================================================================
 
-ASK_USER_QUESTION_DESCRIPTION = """Ask the user ONE question at a time. Use this to:
+MAX_BATCHED_QUESTIONS = 4
+
+ASK_USER_QUESTION_DESCRIPTION = """Ask the user up to 4 questions at once. Use this to:
 - Clarify what they want (Phase 1: Clarify)
 - Ask follow-up questions after research (Phase 3: Refine)
 - Get approval for the plan (Phase 4: Present Plan)
 
-IMPORTANT: Only ask ONE question per tool call. If you have multiple questions, call this tool once, wait for the answer, then ask the next question. This keeps it simple and non-overwhelming for the user.
+BATCH YOUR QUESTIONS. If you have 2-4 things to ask, put them ALL in one call via the
+`questions` parameter. The user answers them together on one card and you get every
+answer back in a single result — far faster for them than one question per turn. Only
+ask one at a time when a later question genuinely depends on the answer to an earlier
+one. Never ask more than 4 in one call; ask the rest on the next turn.
 
 Parameters:
-- question: The question to ask, in plain non-technical language
-- options: (Optional) A list of suggested answers the user can pick from. The user can also type their own answer. Use this to make it easy for non-technical users to respond.
-- context: (Optional) Brief context about why you're asking (shown as a subtitle)
-- ui_related: (Optional, default false) Set to true when the question involves a VISUAL or
-  UI/UX decision (layout, colors, components, button/card styling, section arrangement, etc.).
-  When true, the user is shown one extra subtle "See visual options" choice alongside your
-  options. If they pick it, the tool result will explicitly ask you to follow up by calling
-  ask_user_uiux_question with 2-4 concrete live HTML previews for this decision. Leave it
-  false for non-visual questions.
+- questions: A list of 1-4 question objects (PREFERRED). Each object is:
+    - question: The question to ask, in plain non-technical language
+    - options: (Optional) suggested answers the user can click. They can also type their own.
+    - ui_related: (Optional, default false) see below — this is PER QUESTION.
+- question / options / ui_related: (Legacy) the single-question form. Equivalent to passing
+  a one-item `questions` list. Use `questions` instead.
+- context: (Optional) Brief context about why you're asking (shown once, above the questions)
 
-This tool will freeze execution and wait for the user to respond. The user's answer is returned as the tool result."""
+ui_related — set true on ANY question that involves a VISUAL or UI/UX decision (layout,
+colors, components, button/card styling, section arrangement, etc.). That question gets an
+extra subtle "See visual options" choice. If the user picks it, the tool result will ask you
+to follow up by calling ask_user_uiux_question with 2-4 concrete live HTML previews for THAT
+specific question — the other questions' answers still stand, so do not re-ask them. Leave it
+false for non-visual questions. It is per-question: in a batch you can flag question 2 as
+visual while 1 and 3 are plain text questions.
+
+This tool will freeze execution and wait for the user to respond. The user's answers are
+returned as the tool result."""
+
+
+class QuestionSpec(TypedDict, total=False):
+    """One question in an ask_user_question batch.
+
+    Attributes:
+        question: The question text, in plain non-technical language.
+        options: Suggested answers the user can click instead of typing.
+        ui_related: True for a visual/UI-UX decision — adds a per-question
+            "See visual options" choice that asks for live previews instead.
+    """
+
+    question: str
+    options: list[str]
+    ui_related: bool
+
+
+def normalize_questions(
+    questions: list[dict] = None,
+    question: str = "",
+    options: list[str] = None,
+    ui_related: bool = False,
+) -> tuple[list[dict], int]:
+    """Fold the batch and legacy single-question forms into one list.
+
+    Returns ``(questions, dropped)`` where ``dropped`` counts questions past the
+    4-question cap. We truncate rather than render a wall of questions, and tell the
+    model what was dropped so it can ask them next turn instead of losing them.
+    """
+    raw = list(questions or [])
+    if not raw and question:
+        raw = [{"question": question, "options": options, "ui_related": ui_related}]
+
+    normalized = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("question") or "").strip()
+        if not text:
+            continue
+        normalized.append({
+            "question": text,
+            "options": [str(o) for o in (item.get("options") or [])],
+            "ui_related": bool(item.get("ui_related")),
+        })
+
+    dropped = max(0, len(normalized) - MAX_BATCHED_QUESTIONS)
+    return normalized[:MAX_BATCHED_QUESTIONS], dropped
 
 
 @tool(description=ASK_USER_QUESTION_DESCRIPTION)
 def ask_user_question(
-    question: str,
     runtime: ToolRuntime,
+    questions: list[QuestionSpec] = None,
+    question: str = "",
     options: list[str] = None,
     context: str = "",
     ui_related: bool = False,
 ) -> Command:
-    """Ask the user a question, freeze execution, and resume with their answer."""
+    """Ask the user 1-4 questions, freeze execution, and resume with their answers."""
     tool_call_id = runtime.tool_call_id
 
+    batch, dropped = normalize_questions(questions, question, options, ui_related)
+    if not batch:
+        return Command(update={"messages": [ToolMessage(
+            content=(
+                "No question was asked — `questions` was empty. Call ask_user_question "
+                "again with a `questions` list of 1-4 question objects."
+            ),
+            tool_call_id=tool_call_id,
+        )]})
+
     # interrupt() freezes the agent here. The value is sent to the frontend
-    # as a question_request. When the user answers, interrupt() returns the answer.
-    # ui_related toggles an extra "See visual options" choice on the frontend card; if
-    # the user picks it the resumed answer asks us to call ask_user_uiux_question next.
+    # as a question_request. When the user answers, interrupt() returns the answers.
+    # The first question is also mirrored into the legacy top-level fields so a stale
+    # cached frontend still renders something instead of an empty card.
+    # ui_related toggles a per-question "See visual options" choice on the card; if the
+    # user picks it the resumed answer asks us to call ask_user_uiux_question for that
+    # one question next, keeping the answers already given to the others.
     user_answer = interrupt({
         "type": "user_question",
-        "question": question,
-        "options": options or [],
+        "questions": batch,
+        "question": batch[0]["question"],
+        "options": batch[0]["options"],
+        "ui_related": batch[0]["ui_related"],
         "context": context,
-        "ui_related": ui_related,
     })
+
+    content = f"User answered: {user_answer}"
+    if dropped:
+        content += (
+            f"\n\n(Note: you passed more than {MAX_BATCHED_QUESTIONS} questions; the last "
+            f"{dropped} were not shown to the user. Ask those on your next turn.)"
+        )
 
     return Command(
         update={
             "messages": [ToolMessage(
-                content=f"User answered: {user_answer}",
+                content=content,
                 tool_call_id=tool_call_id
             )]
         }
@@ -281,7 +370,7 @@ default_tools = [
     ask_user_uiux_question,
     # Standard tools (same as beginner)
     write_todos,
-    ls, read_file, write_file, edit_file, bash_command,
+    ls, read_file, write_file, edit_file, check_page, bash_command,
     tail_rails_logs, hard_restart_rails, fix_permissions,
     glob_files, grep_files, internet_search,
     read_leonardo_md, write_leonardo_md, edit_leonardo_md,

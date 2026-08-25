@@ -379,8 +379,9 @@ class TestFailurePaths:
             )
         assert resp.status_code == 200
         assert "text/html" in resp.headers.get("content-type", "")
-        # Loop broken: manual recovery link (no retry param) present.
-        assert "Continue with LlamaPress" in resp.text
+        # Loop broken: manual recovery link (no retry param) present, named
+        # after the brand domain in play (see app/services/sso_origin.py).
+        assert "Continue with mothership.test" in resp.text
         assert any(r["error_class"] == "UnifiedLogin::ConsumeFailed" for r in fake.reported)
 
     def test_unreachable_renders_login_page_no_bounce(self, db_engine, client):

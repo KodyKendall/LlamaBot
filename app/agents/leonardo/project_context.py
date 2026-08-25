@@ -173,7 +173,12 @@ def resolve_base_prompt(static_default: str, agent_mode: Optional[str]) -> str:
 
     ``agent_mode=None`` short-circuits to the static default — preserving today's
     behavior exactly for callers that don't pass a mode.
+
+    Whichever prompt wins, its gated sections are resolved before it is returned,
+    so the prompt can never advertise a tool this box does not have.
     """
+    from app.agents.leonardo.prompt_gates import apply_prompt_gates
+
     if agent_mode:
         cached = system_prompt_cache.get_cached(agent_mode)  # None on miss / any error
         if cached and len(cached) >= MIN_PROMPT_LEN:
@@ -181,8 +186,11 @@ def resolve_base_prompt(static_default: str, agent_mode: Optional[str]) -> str:
                 f"Using mothership-delivered system prompt for agent_mode={agent_mode} "
                 f"({len(cached)} chars)"
             )
-            return cached
-    return static_default
+            return apply_prompt_gates(cached)
+    # Every base prompt passes through the gates here — one choke point, so a
+    # section describing a tool that is switched off on this box can never reach
+    # the model. See app/agents/leonardo/prompt_gates.py.
+    return apply_prompt_gates(static_default)
 
 
 def build_system_prompt_with_project_context(

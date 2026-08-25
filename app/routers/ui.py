@@ -29,6 +29,11 @@ from app.services.magic_link_service import (
     verify_magic_link_token,
 )
 from app.services.mothership_client import MothershipClient
+from app.services.sso_origin import (
+    brand_display_name,
+    remember_sso_origin,
+    resolve_sso_origin,
+)
 
 # Role → agent-mode permissions live in app/permissions.py — the single source of
 # truth this router and the WebSocket gate both read. Re-exported here because
@@ -191,27 +196,33 @@ frontend_dir = Path(__file__).parent.parent / "frontend"
 _SSO_CTA_PLACEHOLDER = "<!--SSO_CTA-->"
 
 
-def _render_sso_login_cta() -> str:
-    """Build the "Sign in with your LlamaPress.ai account" CTA for the login page.
+def _render_sso_login_cta(request: Request = None) -> str:
+    """Build the "Sign in with your <brand> account" CTA for the login page.
 
     Unified Login's discoverable entry point: a link that top-navigates to the
     mothership's ``/sso/leo/{instance_name}`` SSO endpoint (which mints a grant
     and bounces back to ``/auth/consume``). ``target="_top"`` is REQUIRED — the
-    login page can render inside the chat's app-preview iframe and LlamaPress.ai
-    won't load framed, so the click must break out to the top window.
+    login page can render inside the chat's app-preview iframe and the
+    mothership won't load framed, so the click must break out to the top window.
+
+    Host and copy both follow the brand domain this browser arrived from
+    (``resolve_sso_origin``): a builtwithleo.com user gets sent back to
+    builtwithleo.com, not to the ``mothership_url`` in instance.json.
 
     Returns "" on self-hosted instances (no mothership configured) so those users
     see the unchanged stock username/password form — never a broken button.
     """
     mothership = MothershipClient()
-    base = mothership.mothership_url
     name = mothership.instance_name
+    base = resolve_sso_origin(request, mothership.mothership_url or "") if request \
+        else (mothership.mothership_url or "").rstrip("/") or None
     if not base or not name:
         return ""
     sso_url = f"{base.rstrip('/')}/sso/leo/{name}"
+    brand = escape(brand_display_name(sso_url))
     return (
         f'<a class="sso-cta" href="{escape(sso_url, quote=True)}" target="_top">'
-        "Sign in with your LlamaPress.ai account</a>"
+        f"Sign in with your {brand} account</a>"
         '<div class="sso-divider"><span>or</span></div>'
     )
 
@@ -440,8 +451,12 @@ async def login_get(
             html = f.read()
         # Inject the Unified Login CTA on mothership-managed instances; on
         # self-hosted boxes the placeholder is replaced with "" (stock form).
-        html = html.replace(_SSO_CTA_PLACEHOLDER, _render_sso_login_cta())
-        return HTMLResponse(content=html)
+        html = html.replace(_SSO_CTA_PLACEHOLDER, _render_sso_login_cta(request))
+        response = HTMLResponse(content=html)
+        # A mothership link into /login can carry ?sso_origin= too; remember it
+        # so the CTA and any later bounce stay on that brand.
+        remember_sso_origin(request, response, MothershipClient().mothership_url or "")
+        return response
 
     try:
         username = verify_magic_link_token(token)
@@ -474,6 +489,9 @@ async def login_get(
 
     response = RedirectResponse(url=redirect_url, status_code=302)
     _set_session_cookie(response, user)
+    # The legacy magic link can carry ?sso_origin= as well, so a user who came in
+    # from builtwithleo.com keeps that brand on any later sign-in prompt.
+    remember_sso_origin(request, response, MothershipClient().mothership_url or "")
     return response
 
 

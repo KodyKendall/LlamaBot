@@ -34,7 +34,7 @@ class TicketPlanModeContextMiddleware(AgentMiddleware):
     """Inject ticket-mode restrictions AND the plan-first grounding reminder.
 
     One combined `<CONTEXT type="mode">` block: keeps the Ticket Mode write rules and
-    adds the Ticket Plan Mode requirement to ask clarifying questions (one at a time,
+    adds the Ticket Plan Mode requirement to ask clarifying questions (2-4 at a time,
     visual options for look-and-feel decisions) before drafting the observation, then
     proceed with the normal research -> ticket -> offer-to-implement flow.
     """
@@ -43,7 +43,7 @@ class TicketPlanModeContextMiddleware(AgentMiddleware):
         context = (
             '<CONTEXT type="mode">TICKET PLAN MODE: READ any file, WRITE only .md files in '
             'rails/requirements/. No code changes. FIRST ground the story — call '
-            'ask_user_question ONE question at a time (set ui_related=true for any '
+            'ask_user_question with a `questions` list of 2-4 at once (set ui_related=true on any '
             'look-and-feel question; follow up with ask_user_uiux_question for visual '
             'options) before drafting the observation. THEN proceed as Ticket Mode: '
             'delegated research -> write_final_ticket -> offer_implementation.</CONTEXT>'

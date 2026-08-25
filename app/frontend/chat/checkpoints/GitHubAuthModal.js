@@ -2,15 +2,205 @@
  * GitHubAuthModal - GitHub Device Flow OAuth modal
  *
  * Shows a modal with the device code and link to github.com/login/device.
- * Polls the backend until the user completes authorization.
+ * Polls the backend until the user completes authorization — see
+ * DeviceAuthPoller below for why that poll is not a plain setInterval.
  */
 
+export const POLL_ENDPOINT = '/api/github/poll-auth';
+export const DEFAULT_INTERVAL = 5;      // seconds; GitHub's own floor
+export const MIN_WATCH_SECONDS = 120;   // keep watching this long even if told otherwise
+export const MAX_TRANSIENT_ERRORS = 3;  // consecutive network/5xx failures before giving up
+
+/**
+ * Drives the "waiting for authorization" wait so the user never has to press
+ * "check now". Three things a naive setInterval gets wrong:
+ *
+ *   - The user authorizes on github.com in ANOTHER tab, so this one is
+ *     backgrounded and its timers are throttled to roughly once a minute. We
+ *     re-check the moment the tab is looked at again (visibility/focus/online).
+ *   - The successful poll installs the token on the host (gh auth login +
+ *     docker cp), which can take tens of seconds. A timer firing underneath it
+ *     would ask GitHub about an already-redeemed device code and paint an error
+ *     over the success — so only one check is ever in flight.
+ *   - A single transient 5xx must not end the wait.
+ *
+ * Timers, fetch and the clock are injectable so this is testable without
+ * waiting on real time (see app/tests/js/github_device_autopoll.test.mjs).
+ */
+export class DeviceAuthPoller {
+  constructor({
+    deviceCode,
+    interval = DEFAULT_INTERVAL,
+    expiresIn = 900,
+    fetchFn = (...args) => fetch(...args),
+    timers = { setTimeout: (...a) => setTimeout(...a), clearTimeout: (...a) => clearTimeout(...a) },
+    doc = typeof document !== 'undefined' ? document : null,
+    win = typeof window !== 'undefined' ? window : null,
+    now = () => Date.now(),
+    onResult = () => {},
+    onCheckingChange = () => {},
+  } = {}) {
+    this.deviceCode = deviceCode;
+    this.intervalSeconds = Math.max(interval || DEFAULT_INTERVAL, DEFAULT_INTERVAL);
+    this.expiresIn = expiresIn;
+    this.fetchFn = fetchFn;
+    this.timers = timers;
+    this.doc = doc;
+    this.win = win;
+    this.now = now;
+    this.onResult = onResult;
+    this.onCheckingChange = onCheckingChange;
+
+    this.stopped = false;
+    this.inFlight = false;
+    this.timer = null;
+    this.deadline = null;
+    this.lastCheckAt = null;
+    this.transientErrors = 0;
+    this.wakeEvents = [];
+    this._onWake = () => { this.wake(); };
+  }
+
+  /** Begin the wait: hook the wake events and schedule the first check. */
+  start() {
+    if (this.stopped) return;
+    this.lastCheckAt = this.now();
+    this.deadline = this.now() + Math.max(this.expiresIn || 0, MIN_WATCH_SECONDS) * 1000;
+    this._listen();
+    this._schedule();
+  }
+
+  /**
+   * The tab came back (or the network did). Check right away if GitHub's
+   * interval floor has elapsed; otherwise leave the pending timer alone.
+   */
+  wake() {
+    if (this.stopped || this.inFlight) return;
+    const since = this.now() - (this.lastCheckAt ?? 0);
+    if (since >= this.intervalSeconds * 1000) {
+      this.timers.clearTimeout(this.timer);
+      this.timer = null;
+      this.check();
+    }
+  }
+
+  /**
+   * One poll. Safe to call from the timer, a wake, or the manual button — a
+   * check already in flight simply wins.
+   */
+  async check() {
+    if (this.stopped || this.inFlight) return null;
+    this.inFlight = true;
+    this.lastCheckAt = this.now();
+    this.onCheckingChange(true);
+
+    let status = null;
+    try {
+      const resp = await this.fetchFn(POLL_ENDPOINT, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ device_code: this.deviceCode }),
+      });
+
+      if (!resp.ok) {
+        status = this._transient('Server error while checking GitHub');
+      } else {
+        const data = await resp.json();
+        this.transientErrors = 0;
+        status = data.status || 'error';
+        this._handle(status, data);
+      }
+    } catch (e) {
+      status = this._transient(e?.message || 'Network error while checking GitHub');
+    } finally {
+      this.inFlight = false;
+      this.onCheckingChange(false);
+      if (!this.stopped) this._schedule();
+    }
+    return status;
+  }
+
+  /** Stop polling and unhook the wake listeners. Idempotent. */
+  stop() {
+    this.stopped = true;
+    this.timers.clearTimeout(this.timer);
+    this.timer = null;
+    this._unlisten();
+  }
+
+  _handle(status, data) {
+    switch (status) {
+      case 'pending':
+        this.onResult('pending', data);
+        break;
+      case 'slow_down':
+        // GitHub asks for more room between polls; take it and keep waiting.
+        this.intervalSeconds = Math.max(data.interval || this.intervalSeconds + 5, this.intervalSeconds + 5);
+        this.onResult('slow_down', data);
+        break;
+      case 'success':
+      case 'expired':
+      case 'denied':
+        this.stop();
+        this.onResult(status, data);
+        break;
+      default:
+        this.stop();
+        this.onResult('error', data);
+    }
+  }
+
+  /** Ride out the odd network blip; give up only if they keep coming. */
+  _transient(message) {
+    this.transientErrors += 1;
+    if (this.transientErrors > MAX_TRANSIENT_ERRORS) {
+      this.stop();
+      this.onResult('error', { message });
+      return 'error';
+    }
+    console.warn('GitHub poll error:', message);
+    return 'retry';
+  }
+
+  _schedule() {
+    if (this.stopped) return;
+    if (this.deadline !== null && this.now() >= this.deadline) {
+      this.stop();
+      this.onResult('expired', { message: 'Authorization code expired. Please try again.' });
+      return;
+    }
+    this.timers.clearTimeout(this.timer);
+    this.timer = this.timers.setTimeout(() => { this.timer = null; return this.check(); }, this.intervalSeconds * 1000);
+  }
+
+  _listen() {
+    this._unlisten();
+    if (this.doc?.addEventListener) {
+      this.doc.addEventListener('visibilitychange', this._onWake);
+      this.wakeEvents.push([this.doc, 'visibilitychange']);
+    }
+    if (this.win?.addEventListener) {
+      this.win.addEventListener('focus', this._onWake);
+      this.win.addEventListener('online', this._onWake);
+      this.wakeEvents.push([this.win, 'focus'], [this.win, 'online']);
+    }
+  }
+
+  _unlisten() {
+    this.wakeEvents.forEach(([target, name]) => target.removeEventListener(name, this._onWake));
+    this.wakeEvents = [];
+  }
+}
+
 export class GitHubAuthModal {
-  constructor() {
+  constructor(options = {}) {
     this.modal = null;
-    this.pollInterval = null;
+    this.poller = null;
     this.deviceCode = null;
     this.aborted = false;
+    // Injection seam for tests; the browser gets the real globals.
+    this.pollerOptions = options.pollerOptions || {};
   }
 
   /**
@@ -49,7 +239,7 @@ export class GitHubAuthModal {
       const data = await resp.json();
       this.deviceCode = data.device_code;
       this.showModal(data.user_code, data.verification_uri, data.interval);
-      this.startPolling(data.device_code, data.interval);
+      this.startPolling(data.device_code, data.interval, data.expires_in);
     } catch (e) {
       this.showError('Failed to connect to server: ' + e.message);
     }
@@ -108,7 +298,7 @@ export class GitHubAuthModal {
         </div>
         <div class="gh-auth-waiting">
           <i class="fa-solid fa-spinner fa-spin"></i>
-          <span>Waiting for authorization...</span>
+          <span class="gh-auth-waiting-text">Waiting for authorization — this checks itself, no need to refresh.</span>
           <button class="gh-auth-check-btn" title="Check now">
             <i class="fa-solid fa-rotate"></i>
           </button>
@@ -136,9 +326,9 @@ export class GitHubAuthModal {
       }
     };
 
-    // Check now button - manual poll trigger
+    // Check now button — the flow polls itself; this is just an impatience valve.
     this.modal.querySelector('.gh-auth-check-btn').onclick = () => {
-      this.pollOnce(this.deviceCode);
+      this.poller?.wake();
     };
 
     // Cancel button
@@ -216,117 +406,57 @@ export class GitHubAuthModal {
     document.body.appendChild(this.modal);
   }
 
-  startPolling(deviceCode, interval) {
-    const pollMs = (interval || 5) * 1000;
-
-    this.pollInterval = setInterval(async () => {
-      if (this.aborted) {
-        this.stopPolling();
-        return;
-      }
-
-      try {
-        const resp = await fetch('/api/github/poll-auth', {
-          method: 'POST',
-          credentials: 'same-origin',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ device_code: deviceCode }),
-        });
-
-        if (!resp.ok) {
-          this.showError('Server error while polling');
-          this.stopPolling();
-          return;
-        }
-
-        const data = await resp.json();
-
-        switch (data.status) {
+  /**
+   * Wait for the user to finish on github.com. DeviceAuthPoller keeps checking
+   * on its own — including the instant the user switches back to this tab,
+   * which is when a plain interval would still be throttled — so the "check
+   * now" button is optional rather than the way the flow completes.
+   */
+  startPolling(deviceCode, interval, expiresIn) {
+    this.stopPolling();
+    this.deviceCode = deviceCode;
+    this.poller = new DeviceAuthPoller({
+      deviceCode,
+      interval,
+      expiresIn,
+      onCheckingChange: (checking) => this.setChecking(checking),
+      onResult: (status, data = {}) => {
+        switch (status) {
           case 'success':
-            this.stopPolling();
             this.showSuccess(data.message || 'GitHub connected!');
             break;
-          case 'pending':
-            // Keep polling
-            break;
-          case 'slow_down':
-            // GitHub wants us to slow down - restart with longer interval
-            this.stopPolling();
-            this.startPolling(deviceCode, data.interval || 10);
-            break;
           case 'expired':
-            this.stopPolling();
-            this.showError('Authorization code expired. Please try again.');
+            this.showError(data.message || 'Authorization code expired. Please try again.');
             break;
           case 'denied':
-            this.stopPolling();
             this.showError('Authorization was denied.');
             break;
-          default:
-            this.stopPolling();
+          case 'error':
             this.showError(data.message || 'Unexpected error');
+            break;
+          default:
+            break;  // pending / slow_down — keep waiting
         }
-      } catch (e) {
-        // Network error - keep trying
-        console.warn('GitHub poll error:', e);
-      }
-    }, pollMs);
+      },
+      ...this.pollerOptions,
+    });
+    this.poller.start();
   }
 
-  async pollOnce(deviceCode) {
-    const checkBtn = this.modal?.querySelector('.gh-auth-check-btn');
-    if (checkBtn) {
-      checkBtn.innerHTML = '<i class="fa-solid fa-rotate fa-spin"></i>';
-      checkBtn.disabled = true;
-    }
-
-    try {
-      const resp = await fetch('/api/github/poll-auth', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ device_code: deviceCode }),
-      });
-
-      if (!resp.ok) {
-        this.showError('Server error while checking');
-        this.stopPolling();
-        return;
-      }
-
-      const data = await resp.json();
-
-      if (data.status === 'success') {
-        this.stopPolling();
-        this.showSuccess(data.message || 'GitHub connected!');
-      } else if (data.status === 'pending') {
-        // Still waiting - restore button
-        if (checkBtn) {
-          checkBtn.innerHTML = '<i class="fa-solid fa-rotate"></i>';
-          checkBtn.disabled = false;
-        }
-      } else if (data.status === 'expired') {
-        this.stopPolling();
-        this.showError('Authorization code expired. Please try again.');
-      } else if (data.status === 'denied') {
-        this.stopPolling();
-        this.showError('Authorization was denied.');
-      } else {
-        this.stopPolling();
-        this.showError(data.message || 'Unexpected error');
-      }
-    } catch (e) {
-      if (checkBtn) {
-        checkBtn.innerHTML = '<i class="fa-solid fa-rotate"></i>';
-        checkBtn.disabled = false;
-      }
-    }
+  /** Spin the check button while a poll is in flight. */
+  setChecking(checking) {
+    const btn = this.modal?.querySelector('.gh-auth-check-btn');
+    if (!btn) return;
+    btn.innerHTML = checking
+      ? '<i class="fa-solid fa-rotate fa-spin"></i>'
+      : '<i class="fa-solid fa-rotate"></i>';
+    btn.disabled = checking;
   }
 
   stopPolling() {
-    if (this.pollInterval) {
-      clearInterval(this.pollInterval);
-      this.pollInterval = null;
+    if (this.poller) {
+      this.poller.stop();
+      this.poller = null;
     }
   }
 

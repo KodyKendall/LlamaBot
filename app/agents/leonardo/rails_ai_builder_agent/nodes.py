@@ -25,7 +25,7 @@ from app.agents.leonardo.rails_agent.state import RailsAgentState
 # an explicit llm_model silently ignores the fleet default.
 from app.agents.leonardo.model_policy import enabled_default_model
 from app.agents.leonardo.rails_agent.tools import (
-    write_todos, write_file, read_file, ls, edit_file, glob_files, grep_files, bash_command,
+    write_todos, write_file, read_file, ls, edit_file, check_page, glob_files, grep_files, bash_command,
     ls_agents, read_agent_file, write_agent_file, edit_agent_file,
     read_langgraph_json, edit_langgraph_json,
     read_brand_guide, write_brand_guide,
@@ -34,8 +34,10 @@ from app.agents.leonardo.rails_agent.sub_agents import delegate_research
 from app.agents.leonardo.rails_ai_builder_agent.prompts import RAILS_AI_BUILDER_AGENT_PROMPT
 from app.agents.leonardo.project_context import build_system_prompt_with_project_context, brand_context_section
 from app.agents.leonardo.llm_factory import get_llm, invoke_with_cache, system_message_for_model
-from app.agents.leonardo.agent_factory import repair_orphaned_tool_calls_in_messages
+from app.agents.leonardo.message_invariants import normalize_messages_for_provider
 from app.agents.leonardo.resilience import invoke_with_transient_retry
+from app.agents.leonardo.rails_agent.nodes import SUMMARIZATION_PROMPT
+from app.agents.leonardo.summarization import compact_messages_if_needed
 
 import logging
 logger = logging.getLogger(__name__)
@@ -69,7 +71,7 @@ def get_sys_msg():
 
 default_tools = [
     write_todos,
-    ls, read_file, write_file, edit_file, glob_files, grep_files, bash_command,
+    ls, read_file, write_file, edit_file, check_page, glob_files, grep_files, bash_command,
     delegate_research,  # Read-only sub-agent for codebase investigation
     # Agent file tools
     ls_agents, read_agent_file, write_agent_file, edit_agent_file,
@@ -88,7 +90,16 @@ def leonardo_ai_builder(state: RailsAgentState) -> Command[Literal["tools"]]:
 
    view_path = (state.get('debug_info') or {}).get('view_path')
 
-   messages = [system_message_for_model(get_sys_msg(), llm_model)] + state["messages"]
+   # Context management — this raw StateGraph node runs no AgentMiddleware, so
+   # nothing trims or summarizes it on its own. Same shared middleware every
+   # create_agent mode uses; see app/agents/leonardo/summarization.py.
+   # Compact the conversation only: the system message and the per-turn notes
+   # below are rebuilt every turn and must not be summarized away.
+   convo, compaction_ops = compact_messages_if_needed(
+      state["messages"], summary_prompt=SUMMARIZATION_PROMPT,
+   )
+
+   messages = [system_message_for_model(get_sys_msg(), llm_model)] + convo
 
    if view_path:
       messages = messages + [HumanMessage(content="<NOTE_FROM_SYSTEM> The user is currently viewing their Ruby on Rails webpage route at: " + view_path + " </NOTE_FROM_SYSTEM>")]
@@ -98,12 +109,12 @@ def leonardo_ai_builder(state: RailsAgentState) -> Command[Literal["tools"]]:
    # without this a dangling AIMessage tool_call 400s every later turn
    # ('insufficient tool messages'). SI#112. Covers all cache_control/tools
    # branches since only HumanMessages are appended after this point.
-   messages = repair_orphaned_tool_calls_in_messages(messages)
+   messages = normalize_messages_for_provider(messages)
 
    # Tools
    tools = [
       write_todos,
-      ls, read_file, write_file, edit_file, glob_files, grep_files, bash_command,
+      ls, read_file, write_file, edit_file, check_page, glob_files, grep_files, bash_command,
       delegate_research,  # Read-only sub-agent for codebase investigation
       # Agent file tools
       ls_agents, read_agent_file, write_agent_file, edit_agent_file,
@@ -119,9 +130,11 @@ def leonardo_ai_builder(state: RailsAgentState) -> Command[Literal["tools"]]:
       response = invoke_with_transient_retry(
          lambda: invoke_with_cache(llm, messages, llm_model),
          label=f"rails_ai_builder_agent/{llm_model}",
+         messages=messages,
       )
       # Reset counter by subtracting current count (since reducer uses operator.add)
-      return {"messages": [response], "failed_tool_calls_count": -failed_tool_calls_count} # by adding a negative number, we subtract the current count and reset it to 0.
+      # compaction_ops first, or the node re-summarizes from scratch every call.
+      return {"messages": compaction_ops + [response], "failed_tool_calls_count": -failed_tool_calls_count} # by adding a negative number, we subtract the current count and reset it to 0.
 
    # Bind tools - parallel_tool_calls is not supported by Gemini
    if llm_model.startswith("gemini"):
@@ -132,8 +145,9 @@ def leonardo_ai_builder(state: RailsAgentState) -> Command[Literal["tools"]]:
    response = invoke_with_transient_retry(
       lambda: invoke_with_cache(llm_with_tools, messages, llm_model),
       label=f"rails_ai_builder_agent/{llm_model}",
+      messages=messages, tools=tools,
    )
-   return {"messages": [response]}
+   return {"messages": compaction_ops + [response]}
 
 # Graph
 def build_workflow(checkpointer=None):

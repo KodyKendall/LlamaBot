@@ -194,10 +194,18 @@ def test_every_leonardo_agent_is_wired_for_repair(nodes_file):
             f"build_leonardo_agent() so orphaned tool calls are repaired (SI#112)."
         )
 
-    # raw StateGraph path: must call the pure repair fn before .invoke().
-    assert "repair_orphaned_tool_calls_in_messages" in text, (
-        f"{nodes_file.parent.name} is a raw StateGraph agent but never calls "
-        f"repair_orphaned_tool_calls_in_messages() before .invoke() (SI#112)."
+    # raw StateGraph path: must run the messages through the shared validator
+    # before .invoke(). `normalize_messages_for_provider` is the single entry
+    # point (2026-08-23); it owns tool-call pairing plus the other invariants the
+    # providers enforce. The older `repair_orphaned_tool_calls_in_messages` is
+    # still accepted — it is the same rule, one layer down.
+    assert (
+        "normalize_messages_for_provider" in text
+        or "repair_orphaned_tool_calls_in_messages" in text
+    ), (
+        f"{nodes_file.parent.name} is a raw StateGraph agent but never runs its "
+        f"messages through normalize_messages_for_provider() before .invoke() "
+        f"(SI#112 + the 2026-08-23 malformed-history set)."
     )
 
 

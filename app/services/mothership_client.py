@@ -89,6 +89,27 @@ class MothershipClient:
         """
         return self.enabled and not telemetry_disabled()
 
+    @staticmethod
+    def _resolve_user(user: Optional[dict]) -> Optional[dict]:
+        """Who this report is about: the explicit argument, else the turn stamp.
+
+        HTTP callers hand the identity in directly (they have the request and
+        therefore the session cookie). The WebSocket paths cannot: report_message
+        fires deep inside RequestHandler, which is constructed once per
+        connection BEFORE authentication runs, so there is no user object to
+        thread down. Those turns stamp app/services/user_context.py at auth time
+        and this reads it back. Unset -> None -> the payload simply omits the
+        user, exactly as it did before this existed.
+        """
+        if user is not None:
+            return user
+        try:
+            from app.services import user_context
+
+            return user_context.current()
+        except Exception:  # noqa: BLE001 - telemetry must never break a turn
+            return None
+
     @property
     def instance_name(self) -> Optional[str]:
         """Get instance name from config."""
@@ -144,6 +165,7 @@ class MothershipClient:
         tool_calls: Optional[list] = None,
         tool_call_id: Optional[str] = None,
         timings: Optional[dict] = None,
+        user: Optional[dict] = None,
     ) -> Optional[dict]:
         """
         POST /api/leonardo/report_message
@@ -160,6 +182,13 @@ class MothershipClient:
         tokens-per-second of the model call that produced this reply, so the
         mothership has a per-message performance series alongside token usage.
         See docs/dev/performance_telemetry.md.
+
+        ``user`` says WHO sent it — ``{id, username, email,
+        llamapress_user_guid, role, is_admin}``. Defaults to the turn's stamped
+        identity, so WebSocket callers need pass nothing. Omitted entirely when
+        unknown (a Rails-gem token, a legacy box). See
+        app/services/user_context.py for why the guid is the join key and email
+        is not.
         """
         if not self.reporting_enabled:
             return None
@@ -183,6 +212,9 @@ class MothershipClient:
                     payload["tool_call_id"] = tool_call_id
                 if timings:
                     payload["timings"] = timings
+                reported_user = self._resolve_user(user)
+                if reported_user:
+                    payload["user"] = reported_user
                 response = await client.post(
                     f"{self.config['mothership_url']}/api/leonardo/report_message",
                     json=payload,
@@ -212,6 +244,7 @@ class MothershipClient:
         content: Optional[str] = None,
         sent_at: Optional[str] = None,
         debug_context: Optional[dict] = None,
+        user: Optional[dict] = None,
     ) -> Optional[dict]:
         """
         POST /api/leonardo/submit_feedback
@@ -242,6 +275,9 @@ class MothershipClient:
                     payload["sent_at"] = sent_at
                 if debug_context:
                     payload["debug_context"] = debug_context
+                reported_user = self._resolve_user(user)
+                if reported_user:
+                    payload["user"] = reported_user
                 response = await client.post(
                     f"{self.config['mothership_url']}/api/leonardo/submit_feedback",
                     json=payload,
@@ -349,6 +385,7 @@ class MothershipClient:
         fingerprint: Optional[str] = None,
         recovered: Optional[bool] = None,
         source: str = "llamabot",
+        user: Optional[dict] = None,
     ) -> None:
         """
         POST /api/leonardo/report_error
@@ -392,6 +429,9 @@ class MothershipClient:
                     payload["fingerprint"] = fingerprint
                 if recovered is not None:
                     payload["recovered"] = recovered
+                reported_user = self._resolve_user(user)
+                if reported_user:
+                    payload["user"] = reported_user
                 response = await client.post(
                     f"{self.config['mothership_url']}/api/leonardo/report_error",
                     json=payload,
@@ -418,6 +458,7 @@ class MothershipClient:
         model: Optional[str] = None,
         llamabot_version: Optional[str] = None,
         occurred_at: Optional[str] = None,
+        user: Optional[dict] = None,
     ) -> None:
         """
         POST /api/leonardo/report_turn_metrics
@@ -462,6 +503,9 @@ class MothershipClient:
                     payload["llamabot_version"] = llamabot_version
                 if occurred_at:
                     payload["occurred_at"] = occurred_at
+                reported_user = self._resolve_user(user)
+                if reported_user:
+                    payload["user"] = reported_user
                 response = await client.post(
                     f"{self.config['mothership_url']}/api/leonardo/report_turn_metrics",
                     json=payload,
@@ -573,4 +617,46 @@ class MothershipClient:
             return None
         except httpx.RequestError as e:
             logger.error(f"Teardown notification request failed: {e}")
+            return None
+
+    async def fetch_overlay_ads(
+        self, current_llamabot: str, user: Optional[dict] = None
+    ) -> Optional[dict]:
+        """
+        POST /api/leonardo/overlay_ads
+
+        Fetch the promo HTML snippets AND the display policy for the "Your App is
+        Building!" overlay. The mothership owns the content, the rotation cadence
+        and the rules for when a promo shows at all, so all three can be changed
+        (and personalised per user) with no instance deploy.
+
+        Returns ``{"ads": [...], "rotate_seconds": int}`` or ``None`` on any error
+        — including a 404 from a mothership that hasn't shipped the endpoint yet.
+        Fully fail-open: the overlay simply shows no promo slot.
+
+        Gated on ``enabled`` (configured), not ``reporting_enabled`` — this pulls
+        content down rather than reporting anything about this box, so the
+        telemetry kill switch must not blank the product surface.
+        """
+        if not self.enabled:
+            return None
+
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.post(
+                    f"{self.config['mothership_url']}/api/leonardo/overlay_ads",
+                    json={
+                        "instance_name": self.config["instance_name"],
+                        "llamabot_version": current_llamabot,
+                        # Who is looking at it, so the mothership can personalise
+                        # the creative AND the display policy. Omitted when the
+                        # request has no session.
+                        "user": user,
+                    },
+                    headers={"Authorization": f"Bearer {self.config['mothership_api_token']}"},
+                )
+                response.raise_for_status()
+                return response.json()
+        except Exception as e:
+            logger.info(f"Overlay ad fetch failed (no promos will show): {e}")
             return None

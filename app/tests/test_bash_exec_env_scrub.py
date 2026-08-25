@@ -137,3 +137,57 @@ def test_the_allowlist_holds_no_llm_provider_keys():
     """A provider key on the allowlist would silently undo the whole fix."""
     for name in tools._EXEC_ENV_ALLOWLIST:
         assert "API_KEY" not in name or name in ("AWS_KEY",), name
+
+
+# ---------------------------------------------------------------------------
+# The substring blocklist is gone (2026-08-23)
+# ---------------------------------------------------------------------------
+#
+# It blocked ordinary Ruby — `Rails.env` contains ".env", and the beginner prompt
+# instructs `rails runner "puts ENV['HOSTED_DOMAIN']"`, which the `ENV[` rule then
+# refused. Two friction reports, both false positives. The allowlist scrub above
+# is the actual control; a substring match never was one.
+
+class TestNoSubstringBlocklist:
+    class _Runtime:
+        tool_call_id = "call_1"
+
+    def _run(self, monkeypatch, command):
+        from app.agents.leonardo.rails_agent import tools
+
+        seen = []
+        monkeypatch.setattr(
+            tools, "rails_api_sh",
+            lambda snippet, *a, **k: seen.append(snippet) or "ok",
+        )
+        content = tools.bash_command.func(
+            command=command, runtime=self._Runtime(),
+        ).update["messages"][0].content
+        return seen, content
+
+    def test_rails_env_is_not_blocked(self, monkeypatch):
+        seen, content = self._run(
+            monkeypatch, 'bundle exec rails runner "puts Rails.env"'
+        )
+        assert seen, "Rails.env was blocked because it contains the substring '.env'"
+        assert "Blocked" not in content
+
+    def test_the_documented_hosted_domain_command_is_not_blocked(self, monkeypatch):
+        seen, content = self._run(
+            monkeypatch, "bundle exec rails runner \"puts ENV['HOSTED_DOMAIN']\""
+        )
+        assert seen, "the prompt tells the agent to run exactly this command"
+        assert "Blocked" not in content
+
+    def test_hosted_domain_survives_the_env_scrub(self):
+        """Blocking it is one failure; blanking it is the other."""
+        from app.agents.leonardo.rails_agent.tools import _EXEC_ENV_ALLOWLIST
+
+        assert "HOSTED_DOMAIN" in _EXEC_ENV_ALLOWLIST
+
+    def test_secrets_are_still_scrubbed(self):
+        from app.agents.leonardo.rails_agent.tools import _EXEC_ENV_ALLOWLIST
+
+        for secret in ("OPENAI_API_KEY", "DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY",
+                       "VSCODE_PASSWORD", "SSO_SHARED_SECRET"):
+            assert secret not in _EXEC_ENV_ALLOWLIST

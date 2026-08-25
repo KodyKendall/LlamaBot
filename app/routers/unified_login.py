@@ -18,7 +18,10 @@ Design contract (frozen, mirrored by prod + the Phase 3 gem):
     adoption key for the admin account created at claim time;
   * grant_expired / grant_used are EXPECTED (refresh, bookmark) and degrade
     gracefully — never an error-page dead end;
-  * one retry bounce max (loop breaker via the ``retry`` param).
+  * one retry bounce max (loop breaker via the ``retry`` param);
+  * every user-facing link back to the mothership uses the brand domain the
+    browser arrived from (``?sso_origin=``, remembered in a cookie — see
+    app/services/sso_origin.py), never the server-to-server ``mothership_url``.
 """
 
 import logging
@@ -36,6 +39,11 @@ from app.dependencies import _user_from_session_cookie
 from app.models import User
 from app.routers.ui import _set_session_cookie
 from app.services.mothership_client import MothershipClient
+from app.services.sso_origin import (
+    brand_display_name,
+    remember_sso_origin,
+    resolve_sso_origin,
+)
 from app.services.user_service import get_user_by_username, hash_password
 
 logger = logging.getLogger(__name__)
@@ -101,9 +109,14 @@ def _sso_url(mothership: MothershipClient, request: Request, *, retry: bool) -> 
     ``retry=True`` adds ``retry=1`` so the mothership knows to bounce back here
     with a fresh token AND so our loop breaker fires if that fresh token also
     fails. The "Continue with LlamaPress" link uses ``retry=False``.
+
+    The host comes from ``resolve_sso_origin`` — the brand domain this browser
+    actually arrived from (builtwithleo.com vs llamapress.ai), NOT the
+    server-to-server ``mothership_url``. Bouncing a builtwithleo.com user to
+    llamapress.ai lands them on a different Rails session and a sign-in wall.
     """
-    base = mothership.mothership_url
     name = mothership.instance_name
+    base = resolve_sso_origin(request, mothership.mothership_url or "")
     if not base or not name:
         return None
     params = _passthrough_params(request)
@@ -233,11 +246,12 @@ def _login_page_with_error(mothership: MothershipClient, request: Request) -> HT
     )
     sso = _sso_url(mothership, request, retry=False)
     if sso:
+        brand = escape(brand_display_name(sso))
         banner += (
             f'<div style="margin-top:16px;text-align:center;">'
             f'<a href="{escape(sso, quote=True)}" '
             f'style="color:#a78bfa;text-decoration:underline;">'
-            "Continue with LlamaPress</a></div>"
+            f"Continue with {brand}</a></div>"
         )
     # login.html carries an empty <div id="message"></div> placeholder.
     if '<div id="message"></div>' in html:
@@ -282,6 +296,11 @@ async def auth_consume(
 
         response = RedirectResponse(url=redirect_url, status_code=302)
         _set_session_cookie(response, user)
+        # Remember which brand domain this browser came from so a LATER bounce
+        # (expired grant, sign-out) returns to it rather than to the configured
+        # mothership_url. Not threaded into redirect_url — the chat has no use
+        # for it and it would sit in the address bar.
+        remember_sso_origin(request, response, mothership.mothership_url or "")
         return response
 
     # 4. Failure paths.
@@ -297,7 +316,9 @@ async def auth_consume(
     if error_code in BOUNCE_CODES and not retry:
         sso = _sso_url(mothership, request, retry=True)
         if sso:
-            return RedirectResponse(url=sso, status_code=302)
+            response = RedirectResponse(url=sso, status_code=302)
+            remember_sso_origin(request, response, mothership.mothership_url or "")
+            return response
 
     # 4c/4d. Terminal: loop already broken (retry present), mothership_unreachable
     #     (a bounce can't help), or an unexpected code. Report the stuck user and
@@ -308,7 +329,9 @@ async def auth_consume(
         error_message=error_code or "unknown",
         traceback_str="",
     )
-    return _login_page_with_error(mothership, request)
+    response = _login_page_with_error(mothership, request)
+    remember_sso_origin(request, response, mothership.mothership_url or "")
+    return response
 
 
 class RedeemRailsGrantRequest(BaseModel):

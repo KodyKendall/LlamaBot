@@ -136,10 +136,14 @@ export class FileAttachmentManager {
 
     if (!browseBtn || !panel || !listEl) return;
 
+    // "My Uploads" goes straight to the full Asset Library modal. The small
+    // panel below used to be an intermediate step — one extra click to see the
+    // same list with no previews — so the menu item skips it entirely.
     browseBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       this.hideMenu();
-      this.toggleFileBrowser();
+      this.hideFileBrowser();
+      this.openAssetModal();
     });
 
     if (closeBtn) {
@@ -317,6 +321,11 @@ export class FileAttachmentManager {
 
     const closeBtn = modal.querySelector('[data-llamabot="asset-modal-close"]');
     const refreshBtn = modal.querySelector('[data-llamabot="asset-modal-refresh"]');
+    this.assetModalExpandBtn = modal.querySelector('[data-llamabot="asset-modal-expand"]');
+
+    if (this.assetModalExpandBtn) {
+      this.assetModalExpandBtn.addEventListener('click', () => this.toggleAssetModalExpanded());
+    }
 
     if (expandBtn) {
       expandBtn.addEventListener('click', (e) => {
@@ -334,16 +343,45 @@ export class FileAttachmentManager {
       if (e.target === modal) this.hideAssetModal();
     });
 
-    // Escape closes the modal
+    // Escape steps back one level: out of full screen first, then out of the modal.
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && this.assetModal && !this.assetModal.classList.contains('hidden')) {
+      if (e.key !== 'Escape') return;
+      if (!this.assetModal || this.assetModal.classList.contains('hidden')) return;
+      if (this.assetModal.classList.contains('asset-modal--expanded')) {
+        this.setAssetModalExpanded(false);
+      } else {
         this.hideAssetModal();
       }
     });
   }
 
+  /**
+   * Full-screen the asset library: the modal grows to fill the viewport and the
+   * file list gets out of the way, so a spreadsheet gets the whole width instead
+   * of the ~800px left over in the default layout.
+   */
+  toggleAssetModalExpanded() {
+    if (!this.assetModal) return;
+    this.setAssetModalExpanded(!this.assetModal.classList.contains('asset-modal--expanded'));
+  }
+
+  setAssetModalExpanded(expanded) {
+    if (!this.assetModal) return;
+    this.assetModal.classList.toggle('asset-modal--expanded', expanded);
+    const btn = this.assetModalExpandBtn;
+    if (!btn) return;
+    btn.setAttribute('aria-pressed', expanded ? 'true' : 'false');
+    btn.setAttribute('data-tooltip', expanded ? 'Back to the file list' : 'Expand to full screen');
+    btn.innerHTML = expanded
+      ? '<i class="fa-solid fa-down-left-and-up-right-to-center"></i>'
+      : '<i class="fa-solid fa-up-right-and-down-left-from-center"></i>';
+  }
+
   hideAssetModal() {
-    if (this.assetModal) this.assetModal.classList.add('hidden');
+    if (!this.assetModal) return;
+    // Reset to the two-pane layout so the next open always shows the file list.
+    this.setAssetModalExpanded(false);
+    this.assetModal.classList.add('hidden');
   }
 
   async openAssetModal() {
@@ -420,8 +458,8 @@ export class FileAttachmentManager {
 
   /**
    * Render the right-hand preview pane for the selected asset. Images and PDFs
-   * render natively; spreadsheets render via lazily-loaded SheetJS; everything
-   * else offers a download plus an optional Microsoft Office Online preview.
+   * render natively; spreadsheets render as a cell grid parsed on the box;
+   * everything else is download-only.
    */
   renderAssetPreview(dataset) {
     const { path, filename, size, folder } = dataset;
@@ -455,10 +493,7 @@ export class FileAttachmentManager {
         <div class="asset-preview-placeholder">
           <i class="fa-solid ${this.iconForFile(filename, false)}"></i>
           <span>No inline preview for .${ext} files</span>
-          <button class="asset-office-btn" data-llamabot="asset-office-btn">
-            <i class="fa-solid fa-cloud"></i> Preview with Microsoft Office Online
-          </button>
-          <span class="asset-office-note">Opens an external viewer — requires this instance to be publicly reachable.</span>
+          <span class="asset-office-note">Download it to open in the app it belongs to.</span>
         </div>`;
     }
 
@@ -513,24 +548,13 @@ export class FileAttachmentManager {
     // Lazy spreadsheet rendering
     if (isSheet) {
       const stage = this.assetModalPreview.querySelector('[data-llamabot="asset-sheet-stage"]');
-      this.renderSpreadsheetPreview(previewUrl, stage);
+      this.renderSpreadsheetPreview(path, previewUrl, stage);
     }
 
     // Lazy text rendering
     if (isText) {
       const stage = this.assetModalPreview.querySelector('[data-llamabot="asset-text-stage"]');
       this.renderTextPreview(previewUrl, filename, stage);
-    }
-
-    // Office Online viewer (lazy iframe, only on click)
-    const officeBtn = this.assetModalPreview.querySelector('[data-llamabot="asset-office-btn"]');
-    if (officeBtn) {
-      officeBtn.addEventListener('click', () => {
-        const publicUrl = `${window.location.origin}${downloadUrl}`;
-        const viewer = `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(publicUrl)}`;
-        const body = this.assetModalPreview.querySelector('[data-llamabot="asset-preview-body"]');
-        body.innerHTML = `<iframe class="asset-preview-frame" src="${viewer}" title="${filename}"></iframe>`;
-      });
     }
   }
 
@@ -559,11 +583,61 @@ export class FileAttachmentManager {
   }
 
   /**
-   * Render a spreadsheet/CSV inline by lazily loading SheetJS from a CDN, fetching
-   * the file through the authenticated preview endpoint (the browser sends the
-   * session cookie), and converting the first sheet to an HTML table.
+   * Render a spreadsheet/CSV inline as a cell grid.
+   *
+   * The workbook is parsed on the box by /api/uploaded-files/sheet (openpyxl),
+   * so nothing leaves the instance and no third-party viewer is involved. Legacy
+   * binary formats openpyxl can't read (.xls, .xlsb) come back 415 and fall back
+   * to the client-side SheetJS reader.
    */
-  async renderSpreadsheetPreview(previewUrl, stage) {
+  async renderSpreadsheetPreview(path, previewUrl, stage) {
+    if (!stage) return;
+    try {
+      const resp = await fetch(`/api/uploaded-files/sheet?path=${encodeURIComponent(path)}`);
+      if (resp.status === 415) return this.renderSpreadsheetPreviewClientSide(previewUrl, stage);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      const names = data.sheets || [];
+
+      const tabs = names.map((name, i) =>
+        `<button class="asset-sheet-tab ${i === (data.active || 0) ? 'asset-sheet-tab--active' : ''}" data-sheet="${i}">${this.escapeHtml(name)}</button>`
+      ).join('');
+
+      stage.innerHTML = `
+        ${names.length > 1 ? `<div class="asset-sheet-tabs">${tabs}</div>` : ''}
+        <div class="asset-sheet-scroll" data-llamabot="asset-sheet-scroll"></div>
+      `;
+
+      const scroll = stage.querySelector('[data-llamabot="asset-sheet-scroll"]');
+      this.renderSheetGrid(data.rows || [], scroll, data.total_rows);
+
+      stage.querySelectorAll('.asset-sheet-tab').forEach(tab => {
+        tab.addEventListener('click', async () => {
+          stage.querySelectorAll('.asset-sheet-tab').forEach(t => t.classList.remove('asset-sheet-tab--active'));
+          tab.classList.add('asset-sheet-tab--active');
+          scroll.innerHTML = '<div class="asset-preview-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading sheet…</div>';
+          try {
+            const r = await fetch(`/api/uploaded-files/sheet?path=${encodeURIComponent(path)}&sheet=${tab.dataset.sheet}`);
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            const d = await r.json();
+            this.renderSheetGrid(d.rows || [], scroll, d.total_rows);
+          } catch (err) {
+            console.error('Sheet load failed:', err);
+            scroll.innerHTML = `<div class="asset-preview-placeholder"><i class="fa-solid fa-triangle-exclamation"></i><span>Couldn't load that sheet.</span></div>`;
+          }
+        });
+      });
+    } catch (err) {
+      console.error('Spreadsheet preview failed:', err);
+      stage.innerHTML = `<div class="asset-preview-placeholder"><i class="fa-solid fa-triangle-exclamation"></i><span>Couldn't render this spreadsheet. Try downloading it instead.</span></div>`;
+    }
+  }
+
+  /**
+   * Fallback reader for legacy binary workbooks (.xls, .xlsb) that openpyxl
+   * can't open: lazily load SheetJS and parse the bytes in the browser.
+   */
+  async renderSpreadsheetPreviewClientSide(previewUrl, stage) {
     if (!stage) return;
     try {
       const XLSX = await this.loadSheetJs();
@@ -571,6 +645,8 @@ export class FileAttachmentManager {
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const buf = await resp.arrayBuffer();
       const wb = XLSX.read(buf, { type: 'array' });
+
+      const toRows = (ws) => XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', blankrows: false });
 
       const tabs = wb.SheetNames.map((name, i) =>
         `<button class="asset-sheet-tab ${i === 0 ? 'asset-sheet-tab--active' : ''}" data-sheet="${i}">${this.escapeHtml(name)}</button>`
@@ -582,14 +658,14 @@ export class FileAttachmentManager {
       `;
 
       const scroll = stage.querySelector('[data-llamabot="asset-sheet-scroll"]');
-      this.renderSheetGrid(XLSX, wb.Sheets[wb.SheetNames[0]], scroll);
+      this.renderSheetGrid(toRows(wb.Sheets[wb.SheetNames[0]]), scroll);
 
       stage.querySelectorAll('.asset-sheet-tab').forEach(tab => {
         tab.addEventListener('click', () => {
           stage.querySelectorAll('.asset-sheet-tab').forEach(t => t.classList.remove('asset-sheet-tab--active'));
           tab.classList.add('asset-sheet-tab--active');
           const idx = parseInt(tab.dataset.sheet, 10);
-          this.renderSheetGrid(XLSX, wb.Sheets[wb.SheetNames[idx]], scroll);
+          this.renderSheetGrid(toRows(wb.Sheets[wb.SheetNames[idx]]), scroll);
         });
       });
     } catch (err) {
@@ -599,20 +675,25 @@ export class FileAttachmentManager {
   }
 
   /**
-   * Render a worksheet as a spreadsheet-style grid: A/B/C column headers, row
-   * numbers, sticky headers, zebra striping, right-aligned numerics. Capped to a
-   * sane number of rows so huge sheets don't lock up the DOM.
+   * Render rows of cell values as a spreadsheet-style grid: A/B/C column headers,
+   * row numbers, sticky headers, zebra striping, right-aligned numerics. Capped
+   * to a sane number of rows so huge sheets don't lock up the DOM.
+   *
+   * @param {Array<Array>} rows - already-parsed cell values, row-major
+   * @param {HTMLElement} scroll - container to render into
+   * @param {number} [totalRows] - row count in the full sheet, when the caller
+   *   (the server parser) already truncated `rows`
    */
-  renderSheetGrid(XLSX, ws, scroll) {
+  renderSheetGrid(rows, scroll, totalRows) {
     const MAX_ROWS = 500;
-    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', blankrows: false });
     if (!rows.length) {
       scroll.innerHTML = `<div class="asset-preview-placeholder"><i class="fa-solid fa-table-cells"></i><span>This sheet is empty</span></div>`;
       return;
     }
 
-    const truncated = rows.length > MAX_ROWS;
-    const view = truncated ? rows.slice(0, MAX_ROWS) : rows;
+    const fullCount = Number.isFinite(totalRows) ? totalRows : rows.length;
+    const truncated = fullCount > MAX_ROWS;
+    const view = rows.length > MAX_ROWS ? rows.slice(0, MAX_ROWS) : rows;
     const colCount = view.reduce((m, r) => Math.max(m, r.length), 0);
 
     const colLabel = (n) => {
@@ -633,7 +714,9 @@ export class FileAttachmentManager {
       for (let c = 0; c < colCount; c++) {
         const v = r[c];
         const empty = v === '' || v === null || v === undefined;
-        const num = typeof v === 'number';
+        // The server parser hands back strings, so right-align anything that
+        // reads as a number too — otherwise every numeric column looks like text.
+        const num = typeof v === 'number' || (!empty && typeof v === 'string' && /^-?[\d,]*\.?\d+%?$/.test(v.trim()));
         body += `<td class="${num ? 'asset-sheet-num' : ''}">${empty ? '' : this.escapeHtml(String(v))}</td>`;
       }
       body += '</tr>';
@@ -642,7 +725,7 @@ export class FileAttachmentManager {
 
     scroll.innerHTML =
       `<table class="asset-sheet-grid">${head}${body}</table>` +
-      (truncated ? `<div class="asset-sheet-truncated"><i class="fa-solid fa-circle-info"></i> Showing first ${MAX_ROWS} of ${rows.length} rows — download for the full file.</div>` : '');
+      (truncated ? `<div class="asset-sheet-truncated"><i class="fa-solid fa-circle-info"></i> Showing first ${view.length} of ${fullCount} rows — download for the full file.</div>` : '');
   }
 
   /** Escape a string for safe insertion into HTML. */
