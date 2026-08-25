@@ -88,12 +88,19 @@ export class ErrorAttach {
       stack: raw.stack ? String(raw.stack).slice(0, 4000) : null,
       path: String(raw.path || ''),
       timestamp: Number(raw.timestamp) || Date.now(),
-      count: 1
+      // Server errors arrive with a total already on them: the Rails feed
+      // collapses a render loop into a count rather than 200 entries, so this is
+      // the only place that number exists. Pushed JS errors carry no count and
+      // are tallied here instead.
+      count: Math.max(1, Number(raw.count) || 1),
+      counted: Number(raw.count) > 0
     };
 
     const dupe = this.errors.find((e) => e.message === entry.message && e.path === entry.path);
     if (dupe) {
-      dupe.count += 1;
+      // A source that counts for itself re-reports its running total, so taking
+      // the larger is right and incrementing would double-count it.
+      dupe.count = entry.counted ? Math.max(dupe.count, entry.count) : dupe.count + 1;
       dupe.timestamp = entry.timestamp;
     } else {
       this.errors.push(entry);
@@ -136,15 +143,29 @@ export class ErrorAttach {
    */
   buildMessageBlock() {
     if (!this.sending()) return '';
-    const body = this.errors.map((e) => {
-      const times = e.count > 1 ? ` (x${e.count})` : '';
-      const where = e.path ? ` on ${e.path}` : '';
-      const stack = e.stack ? `\n${e.stack}` : '';
-      return `[${e.kind}]${where}${times}: ${e.message}${stack}`;
-    }).join('\n\n');
-    const plural = this.errors.length > 1 ? 's' : '';
-    return `<PAGE_JS_ERRORS>\nThe user attached the following JavaScript error${plural} `
-      + `from their app preview:\n\n${body}\n</PAGE_JS_ERRORS>`;
+
+    // Two tags, because they are two different jobs. A Ruby backtrace described
+    // as "a JavaScript error from their app preview" would send Leo looking in
+    // the wrong half of the app — and a 500 is fixed in a controller or a view,
+    // not in the page's script.
+    const blocks = [];
+
+    const js = this.errors.filter((e) => e.kind !== 'rails');
+    if (js.length > 0) {
+      const plural = js.length > 1 ? 's' : '';
+      blocks.push(`<PAGE_JS_ERRORS>\nThe user attached the following JavaScript error${plural} `
+        + `from their app preview:\n\n${formatErrors(js)}\n</PAGE_JS_ERRORS>`);
+    }
+
+    const rails = this.errors.filter((e) => e.kind === 'rails');
+    if (rails.length > 0) {
+      const plural = rails.length > 1 ? 's' : '';
+      blocks.push(`<RAILS_SERVER_ERRORS>\nThe user attached the following error${plural} `
+        + `their Rails app raised while they were using it:\n\n${formatErrors(rails)}\n`
+        + `</RAILS_SERVER_ERRORS>`);
+    }
+
+    return blocks.join('\n\n');
   }
 
   /** True when the current errors would ride along with a send. */
@@ -177,13 +198,15 @@ export class ErrorAttach {
       return;
     }
 
-    const total = this.errors.reduce((n, e) => n + e.count, 0);
-    const plural = total === 1 ? '' : 's';
-
+    // Distinct problems, not total occurrences. One broken page that raises the
+    // same error on every render is one thing to fix, and Rails counts those in
+    // the dozens — "50 errors detected" would be alarming and wrong. How many
+    // times each one fired is in the popup, on the entry it belongs to, which is
+    // also the only place it means anything.
     this.banner.classList.remove('hidden');
     this.banner.innerHTML = `
       <span class="js-error-dot"></span>
-      <span class="js-error-count">${total} error${plural} detected</span>
+      <span class="js-error-count">${this._countLabel()}</span>
       <button type="button" class="js-error-more" data-act="details">Read more</button>
       <label class="js-error-show">
         <input type="checkbox" data-act="show" ${this.showLeo ? 'checked' : ''} />
@@ -211,6 +234,26 @@ export class ErrorAttach {
    * Open the details popup. Built on demand and thrown away on close — it is
    * describing a list that changes, so there is nothing worth keeping around.
    */
+  /**
+   * "1 Rails error, 2 JavaScript errors detected".
+   *
+   * Naming the kind is the whole point of the line. The two mean different
+   * things to whoever is looking: a JavaScript error means the page loaded and
+   * something on it misbehaved; a Rails error means the request never made it
+   * out of the server — and those happen on screens that look completely fine,
+   * which is exactly when nobody would think to look.
+   */
+  _countLabel() {
+    const rails = this.errors.filter((e) => e.kind === 'rails').length;
+    const js = this.errors.length - rails;
+    const part = (n, name) => `${n} ${name} error${n === 1 ? '' : 's'}`;
+
+    const parts = [];
+    if (rails) parts.push(part(rails, 'Rails'));
+    if (js) parts.push(part(js, 'JavaScript'));
+    return `${parts.join(', ')} detected`;
+  }
+
   openDetails() {
     if (this.modal) return;              // already open; don't stack a second one
     if (this.errors.length === 0) return;
@@ -252,7 +295,8 @@ export class ErrorAttach {
       : `These aren't being sent right now — tick <strong>Show Leo</strong> on the notice to include them with your next message.`;
 
     const items = this.errors.map((e) => `
-      <li class="js-error-item">
+      <li class="js-error-item${e.kind === 'rails' ? ' js-error-item--rails' : ''}">
+        <span class="js-error-kind">${kindLabel(e)}</span>
         <div class="js-error-item-plain">${escapeHtml(friendlySummary(e))}</div>
         <div class="js-error-item-tech">${escapeHtml(e.message)}</div>
         <div class="js-error-item-meta">
@@ -292,6 +336,10 @@ export function friendlySummary(e) {
   const message = String((e && e.message) || '');
   const kind = (e && e.kind) || '';
 
+  // Server errors first: a Ruby NoMethodError would otherwise be described in
+  // the language of the browser, which is both wrong and unhelpful.
+  if (kind === 'rails') return serverSummary(message);
+
   if (/NetworkError|Failed to fetch|fetch failed|ERR_|status (4|5)\d\d/i.test(message)) {
     return "A request to the server didn't go through.";
   }
@@ -311,6 +359,46 @@ export function friendlySummary(e) {
     return 'A background task failed and nothing caught it.';
   }
   return 'The page hit an unexpected error.';
+}
+
+/**
+ * Which half of the stack this came from, as a word the user can act on.
+ *
+ * Derived from a fixed two-way mapping rather than echoing `e.kind`, so an
+ * app-controlled value can never reach the markup.
+ */
+export function kindLabel(e) {
+  return (e && e.kind) === 'rails' ? 'Rails' : 'JavaScript';
+}
+
+/** The same job as friendlySummary, for the exceptions Rails raises. */
+function serverSummary(message) {
+  if (/PendingMigration/.test(message)) {
+    return 'The database is missing a change the app expects.';
+  }
+  if (/RecordNotFound/.test(message)) {
+    return "The app asked for something in the database that doesn't exist.";
+  }
+  if (/StatementInvalid|PG::|ActiveRecord::/.test(message)) {
+    return "The database couldn't do what the app asked.";
+  }
+  if (/MissingTemplate|ActionView::/.test(message)) {
+    return 'The server hit an error while building this page.';
+  }
+  if (/RoutingError|ActionController::/.test(message)) {
+    return "The server didn't know how to handle that request.";
+  }
+  return 'The server hit an error handling that request.';
+}
+
+/** One line per error, shared by both blocks sent to Leo. */
+function formatErrors(errors) {
+  return errors.map((e) => {
+    const times = e.count > 1 ? ` (x${e.count})` : '';
+    const where = e.path ? ` on ${e.path}` : '';
+    const stack = e.stack ? `\n${e.stack}` : '';
+    return `[${e.kind}]${where}${times}: ${e.message}${stack}`;
+  }).join('\n\n');
 }
 
 function truncate(s, n) {

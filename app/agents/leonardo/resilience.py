@@ -174,7 +174,23 @@ def _record_raw_model_call(turn, started_at: float, response) -> None:
         logger.debug("turn_metrics: raw model call not recorded: %s", e)
 
 
-def invoke_with_transient_retry(fn, *, label: str = "model call"):
+def _describe_if_bad_request(exc, messages, tools, label):
+    """Log the redacted shape of a request a provider rejected (raw-node path)."""
+    if messages is None:
+        return
+    try:
+        from app.agents.leonardo.message_invariants import (
+            log_bad_request_shape,
+            looks_like_bad_request,
+        )
+
+        if looks_like_bad_request(exc):
+            log_bad_request_shape(exc, messages, tools=tools, label=label)
+    except Exception:  # noqa: BLE001 - diagnosis must never mask the real error
+        logger.debug("could not describe the rejected request", exc_info=True)
+
+
+def invoke_with_transient_retry(fn, *, label: str = "model call", messages=None, tools=None):
     """Call ``fn()`` with rung-1 transient-error retry semantics, returning its result.
 
     For raw StateGraph nodes (e.g. rails_beginner_agent, rails_ai_builder_agent)
@@ -206,6 +222,9 @@ def invoke_with_transient_retry(fn, *, label: str = "model call"):
         except Exception as e:
             attempt += 1
             if attempt >= _MODEL_RETRY_MAX_ATTEMPTS or not is_transient_error(e):
+                # Same diagnosis the middleware path records: a provider 400
+                # carries nothing actionable, so describe the shape we sent.
+                _describe_if_bad_request(e, messages, tools, label)
                 _record_raw_model_call(turn, started_at, None)
                 raise
             logger.warning(

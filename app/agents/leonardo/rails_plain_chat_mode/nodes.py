@@ -23,6 +23,8 @@ from app.agents.leonardo.model_policy import enabled_default_model
 from app.agents.leonardo.rails_agent.state import RailsAgentState
 from app.agents.leonardo.project_context import brand_context_section
 from app.agents.leonardo.resilience import invoke_with_transient_retry
+from app.agents.leonardo.summarization import compact_messages_if_needed
+from app.agents.leonardo.message_invariants import normalize_messages_for_provider
 
 load_dotenv()
 
@@ -54,6 +56,18 @@ def get_sys_msg():
     }
 
 
+# Plain chat has no tools and no code to carry forward, so the summary only has
+# to preserve the thread of the conversation itself.
+SUMMARIZATION_PROMPT = """Summarize the conversation so far so it can continue without the earlier messages.
+
+Keep: what the user asked about, the answers and advice already given, any decisions
+they made, and any facts about them or their project that came up. Write it as notes
+to yourself, not as a message to the user.
+
+Conversation:
+{messages}"""
+
+
 def plain_chat(state: RailsAgentState):
     llm_model = state.get("llm_model") or enabled_default_model()
     logger.info(f"Using LLM model: {llm_model}")
@@ -62,15 +76,24 @@ def plain_chat(state: RailsAgentState):
     llm = get_llm(llm_model)
 
     sys_msg = system_message_for_model(get_sys_msg(), llm_model)
+
+    # Context management — raw node, no AgentMiddleware, so nothing trims this
+    # on its own. A long chat thread has no ceiling without it. Same shared
+    # middleware every create_agent mode runs.
+    convo, compaction_ops = compact_messages_if_needed(
+        state["messages"], summary_prompt=SUMMARIZATION_PROMPT,
+    )
     # Raw node — no DynamicModelMiddleware, so the rung-1 transient retry has to
     # be at the call site, same as rails_beginner_agent / rails_ai_builder_agent.
     # Without it a mid-stream provider drop (RemoteProtocolError: incomplete
     # chunked read) kills the turn outright. See test_stream_truncated_response.py.
+    outgoing = normalize_messages_for_provider([sys_msg] + convo)
     response = invoke_with_transient_retry(
-        lambda: llm.invoke([sys_msg] + state["messages"]),
+        lambda: llm.invoke(outgoing),
         label=f"rails_plain_chat_mode/{llm_model}",
+        messages=outgoing,
     )
-    return {"messages": [response]}
+    return {"messages": compaction_ops + [response]}
 
 
 def build_workflow(checkpointer=None):

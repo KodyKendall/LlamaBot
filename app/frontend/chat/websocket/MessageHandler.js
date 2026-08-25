@@ -3,16 +3,14 @@
  */
 
 import { isCustomAgentMode } from '../utils/agentModes.js';
+import {
+  normalizeQuestions,
+  buildQuestionCardHtml,
+  buildSubmission,
+  isAnswered,
+} from '../messages/QuestionCard.js';
 
 const PAYWALL_UPGRADE_URL = 'https://llamapress.ai/pricing';
-
-// Submitted as the answer when the user picks the "See visual options" choice on a
-// UI/UX-related ask_user_question. It instructs Leo to re-ask the question visually via
-// ask_user_uiux_question rather than treating this as a normal text answer.
-const UIUX_REQUEST_DIRECTIVE =
-  'The user would like to see visual UI/UX options for this. Please call the ' +
-  'ask_user_uiux_question tool with 2-4 concrete example designs (live HTML previews) ' +
-  'for this decision instead of answering in text.';
 
 export class MessageHandler {
   constructor(appState, streamingState, messageRenderer, iframeManager, scrollManager, tokenIndicator, config) {
@@ -731,10 +729,23 @@ export class MessageHandler {
     this._playAskUserQuestionSound();
     this._showWaitingForInputBadge();
 
-    const { question, options, context, thread_id, agent_name, ui_related } = data;
+    // Leo may ask 1-4 questions in one interrupt; they're answered together and
+    // submitted once, which saves a whole round-trip per extra question.
+    const { context, thread_id, agent_name } = data;
+    const questions = normalizeQuestions(data);
+    if (!questions.length) return;
+
     const questionId = `question-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
 
-    const html = this._buildQuestionCardHtml(questionId, question, options || [], context || '', thread_id, agent_name, !!ui_related);
+    const html = buildQuestionCardHtml({
+      questionId,
+      questions,
+      context: context || '',
+      threadId: thread_id,
+      agentName: agent_name,
+      escapeHtml: (t) => this._escapeHtml(t),
+      parseMarkdown: (t) => this.messageRenderer.markdownParser.parse(t),
+    });
     this.messageRenderer.addMessage(html, 'question_request', null);
 
     // Attach interactive event listeners after DOM render, then (if the building
@@ -788,118 +799,118 @@ export class MessageHandler {
     return true;
   }
 
-  _buildQuestionCardHtml(questionId, question, options, context, threadId, agentName, uiRelated = false) {
-    const optionButtons = options.map(opt =>
-      `<button class="plan-option-btn" data-option="${this._escapeHtml(opt)}">${this._escapeHtml(opt)}</button>`
-    ).join('');
-
-    // When the agent flags the question as UI/UX-related, offer one subtle extra choice.
-    // Selecting it submits a directive (see _attachQuestionListeners) that asks Leo to
-    // follow up with ask_user_uiux_question — i.e. show real visual previews.
-    const uiuxOptionBtn = uiRelated ? `
-      <button class="plan-option-btn plan-uiux-request-btn" data-uiux-request="true"
-              title="Have Leo show you visual UI/UX options to pick from">
-        <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor" aria-hidden="true">
-          <path d="M12 2C6.49 2 2 6.49 2 12s4.49 10 10 10c1.38 0 2.5-1.12 2.5-2.5 0-.61-.23-1.2-.64-1.67-.08-.1-.13-.21-.13-.33 0-.28.22-.5.5-.5H16c3.31 0 6-2.69 6-6 0-4.96-4.49-9-10-9zm-5.5 9c-.83 0-1.5-.67-1.5-1.5S5.67 8 6.5 8 8 8.67 8 9.5 7.33 11 6.5 11zm3-4C8.67 7 8 6.33 8 5.5S8.67 4 9.5 4s1.5.67 1.5 1.5S10.33 7 9.5 7zm5 0c-.83 0-1.5-.67-1.5-1.5S13.67 4 14.5 4s1.5.67 1.5 1.5S15.33 7 14.5 7zm3 4c-.83 0-1.5-.67-1.5-1.5S16.67 8 17.5 8s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/>
-        </svg>See visual options
-      </button>` : '';
-
-    const skipBtn = `<button class="plan-skip-btn">Skip</button>`;
-
-    return `
-      <div class="plan-question-card" data-question-id="${questionId}"
-           data-thread-id="${threadId}" data-agent-name="${agentName}">
-        <div class="plan-question-text">${this.messageRenderer.markdownParser.parse(question)}</div>
-        ${context ? `<div class="plan-question-context">${this._escapeHtml(context)}</div>` : ''}
-        ${(options.length > 0 || uiRelated) ? `
-          <div class="plan-question-options">
-            ${optionButtons}
-            ${uiuxOptionBtn}
-            ${skipBtn}
-          </div>
-        ` : ''}
-        <button class="plan-continue-btn" style="display: none;">Continue</button>
-        <div class="plan-question-input-row">
-          <textarea class="plan-question-input" rows="2" placeholder="Add to your answer..."></textarea>
-          <button class="plan-send-btn"><i class="fa-solid fa-arrow-up"></i></button>
-        </div>
-      </div>
-    `;
-  }
-
   // cardEl lets us wire a specific node (e.g. the overlay clone, which shares the
   // chat card's data-question-id); falls back to looking it up by id in the chat.
   _attachQuestionListeners(questionId, threadId, agentName, cardEl = null) {
     const card = cardEl || document.querySelector(`[data-question-id="${questionId}"]`);
     if (!card) return;
-    let selectedOptions = [];
-    // Tracked separately from selectedOptions: this choice doesn't answer the question,
-    // it asks Leo to re-ask it visually (ask_user_uiux_question).
-    let uiuxRequested = false;
 
-    const updateContinueBtn = () => {
-      const continueBtn = card.querySelector('.plan-continue-btn');
-      const input = card.querySelector('.plan-question-input');
-      const hasSelection = selectedOptions.length > 0 || uiuxRequested;
-      const hasText = input?.value?.trim()?.length > 0;
-      continueBtn.style.display = (hasSelection || hasText) ? 'block' : 'none';
-    };
+    const items = Array.from(card.querySelectorAll('.plan-question-item'));
+    if (!items.length) return;
 
-    // Build the answer that resumes the agent (real directive) plus a friendly version
-    // to show in the user's own chat bubble. For the UI/UX request we send Leo an explicit
-    // instruction but only show "See visual options" to the user.
-    const buildSubmission = () => {
-      const freeText = card.querySelector('.plan-question-input')?.value?.trim();
-      const parts = [...selectedOptions];
-      const displayParts = [...selectedOptions];
-      if (freeText) { parts.push(freeText); displayParts.push(freeText); }
-      if (uiuxRequested) {
-        parts.push(UIUX_REQUEST_DIRECTIVE);
-        displayParts.push('See visual options');
+    // The questions are read back off the DOM rather than closed over, so the overlay
+    // clone (cloneNode copies markup, not handlers) can be wired from the same code.
+    const questions = items.map(item => ({ question: item.dataset.questionText || '' }));
+    const batched = questions.length > 1;
+
+    // One state slot per question: what was clicked, typed, skipped, or sent to previews.
+    const states = questions.map(() => ({ options: [], text: '', uiux: false, skipped: false }));
+
+    const progressEl = card.querySelector('.plan-question-progress');
+    const continueBtn = card.querySelector('.plan-continue-btn');
+
+    const refresh = () => {
+      const answered = states.filter(isAnswered).length;
+      if (batched) {
+        // Every question needs an answer (Skip counts) before Continue unlocks —
+        // otherwise a blank slot goes to Leo with nothing to map it to.
+        if (progressEl) progressEl.textContent = `${answered} of ${questions.length} answered`;
+        if (continueBtn) continueBtn.disabled = answered < questions.length;
+      } else if (continueBtn) {
+        continueBtn.style.display = answered > 0 ? 'block' : 'none';
       }
-      return { answer: parts.join(', '), display: displayParts.join(', ') };
     };
 
-    // Option toggle (multi-select). The UI/UX request chip toggles its own flag rather
-    // than contributing an option string.
+    const submit = () => {
+      const { answer, display } = buildSubmission(questions, states);
+      this._submitQuestionAnswer(card, answer, threadId, agentName, display);
+    };
+
+    // Clear a question's skip once the user actually answers it, and vice versa —
+    // they're contradictory states and the last click should win.
+    const setSkipped = (i, skipped) => {
+      states[i].skipped = skipped;
+      const item = items[i];
+      item.querySelector('.plan-skip-btn')?.classList.toggle('selected', skipped);
+      if (skipped) {
+        states[i].options = [];
+        states[i].uiux = false;
+        states[i].text = '';
+        item.querySelectorAll('.plan-option-btn').forEach(b => b.classList.remove('selected'));
+        const input = item.querySelector('.plan-question-input');
+        if (input) input.value = '';
+      }
+    };
+
+    // Option toggle (multi-select, per question). The "See visual options" chip sets
+    // its own flag rather than contributing an option string — it isn't an answer, it
+    // asks Leo to re-ask THAT question with live previews.
     card.querySelectorAll('.plan-option-btn').forEach(btn => {
       btn.addEventListener('click', () => {
+        const i = Number(btn.dataset.qi || 0);
         btn.classList.toggle('selected');
         if (btn.dataset.uiuxRequest === 'true') {
-          uiuxRequested = btn.classList.contains('selected');
+          states[i].uiux = btn.classList.contains('selected');
         } else {
           const opt = btn.dataset.option;
-          if (selectedOptions.includes(opt)) {
-            selectedOptions = selectedOptions.filter(o => o !== opt);
-          } else {
-            selectedOptions.push(opt);
-          }
+          states[i].options = states[i].options.includes(opt)
+            ? states[i].options.filter(o => o !== opt)
+            : [...states[i].options, opt];
         }
-        updateContinueBtn();
+        if (states[i].skipped) setSkipped(i, false);
+        refresh();
       });
     });
 
-    // Skip button
-    card.querySelector('.plan-skip-btn')?.addEventListener('click', () => {
+    // Skip: in a batch it marks just that question and waits for Continue; on a single
+    // question it submits the card straight away, exactly as it always has.
+    card.querySelectorAll('.plan-skip-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (!batched) {
+          this._submitQuestionAnswer(card, 'skip', threadId, agentName);
+          return;
+        }
+        const i = Number(btn.dataset.qi || 0);
+        setSkipped(i, !states[i].skipped);
+        refresh();
+      });
+    });
+
+    card.querySelector('.plan-skip-all-btn')?.addEventListener('click', () => {
       this._submitQuestionAnswer(card, 'skip', threadId, agentName);
     });
 
-    // Continue button
-    card.querySelector('.plan-continue-btn')?.addEventListener('click', () => {
-      const { answer, display } = buildSubmission();
-      this._submitQuestionAnswer(card, answer, threadId, agentName, display);
+    continueBtn?.addEventListener('click', () => {
+      if (continueBtn.disabled) return;
+      submit();
     });
 
-    // Input handling
-    const input = card.querySelector('.plan-question-input');
-    const sendBtn = card.querySelector('.plan-send-btn');
-    input?.addEventListener('input', updateContinueBtn);
-    sendBtn?.addEventListener('click', () => {
-      const { answer, display } = buildSubmission();
-      if (answer.length > 0) {
-        this._submitQuestionAnswer(card, answer, threadId, agentName, display);
-      }
+    // Free text, per question.
+    card.querySelectorAll('.plan-question-input').forEach(input => {
+      const i = Number(input.dataset.qi || 0);
+      input.addEventListener('input', () => {
+        states[i].text = input.value;
+        if (states[i].skipped && input.value.trim()) setSkipped(i, false);
+        refresh();
+      });
     });
+
+    // Single-question send arrow (a batch submits through Continue instead).
+    card.querySelector('.plan-send-btn')?.addEventListener('click', () => {
+      if (states.some(isAnswered)) submit();
+    });
+
+    refresh();
 
     // Scroll question into view
     card.scrollIntoView({ behavior: 'smooth', block: 'end' });

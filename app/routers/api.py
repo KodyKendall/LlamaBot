@@ -313,6 +313,142 @@ async def api_check_updates(session: Session = Depends(get_db_session)):
     return result
 
 
+@router.get("/api/overlay-ads", response_class=JSONResponse)
+async def api_overlay_ads(request: Request):
+    """Promo snippets AND the display policy for the building overlay.
+
+    Thin, fail-open proxy in front of the mothership: it owns the creative, the
+    cadence, and the rules for when a promo shows at all; we only clamp and
+    cache (see ``app.services.overlay_ads``). An unconfigured box, an old
+    mothership, or any error all return an empty list with default policy — the
+    overlay then shows no slot, exactly as before this shipped.
+
+    The signed-in user is passed along so the mothership can personalise both
+    halves. Resolved *optionally*: this must never 401, because a promo failing
+    to load is not a reason to break the build overlay.
+    """
+    from app.dependencies import _user_from_session_cookie
+    from app.services import overlay_ads
+    from app.services.mothership_client import MothershipClient
+
+    # A local override file is an explicit operator choice, so it wins over both
+    # the cache and the mothership — edit the file, reload, see the new promo.
+    local = overlay_ads.local_override()
+    if local is not None:
+        return local
+
+    # Resolved WITHOUT a FastAPI dependency on purpose: `Depends(get_db_session)`
+    # would make a DB hiccup 500 an endpoint whose whole contract is to fail open.
+    # No user just means no personalisation.
+    user = None
+    try:
+        from app.db import engine
+        if engine is not None:
+            with Session(engine) as db:
+                user = _user_from_session_cookie(request, db)
+    except Exception as e:
+        logger.info(f"Overlay ads: could not resolve user, serving unpersonalised: {e}")
+
+    # Cache per user: the mothership personalises this response, so a shared
+    # cache would serve one user's targeted promos and policy to the next.
+    cache_key = f"user:{user.id}" if user else "anon"
+
+    fresh = overlay_ads.cached(cache_key)
+    if fresh is not None:
+        return fresh
+
+    mothership = MothershipClient()
+    if not mothership.enabled:
+        return overlay_ads.empty()
+
+    # Same wire shape every mothership report uses, so a promo can be targeted
+    # by the same llamapress_user_guid the telemetry is keyed on.
+    from app.services import user_context as user_ctx
+
+    raw = await mothership.fetch_overlay_ads(
+        get_container_version(), user=user_ctx.describe(user)
+    )
+    if raw is None:
+        # Cache the miss too, so an unreachable mothership isn't re-dialed on
+        # every single build for the next minute.
+        return overlay_ads.store(overlay_ads.empty(), cache_key)
+    return overlay_ads.store(overlay_ads.normalize(raw), cache_key)
+
+
+@router.get("/api/rails-errors", response_class=JSONResponse)
+async def api_rails_errors(request: Request, username: str = Depends(auth)):
+    """The Rails app's recent crashes, for the chat page's error tray.
+
+    The tray above the composer already shows JavaScript errors the preview
+    pushes over postMessage. This is the other half: press a button, get a 500,
+    and the same notice says so — instead of the user staring at a Rails error
+    page wondering whether Leo can see it.
+
+    Why LlamaBot proxies instead of the browser reading Rails directly:
+    ``GET /llama_bot/errors`` sets no CORS headers and the chat page is a
+    different origin, so a direct fetch is blocked. Proxying also keeps the
+    whole feature inside the LlamaBot image — it works against any gem already
+    serving the feed, with no skeleton release in the way.
+
+    Polled every few seconds by a signed-in user, so it stays cheap and quiet:
+    the work is one request on the Docker network, and every failure answers
+    "no information" rather than something the tray would have to render.
+    """
+    return await _rails_errors(request)
+
+
+def _rails_errors_feed(token: str):
+    from app.services.rails_error_feed import RailsErrorFeedClient
+
+    return RailsErrorFeedClient(token=token)
+
+
+async def _rails_errors(request: Request, feed_factory=_rails_errors_feed):
+    """Everything the route does. Split out so tests can inject a fake feed."""
+    from app.lib import rails_error_tray
+
+    unavailable = {"seq": None, "errors": [], "available": False}
+
+    # Header, never a query parameter: this is a live 30-minute Rails bearer
+    # token and query strings end up in access logs and browser history.
+    token = (request.headers.get("X-Rails-Api-Token") or "").strip()
+    if not token:
+        # Signed into LlamaBot but not into the Rails app. Nothing to poll.
+        return unavailable
+
+    since = _rails_error_cursor(request.query_params.get("since"))
+
+    try:
+        result = await feed_factory(token).fetch(since=since)
+    except Exception as e:  # noqa: BLE001 - a broken feed is not a broken page
+        logger.debug(f"Rails error feed unavailable: {e}")
+        return unavailable
+
+    if result is None:
+        # Gem too old for the endpoint, token expired, or Rails restarting.
+        return unavailable
+
+    seq, errors = result
+    return {
+        "seq": seq,
+        "errors": rails_error_tray.tray_entries(errors),
+        "available": True,
+    }
+
+
+def _rails_error_cursor(raw) -> Optional[int]:
+    """The caller's cursor, or None to make this a probe.
+
+    Anything that is not a plain non-negative integer becomes a probe rather
+    than 0 — reading a garbled cursor as 0 would replay the whole ring into the
+    tray, which is how the user would get shown crashes from yesterday.
+    """
+    value = str(raw or "").strip()
+    if not value.isdigit():
+        return None
+    return int(value)
+
+
 class UpdateRequest(BaseModel):
     llamabot_version: str
     llamapress_version: str
@@ -987,6 +1123,8 @@ async def api_submit_feedback(request: Request, body: FeedbackRequest, username:
         len((debug_context or {}).get("recent_events") or []),
     )
 
+    from app.services import user_context as user_ctx
+
     result = await mothership.submit_feedback(
         thread_id=body.thread_id,
         rating=body.rating,
@@ -995,6 +1133,9 @@ async def api_submit_feedback(request: Request, body: FeedbackRequest, username:
         content=body.content,
         sent_at=body.sent_at,
         debug_context=debug_context,
+        # HTTP path: no turn stamp to fall back on, so resolve the signed-in
+        # user from the session cookie here.
+        user=user_ctx.for_request(request),
     )
     return {"success": bool(result and result.get("success"))}
 
@@ -1057,6 +1198,8 @@ async def api_report_frontend_error(
     try:
         from datetime import datetime, timezone
 
+        from app.services import user_context as user_ctx
+
         await mothership.report_error(
             thread_id=body.thread_id,
             error_class=body.error_class,
@@ -1068,6 +1211,7 @@ async def api_report_frontend_error(
             occurred_at=datetime.now(timezone.utc).isoformat(),
             fingerprint=fingerprint,
             source="frontend",
+            user=user_ctx.for_request(request),
         )
     except Exception as e:
         logger.warning(f"Frontend error report failed: {e}")
@@ -2140,17 +2284,13 @@ PREVIEW_PATH_PREFIXES = {
 }
 
 
-@router.get("/api/uploaded-files/preview")
-async def preview_uploaded_file(path: str, download: bool = False, username: str = Depends(auth)):
-    """Serve an uploaded file.
+def _resolve_uploaded_file(path: str) -> tuple[str, str]:
+    """Map an "app/imports/foo.xlsx" style path onto a real file on disk.
 
-    download=1 always forces a download (Content-Disposition: attachment).
-    Otherwise we serve inline only for browser-native types (raster images, PDF);
-    everything else — Office docs, slideshows, SVG — downloads. Capped at 50MB.
+    Returns (absolute_path, filename). Raises HTTPException for anything outside
+    the two allowed upload roots, for traversal attempts, for missing files, and
+    for files above the preview size cap.
     """
-    import pathlib
-    from fastapi.responses import FileResponse
-
     base_dir = None
     filename = None
     for prefix, candidate_base in PREVIEW_PATH_PREFIXES.items():
@@ -2176,10 +2316,132 @@ async def preview_uploaded_file(path: str, download: bool = False, username: str
     if size > MAX_PREVIEW_BYTES:
         raise HTTPException(status_code=413, detail=f"File too large to preview ({size} bytes, max {MAX_PREVIEW_BYTES})")
 
+    return real_full, filename
+
+
+@router.get("/api/uploaded-files/preview")
+async def preview_uploaded_file(path: str, download: bool = False, username: str = Depends(auth)):
+    """Serve an uploaded file.
+
+    download=1 always forces a download (Content-Disposition: attachment).
+    Otherwise we serve inline only for browser-native types (raster images, PDF);
+    everything else — Office docs, slideshows, SVG — downloads. Capped at 50MB.
+    """
+    import pathlib
+    from fastapi.responses import FileResponse
+
+    real_full, filename = _resolve_uploaded_file(path)
+
     ext = pathlib.Path(filename).suffix.lower()
     inline = (not download) and ext in INLINE_PREVIEW_EXTENSIONS
     disposition = "inline" if inline else "attachment"
     return FileResponse(real_full, filename=filename, content_disposition_type=disposition)
+
+
+# ---------------------------------------------------------------------------
+# Spreadsheet preview — parsed HERE, on the box, never by a third party.
+#
+# The asset library used to hand spreadsheets to Microsoft's Office Online
+# viewer (view.officeapps.live.com) in an iframe. That can never work: the
+# viewer fetches the file from Microsoft's servers, and /api/uploaded-files/preview
+# requires this user's session. So we do the boring thing — parse the workbook
+# with openpyxl (already a dependency, used by the pyxl agent) and hand the
+# frontend plain rows of cell values to draw as a grid.
+# ---------------------------------------------------------------------------
+
+# openpyxl reads the OOXML family only. Legacy binary .xls/.xlsb are not covered.
+SHEET_PREVIEW_EXTENSIONS = {'.xlsx', '.xlsm', '.xltx', '.xltm'}
+DELIMITED_PREVIEW_EXTENSIONS = {'.csv': ',', '.tsv': '\t'}
+
+SHEET_PREVIEW_MAX_ROWS = 500
+SHEET_PREVIEW_MAX_COLS = 100
+
+
+def _cell_to_str(value) -> str:
+    """Render one cell for display. Dates as ISO, floats without trailing .0."""
+    import datetime as _dt
+
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "TRUE" if value else "FALSE"
+    if isinstance(value, (_dt.datetime, _dt.date, _dt.time)):
+        return value.isoformat(sep=" ") if isinstance(value, _dt.datetime) else value.isoformat()
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value)
+
+
+@router.get("/api/uploaded-files/sheet", response_class=JSONResponse)
+async def preview_uploaded_sheet(path: str, sheet: int = 0, username: str = Depends(auth)):
+    """Parse an uploaded spreadsheet/CSV and return one sheet as rows of strings.
+
+    Response: {"sheets": [names...], "active": i, "rows": [[cell, ...], ...],
+               "total_rows": n, "truncated": bool}
+    415 means "this format can't be parsed here" — the caller falls back to its
+    client-side reader (legacy .xls/.xlsb).
+    """
+    import csv
+    import io
+    import pathlib
+
+    real_full, filename = _resolve_uploaded_file(path)
+    ext = pathlib.Path(filename).suffix.lower()
+
+    if ext in DELIMITED_PREVIEW_EXTENSIONS:
+        delimiter = DELIMITED_PREVIEW_EXTENSIONS[ext]
+        with open(real_full, "r", encoding="utf-8-sig", errors="replace", newline="") as fh:
+            all_rows = list(csv.reader(io.StringIO(fh.read()), delimiter=delimiter))
+        total_rows = len(all_rows)
+        rows = [[_cell_to_str(c) for c in r[:SHEET_PREVIEW_MAX_COLS]] for r in all_rows[:SHEET_PREVIEW_MAX_ROWS]]
+        return {
+            "sheets": [filename],
+            "active": 0,
+            "rows": rows,
+            "total_rows": total_rows,
+            "truncated": total_rows > SHEET_PREVIEW_MAX_ROWS,
+        }
+
+    if ext not in SHEET_PREVIEW_EXTENSIONS:
+        raise HTTPException(status_code=415, detail=f"No server-side preview for {ext} files")
+
+    try:
+        import openpyxl
+        wb = openpyxl.load_workbook(real_full, data_only=True, read_only=True)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning(f"Spreadsheet preview failed for {filename}: {e}")
+        raise HTTPException(status_code=422, detail="Could not read this workbook")
+
+    try:
+        names = list(wb.sheetnames)
+        if not names:
+            raise HTTPException(status_code=422, detail="Workbook has no sheets")
+        index = sheet if 0 <= sheet < len(names) else 0
+        ws = wb[names[index]]
+
+        rows = []
+        total_rows = 0
+        for row in ws.iter_rows(values_only=True):
+            total_rows += 1
+            if len(rows) < SHEET_PREVIEW_MAX_ROWS:
+                rows.append([_cell_to_str(c) for c in row[:SHEET_PREVIEW_MAX_COLS]])
+
+        # Trim trailing all-blank rows openpyxl reports for formatted-but-empty cells.
+        while rows and not any(c for c in rows[-1]):
+            rows.pop()
+            total_rows -= 1
+
+        return {
+            "sheets": names,
+            "active": index,
+            "rows": rows,
+            "total_rows": total_rows,
+            "truncated": total_rows > len(rows),
+        }
+    finally:
+        wb.close()
 
 
 # ============== Remote Setup API ==============

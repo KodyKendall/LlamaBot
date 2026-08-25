@@ -15,6 +15,8 @@
 
 import { getRailsUrl, getVSCodeUrl, getInboxUrl, getActivityUrl, DEFAULT_CONFIG } from '../config.js';
 import { isTabVisible } from '../utils/tabVisibility.js';
+import { loadOverlayAds, OverlayAdRotator, evaluatePolicy, policyAllowsMode, recordShown } from './OverlayAds.js';
+import { installOverlayDevtools } from './OverlayDevtools.js';
 
 /**
  * data-target name → data-llamabot attribute, for every tab in the browser pane.
@@ -69,6 +71,11 @@ export class IframeManager {
 
     // Navigation history stack for back button (since we can't access cross-origin iframe history)
     this.navigationHistory = [];
+
+    // window.leoAds — console handle for driving the overlay without an agent turn.
+    // Installed here (rather than off window.chatApp) so it binds to this manager
+    // directly and doesn't care when/whether chatApp gets assigned.
+    installOverlayDevtools(this);
 
     // Track current path for reliable refresh (fallback when iframe query fails).
     // Seeded from the last page this browser was on so a full page refresh puts
@@ -349,6 +356,8 @@ export class IframeManager {
     const browserContent = document.querySelector('.browser-content');
     if (!browserContent) return;
 
+    this._stopOverlayAds();   // belt-and-braces: never inherit a previous overlay's rotator
+
     // Create overlay div
     const overlay = document.createElement('div');
     overlay.id = 'streamingOverlay';
@@ -365,7 +374,9 @@ export class IframeManager {
     overlay.style.zIndex = '10';
     overlay.style.borderRadius = '8px';
     overlay.style.overflow = 'hidden';
-    overlay.style.paddingTop = '24px';
+    overlay.style.boxSizing = 'border-box';
+    overlay.style.padding = '16px';
+    overlay.style.gap = '12px';
 
     // Add close control if requested. A bare "×" reads as "cancel", which made
     // users unsure whether hitting it would stop Leo. Instead we show a labeled
@@ -462,7 +473,7 @@ export class IframeManager {
 
     const textContainer = document.createElement('div');
     textContainer.style.width = 'auto';
-    textContainer.style.textAlign = 'center';
+    textContainer.style.textAlign = 'left';
     textContainer.style.overflow = 'hidden';
     textContainer.appendChild(overlayText);
 
@@ -497,11 +508,11 @@ export class IframeManager {
     const tipsContainer = document.createElement('div');
     tipsContainer.style.width = 'auto';
     tipsContainer.style.maxWidth = '100%';
-    tipsContainer.style.textAlign = 'center';
-    // Extra breathing room below the title so the tip reads as its own thing, not
-    // a subtitle. The title is big+bold+white; the tip is a lighter, amber-accented
-    // hint in its own pill below, so the two clearly separate.
-    tipsContainer.style.padding = '18px 0 0';
+    tipsContainer.style.textAlign = 'left';
+    // The status block is deliberately quiet now — it shares one compact top-left
+    // row with the animation so the promo below it owns the pane. A little space
+    // under the title still keeps the tip reading as its own thing.
+    tipsContainer.style.padding = '6px 0 0';
     tipsContainer.style.boxSizing = 'border-box';
     tipsContainer.style.color = 'rgba(255, 255, 255, 0.85)';
     tipsContainer.style.fontFamily = 'Arial, sans-serif';
@@ -639,11 +650,144 @@ export class IframeManager {
     questionContainer.style.padding = '16px 20px';
     questionContainer.style.display = 'none';
 
+    // Full-width rail that carries the status pill. It's what keeps the pill's
+    // left edge flush with the promo below it: the rail is the same width as the
+    // content column and centered like it, while the pill itself hugs its content
+    // at the rail's left edge.
+    const headerRow = document.createElement('div');
+    headerRow.style.flex = '0 0 auto';
+    headerRow.style.alignSelf = 'center';
+    headerRow.style.width = '100%';
+    headerRow.style.display = 'flex';
+    headerRow.style.justifyContent = 'flex-start';
+
+    // Jumbotron promo slot. The creative is mothership-owned HTML rendered in a
+    // sandboxed iframe (see OverlayAds.js) — this is only the frame it sits in.
+    // Stays hidden unless the mothership actually returns a promo, so an
+    // unconfigured box looks exactly like it did before this shipped.
+    const adContainer = document.createElement('div');
+    adContainer.id = 'overlayAdSlot';
+    adContainer.style.flex = '0 0 auto';
+    adContainer.style.width = '100%';
+    adContainer.style.maxWidth = '480px';
+    adContainer.style.height = '140px';
+    adContainer.style.marginBottom = '16px';
+    adContainer.style.boxSizing = 'border-box';
+    adContainer.style.background = 'rgba(13, 13, 26, 0.85)';
+    adContainer.style.borderRadius = '10px';
+    adContainer.style.border = '1px solid rgba(255, 255, 255, 0.08)';
+    adContainer.style.overflow = 'hidden';
+    adContainer.style.display = 'none';
+
+    // Is a promo actually on screen right now? Everything about the overlay's
+    // proportions hangs off this: with no promo the overlay must look EXACTLY
+    // like it did before the jumbotron shipped (big centered animation under a
+    // 2.5rem title), and it only shrinks into the compact top-left status pill
+    // when there's a promo to make room for. A mothership that's down, empty, or
+    // hasn't been configured yet is therefore invisible to the user.
+    const adsVisible = () => {
+      const mode = this._overlayMode;
+      return !!this._overlayAdRotator
+        && mode !== 'question'
+        && policyAllowsMode(this._overlayAdPolicy, mode);
+    };
+
+    // The todo/question boxes are 480 wide; only the jumbotron gets the full 900.
+    const columnWidth = () => (
+      (this._overlayMode !== 'plan' && this._overlayMode !== 'question') ? '900px' : '480px'
+    );
+
+    // Sizes the promo slot for the current mode.
+    //
+    //   building → ALL of it. Nothing else is competing, and an ad that fills the
+    //              pane is the whole point of the jumbotron.
+    //   plan     → the payload's own `height` (default 140), so the todo list —
+    //              which is what the user actually wants to watch — keeps the rest.
+    //
+    // Called from setOverlayMode (layout changed) and from the rotator's
+    // onAdChange (a promo with a different height just came up).
+    const applyAdSizing = this._applyOverlayAdSizing = () => {
+      adContainer.style.maxWidth = columnWidth();
+      if (this._overlayMode === 'plan') {
+        const height = this._overlayAdRotator?.currentAd?.height || 140;
+        adContainer.style.flex = `0 0 ${height}px`;
+      } else {
+        adContainer.style.flex = '1 1 auto';
+      }
+    };
+
+    // Switches the whole status block between its two chromes:
+    //
+    //   classic (no promo) → the pre-jumbotron look. Title + tip centered in a
+    //                        pill, the big animation centered below it, nothing
+    //                        else on the pane.
+    //   compact (promo up) → title + tip + a small ball in one quiet top-left
+    //                        row, left-aligned to the promo's column, so the eye
+    //                        goes to the promo instead.
+    //
+    // The animation actually moves between the two: a row item inside the pill in
+    // compact chrome, its own full-width block under the pill in classic.
+    const applyChrome = (withAd, { isPlan, isQuestion }) => {
+      if (withAd) {
+        overlay.style.padding = '16px';
+        overlay.style.gap = '12px';
+        headerRow.style.maxWidth = columnWidth();
+        headerRow.style.justifyContent = 'flex-start';
+        headerBox.style.flexDirection = 'row';
+        headerBox.style.gap = '10px';
+        headerBox.style.maxWidth = '100%';
+        headerBox.style.padding = '8px 16px 8px 10px';
+        textContainer.style.textAlign = 'left';
+        tipsContainer.style.textAlign = 'left';
+        tipsContainer.style.padding = '6px 0 0';
+        lottieContainer.style.width = 'auto';
+        // A row item inside the pill, ahead of the title/tip stack.
+        if (headerBox.firstChild !== lottieContainer) headerBox.insertBefore(lottieContainer, headerText);
+        // Deliberately quiet: a 1.15rem title over a 58px ball.
+        overlayText.style.fontSize = isQuestion ? '1.6rem' : '1.15rem';
+        tipsContainer.style.fontSize = '0.68rem';
+        const ballPx = isQuestion ? '0px' : '58px';
+        lottiePlayer.style.width = ballPx;
+        lottiePlayer.style.height = ballPx;
+        // The title shares its row with the animation and the pill's padding, so
+        // it has meaningfully less room than when it was centered on its own.
+        this._overlayTitleReserve = 150;
+      } else {
+        overlay.style.padding = '24px 0 0';
+        overlay.style.gap = '0px';
+        headerRow.style.maxWidth = 'none';
+        headerRow.style.justifyContent = 'center';
+        headerBox.style.flexDirection = 'column';
+        headerBox.style.gap = '0px';
+        headerBox.style.maxWidth = '92%';
+        headerBox.style.padding = '12px 26px';
+        textContainer.style.textAlign = 'center';
+        tipsContainer.style.textAlign = 'center';
+        // Extra breathing room below the title so the tip reads as its own thing,
+        // not a subtitle.
+        tipsContainer.style.padding = '18px 0 0';
+        lottieContainer.style.width = '100%';
+        // Big animation on its own line, directly under the pill.
+        if (lottieContainer.parentNode !== overlay) overlay.insertBefore(lottieContainer, todoContainer);
+        // Title is large while building, then shrinks once the todo list takes over.
+        overlayText.style.fontSize = isPlan ? '1.8rem' : '2.5rem';
+        // Tips track ~35% of the current title size.
+        tipsContainer.style.fontSize = isPlan ? '0.63rem' : '0.875rem';
+        const ballPx = isPlan ? '140px' : '240px';
+        lottiePlayer.style.width = ballPx;
+        lottiePlayer.style.height = ballPx;
+        this._overlayTitleReserve = 70;
+      }
+    };
+
     // Toggle the overlay layouts:
     //   building → big centered animation + cycling tips, no box
     //   plan     → small animation up top + the cloned todo list box
     //   question → animation/tips stopped; the cloned question card takes the pane
+    // Orthogonal to all three: whether a promo is on screen, which is what
+    // applyChrome switches the status block's proportions on.
     const setOverlayMode = (mode) => {
+      this._overlayMode = mode;
       const isPlan = mode === 'plan';
       const isQuestion = mode === 'question';
       // Building: title + tips + ball are centered as a group (animation doesn't
@@ -653,44 +797,61 @@ export class IframeManager {
       // Stop the animation entirely while a question is up — it's the cue that Leo
       // has paused and needs an answer (rather than still working).
       lottieContainer.style.display = isQuestion ? 'none' : 'flex';
-      // Title is large while building, then shrinks once the todo list takes over.
-      overlayText.style.fontSize = isPlan ? '1.8rem' : '2.5rem';
-      // Tips track ~35% of the current title size (bigger pre-plan, smaller after).
-      tipsContainer.style.fontSize = isPlan ? '0.63rem' : '0.875rem';
-      lottiePlayer.style.width = isPlan ? '140px' : '240px';
-      lottiePlayer.style.height = isPlan ? '140px' : '240px';
       // Tips keep cycling in building/plan, but are hidden while a question is up.
       tipsContainer.style.display = isQuestion ? 'none' : 'block';
       todoContainer.style.display = isPlan ? 'block' : 'none';
       questionContainer.style.display = isQuestion ? 'block' : 'none';
+      // Whether a promo may appear in THIS layout is the mothership's call
+      // (policy.modes), with one guarantee it can't override: never during a
+      // question — Leo is blocked on the user, nothing competes with that.
+      const withAd = adsVisible();
+      adContainer.style.display = withAd ? 'block' : 'none';
+      applyAdSizing();
+      applyChrome(withAd, { isPlan, isQuestion });
       // Re-evaluate the "Your " drop since the title size just changed.
       this._fitOverlayTitle?.();
     };
     this._setOverlayMode = setOverlayMode;
-    setOverlayMode('building'); // start in the building state
 
-    // Wrap the title + tips in a semi-opaque "pill" so the white text reads
-    // clearly over the live site behind the overlay, without darkening the rest.
+    // The status block: animation on the left, title + tip stacked to its right,
+    // the whole thing a compact pill pinned to the TOP-LEFT of the pane. The pill
+    // background keeps the white text readable over the live site behind it.
+    //
+    // This used to be a centered column with a 240px animation under a 2.5rem
+    // title, which is what the promo slot below now claims — see setOverlayMode.
+    const headerText = document.createElement('div');
+    headerText.style.display = 'flex';
+    headerText.style.flexDirection = 'column';
+    headerText.style.alignItems = 'flex-start';
+    headerText.style.minWidth = '0';
+    headerText.appendChild(textContainer);
+    headerText.appendChild(tipsContainer);
+
+    // Direction, gap, padding and max-width are chrome-dependent — applyChrome
+    // owns them, along with where the animation lives.
     const headerBox = document.createElement('div');
     headerBox.style.flex = '0 0 auto';
     headerBox.style.display = 'flex';
-    headerBox.style.flexDirection = 'column';
     headerBox.style.alignItems = 'center';
-    headerBox.style.maxWidth = '92%';
     headerBox.style.boxSizing = 'border-box';
-    headerBox.style.padding = '12px 26px';
     headerBox.style.borderRadius = '14px';
     headerBox.style.background = 'rgba(0, 0, 0, 0.45)';
-    headerBox.appendChild(textContainer);
-    headerBox.appendChild(tipsContainer);
+    headerBox.appendChild(headerText);
 
-    overlay.appendChild(headerBox);
-    overlay.appendChild(lottieContainer);
+    headerRow.appendChild(headerBox);
+
+    overlay.appendChild(headerRow);
     overlay.appendChild(todoContainer);
     overlay.appendChild(questionContainer);
+    overlay.appendChild(adContainer);
+
+    // Now that every node applyChrome touches exists, paint the initial layout.
+    setOverlayMode('building');
+
     browserContent.appendChild(overlay);
 
     this.overlayElement = overlay;
+    this._startOverlayAds(overlay, adContainer);
 
     // Keep the title on one line: drop the "Your " prefix when the pane is too
     // narrow to fit the full title, and restore it when there's room again. The
@@ -700,8 +861,10 @@ export class IframeManager {
       if (!prefixSpan) return;                          // current title has no "Your "
       prefixSpan.style.display = 'inline';              // try the full title first
       // Measure against the pane width (minus the pill's padding/margins), not
-      // the now content-hugging title container.
-      const available = browserContent.clientWidth - 70;
+      // the now content-hugging title container. How much to reserve depends on
+      // the chrome (compact shares the row with the animation), so applyChrome
+      // sets it.
+      const available = browserContent.clientWidth - (this._overlayTitleReserve || 70);
       if (overlayText.scrollWidth > available) {
         prefixSpan.style.display = 'none';              // too tight — drop "Your"
       }
@@ -788,6 +951,70 @@ export class IframeManager {
   }
 
   /**
+   * Fetch and mount the overlay's promo slot.
+   *
+   * Fire-and-forget by design: the overlay is already on screen and useful
+   * without it, so nothing here is awaited and every failure path is "no slot".
+   * `loadOverlayAds` never rejects; the only thing to guard is the race where
+   * the user hides the overlay (or a new build starts) while the request is in
+   * flight — hence the identity check against the overlay we were called for.
+   */
+  _startOverlayAds(overlay, slotEl) {
+    loadOverlayAds().then(({ ads, rotateSeconds, policy, variant }) => {
+      if (this.overlayElement !== overlay) return;   // overlay died mid-fetch
+
+      this._overlayAdPolicy = policy;
+      this._overlayAdVariant = variant;
+
+      // WHEN a promo shows is the mothership's decision, not ours — see
+      // evaluatePolicy. We only carry out the verdict and record why, so
+      // leoAds.status() can answer "where's my ad?" without a code read.
+      const verdict = evaluatePolicy({ ads, policy });
+      this._overlayAdVerdict = verdict.reason;
+      if (!verdict.show) return;
+
+      const mount = () => {
+        // The delay means the overlay may be long gone by the time we fire.
+        if (this.overlayElement !== overlay) return;
+        const rotator = new OverlayAdRotator({
+          ads,
+          rotateSeconds,
+          // Promos can declare different heights; re-apply sizing whenever one
+          // comes up (only actually changes anything in plan mode).
+          onAdChange: () => this._applyOverlayAdSizing?.(),
+        });
+        if (!rotator.mount(slotEl)) return;
+        this._overlayAdRotator = rotator;
+        recordShown();                                // starts the cooldown clock
+        // Re-run the current layout now that there IS a slot to show.
+        this._setOverlayMode?.(this._overlayMode || 'building');
+      };
+
+      // Hold the promo back for the first few seconds so a short build doesn't
+      // flash an ad and yank it away.
+      if (verdict.delayMs > 0) {
+        this._overlayAdDelayTimer = setTimeout(mount, verdict.delayMs);
+      } else {
+        mount();
+      }
+    });
+  }
+
+  /**
+   * Tear the promo slot down (kills its rotation timer). Safe when none exists.
+   */
+  _stopOverlayAds() {
+    if (this._overlayAdDelayTimer) {
+      clearTimeout(this._overlayAdDelayTimer);
+      this._overlayAdDelayTimer = null;
+    }
+    if (this._overlayAdRotator) {
+      this._overlayAdRotator.stop();
+      this._overlayAdRotator = null;
+    }
+  }
+
+  /**
    * Stop mirroring the chat into the overlay.
    */
   _stopOverlayPlanMirror() {
@@ -810,7 +1037,9 @@ export class IframeManager {
     container.innerHTML = '';
     container.appendChild(cloneEl);
     this._overlayQuestionActive = true;
-    this._setOverlayTitle?.('Question from Leo');
+    // Leo can ask 1-4 questions on one card.
+    const asked = Number(cloneEl.dataset?.count || 1);
+    this._setOverlayTitle?.(asked > 1 ? `${asked} questions from Leo` : 'Question from Leo');
     this._setOverlayMode?.('question');
     return true;
   }
@@ -858,6 +1087,7 @@ export class IframeManager {
    */
   removeStreamingOverlay() {
     this._stopOverlayPlanMirror();
+    this._stopOverlayAds();
     if (this._overlayTitleObserver) {
       this._overlayTitleObserver.disconnect();
       this._overlayTitleObserver = null;
@@ -868,6 +1098,11 @@ export class IframeManager {
       this._overlayTipInterval = null;
     }
     this._setOverlayMode = null;
+    this._overlayMode = null;
+    this._applyOverlayAdSizing = null;
+    this._overlayAdPolicy = null;
+    this._overlayAdVariant = null;
+    this._overlayAdVerdict = null;
     // Drop the question state too — the real card still lives in the chat; only the
     // throwaway overlay clone dies with the overlay, so nothing needs rescuing.
     this._overlayQuestionActive = false;

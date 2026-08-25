@@ -308,7 +308,7 @@ test('the banner is one compact line: count, Read more, and a Show Leo box', () 
   const { banner, sendError } = harness();
   sendError(anError());
 
-  assert.match(banner.innerHTML, /1 error detected/);
+  assert.match(banner.innerHTML, /1 JavaScript error detected/);
   assert.match(banner.innerHTML, /Read more/);
   assert.match(banner.innerHTML, /Show Leo/);
   assert.match(banner.innerHTML, /type="checkbox"[^>]*checked/);
@@ -421,12 +421,228 @@ test('the count pluralises', () => {
   const { banner, sendError } = harness();
   sendError(anError({ id: 'a', message: 'boom a' }));
   sendError(anError({ id: 'b', message: 'boom b' }));
-  assert.match(banner.innerHTML, /2 errors detected/);
+  assert.match(banner.innerHTML, /2 JavaScript errors detected/);
 });
 
-test('repeats count toward the total', () => {
-  const { banner, sendError } = harness();
+test('a repeat of the same error stays one problem in the notice', () => {
+  // The count is how many times it fired, not how many things are broken. The
+  // popup carries "happened N times" on the entry itself; the notice would only
+  // be alarming if it turned one broken page into "50 errors detected".
+  const { attach, banner, sendError } = harness();
   sendError(anError());
   sendError(anError({ id: 'again' }));
-  assert.match(banner.innerHTML, /2 errors detected/);
+
+  assert.match(banner.innerHTML, /1 JavaScript error detected/);
+  assert.equal(attach.errors[0].count, 2);
+});
+
+test('two different errors are two problems', () => {
+  const { banner, sendError } = harness();
+  sendError(anError({ id: 'a', message: 'boom a' }));
+  sendError(anError({ id: 'b', message: 'boom b' }));
+  assert.match(banner.innerHTML, /2 JavaScript errors detected/);
+});
+
+// ---------------------------------------------------------------------------
+// Rails server errors, in the same tray
+// ---------------------------------------------------------------------------
+//
+// Same notice, same "Show Leo" box, second source. These do not arrive over
+// postMessage — the Rails app cannot reach this page — they come from
+// ui/RailsErrorPoll.js, which reads them through LlamaBot. From here on they are
+// ordinary tray entries, distinguished only by `kind`.
+
+function aServerError(overrides = {}) {
+  return {
+    id: 'rails-5',
+    kind: 'rails',
+    message: "NoMethodError: undefined method `title' for nil",
+    path: 'GET /posts/1',
+    count: 1,
+    stack: 'app/views/posts/show.html.erb:3',
+    ...overrides
+  };
+}
+
+test('a server error lands in the same tray as a JS error', () => {
+  const { attach, banner, sendError } = harness();
+  sendError(anError());
+  attach.record(aServerError());
+
+  assert.equal(attach.errors.length, 2);
+  assert.match(banner.innerHTML, /1 Rails error, 1 JavaScript error detected/);
+});
+
+test('a server error carries the times Rails raised it', () => {
+  // The gem collapses a render loop into a count rather than 200 rows, so the
+  // count is the only place that information exists.
+  const { attach } = harness();
+  attach.record(aServerError({ count: 12 }));
+  assert.equal(attach.errors[0].count, 12);
+});
+
+test('re-reporting the same server error takes the higher count, not one more', () => {
+  // The feed re-stamps an entry when it repeats, so the same crash can arrive
+  // twice carrying its running total. Incrementing would double-count it.
+  const { attach } = harness();
+  attach.record(aServerError({ count: 3 }));
+  attach.record(aServerError({ count: 5 }));
+
+  assert.equal(attach.errors.length, 1);
+  assert.equal(attach.errors[0].count, 5);
+});
+
+test('a JS error with no count still increments on a repeat', () => {
+  const { attach, sendError } = harness();
+  sendError(anError());
+  sendError(anError({ id: 'again' }));
+  assert.equal(attach.errors[0].count, 2);
+});
+
+test('server errors go to Leo under their own tag', () => {
+  // The JS block says "JavaScript error ... from their app preview", which would
+  // be a lie about a Ruby backtrace — and the two want different fixes.
+  const { attach, sendError } = harness();
+  sendError(anError());
+  attach.record(aServerError());
+
+  const block = attach.buildMessageBlock();
+  assert.match(block, /<PAGE_JS_ERRORS>[\s\S]*TypeError[\s\S]*<\/PAGE_JS_ERRORS>/);
+  assert.match(block, /<RAILS_SERVER_ERRORS>[\s\S]*NoMethodError[\s\S]*<\/RAILS_SERVER_ERRORS>/);
+  const jsBlock = block.match(/<PAGE_JS_ERRORS>([\s\S]*?)<\/PAGE_JS_ERRORS>/)[1];
+  assert.ok(!jsBlock.includes('NoMethodError'), 'no Ruby in the JS block');
+});
+
+test('a tray with only server errors sends no JavaScript block', () => {
+  const { attach } = harness();
+  attach.record(aServerError());
+
+  const block = attach.buildMessageBlock();
+  assert.ok(!block.includes('<PAGE_JS_ERRORS>'));
+  assert.match(block, /<RAILS_SERVER_ERRORS>/);
+});
+
+test('a tray with only JS errors is unchanged', () => {
+  const { attach, sendError } = harness();
+  sendError(anError());
+
+  const block = attach.buildMessageBlock();
+  assert.match(block, /<PAGE_JS_ERRORS>/);
+  assert.ok(!block.includes('<RAILS_SERVER_ERRORS>'));
+});
+
+test('the server backtrace rides along', () => {
+  const { attach } = harness();
+  attach.record(aServerError());
+  assert.match(attach.buildMessageBlock(), /app\/views\/posts\/show\.html\.erb:3/);
+});
+
+test('server errors are consumed by a send like any other', () => {
+  const { attach } = harness();
+  attach.record(aServerError());
+  attach.clear();
+  assert.equal(attach.errors.length, 0);
+});
+
+test('server error text is escaped in the popup', () => {
+  const { attach, body } = harness();
+  attach.record(aServerError({ message: 'NoMethodError: <img src=x onerror=alert(1)>' }));
+  attach.openDetails();
+
+  const html = body.children[body.children.length - 1].innerHTML;
+  assert.ok(!html.includes('<img src=x'));
+  assert.match(html, /&lt;img src=x/);
+});
+
+test('a server error reads as a server problem, not a page problem', () => {
+  assert.match(friendlySummary(aServerError()), /server/i);
+});
+
+test('common Rails failures get their own plain sentence', () => {
+  const say = (message) => friendlySummary(aServerError({ message }));
+
+  assert.match(say('ActiveRecord::RecordNotFound: Couldn\'t find Post'), /couldn't find|doesn't exist/i);
+  assert.match(say('ActiveRecord::StatementInvalid: PG::UndefinedColumn'), /database/i);
+  assert.match(say('ActionView::Template::Error: undefined method'), /page|render/i);
+  assert.match(say('ActiveRecord::PendingMigrationError'), /database/i);
+});
+
+test('an unrecognised server error still says something useful', () => {
+  assert.match(friendlySummary(aServerError({ message: 'Whatever::Error: hmm' })), /server/i);
+});
+
+// ---------------------------------------------------------------------------
+// Telling the two kinds apart
+//
+// The tray carries both browser errors (pushed from the preview over
+// postMessage) and Rails crashes (polled from the server's own error feed).
+// Until now it rendered "3 errors detected" for either, which hides the single
+// most useful fact: a JavaScript error means the page loaded and something
+// misbehaved, a Rails error means the request never made it out of the server —
+// and the server ones happen even when the screen looks perfectly fine.
+// ---------------------------------------------------------------------------
+
+function trayWith(entries) {
+  const tray = new ErrorAttach({ getAllowedOrigin: () => RAILS_ORIGIN });
+  const banner = new FakeElement();
+  tray.init(banner, new FakeElement());
+  entries.forEach((e) => tray.record(e));
+  return { tray, banner };
+}
+
+const jsError = (message = 'x is not a function') => ({
+  id: `js-${message}`, kind: 'error', message, path: '/dash',
+});
+const railsError = (message = 'undefined method `titl?') => ({
+  id: `rails-${message}`, kind: 'rails', message, path: '/posts/3',
+});
+
+test('banner names JavaScript when only browser errors are present', () => {
+  const { banner } = trayWith([jsError()]);
+  assert.match(banner.innerHTML, /1 JavaScript error detected/);
+  assert.doesNotMatch(banner.innerHTML, /Rails/);
+});
+
+test('banner names Rails when only server errors are present', () => {
+  const { banner } = trayWith([railsError()]);
+  assert.match(banner.innerHTML, /1 Rails error detected/);
+  assert.doesNotMatch(banner.innerHTML, /JavaScript/);
+});
+
+test('banner breaks the count down when both kinds are present', () => {
+  const { banner } = trayWith([jsError(), railsError()]);
+  assert.match(banner.innerHTML, /1 Rails/);
+  assert.match(banner.innerHTML, /1 JavaScript/);
+});
+
+test('banner pluralises each kind independently', () => {
+  const { banner } = trayWith([jsError('a'), jsError('b'), railsError('c')]);
+  assert.match(banner.innerHTML, /1 Rails error/);
+  assert.match(banner.innerHTML, /2 JavaScript errors/);
+});
+
+test('banner counts distinct problems, not occurrences', () => {
+  // A crashing page raises the same error on every render; Rails counts those
+  // in the dozens. "50 errors detected" would be alarming and wrong.
+  const { tray, banner } = trayWith([railsError('same')]);
+  tray.record({ ...railsError('same'), count: 40 });
+  assert.match(banner.innerHTML, /1 Rails error detected/);
+});
+
+test('each popup entry is labelled with its kind', () => {
+  const { tray } = trayWith([jsError(), railsError()]);
+  const html = tray._detailsHtml();
+  assert.match(html, /js-error-kind[^>]*>Rails</);
+  assert.match(html, /js-error-kind[^>]*>JavaScript</);
+});
+
+test('a Rails entry is marked so it can be styled apart', () => {
+  const { tray } = trayWith([railsError()]);
+  assert.match(tray._detailsHtml(), /js-error-item--rails/);
+});
+
+test('the kind label cannot be injected from error text', () => {
+  const { tray } = trayWith([{ id: 'x', kind: '<img src=x onerror=alert(1)>', message: 'hi' }]);
+  const html = tray._detailsHtml();
+  assert.doesNotMatch(html, /<img src=x/);
 });

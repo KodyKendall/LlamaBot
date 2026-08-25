@@ -149,17 +149,26 @@ class TestTokenServiceUnit:
         assert is_rails_token("single-dash-only") is False
         assert is_rails_token("") is False
 
-    def test_verify_rails_token_trusted(self):
-        """Test that Rails tokens are trusted."""
+    def test_verify_rails_token_requires_a_real_signature(self, monkeypatch):
+        """Rails tokens are verified, not taken on trust.
+
+        This test used to assert the opposite — that any ``<x>--<y>`` string
+        produced a `rails_auth` payload — which is precisely what let an
+        anonymous WebSocket frame authenticate as the gem and run the engineer
+        agent. See app/tests/test_rails_token_verification.py.
+        """
         from app.services.token_service import verify_rails_token
+        from app.tests.rails_token_vectors import TEST_SKB, VALID
 
-        # Valid Rails-style token
-        payload = verify_rails_token("base64data--base64signature")
+        monkeypatch.setenv("SECRET_KEY_BASE", TEST_SKB)
 
+        assert verify_rails_token("base64data--base64signature") is None
+
+        payload = verify_rails_token(VALID)
         assert payload is not None
-        assert payload["sub"] == "rails_gem"
         assert payload["type"] == "rails_auth"
         assert payload["source"] == "llama_bot_rails"
+        assert payload["rails_user_id"] == 4242
 
     def test_verify_rails_token_rejects_non_rails(self):
         """Test that non-Rails tokens are rejected by verify_rails_token."""
@@ -353,29 +362,36 @@ class TestWebSocketAuthEnabled:
             response = websocket.receive_json()
             assert response["type"] == "auth_error"
 
-    def test_rails_token_succeeds(self):
-        """When auth required, Rails tokens should be accepted."""
+    def test_rails_token_succeeds(self, monkeypatch):
+        """When auth required, a genuine Rails token is accepted."""
         from fastapi.testclient import TestClient
         from main import app
 
+        from app.tests.rails_token_vectors import TEST_SKB, VALID
+
+        monkeypatch.setenv("SECRET_KEY_BASE", TEST_SKB)
         client = TestClient(app)
 
         with client.websocket_connect("/ws") as websocket:
-            # Send Rails-style token
+            # A token this Rails app really minted — a forged one is refused,
+            # which is covered in test_rails_token_verification.py.
             websocket.send_json({
                 "type": "auth",
-                "token": "rails-data--rails-signature"
+                "token": VALID
             })
 
             response = websocket.receive_json()
             assert response["type"] == "auth_success"
-            assert response["user"] == "rails_gem"
+            assert response["user"] == "rails_user:4242"
 
-    def test_api_token_in_message_authenticates(self):
+    def test_api_token_in_message_authenticates(self, monkeypatch):
         """Rails gem pattern: api_token in message payload should authenticate."""
         from fastapi.testclient import TestClient
         from main import app
 
+        from app.tests.rails_token_vectors import TEST_SKB, VALID
+
+        monkeypatch.setenv("SECRET_KEY_BASE", TEST_SKB)
         client = TestClient(app)
 
         with client.websocket_connect("/ws") as websocket:
@@ -383,7 +399,7 @@ class TestWebSocketAuthEnabled:
             websocket.send_json({
                 "message": "Hello",
                 "thread_id": "test",
-                "api_token": "rails-data--rails-signature"
+                "api_token": VALID
             })
 
             # First response should be auth_success
@@ -445,3 +461,43 @@ class TestWSTokenEndpoint:
         assert payload["type"] == "ws_auth"
         assert "sub" in payload
         assert "user_id" in payload
+
+
+class TestAuthIsRequiredByDefault:
+    """WS_AUTH_REQUIRED shipped defaulting to false, and no provisioner set it.
+
+    `self.authenticated = not WS_AUTH_REQUIRED` meant a socket that simply never
+    sent an `auth` frame started out authenticated, on every box in the fleet.
+    """
+
+    def _reload(self, monkeypatch, value):
+        import importlib
+
+        import app.websocket.web_socket_handler as mod
+
+        if value is None:
+            monkeypatch.delenv("WS_AUTH_REQUIRED", raising=False)
+        else:
+            monkeypatch.setenv("WS_AUTH_REQUIRED", value)
+        return importlib.reload(mod)
+
+    def test_defaults_to_required_when_unset(self, monkeypatch):
+        assert self._reload(monkeypatch, None).WS_AUTH_REQUIRED is True
+
+    def test_an_operator_can_still_switch_it_off(self, monkeypatch):
+        assert self._reload(monkeypatch, "false").WS_AUTH_REQUIRED is False
+
+    def test_a_fresh_socket_does_not_start_out_authenticated(self, monkeypatch):
+        from unittest.mock import MagicMock, patch
+
+        mod = self._reload(monkeypatch, None)
+        with patch("app.websocket.request_handler.RequestHandler"):
+            handler = mod.WebSocketHandler(MagicMock(), MagicMock())
+        assert handler.authenticated is False
+
+    def teardown_method(self):
+        # Leave the module as the rest of the suite expects to find it.
+        import importlib
+
+        import app.websocket.web_socket_handler as mod
+        importlib.reload(mod)

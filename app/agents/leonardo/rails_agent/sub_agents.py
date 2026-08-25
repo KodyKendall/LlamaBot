@@ -43,6 +43,7 @@ from app.agents.leonardo.llm_factory import get_llm, system_message_for_model
 from app.agents.leonardo.model_policy import enabled_default_model
 from app.agents.leonardo.delegation import (
     DELEGATION_TIMEOUT_SECONDS,
+    summarize_partial_work,
     DelegationTimedOut,
     run_delegation,
 )
@@ -321,15 +322,20 @@ async def delegate_task(
             ]
         })
 
-    except DelegationTimedOut:
+    except DelegationTimedOut as timeout:
         logger.warning("Sub-agent delegation timed out")
+        # Report what it got done. The sub-agent has usually already edited
+        # files; without this the parent must re-read the tree, or retry and
+        # edit them twice. A partial report is recoverable, nothing is not.
         return Command(update={
             "messages": [
                 ToolMessage(
                     content=(
-                        "[DELEGATED TASK FAILED]\n\n"
-                        f"Timed out after {DELEGATION_TIMEOUT_SECONDS}s — you may retry "
-                        "delegate_task once."
+                        "[DELEGATED TASK TIMED OUT]\n\n"
+                        f"It ran out of time after {DELEGATION_TIMEOUT_SECONDS}s. "
+                        "Anything listed below was already done — do NOT redo it. Pick "
+                        "up from here yourself, or delegate only what is left.\n\n"
+                        + summarize_partial_work(timeout.partial_messages)
                     ),
                     tool_call_id=tool_call_id
                 )
@@ -494,15 +500,16 @@ async def delegate_research(
             ]
         })
 
-    except DelegationTimedOut:
+    except DelegationTimedOut as timeout:
         logger.warning("Research sub-agent delegation timed out")
         return Command(update={
             "messages": [
                 ToolMessage(
                     content=(
-                        "[RESEARCH FAILED]\n\n"
-                        f"Timed out after {DELEGATION_TIMEOUT_SECONDS}s — you may retry "
-                        "delegate_research once."
+                        "[RESEARCH TIMED OUT]\n\n"
+                        f"It ran out of time after {DELEGATION_TIMEOUT_SECONDS}s. "
+                        "What it had looked at so far:\n\n"
+                        + summarize_partial_work(timeout.partial_messages)
                     ),
                     tool_call_id=tool_call_id
                 )

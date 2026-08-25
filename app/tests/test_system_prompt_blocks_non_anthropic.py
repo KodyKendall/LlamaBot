@@ -175,7 +175,10 @@ def test_every_non_middleware_agent_flattens_its_cached_prompt():
     offenders = []
     for path in sorted(AGENTS_DIR.rglob("*.py")):
         src = path.read_text()
-        if '"cache_control"' not in src:
+        # The marker is the block being BUILT (`"cache_control": {...}`), not the
+        # string appearing at all — message_invariants.py merely lists it among
+        # the block types providers accept and builds no prompt of its own.
+        if '"cache_control": {' not in src:
             continue
         if "DynamicModelMiddleware" in src:
             continue  # covered by the middleware

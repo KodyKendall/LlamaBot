@@ -862,3 +862,84 @@ def make_summarization_middleware(
         summary_prompt=summary_prompt,
         keep_initial_human=keep_initial_human,
     )
+
+
+# ---------------------------------------------------------------------------
+# Context management for RAW StateGraph nodes
+# ---------------------------------------------------------------------------
+#
+# `create_agent` modes get compaction for free: they pass
+# `make_summarization_middleware()` into the middleware stack and LangGraph runs
+# `before_model` for them. A raw `StateGraph` node — one that calls
+# `llm.invoke(messages)` itself — runs NO middleware, so nothing ever trims it
+# and its history climbs until the provider rejects the turn (2026-08-23 fleet
+# telemetry: `rails_beginner_agent` p90 655k tokens, 32 of 33 all-time
+# 1,048,576-token crashes).
+#
+# This is deliberately a thin adapter over the SAME middleware, not a second
+# implementation of the rule — two implementations of one rule is how beginner
+# mode ended up without it.
+
+_COMPACTOR_CACHE: dict = {}
+
+
+def _compactor(summary_prompt: str, keep_initial_human: int):
+    key = (summary_prompt, keep_initial_human)
+    mw = _COMPACTOR_CACHE.get(key)
+    if mw is None:
+        mw = make_summarization_middleware(
+            summary_prompt=summary_prompt,
+            keep_initial_human=keep_initial_human,
+        )
+        _COMPACTOR_CACHE[key] = mw
+    return mw
+
+
+def compact_messages_if_needed(
+    messages,
+    *,
+    summary_prompt: str,
+    keep_initial_human: int = 3,
+    runtime=None,
+):
+    """Compact a raw ``StateGraph`` node's conversation before it hits the model.
+
+    Pass ``state["messages"]`` — the conversation only, NOT the system message
+    or any per-turn notes the node appends, which are rebuilt every turn and
+    must not be summarized away.
+
+    Returns ``(messages_for_the_model, ops_to_persist)``:
+
+    - ``messages_for_the_model`` is what to hand the provider this turn.
+    - ``ops_to_persist`` is the message-channel write that makes the compaction
+      stick (``[RemoveMessage(REMOVE_ALL_MESSAGES), summary, *tail]``, which the
+      ``DeltaChannel`` reducer in ``app/agents/utils/delta_state.py`` honors).
+      Merge it into the node's return value ahead of the model response, or the
+      node pays for a fresh summarization on every single model call.
+
+    Both are empty-safe: when nothing needs doing the original list comes back
+    and ``ops_to_persist`` is ``[]``. Compaction failing must never be the thing
+    that kills a turn, so any exception falls through to the uncompacted list.
+    """
+    from langchain_core.messages import RemoveMessage
+
+    msgs = list(messages or [])
+    if not msgs:
+        return msgs, []
+
+    try:
+        result = _compactor(summary_prompt, keep_initial_human).before_model(
+            {"messages": msgs}, runtime
+        )
+    except Exception:
+        logger.exception(
+            "Context compaction failed; proceeding with the uncompacted history."
+        )
+        return msgs, []
+
+    ops = list((result or {}).get("messages") or [])
+    if not ops:
+        return msgs, []
+
+    kept = [m for m in ops if not isinstance(m, RemoveMessage)]
+    return kept, ops

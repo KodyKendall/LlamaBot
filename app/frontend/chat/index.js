@@ -3,7 +3,7 @@
  * Initializes and coordinates all modules
  */
 
-import { DEFAULT_CONFIG, getRailsUrl } from './config.js';
+import { DEFAULT_CONFIG, getRailsUrl, INACTIVITY_WARNING_BANNER_ENABLED } from './config.js';
 import { setCookie, getCookie } from './utils/cookies.js';
 import { errorReporter } from './utils/ErrorReporter.js';
 import { leoDiagnostics } from './utils/LeoDiagnostics.js';
@@ -23,6 +23,7 @@ import { PromptManager } from './ui/PromptManager.js';
 import { BrandGuide } from './ui/BrandGuide.js';
 import { ColorAttach } from './ui/ColorAttach.js';
 import { ErrorAttach } from './ui/ErrorAttach.js';
+import { RailsErrorPoll } from './ui/RailsErrorPoll.js';
 import { FileAttachmentManager } from './ui/FileAttachmentManager.js';
 import { ScreenRecorder } from './ui/ScreenRecorder.js';
 import { ScreenshotAnnotator } from './ui/ScreenshotAnnotator.js';
@@ -322,16 +323,18 @@ class ChatApp {
     // NOT re-send the user message (that's what caused the duplicate-restart
     // bug). The client_message_id idempotency guard remains a backstop. The
     // small delay lets the auth message go first (sendAuthMessage is async).
-    window.addEventListener('websocketConnected', () => {
+    // `websocketReady`, not `websocketConnected`: the server refuses `attach`
+    // until the socket has authenticated, and the token fetch is async. This
+    // used to be a 300ms timer racing that handshake — losing the race now
+    // costs the run its live output, so wait for the real signal instead.
+    window.addEventListener('websocketReady', () => {
       if (!this.isAgentRunning) return;
       const threadId = this.appState.getThreadId?.();
       if (!threadId) return;
       const lastSeq = this.messageHandler?.getLastSeq?.(threadId) || 0;
-      setTimeout(() => {
-        if (this.webSocketManager?.send({ type: 'attach', thread_id: threadId, last_seq: lastSeq })) {
-          console.log(`Resumed: attached to background run (thread=${threadId}, last_seq=${lastSeq})`);
-        }
-      }, 300);
+      if (this.webSocketManager?.send({ type: 'attach', thread_id: threadId, last_seq: lastSeq })) {
+        console.log(`Resumed: attached to background run (thread=${threadId}, last_seq=${lastSeq})`);
+      }
     });
 
     // Layer 2: the background run for this thread is gone (server restarted, or
@@ -489,6 +492,29 @@ class ChatApp {
         this.elements.jsErrorBanner,
         this.elements.messageInput
       );
+    });
+
+    safeInit('rails error poll', () => {
+      // The other half of the tray: crashes from the Rails app itself. They
+      // cannot be pushed the way the preview's JS errors are — the app has no
+      // handle on this page — so we poll LlamaBot's proxy of the crash feed.
+      // Own safeInit for the same reason as the tray above.
+      this.railsErrorPoll = new RailsErrorPoll({
+        getToken: () => this.getRailsApiToken(),
+        // Mid-turn crashes belong to Leo's auto-recovery, which is already
+        // fixing them without showing the user a broken page.
+        isAgentRunning: () => this.isAgentRunning,
+        onErrors: (errors) => errors.forEach((e) => this.errorAttach?.record(e)),
+      });
+      this.railsErrorPoll.start();
+
+      // A 500 usually arrives as a page the preview just navigated to, and by
+      // the time it has loaded the crash is already in the feed. Asking now
+      // instead of on the next tick is the difference between the notice
+      // appearing with the broken page and appearing a few seconds later.
+      this.elements.liveSiteFrame?.addEventListener('load', () => {
+        this.railsErrorPoll.nudge();
+      });
     });
 
     // The step that failed on leo-tama (initAssetModal). Attaching, uploads and
@@ -2319,6 +2345,8 @@ class ChatApp {
    * Start periodic inactivity check
    */
   startInactivityCheck() {
+    // Banner is disabled for now — don't burn a timer on a check that can't fire.
+    if (!INACTIVITY_WARNING_BANNER_ENABLED) return;
     // Check every 30 seconds if we should show warning
     this.inactivityCheckInterval = setInterval(() => this.checkInactivityWarning(), 30000);
   }
@@ -2346,6 +2374,9 @@ class ChatApp {
    * Show the timeout warning banner
    */
   showTimeoutWarning() {
+    // Single choke point for the banner: with the flag off it never appears,
+    // whoever calls this.
+    if (!INACTIVITY_WARNING_BANNER_ENABLED) return;
     const banner = this.container.querySelector('[data-llamabot="timeout-warning"]');
     if (banner && banner.classList.contains('hidden')) {
       banner.classList.remove('hidden');

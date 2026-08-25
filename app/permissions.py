@@ -92,6 +92,17 @@ DEFAULT_ROLE_MODES: dict[str, list[str]] = {
         "ticket", "engineer", "testing", "database",
         "ai_builder", "beginner", "pyxl", "chat",
     ],
+    # The llama_bot_rails gem — the chat embedded in the box's own Rails app.
+    # A verified gem token proves the box's Rails app sent the frame, but it
+    # carries a *Rails* user id, which maps to no LlamaBot account and so has no
+    # per-user role to look up. The surface gets one grant instead, matching
+    # `engineer` because that is what the embedded chat has always been able to
+    # do — the point of naming it separately is that an operator can now narrow
+    # it, and that the gate checks it at all (it used to skip `rails_auth`).
+    "rails": [
+        "ticket", "engineer", "testing", "database",
+        "ai_builder", "beginner", "pyxl", "chat",
+    ],
 }
 
 # Role used when a user's role is missing or unrecognised (least privilege).

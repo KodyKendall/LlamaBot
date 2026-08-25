@@ -31,7 +31,7 @@ from datetime import date
 
 from app.agents.leonardo.rails_agent.state import RailsAgentState
 from app.agents.leonardo.rails_agent.tools import (
-    write_todos, ls, read_file, write_file, edit_file, bash_command,
+    write_todos, ls, read_file, write_file, edit_file, check_page, bash_command,
     fix_permissions,
     # Agent file tools (for reading test patterns from other agents)
     ls_agents, read_agent_file, write_agent_file, edit_agent_file,
@@ -176,7 +176,7 @@ def get_cached_system_prompt():
 # Tool list - tools available to the Testing agent
 default_tools = [
     write_todos,
-    ls, read_file, write_file, edit_file,
+    ls, read_file, write_file, edit_file, check_page,
     bash_command,  # For running rspec tests
     fix_permissions,  # Fix permission issues in Rails container
     delegate_research,  # Read-only sub-agent for codebase investigation

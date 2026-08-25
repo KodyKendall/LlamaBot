@@ -20,7 +20,7 @@ from app.agents.leonardo.rails_agent.state import RailsAgentState
 # an explicit llm_model silently ignores the fleet default.
 from app.agents.leonardo.model_policy import enabled_default_model
 from app.agents.leonardo.rails_agent.tools import (
-    write_todos, write_file, read_file, ls, edit_file, bash_command, tail_rails_logs, hard_restart_rails, fix_permissions,
+    write_todos, write_file, read_file, ls, edit_file, check_page, bash_command, tail_rails_logs, hard_restart_rails, fix_permissions,
     glob_files, grep_files, internet_search,
     read_leonardo_md, write_leonardo_md, edit_leonardo_md,
     read_brand_guide, write_brand_guide,
@@ -34,8 +34,12 @@ from app.agents.leonardo.rails_beginner_agent.prompts import BEGINNER_AGENT_PROM
 from app.agents.leonardo.project_context import build_beginner_system_prompt, brand_context_section
 from app.agents.leonardo.friction import report_friction, with_friction_section
 from app.agents.leonardo.llm_factory import get_llm, system_message_for_model
-from app.agents.leonardo.agent_factory import repair_orphaned_tool_calls_in_messages
+from app.agents.leonardo.message_invariants import normalize_messages_for_provider
 from app.agents.leonardo.resilience import invoke_with_transient_retry
+# Reuse the Rails summarization prompt verbatim (DRY) — beginner mode builds the
+# same kind of app, so it needs the same things carried across a compaction.
+from app.agents.leonardo.rails_agent.nodes import SUMMARIZATION_PROMPT
+from app.agents.leonardo.summarization import compact_messages_if_needed
 
 import logging
 logger = logging.getLogger(__name__)
@@ -105,7 +109,7 @@ def suggest_plan_mode(
 
 default_tools = [
     write_todos,
-    ls, read_file, write_file, edit_file, bash_command, tail_rails_logs, hard_restart_rails, fix_permissions,
+    ls, read_file, write_file, edit_file, check_page, bash_command, tail_rails_logs, hard_restart_rails, fix_permissions,
     glob_files, grep_files, internet_search,
     read_leonardo_md, write_leonardo_md, edit_leonardo_md,
     read_brand_guide, write_brand_guide,  # Brand guide (colors, logos, notes)
@@ -138,7 +142,7 @@ def beginner_turn_tools(browser_inspect_on: bool = False) -> list:
     """
     tools = [
         write_todos,
-        ls, read_file, write_file, edit_file, bash_command, tail_rails_logs, hard_restart_rails,
+        ls, read_file, write_file, edit_file, check_page, bash_command, tail_rails_logs, hard_restart_rails,
         glob_files, grep_files, internet_search,
         read_leonardo_md, write_leonardo_md, edit_leonardo_md,
         list_skills, read_skill, write_skill, edit_skill, delete_skill,
@@ -160,7 +164,22 @@ def leonardo_beginner(state: RailsAgentState, browser_inspect_on: bool = False) 
 
     view_path = (state.get('debug_info') or {}).get('view_path')
 
-    messages = [system_message_for_model(get_sys_msg(), llm_model)] + state["messages"]
+    # Context management. This raw StateGraph node runs NO AgentMiddleware, so
+    # nothing here trims or summarizes on its own — before this, beginner mode
+    # was the only Rails mode with no ceiling at all, and it walked its history
+    # straight into the provider's 1,048,576-token wall (2026-08-23 telemetry:
+    # p90 655k tokens vs ~163k for every mode that HAS the middleware; 32 of 33
+    # all-time context-length crashes). `compact_messages_if_needed` is a thin
+    # adapter over the SAME `RailsSummarizationMiddleware` those modes run, not
+    # a second implementation of the rule.
+    #
+    # Compact the CONVERSATION only. The system message and the per-turn notes
+    # below are rebuilt every turn and must not be summarized away.
+    convo, compaction_ops = compact_messages_if_needed(
+        state["messages"], summary_prompt=SUMMARIZATION_PROMPT,
+    )
+
+    messages = [system_message_for_model(get_sys_msg(), llm_model)] + convo
     if view_path:
         messages = messages + [HumanMessage(
             content="<NOTE_FROM_SYSTEM> The user is currently viewing their Ruby on Rails webpage route at: " + view_path + " </NOTE_FROM_SYSTEM>"
@@ -172,7 +191,7 @@ def leonardo_beginner(state: RailsAgentState, browser_inspect_on: bool = False) 
     # tool call leaves a dangling AIMessage tool_call and every later turn 400s
     # ('insufficient tool messages'). SI#112. Only appends HumanMessages follow,
     # so one repair here covers the failure-limit and main invoke branches.
-    messages = repair_orphaned_tool_calls_in_messages(messages)
+    messages = normalize_messages_for_provider(messages)
 
     tools = beginner_turn_tools(browser_inspect_on)
 
@@ -187,8 +206,15 @@ def leonardo_beginner(state: RailsAgentState, browser_inspect_on: bool = False) 
         response = invoke_with_transient_retry(
             lambda: llm.invoke(messages),
             label=f"rails_beginner_agent/{llm_model}",
+            messages=messages,
         )
-        return {"messages": [response], "failed_tool_calls_count": -failed_tool_calls_count}
+        # compaction_ops FIRST so the REMOVE_ALL + summary land before the new
+        # response — without persisting them the node re-summarizes from scratch
+        # on every single model call.
+        return {
+            "messages": compaction_ops + [response],
+            "failed_tool_calls_count": -failed_tool_calls_count,
+        }
 
     if llm_model.startswith("gemini"):
         llm_with_tools = llm.bind_tools(tools)
@@ -198,8 +224,9 @@ def leonardo_beginner(state: RailsAgentState, browser_inspect_on: bool = False) 
     response = invoke_with_transient_retry(
         lambda: llm_with_tools.invoke(messages),
         label=f"rails_beginner_agent/{llm_model}",
+        messages=messages, tools=tools,
     )
-    return {"messages": [response]}
+    return {"messages": compaction_ops + [response]}
 
 
 def build_workflow(checkpointer=None):

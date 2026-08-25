@@ -7,6 +7,7 @@ from starlette.websockets import WebSocketState
 from app.websocket.web_socket_request_context import WebSocketRequestContext
 from app.lib.token_usage import extract_token_usage
 from app.lib.turn_metrics import start_turn
+from app.lib.rails_error_watch import resume_error_watch, start_error_watch
 from typing import Dict, Optional
 
 from langchain_core.messages import HumanMessage
@@ -83,6 +84,30 @@ async def _report_tool_messages(*, messages, mothership, thread_id: str, agent_d
                 "agent_depth": agent_depth,
             }],
         )
+
+
+def _prepend_request_shape(exc: Exception, traceback_str: str) -> str:
+    """Put the rejected request's SHAPE at the top of the reported traceback.
+
+    A provider 400 arrives with ``'param': None`` and nothing else — 32
+    occurrences on 7 boxes in 7 days for our own default model, and the
+    mothership had no way to tell what was wrong with the request we sent.
+    The shape is attached to the exception by
+    ``message_invariants.log_bad_request_shape`` at the model-call boundary.
+
+    It goes FIRST because ``report_error`` truncates the traceback at 5000
+    characters, and it carries no message content — roles, content kinds, block
+    types, tool-call pairing and sizes only.
+    """
+    shape = getattr(exc, "llamabot_request_shape", None)
+    if not shape:
+        return traceback_str
+    try:
+        import json as _json
+        rendered = _json.dumps(shape, default=str)[:3000]
+    except Exception:  # noqa: BLE001
+        return traceback_str
+    return f"[llamabot request shape]\n{rendered}\n\n{traceback_str}"
 
 
 class RequestHandler:
@@ -283,7 +308,7 @@ class RequestHandler:
                 # line — changing that input would re-fingerprint every existing
                 # incident and split its history in two.
                 error_message=describe_exception(exc),
-                traceback_str=_tb.format_exc(),
+                traceback_str=_prepend_request_shape(exc, _tb.format_exc()),
                 agent_mode=agent_mode,
                 model=(message or {}).get("llm_model"),
                 llamabot_version=version,
@@ -928,6 +953,17 @@ class RequestHandler:
                 thread_id=str(incoming_message.get("thread_id", "")),
                 agent_mode=incoming_message.get("agent_name"),
             )
+
+            # Arm mid-turn Rails auto-recovery for this turn. Installed in the
+            # same async context and for the same reason as start_turn above:
+            # RailsErrorWatchMiddleware runs inside LangGraph's node tasks,
+            # which inherit a copy of this context. A new user message always
+            # gets a fresh repair budget. See docs/dev/rails_auto_recovery.md.
+            start_error_watch(
+                thread_id=str(incoming_message.get("thread_id", "")),
+                agent_name=incoming_message.get("agent_name"),
+                api_token=incoming_message.get("api_token"),
+            )
             turn_started_at = _time.monotonic()
             try:
                 app, state, agent_config = self.get_langgraph_app_and_state(incoming_message)
@@ -1331,6 +1367,13 @@ class RequestHandler:
                     "recursion_limit": recursion_limit
                 }
 
+                # Same turn, continued after an interrupt: put the turn's Rails
+                # error watch back on this context so a crash caused by the work
+                # either side of the pause is still noticed. Chiefly this is the
+                # browser_command path — Leo navigating the preview to verify is
+                # exactly when a 500 shows up. No-op if the turn never armed one.
+                resume_error_watch(thread_id=str(response_message.get("thread_id", "")))
+
                 # Auto-repair corrupted thread state (defensive - less likely in HITL flow).
                 # No-ops while the graph is paused on the interrupt we are about to
                 # resume — repairing there would discard the user's decision.
@@ -1456,8 +1499,13 @@ class RequestHandler:
 
                     # Plan mode question interrupt
                     if isinstance(interrupt_value, dict) and interrupt_value.get("type") == "user_question":
+                        # `questions` is the batch (1-4). The top-level question/options/
+                        # ui_related mirror its first entry so a stale cached frontend
+                        # still renders that question instead of an empty card.
+                        questions = interrupt_value.get("questions", [])
                         await websocket.send_json({
                             "type": "question_request",
+                            "questions": questions,
                             "question": interrupt_value.get("question", ""),
                             "options": interrupt_value.get("options", []),
                             "context": interrupt_value.get("context", ""),
@@ -1465,7 +1513,9 @@ class RequestHandler:
                             "thread_id": message_data.get('thread_id'),
                             "agent_name": message_data.get('agent_name'),
                         })
-                        logger.info("Graph interrupted for plan mode question")
+                        logger.info(
+                            f"Graph interrupted for plan mode question ({len(questions) or 1} asked)"
+                        )
 
                     # Plan mode visual (UI/UX) question interrupt — options carry HTML previews
                     elif isinstance(interrupt_value, dict) and interrupt_value.get("type") == "uiux_question":
@@ -1559,6 +1609,13 @@ class RequestHandler:
                     },
                     "recursion_limit": recursion_limit
                 }
+
+                # Same turn, continued after an interrupt: put the turn's Rails
+                # error watch back on this context so a crash caused by the work
+                # either side of the pause is still noticed. Chiefly this is the
+                # browser_command path — Leo navigating the preview to verify is
+                # exactly when a 500 shows up. No-op if the turn never armed one.
+                resume_error_watch(thread_id=str(response_message.get("thread_id", "")))
 
                 # Auto-repair corrupted thread state. No-ops while the graph is
                 # paused on the question interrupt we are about to resume —

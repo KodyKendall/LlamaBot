@@ -92,6 +92,16 @@ export const DEFAULT_CONFIG = {
 };
 
 /**
+ * Inactivity warning banner ("Session expiring soon due to inactivity.").
+ *
+ * Temporarily OFF (0.7.4). The lease itself and the activity sync behind it are
+ * untouched — this only suppresses the yellow banner, which we don't need in
+ * front of users right now. Flip to true to bring it back; no other code
+ * changes are needed.
+ */
+export const INACTIVITY_WARNING_BANNER_ENABLED = false;
+
+/**
  * Resolve the active agent-mode -> agent_name map.
  *
  * Built-in modes (DEFAULT_CONFIG.agentModes) are always present and always win.

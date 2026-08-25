@@ -18,6 +18,13 @@ def _run_ticket_delegation(result_queue):
         async def ainvoke(self, *_args, **_kwargs):
             await asyncio.Event().wait()
 
+        # run_delegation streams (so a timeout can report partial work), so the
+        # stall has to happen inside astream — with only ainvoke here the tool
+        # fails on a missing attribute instead of reproducing the hang.
+        async def astream(self, *_args, **_kwargs):
+            await asyncio.Event().wait()
+            yield {}
+
     sub_agents.create_sub_agent = lambda **_kwargs: BlockingSubAgent()
 
     # The fixed tool delegates timeout ownership to the shared runtime. Keep the
@@ -82,8 +89,12 @@ def test_ticket_delegate_task_recovers_from_a_blocked_sub_agent():
     while result is None:
         item = result_queue.get(timeout=1)
         result = item.get("result")
-    assert "[DELEGATED TASK FAILED]" in result["content"]
-    assert "Timed out" in result["content"]
+    # A deadline is its own outcome, not a generic failure: the tool has to say
+    # the run ran out of time AND hand back whatever the sub-agent finished, so
+    # the caller picks up from there instead of redoing the work.
+    assert "[DELEGATED TASK TIMED OUT]" in result["content"]
+    assert "ran out of time" in result["content"]
+    assert "No record of what the sub-agent did" in result["content"]
     assert result["failed_tool_calls_count"] == 1
 
 

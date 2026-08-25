@@ -121,7 +121,20 @@ export class WebSocketManager {
     } else {
       // ActionCable is authenticated by the Rails gem, so it's ready immediately.
       this.flushOutbox();
+      this.announceReady();
     }
+  }
+
+  /**
+   * Announce that this socket may now carry authenticated traffic.
+   *
+   * `websocketConnected` fires as soon as the transport is up, which is too
+   * early: the server refuses control frames (`attach`, `cancel`) until the
+   * handshake lands, and the token fetch behind `sendAuthMessage` is async.
+   * Anything that resumes a run waits for this event instead.
+   */
+  announceReady() {
+    window.dispatchEvent(new CustomEvent('websocketReady'));
   }
 
   /**
@@ -134,9 +147,13 @@ export class WebSocketManager {
         this.send({ type: 'auth', token: token });
       } else {
         console.warn('No auth token available - WebSocket may be unauthenticated');
+        // A box with WS_AUTH_REQUIRED=false has no token and never will; don't
+        // strand the resume path waiting for a handshake that isn't coming.
+        this.announceReady();
       }
     } catch (error) {
       console.error('Failed to send auth message:', error);
+      this.announceReady();
     }
   }
 
@@ -221,6 +238,7 @@ export class WebSocketManager {
       // Now that we're live & authenticated, deliver anything that was queued
       // while the connection was down.
       this.flushOutbox();
+      this.announceReady();
       return;
     }
 

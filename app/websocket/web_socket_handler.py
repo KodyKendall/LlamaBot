@@ -16,7 +16,20 @@ from app.websocket.error_text import describe_exception
 logger = logging.getLogger(__name__)
 
 # Authentication configuration
-WS_AUTH_REQUIRED = os.getenv("WS_AUTH_REQUIRED", "false").lower() == "true"
+# Defaults ON. It shipped defaulting to false, which meant a socket that simply
+# never sent an `auth` frame was marked authenticated and could run any agent —
+# and no provisioner set the variable, so every box ran with it off. Leonardo's
+# .env.example has said `WS_AUTH_REQUIRED=true` all along; this makes the code
+# agree with the documented intent. Self-hosters who genuinely want an open box
+# can still set it to false explicitly.
+WS_AUTH_REQUIRED = os.getenv("WS_AUTH_REQUIRED", "true").lower() == "true"
+
+# Frames that act on an already-running turn rather than starting one. They are
+# refused without authentication like anything else, but refusing one drops the
+# frame instead of closing the socket — see handle_websocket.
+_CONTROL_FRAME_TYPES = frozenset({
+    "cancel", "attach", "approval_response", "question_response",
+})
 
 # Frame fields that are credentials, not data. They must never reach the logs:
 # `api_token` is a bearer credential for a specific Rails user (30-min TTL), and
@@ -152,6 +165,17 @@ class WebSocketHandler:
             # the intended behavior. See app/lib/request_context.py.
             from app.lib.request_context import set_current_user_id
             set_current_user_id(payload.get("user_id"))
+            # Stamp WHO this connection's turns belong to, so every mothership
+            # report fired from inside the run (report_message, report_error,
+            # report_turn_metrics) is attributable to a person rather than just
+            # to this box. One DB read per connection, not per message; the
+            # RequestHandler is built before auth, so there is nowhere to thread
+            # the user through by hand. See app/services/user_context.py.
+            from app.services import user_context
+            user_context.set_current(
+                user_context.for_user_id(payload.get("user_id"))
+                or user_context.from_token_payload(payload)
+            )
             await self.manager.send_personal_message({
                 "type": "auth_success",
                 "user": payload.get("sub")
@@ -176,16 +200,38 @@ class WebSocketHandler:
         which is why this sits before the type dispatch: any future frame type
         that names a mode is covered without touching this function.
 
-        Only browser JWTs carry a role claim, so only they are enforced:
-          * ``rails_auth`` — the llama_bot_rails gem, a trusted internal caller
-            with no role to check (see token_service.verify_rails_token).
-          * unauthenticated — WS_AUTH_REQUIRED already governs that path below.
+        Every authenticated caller carries a role, so all of them are enforced
+        the same way — browser JWTs by the user's own role, the llama_bot_rails
+        gem by the ``rails`` role. This used to `return True` for anything that
+        was not a browser JWT, on the premise that ``rails_auth`` meant a
+        trusted internal caller. Nothing verified that premise (any string with
+        a ``--`` in it produced a ``rails_auth`` payload), so the branch was an
+        open door: an anonymous socket naming ``rails_agent`` ran the engineer
+        agent, shell tools and all. It fails closed now, and
+        ``verify_rails_token`` actually checks the signature.
+
+        The one caller still allowed through unauthenticated is a box whose
+        operator has explicitly set ``WS_AUTH_REQUIRED=false``. Denying there
+        would make that flag mean "chat is broken" rather than "this box has no
+        auth"; the default is now on, so it is a deliberate choice.
         """
         agent_name = json_data.get("agent_name")
         if not agent_name:
             return True
-        if not self.auth_user or self.auth_user.get("type") != "ws_auth":
-            return True
+
+        if not self.auth_user:
+            if not WS_AUTH_REQUIRED:
+                return True
+            logger.warning(
+                f"Denied agent '{agent_name}' to an unauthenticated client "
+                f"from {self.websocket.client}"
+            )
+            if self._is_websocket_open(self.websocket):
+                await self.manager.send_personal_message({
+                    "type": "auth_error",
+                    "content": "Authentication required. Please refresh the page.",
+                }, self.websocket)
+            return False
 
         from sqlmodel import Session
 
@@ -329,6 +375,41 @@ class WebSocketHandler:
                             break
                         continue
 
+                    # Authenticate BEFORE any dispatch. This used to sit below
+                    # the control-frame handlers, so `cancel`, `attach`,
+                    # `approval_response` and `question_response` bypassed
+                    # WS_AUTH_REQUIRED entirely: `attach` replays a background
+                    # run's buffered output by thread_id, and
+                    # `approval_response` resumes a run parked on a human
+                    # approval — both reachable with no credentials at all.
+                    # `ping` and `auth` above are the only pre-auth frames.
+                    await self._check_auth_from_message(json_data)
+
+                    if not self.authenticated:
+                        if WS_AUTH_REQUIRED:
+                            frame_type = json_data.get("type") if isinstance(json_data, dict) else None
+                            logger.warning(
+                                f"{self._log_ctx()} Unauthenticated '{frame_type or 'message'}' "
+                                f"frame rejected from {self.websocket.client}"
+                            )
+                            if self._is_websocket_open(self.websocket):
+                                await self.manager.send_personal_message({
+                                    "type": "auth_error",
+                                    "content": "Authentication required. Please refresh the page."
+                                }, self.websocket)
+                            if frame_type in _CONTROL_FRAME_TYPES:
+                                # Drop the frame, keep the socket. A control
+                                # frame can arrive just ahead of the `auth`
+                                # frame on reconnect (the browser fetches its
+                                # token asynchronously); closing here would
+                                # turn that race into a reconnect loop.
+                                continue
+                            break
+                        elif not auth_warning_sent:
+                            # Auth not required but not authenticated - warn once (for migration)
+                            logger.info(f"Unauthenticated WebSocket from {self.websocket.client} (auth not required)")
+                            auth_warning_sent = True
+
                     # Authorize the agent mode BEFORE any dispatch. Sits here so
                     # every frame that names an agent_name is gated by one check
                     # — chat, approval_response, question_response, and anything
@@ -378,25 +459,6 @@ class WebSocketHandler:
                             self._attached_threads.add(str(tid))
                         await self.request_handler.start_resume_run(json_data, self.websocket, "question")
                         continue
-
-                    # For all other messages, check authentication
-                    # First try to extract token from message (Rails gem pattern)
-                    await self._check_auth_from_message(json_data)
-
-                    if not self.authenticated:
-                        if WS_AUTH_REQUIRED:
-                            # Auth required but not authenticated - reject and close
-                            logger.warning(f"{self._log_ctx()} Unauthenticated message rejected from {self.websocket.client}")
-                            await self.manager.send_personal_message({
-                                "type": "auth_error",
-                                "content": "Authentication required. Please refresh the page."
-                            }, self.websocket)
-                            break
-                        else:
-                            # Auth not required but not authenticated - warn once (for migration)
-                            if not auth_warning_sent:
-                                logger.info(f"Unauthenticated WebSocket from {self.websocket.client} (auth not required)")
-                                auth_warning_sent = True
 
                     # Idempotency guard (Layer 1 seatbelt): a dropped socket can
                     # make the browser re-send a message it already delivered

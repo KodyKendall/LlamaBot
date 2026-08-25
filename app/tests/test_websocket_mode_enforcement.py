@@ -166,25 +166,78 @@ async def test_admin_revoking_a_mode_from_a_role_takes_effect(handler, engine):
 
 # --- non-browser callers keep their existing behaviour --------------------
 
-@pytest.mark.asyncio
-async def test_rails_gem_token_is_not_gated(handler):
-    """verify_rails_token returns no role claim; the gem is a trusted internal caller.
+def _as_rails_gem(handler, rails_user_id=7):
+    """Authenticate as the llama_bot_rails gem, the way verify_rails_token does."""
+    from app.services.token_service import RAILS_ROLE
 
-    NOTE: that trust is currently unverified (token_service.verify_rails_token does
-    no signature check) — tracked separately. This test pins the gate's behaviour,
-    not an endorsement of that path.
-    """
     handler.authenticated = True
-    handler.auth_user = {"sub": "rails_gem", "type": "rails_auth", "source": "llama_bot_rails"}
+    handler.auth_user = {
+        "sub": f"rails_user:{rails_user_id}",
+        "type": "rails_auth",
+        "source": "llama_bot_rails",
+        "rails_user_id": rails_user_id,
+        "role": RAILS_ROLE,
+        "is_admin": False,
+    }
+
+
+@pytest.mark.asyncio
+async def test_rails_gem_can_run_the_engineer_agent_by_default(handler):
+    """The embedded Rails chat is the box owner's own chat — it must keep working.
+
+    This is the regression guard on the rollout risk: tightening `rails_auth`
+    must not cost a box its in-app chat.
+    """
+    _as_rails_gem(handler)
     assert await _authorize(handler, {"agent_name": "rails_agent"}) is True
 
 
 @pytest.mark.asyncio
-async def test_unauthenticated_is_left_to_ws_auth_required(handler):
-    """WS_AUTH_REQUIRED governs this path; the gate has no role to check."""
+async def test_rails_gem_is_denied_a_mode_its_role_does_not_grant(handler, engine):
+    """The gem used to skip the gate entirely; now it is a role like any other."""
+    _as_rails_gem(handler)
+    _configure(engine, {"rails": ["chat"]})
+    assert await _authorize(handler, {"agent_name": "rails_agent"}) is False
+    assert await _authorize(handler, {"agent_name": "rails_plain_chat_mode"}) is True
+
+
+@pytest.mark.asyncio
+async def test_unauthenticated_frame_naming_an_agent_is_denied(handler):
+    """The disclosed bug: no cookie, no token, and the engineer agent ran.
+
+    The gate used to `return True` for anything that was not a browser JWT,
+    which meant an anonymous socket naming `rails_agent` sailed straight
+    through. It fails closed now.
+    """
     handler.authenticated = False
     handler.auth_user = None
-    assert await _authorize(handler, {"agent_name": "rails_agent"}) is True
+    with patch("app.websocket.web_socket_handler.WS_AUTH_REQUIRED", True):
+        assert await _authorize(handler, {"agent_name": "rails_agent"}) is False
+
+
+@pytest.mark.asyncio
+async def test_unauthenticated_denial_says_authentication_not_permissions(handler):
+    handler.authenticated = False
+    handler.auth_user = None
+    with patch("app.websocket.web_socket_handler.WS_AUTH_REQUIRED", True):
+        await _authorize(handler, {"agent_name": "rails_agent"})
+    payload = handler.manager.send_personal_message.await_args[0][0]
+    assert payload["type"] == "auth_error"
+
+
+@pytest.mark.asyncio
+async def test_operator_who_turned_auth_off_still_gets_a_working_box(handler):
+    """WS_AUTH_REQUIRED=false is an explicit opt-out of auth altogether.
+
+    Denying every agent frame in that mode would make the flag mean "chat is
+    broken" rather than "no auth on this box", so the gate defers to it. The
+    default is now `true`, so this is a deliberate choice, not the out-of-box
+    state that made the disclosure possible.
+    """
+    handler.authenticated = False
+    handler.auth_user = None
+    with patch("app.websocket.web_socket_handler.WS_AUTH_REQUIRED", False):
+        assert await _authorize(handler, {"agent_name": "rails_agent"}) is True
 
 
 # --- the wiring ------------------------------------------------------------

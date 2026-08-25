@@ -533,3 +533,22 @@ Call at most ONE browser tool per turn, and never in parallel with other tool ca
 Use expressions that produce a value, e.g. `document.title`, `document.querySelectorAll('[data-controller]').length`, or `fetch('/health').then(r => r.status)`.
 Prefer read-only inspection; this runs in the user's real session, so avoid destructive actions unless the user asked for them.
 """
+
+
+CHECK_PAGE_DESCRIPTION = """Load one page of the user's Rails app and report whether it actually rendered.
+
+This is your always-available page verifier. Use it after writing or editing ANY
+view, controller, route, helper or partial — before you tell the user you are done.
+
+Parameters:
+- path: the route to load, e.g. "/", "/leads", "/projects/1". A full URL is also
+  accepted but must point at the user's own app.
+
+Returns the HTTP status, and — when the page did not render — the exception class,
+the message, and the first few backtrace lines pulled from the Rails log. That is
+usually enough to fix it without opening anything else.
+
+Cheap and quiet: no browser, no screenshot, tiny output. Call it freely.
+
+A redirect (302) means the route works but sent you somewhere else (usually a login
+page); it is not an error, but it did not prove the page renders."""

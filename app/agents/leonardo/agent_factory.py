@@ -30,6 +30,7 @@ from langchain.agents import create_agent
 from langchain.agents.middleware import AgentMiddleware
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from app.agents.leonardo.turn_metrics_middleware import TurnMetricsMiddleware
+from app.agents.leonardo.rails_error_watch_middleware import RailsErrorWatchMiddleware
 from app.agents.leonardo.tool_output_middleware import ToolResultSizeLimitMiddleware
 import logging
 
@@ -235,13 +236,25 @@ class RepairOrphanedToolCallsMiddleware(AgentMiddleware):
     """Inject placeholder ToolMessages for AIMessage tool_calls that have no response.
 
     Thin ``AgentMiddleware`` wrapper around
-    :func:`repair_orphaned_tool_calls_in_messages`. The placeholders are NOT
-    persisted to state — they exist only for the duration of the LLM call,
-    keeping the fix invisible to the checkpointer.
+    :func:`app.agents.leonardo.message_invariants.normalize_messages_for_provider`,
+    which owns tool-call pairing AND the other invariants providers enforce
+    (supported content types, no empty content, at least one user/tool message).
+    Nothing it changes is persisted to state — the fixes exist only for the
+    duration of the LLM call, keeping them invisible to the checkpointer.
+
+    The class name is unchanged because it is the wiring key ``build_leonardo_agent``
+    and several tests match on.
     """
 
     def _repair(self, messages):
-        return repair_orphaned_tool_calls_in_messages(messages)
+        # The full invariant set, not just tool-call pairing: one validator that
+        # every provider call passes through, whatever the mode or entry point.
+        # Imported here because message_invariants imports from this module.
+        from app.agents.leonardo.message_invariants import (
+            normalize_messages_for_provider,
+        )
+
+        return normalize_messages_for_provider(messages)
 
     def wrap_model_call(self, request, handler):
         messages = self._repair(list(request.messages))
@@ -404,6 +417,12 @@ def build_leonardo_agent(*, middleware=None, **kwargs):
       it sits OUTERMOST at the model-call boundary and therefore measures what
       the user actually waits for, including whatever the inner middleware
       (summarization, repair, brand injection) costs. Purely observational.
+    - ``RailsErrorWatchMiddleware`` — notices mid-turn that the Rails app is
+      crashing and puts the exception in front of the model before it thinks
+      again, so a turn cannot end on the "something broke" page. APPENDED after
+      the message-shaping middleware so it appends to the FINAL message list
+      (summarization and repair have already had their say). Inert unless the
+      request handler installed a watch for the turn.
     - ``ToolResultSizeLimitMiddleware`` — bounds every tool result. APPENDED
       last so it is outermost at the TOOL boundary and sees the final result
       whatever the inner middleware did to it. A single result bigger than the
@@ -420,6 +439,8 @@ def build_leonardo_agent(*, middleware=None, **kwargs):
         mw.insert(2, BrandContextMiddleware())
     if not any(isinstance(m, TurnMetricsMiddleware) for m in mw):
         mw.append(TurnMetricsMiddleware())
+    if not any(isinstance(m, RailsErrorWatchMiddleware) for m in mw):
+        mw.append(RailsErrorWatchMiddleware())
     if not any(isinstance(m, ToolResultSizeLimitMiddleware) for m in mw):
         mw.append(ToolResultSizeLimitMiddleware())
     return create_agent(middleware=mw, **kwargs)
