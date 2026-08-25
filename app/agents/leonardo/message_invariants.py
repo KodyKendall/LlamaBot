@@ -159,11 +159,15 @@ def normalize_messages_for_provider(messages: List[Any]) -> List[Any]:
     Idempotent, and returns the SAME list object when nothing needed changing so
     callers can cheaply detect "no change".
     """
+    # NOT ``list(messages)``: repair_orphaned_tool_calls_in_messages returns the
+    # SAME list object when it changes nothing, and a defensive copy here would
+    # throw that signal away — every call would then look "changed" and no caller
+    # could detect a no-op. It does not mutate what it is given.
     try:
-        repaired = repair_orphaned_tool_calls_in_messages(list(messages))
+        repaired = repair_orphaned_tool_calls_in_messages(messages)
     except Exception:  # noqa: BLE001
         logger.exception("message_invariants: tool-call repair failed; skipping it")
-        repaired = list(messages)
+        repaired = messages
 
     changed = repaired is not messages
     out = []

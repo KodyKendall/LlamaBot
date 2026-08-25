@@ -8,6 +8,7 @@ degrades to "no promos" rather than a broken overlay.
 
 Run with: pytest app/tests/test_overlay_ads.py -v
 """
+from contextlib import contextmanager
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -334,9 +335,31 @@ def test_empty_returns_a_fresh_dict_each_time():
 # Personalisation — the mothership targets per user, so the cache must too
 # --------------------------------------------------------------------------
 
+@contextmanager
 def _as_user(user):
-    """Patch the session-cookie resolver the endpoint uses."""
-    return patch("app.dependencies._user_from_session_cookie", return_value=user)
+    """Sign a request in as ``user`` (or nobody, for ``None``).
+
+    The endpoint resolves the user by hand rather than through a FastAPI
+    dependency (a DB hiccup must not 500 an endpoint whose contract is to fail
+    open), so the stub has to cover the whole path: an engine to open a session
+    on, a session that touches no database, and the cookie resolver itself.
+    Patching only the resolver passes on a box that HAS an auth DB and fails in
+    CI, which has none — ``engine is None`` there, so no user is ever resolved.
+    """
+    class _NullSession:
+        def __init__(self, _engine):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+    with patch("app.dependencies._user_from_session_cookie", return_value=user), \
+         patch("app.db.engine", object()), \
+         patch("app.routers.api.Session", _NullSession):
+        yield
 
 
 class _FakeUser:

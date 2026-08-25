@@ -55,7 +55,11 @@ class TestContentTypes:
         assert "weird_block" in blocks[0]["text"]
 
     def test_a_bare_object_in_a_content_list_becomes_text(self):
-        msgs = [HumanMessage(content=[{"type": "text", "text": "hi"}, 42])]
+        # model_construct, because pydantic refuses to BUILD this message — which
+        # is the point: the shape only ever arrives from state we did not
+        # construct (a checkpoint, a provider echo), and it still has to be fixed
+        # rather than raise on the way to the model.
+        msgs = [HumanMessage.model_construct(content=[{"type": "text", "text": "hi"}, 42])]
         out = normalize_messages_for_provider(msgs)
         assert [b["type"] for b in out[0].content] == ["text", "text"]
 

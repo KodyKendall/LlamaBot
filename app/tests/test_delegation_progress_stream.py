@@ -55,6 +55,9 @@ async def test_real_langgraph_progress_reaches_thread_scoped_websocket():
         async def ainvoke(self, _input, config=None):
             return payload_result
 
+        async def astream(self, _input, config=None, stream_mode=None):
+            yield payload_result
+
     async def delegate_node(state):
         await run_delegation(
             SuccessfulNestedAgent(),
