@@ -66,8 +66,15 @@ def test_preflight_grants_nothing_on_its_own(client, path):
 
 
 @pytest.mark.parametrize("path", ["/auth/consume", "/login"])
-def test_get_still_rejects_a_bad_token(client, path):
-    """Answering OPTIONS must not loosen the GET."""
+def test_get_still_rejects_a_bad_token(client, path, monkeypatch):
+    """Answering OPTIONS must not loosen the GET.
+
+    The secret is set explicitly: without it, GET /login short-circuits to 503
+    ("magic-link sign-in not configured") before the token is ever verified, which
+    passes on a configured dev box and fails in CI without testing anything.
+    """
+    monkeypatch.setenv("LLAMAPRESS_AI_LOGIN_SECRET", "test-secret-not-a-real-one")
+
     response = client.get(f"{path}?token=not-a-real-token", follow_redirects=False)
 
     assert response.status_code != 204
