@@ -1,4 +1,5 @@
-// Batched ask_user_question: 1-4 questions in one card, answered in one round-trip.
+// Batched ask_user_question: 1-4 questions in one card, answered one at a time in a
+// stepper, submitted in one round-trip.
 //
 // The properties worth pinning are the ones the AGENT depends on and that would rot
 // silently: that a batch answer maps each answer back to its question, that a
@@ -15,6 +16,8 @@ import {
   buildQuestionCardHtml,
   buildSubmission,
   isAnswered,
+  stepLabel,
+  stepperView,
   uiuxRequestDirective,
 } from '../../frontend/chat/messages/QuestionCard.js';
 
@@ -62,16 +65,40 @@ test('drops blank questions rather than rendering an empty block', () => {
 
 // ---------------------------------------------------------------- markup
 
-test('renders one block per question, numbered, in a batch', () => {
+test('renders one block per question but shows only the first', () => {
   const html = render([
     { question: 'Which pages?', options: ['All'], ui_related: false },
     { question: 'What style?', options: [], ui_related: true },
     { question: 'Send email?', options: ['Yes', 'No'], ui_related: false },
   ]);
+  // All three are in the DOM — that is what lets answers survive Back/Next...
   assert.equal(html.match(/class="plan-question-item"/g).length, 3);
   assert.match(html, /data-count="3"/);
   assert.match(html, /class="plan-question-card batched"/);
-  assert.match(html, /0 of 3 answered/);
+  // ...but the user only ever sees one, which is the whole point of the stepper.
+  assert.equal((html.match(/plan-question-item"[^>]*hidden/g) || []).length, 2);
+  assert.match(html, /data-question-text="Which pages\?"(?![^>]*hidden)/);
+  assert.match(html, /Question 1 of 3/);
+});
+
+test('the stepper chrome ships with the card: dots, Back, Next', () => {
+  const html = render([
+    { question: 'A?', options: [], ui_related: false },
+    { question: 'B?', options: [], ui_related: false },
+    { question: 'C?', options: [], ui_related: false },
+  ]);
+  // [ "] so the .plan-question-dots wrapper doesn't count as a dot.
+  assert.equal((html.match(/class="plan-question-dot[ "]/g) || []).length, 3);
+  assert.match(html, /data-di="2"/);
+  // Back is disabled rather than absent, so the footer doesn't reflow on step 1.
+  assert.match(html, /class="plan-back-btn" disabled/);
+  assert.match(html, /class="plan-continue-btn" disabled>Next/);
+});
+
+test('a single question gets no stepper chrome at all', () => {
+  const html = render([{ question: 'Which pages?', options: [], ui_related: false }]);
+  assert.doesNotMatch(html, /plan-question-dot|plan-back-btn|plan-question-step/);
+  assert.doesNotMatch(html, /hidden/, 'the only question is never paged away');
 });
 
 test('the visual-options chip is per-question, not per-card', () => {
@@ -202,4 +229,39 @@ test('Continue gating counts skips as answered', () => {
   assert.equal(isAnswered({ ...blank(), options: ['A'] }), true);
   assert.equal(isAnswered({ ...blank(), text: '  ' }), false, 'whitespace is not an answer');
   assert.equal(isAnswered({ ...blank(), text: 'x' }), true);
+});
+
+
+// ---------------------------------------------------------------- stepper
+
+test('the step label is 1-based', () => {
+  assert.equal(stepLabel(0, 3), 'Question 1 of 3');
+  assert.equal(stepLabel(2, 3), 'Question 3 of 3');
+});
+
+test('Next stays locked until the question on screen is answered', () => {
+  // This gate is what replaced "all N answered" on the old Continue: with the other
+  // questions off screen, the user can't see a blank one to notice it.
+  const states = [blank(), blank(), blank()];
+  assert.equal(stepperView(states, 0, 3).canAdvance, false);
+  states[0].options = ['All'];
+  assert.equal(stepperView(states, 0, 3).canAdvance, true);
+});
+
+test('a skip unlocks Next just like an answer does', () => {
+  const states = [{ ...blank(), skipped: true }, blank()];
+  assert.equal(stepperView(states, 0, 2).canAdvance, true);
+});
+
+test('Back is dead on the first question, and the last one is the submit step', () => {
+  const states = [blank(), blank(), blank()];
+  assert.equal(stepperView(states, 0, 3).canBack, false);
+  assert.equal(stepperView(states, 1, 3).canBack, true);
+  assert.equal(stepperView(states, 1, 3).isLast, false);
+  assert.equal(stepperView(states, 2, 3).isLast, true);
+});
+
+test('the view reports how many questions are answered, for the dots', () => {
+  const states = [{ ...blank(), options: ['A'] }, { ...blank(), skipped: true }, blank()];
+  assert.equal(stepperView(states, 2, 3).answered, 2);
 });

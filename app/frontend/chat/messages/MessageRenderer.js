@@ -179,6 +179,15 @@ export class MessageRenderer {
     // Store raw markdown for copy functionality
     messageDiv.setAttribute('data-raw-content', safeContent);
 
+    // Stable identity for feedback. Without it the mothership matched a rating to a
+    // message by comparing text, so a reply truncated by a dropped socket matched nothing
+    // and a placeholder row was fabricated from the fragment (annotation #688) — the real
+    // message stayed unrated, and 4% of end-user annotations landed on such rows.
+    const messageKey = baseMessage?.id || baseMessage?.message_key;
+    if (messageKey) {
+      messageDiv.setAttribute('data-message-key', String(messageKey));
+    }
+
     messageDiv.innerHTML = this.markdownParser.parse(safeContent);
 
     // Check if this is a tool call message (OpenAI format)
@@ -231,6 +240,33 @@ export class MessageRenderer {
    * Add a copy button to a message element
    * @param {HTMLElement} messageDiv - The message element to add the button to
    */
+  /**
+   * Replace the newest assistant bubble's text with an authoritative version.
+   *
+   * Used by stream resume after a reconnect: the bubble on screen holds only the chunks
+   * that survived the drop, so it can begin mid-sentence (rsb-dev 2026-08-28 rendered the
+   * last 435 chars of a 906-char answer). Rewrites in place rather than appending a second
+   * bubble, so a resume that fires twice cannot duplicate the reply.
+   *
+   * Returns true when a bubble was rewritten, false when there was nothing to rewrite.
+   */
+  replaceLastAiMessage(content) {
+    if (typeof content !== 'string' || !content) return false;
+
+    const bubbles = this.messageHistory?.querySelectorAll?.('[data-llamabot="ai-message"]');
+    if (!bubbles || bubbles.length === 0) return false;
+
+    const target = bubbles[bubbles.length - 1];
+    // Already correct — a second resume must be a no-op, not a re-render.
+    if (target.getAttribute('data-raw-content') === content) return true;
+
+    target.setAttribute('data-raw-content', content);
+    target.innerHTML = this.markdownParser.parse(content);
+    target.setAttribute('data-llamabot-resumed', 'true');
+    this.addCopyButton(target);
+    return true;
+  }
+
   addCopyButton(messageDiv) {
     const copyBtn = document.createElement('button');
     copyBtn.setAttribute('data-llamabot', 'copy-btn');
@@ -311,6 +347,7 @@ export class MessageRenderer {
       const rating = upBtn ? 'good' : 'bad';
       const messageDiv = btn.closest('[data-llamabot="ai-message"], [data-raw-content]');
       const content = messageDiv?.getAttribute('data-raw-content') || '';
+      const messageKey = messageDiv?.getAttribute('data-message-key') || null;
 
       let note = null;
       if (rating === 'bad') {
@@ -318,7 +355,7 @@ export class MessageRenderer {
         note = window.prompt('What went wrong? (optional)') || null;
       }
 
-      this.submitMessageFeedback({ rating, content, note });
+      this.submitMessageFeedback({ rating, content, note, messageKey });
 
       // Visual confirmation: solid-fill the chosen thumb, reset its sibling.
       const row = messageDiv || btn.parentElement;
@@ -333,7 +370,7 @@ export class MessageRenderer {
    * POST a per-message rating to the local box, which forwards it to the mothership.
    * Best-effort: failures are logged, never surfaced to the user or blocking the chat.
    */
-  submitMessageFeedback({ rating, content, note = null }) {
+  submitMessageFeedback({ rating, content, note = null, messageKey = null }) {
     const threadId = this.appState?.getThreadId?.();
     if (!threadId) return;
     fetch('/api/feedback', {
@@ -344,6 +381,9 @@ export class MessageRenderer {
         thread_id: threadId,
         rating,
         scope: 'message',
+        // Both: the key is what the mothership should join on, `content` stays as a
+        // fallback so older mothership code goes on resolving messages as it always did.
+        message_key: messageKey || undefined,
         content: content || undefined,
         note: note || undefined,
         sent_at: new Date().toISOString(),

@@ -23,6 +23,7 @@ THIRD_PARTY_ENDPOINT_MODELS = [
     ("deepseek-v4-flash-gmi", "GMI_DEEPSEEK_API_KEY"),
     ("deepseek-v4-flash-fireworks", "FIREWORKS_DEEPSEEK_API_KEY"),
     ("qwen3.7-plus", "ALIBABA_API_KEY"),
+    ("qwen3.8-27b-hetzner", "HETZNER_API_KEY"),
     ("muse-spark-1.2-contributor", "META_API_KEY"),
     # Self-hosted vLLM on our own RunPod GPU. Unauthenticated today, which is
     # exactly why it belongs here: "no key needed" is the case where api_key=None
@@ -34,6 +35,10 @@ THIRD_PARTY_ENDPOINT_MODELS = [
     # which the fixture below already clears for the DeepSeek row — so the
     # no-key leak case really is keyless here.
     ("nemotron-lightning-30b-fireworks", "FIREWORKS_API_KEY"),
+    # The compiled-in OpenRouter registry entry. Config-driven models route
+    # through one shared get_llm branch, so this row covers every endpoint an
+    # operator adds later, not just this one.
+    ("deepseek-flash-0731-relace", "OPENROUTER_API_KEY"),
 ]
 
 SENTINEL = "sk-openai-must-never-leave-this-process"

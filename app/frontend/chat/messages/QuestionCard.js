@@ -1,9 +1,9 @@
 /**
  * Question card markup + answer formatting for `ask_user_question`.
  *
- * Leo can ask 1-4 questions in a single interrupt. The card renders one block per
- * question; the user answers them all and submits once, which is a whole round-trip
- * saved per extra question.
+ * Leo can ask 1-4 questions in a single interrupt. They are answered one at a time in
+ * a stepper ("Question 2 of 3", Back/Next) and submitted together, which is a whole
+ * round-trip saved per extra question without making the user scroll a stack of them.
  *
  * The pieces that matter live here (pure, no DOM) rather than in MessageHandler so the
  * answer format — the actual contract with the agent — can be tested without a browser.
@@ -67,9 +67,12 @@ const EYE_ICON =
  * Build the card markup.
  *
  * A single question renders exactly as it always has (options row with Skip, hidden
- * Continue, free-text row with a send arrow). Two or more switch to the batched
- * layout: one block per question, a per-question Skip, and one footer Continue that
- * stays disabled until every question is answered or skipped.
+ * Continue, free-text row with a send arrow).
+ *
+ * Two or more render as a STEPPER: every question is in the DOM (so answers survive
+ * paging back and forth) but only the current one is visible, with a "Question 2 of 3"
+ * header, progress dots, and a Back / Next footer that turns into Submit on the last
+ * one. One question on screen at a time — no vertical scrolling through a stack.
  *
  * `escapeHtml` and `parseMarkdown` are injected so this module stays DOM-free.
  */
@@ -97,16 +100,19 @@ export function buildQuestionCardHtml({
           ${EYE_ICON}See visual options
         </button>` : '';
 
-    // Batched: Skip marks just this question and waits for Continue.
+    // Batched: Skip marks this question "no preference" and steps forward.
     // Single: Skip submits the whole card immediately (unchanged behaviour).
     const skipBtn = `<button class="plan-skip-btn" data-qi="${i}">Skip</button>`;
     const hasOptionRow = q.options.length > 0 || q.ui_related || batched;
 
     const sendBtn = batched ? '' : `<button class="plan-send-btn"><i class="fa-solid fa-arrow-up"></i></button>`;
 
+    // Only step 0 is visible on render; the rest are paged in. `hidden` (not a class)
+    // so the overlay clone and any future container styling can't accidentally show them.
+    const hide = batched && i > 0 ? ' hidden' : '';
+
     return `
-      <div class="plan-question-item" data-qi="${i}" data-question-text="${escapeAttr(q.question)}">
-        ${batched ? `<span class="plan-question-num">${i + 1}</span>` : ''}
+      <div class="plan-question-item" data-qi="${i}" data-question-text="${escapeAttr(q.question)}"${hide}>
         <div class="plan-question-text">${parseMarkdown(q.question)}</div>
         ${hasOptionRow ? `<div class="plan-question-options">${optionButtons}${uiuxBtn}${skipBtn}</div>` : ''}
         <div class="plan-question-input-row">
@@ -116,12 +122,26 @@ export function buildQuestionCardHtml({
       </div>`;
   }).join('');
 
+  // One dot per question: filled = answered, ring = where you are, empty = ahead.
+  // Clickable, so a 3-question batch is also random-access.
+  const dots = questions.map((_, i) =>
+    `<button class="plan-question-dot${i === 0 ? ' current' : ''}" data-di="${i}"
+             title="Question ${i + 1}" aria-label="Go to question ${i + 1}"></button>`
+  ).join('');
+
+  const head = batched ? `
+      <div class="plan-question-head">
+        <span class="plan-question-step">${stepLabel(0, questions.length)}</span>
+        <div class="plan-question-dots">${dots}</div>
+      </div>`
+    : '';
+
   const foot = batched ? `
       <div class="plan-question-foot">
-        <span class="plan-question-progress">0 of ${questions.length} answered</span>
+        <button class="plan-back-btn" disabled><i class="fa-solid fa-arrow-left"></i> Back</button>
         <div class="plan-question-foot-actions">
           <button class="plan-skip-all-btn">Skip all</button>
-          <button class="plan-continue-btn" disabled>Continue</button>
+          <button class="plan-continue-btn" disabled>Next <i class="fa-solid fa-arrow-right"></i></button>
         </div>
       </div>`
     : `<button class="plan-continue-btn" style="display: none;">Continue</button>`;
@@ -129,12 +149,35 @@ export function buildQuestionCardHtml({
   return `
       <div class="plan-question-card${batched ? ' batched' : ''}" data-question-id="${questionId}"
            data-thread-id="${escapeAttr(threadId)}" data-agent-name="${escapeAttr(agentName)}"
-           data-count="${questions.length}">
+           data-count="${questions.length}"${batched ? ' data-step="0"' : ''}>
         ${context ? `<div class="plan-question-context">${escapeHtml(context)}</div>` : ''}
+        ${head}
         ${blocks}
         ${foot}
       </div>
     `;
+}
+
+/** Header text for the stepper. Its own function so the markup and the live update agree. */
+export function stepLabel(step, total) {
+  return `Question ${step + 1} of ${total}`;
+}
+
+/**
+ * Everything the stepper chrome needs for one step, derived from the answer states.
+ *
+ * Next only unlocks once the current question has an answer (Skip counts) — that is what
+ * guarantees no blank slot reaches Leo, and it replaces the old "all N answered" gate on
+ * Continue now that the user can't see the other questions to notice one is empty.
+ */
+export function stepperView(states, step, total) {
+  return {
+    label: stepLabel(step, total),
+    canBack: step > 0,
+    canAdvance: isAnswered(states[step]),
+    isLast: step === total - 1,
+    answered: states.filter(isAnswered).length,
+  };
 }
 
 /**

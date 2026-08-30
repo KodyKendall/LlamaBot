@@ -166,6 +166,7 @@ class MothershipClient:
         tool_call_id: Optional[str] = None,
         timings: Optional[dict] = None,
         user: Optional[dict] = None,
+        message_key: Optional[str] = None,
     ) -> Optional[dict]:
         """
         POST /api/leonardo/report_message
@@ -212,6 +213,11 @@ class MothershipClient:
                     payload["tool_call_id"] = tool_call_id
                 if timings:
                     payload["timings"] = timings
+                # Stable per-message key so feedback can join on identity rather than on
+                # comparing message bodies — a stream truncated by a dropped socket does
+                # not match and used to fabricate a placeholder row (annotation #688).
+                if message_key:
+                    payload["message_key"] = message_key
                 reported_user = self._resolve_user(user)
                 if reported_user:
                     payload["user"] = reported_user
@@ -245,6 +251,7 @@ class MothershipClient:
         sent_at: Optional[str] = None,
         debug_context: Optional[dict] = None,
         user: Optional[dict] = None,
+        message_key: Optional[str] = None,
     ) -> Optional[dict]:
         """
         POST /api/leonardo/submit_feedback
@@ -269,8 +276,16 @@ class MothershipClient:
                 }
                 if note:
                     payload["note"] = note
+                # Sent alongside the key, never instead of it: the mothership matched on
+                # exact text equality, so a stream truncated by a dropped socket matched
+                # nothing and fabricated a placeholder row (annotation #688). Kept so
+                # older mothership code keeps resolving messages the way it always did.
                 if content:
                     payload["content"] = content
+                # The stable join key. Omitted rather than sent as null — a null must not
+                # look like a real key the mothership can join on.
+                if message_key:
+                    payload["message_key"] = message_key
                 if sent_at:
                     payload["sent_at"] = sent_at
                 if debug_context:
@@ -295,6 +310,37 @@ class MothershipClient:
             return None
         except Exception as e:
             logger.warning(f"submit_feedback unexpected error: {e}")
+            return None
+
+    async def get_personal_cookbook(self) -> Optional[dict]:
+        """GET /api/leonardo/cookbook_recipes — the box OWNER's own recipes.
+
+        Every LlamaPress user has a personal cookbook of user-namespaced recipes published
+        from their own boxes, so a pattern built on one Leo is reusable on their others.
+        This returns the owner's list INCLUDING unlisted recipes, which the public
+        /cookbook/u/<handle>.json index deliberately omits.
+
+        `instance_name` goes as a QUERY PARAM: the mothership reads params[:instance_name]
+        on this GET, not a JSON body.
+
+        Returns None on anything unusual — no mothership config (local dev, ejected boxes),
+        a bad token, a network blip. Personal recipes enrich the slash menu; they must never
+        be able to empty it.
+        """
+        if not self.config.get("mothership_api_token") or not self.config.get("instance_name"):
+            return None
+
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.get(
+                    f"{self.config['mothership_url']}/api/leonardo/cookbook_recipes",
+                    params={"instance_name": self.config["instance_name"]},
+                    headers={"Authorization": f"Bearer {self.config['mothership_api_token']}"},
+                )
+                response.raise_for_status()
+                return response.json()
+        except Exception as e:  # noqa: BLE001 - an enhancement must never break the menu
+            logger.warning(f"Could not fetch personal cookbook: {e}")
             return None
 
     async def check_paywall(self) -> Optional[dict]:

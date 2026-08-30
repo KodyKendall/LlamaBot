@@ -73,7 +73,10 @@ export function findSlashTrigger(value, caret) {
 export function filterCookbookGuides(guides, query) {
   const list = Array.isArray(guides) ? guides : [];
   const words = String(query || '').toLowerCase().split(/\s+/).filter(Boolean);
-  if (words.length === 0) return [...list];
+  if (words.length === 0) {
+    // Same rule with no query typed: the owner's recipes head the list.
+    return [...list].sort((a, b) => (a.personal ? 0 : 1) - (b.personal ? 0 : 1));
+  }
 
   const haystack = (g) => [
     g.title, g.summary, g.category, g.slug, ...(g.tags || []),
@@ -90,10 +93,18 @@ export function filterCookbookGuides(guides, query) {
     if (words.every(w => title.includes(w))) rank = 0;
     else if (words.every(w => tags.includes(w))) rank = 1;
     else if (words.every(w => category.includes(w))) rank = 2;
-    scored.push({ g, rank, index });
+    // The user's OWN recipes come first within their match quality. They published them
+    // from one of their boxes precisely so they could reuse them here, so when they and a
+    // fleet guide match equally well, theirs is the one they meant.
+    scored.push({ g, rank, personal: g.personal ? 0 : 1, index });
   });
 
-  scored.sort((a, b) => (a.rank - b.rank) || (a.index - b.index));
+  // Relevance first, ownership as the tiebreaker. The ticket asked for personal recipes
+  // "above fleet guides"; sorting on ownership BEFORE match quality also buries a fleet
+  // guide that is a clearly better answer to what the user typed, which is a worse search
+  // than the one we have. Equal match quality -> the user's own recipe wins, which is the
+  // case the request was actually about.
+  scored.sort((a, b) => (a.rank - b.rank) || (a.personal - b.personal) || (a.index - b.index));
   return scored.map(s => s.g);
 }
 
@@ -693,7 +704,7 @@ export class SlashCommandManager {
       filtered.map((g, index) => `
       <div class="slash-command-item cookbook-item${index === 0 ? ' selected' : ''}" data-index="${index}" data-slug="${this._esc(g.slug)}">
         <div class="cookbook-body">
-          <span class="cookbook-title">${this._esc(g.title)}${g.category ? `<span class="command-cookbook-badge">${this._esc(g.category)}</span>` : ''}</span>
+          <span class="cookbook-title">${this._esc(g.title)}${g.personal ? '<span class="command-cookbook-badge cookbook-badge-yours">yours</span>' : ''}${g.category ? `<span class="command-cookbook-badge">${this._esc(g.category)}</span>` : ''}</span>
           <span class="command-description cookbook-summary" title="${this._esc(g.summary)}">${this._esc(g.summary)}</span>
         </div>
         <a class="cookbook-open" href="${this._esc(g.url)}" target="_blank" rel="noopener noreferrer" title="Open this recipe on llamapress.ai"><i class="fa-solid fa-arrow-up-right-from-square"></i></a>

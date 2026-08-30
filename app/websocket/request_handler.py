@@ -8,6 +8,7 @@ from app.websocket.web_socket_request_context import WebSocketRequestContext
 from app.lib.token_usage import extract_token_usage
 from app.lib.turn_metrics import start_turn
 from app.lib.rails_error_watch import resume_error_watch, start_error_watch
+from app.lib.turn_notices import start_turn_notices
 from typing import Dict, Optional
 
 from langchain_core.messages import HumanMessage
@@ -193,6 +194,10 @@ class RequestHandler:
                 "type": "model_substituted",
                 "requested": requested,
                 "effective": actual,
+                # Same frame now also carries a mid-turn failure fallback (see
+                # DynamicModelMiddleware). The banner words the two differently,
+                # so it has to be told which one it is rather than guessing.
+                "reason": "policy",
             })
         except Exception as e:
             logger.warning("Could not report a model substitution to the user: %s", e)
@@ -964,6 +969,16 @@ class RequestHandler:
                 agent_name=incoming_message.get("agent_name"),
                 api_token=incoming_message.get("api_token"),
             )
+
+            # Give the resilience ladder a way to speak. It runs inside
+            # DynamicModelMiddleware, several layers below this socket, and was
+            # completely silent: when a provider accepted requests and streamed
+            # nothing (2026-08-26), the browser showed a spinning shimmer for ten
+            # minutes and the customer's report was "no changes". Installed in
+            # the same async context and for the same reason as the two above.
+            # `websocket` here is the run's sink, so notices inherit thread_id
+            # stamping and replay-on-reattach. See app/lib/turn_notices.py.
+            start_turn_notices(websocket.send_json)
             turn_started_at = _time.monotonic()
             try:
                 app, state, agent_config = self.get_langgraph_app_and_state(incoming_message)
@@ -1249,6 +1264,13 @@ class RequestHandler:
                                                     # reply, so the mothership gets a per-message
                                                     # tokens/sec series next to the token counts.
                                                     timings=turn.last_model_call(),
+                                                    # Stable identity for this reply. Feedback used to be
+                                                    # matched by comparing message TEXT, so a stream cut
+                                                    # short by a dropped socket matched nothing and the
+                                                    # mothership fabricated a placeholder row from the
+                                                    # fragment (annotation #688). The browser echoes this
+                                                    # same id back when the user rates the message.
+                                                    message_key=str(getattr(message, "id", "") or "") or None,
                                                 ))
 
                                         # Report ToolMessage observations (tool outputs/observations).

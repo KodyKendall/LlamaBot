@@ -8,6 +8,7 @@ import {
   buildQuestionCardHtml,
   buildSubmission,
   isAnswered,
+  stepperView,
 } from '../messages/QuestionCard.js';
 
 const PAYWALL_UPGRADE_URL = 'https://llamapress.ai/pricing';
@@ -184,10 +185,12 @@ export class MessageHandler {
     } else if (data.type === 'delegation_progress') {
       window.chatApp?.handleDelegationProgress(data);
     } else if (data.type === 'model_substituted') {
-      // Operator policy is running this turn on a different model than the
-      // dropdown shows. Needs its own branch: without one it falls through to
-      // handleGenericMessage and gets rendered as a chat message.
-      window.chatApp?.showModelSubstitutionNotice(data.requested, data.effective);
+      // This turn is not running on the model the dropdown shows. Two causes,
+      // told apart by data.reason: 'policy' (operator disabled the pick, raised
+      // before the run starts) and 'fallback' (the model stalled mid-turn and
+      // the step finished elsewhere). Needs its own branch: without one it falls
+      // through to handleGenericMessage and gets rendered as a chat message.
+      window.chatApp?.showModelSubstitutionNotice(data.requested, data.effective, data.reason);
     } else {
       this.handleGenericMessage(data);
     }
@@ -816,19 +819,57 @@ export class MessageHandler {
     // One state slot per question: what was clicked, typed, skipped, or sent to previews.
     const states = questions.map(() => ({ options: [], text: '', uiux: false, skipped: false }));
 
-    const progressEl = card.querySelector('.plan-question-progress');
+    const stepEl = card.querySelector('.plan-question-step');
+    const backBtn = card.querySelector('.plan-back-btn');
+    const dots = Array.from(card.querySelectorAll('.plan-question-dot'));
     const continueBtn = card.querySelector('.plan-continue-btn');
 
+    // Which question is on screen. Only one is visible at a time in a batch; the others
+    // stay in the DOM so answers survive paging back and forth.
+    let step = 0;
+
     const refresh = () => {
-      const answered = states.filter(isAnswered).length;
-      if (batched) {
-        // Every question needs an answer (Skip counts) before Continue unlocks —
-        // otherwise a blank slot goes to Leo with nothing to map it to.
-        if (progressEl) progressEl.textContent = `${answered} of ${questions.length} answered`;
-        if (continueBtn) continueBtn.disabled = answered < questions.length;
-      } else if (continueBtn) {
-        continueBtn.style.display = answered > 0 ? 'block' : 'none';
+      if (!batched) {
+        if (continueBtn) continueBtn.style.display = states.some(isAnswered) ? 'block' : 'none';
+        return;
       }
+
+      const view = stepperView(states, step, questions.length);
+      items.forEach((item, i) => { item.hidden = i !== step; });
+      card.dataset.step = String(step);
+      if (stepEl) stepEl.textContent = view.label;
+      if (backBtn) backBtn.disabled = !view.canBack;
+      if (continueBtn) {
+        continueBtn.disabled = !view.canAdvance;
+        continueBtn.innerHTML = view.isLast
+          ? 'Submit'
+          : 'Next <i class="fa-solid fa-arrow-right"></i>';
+      }
+      dots.forEach((dot, i) => {
+        dot.classList.toggle('current', i === step);
+        dot.classList.toggle('answered', isAnswered(states[i]));
+      });
+    };
+
+    // Move to another question. Focus follows so the keyboard stays useful, and the card
+    // is re-centred because a taller/shorter question can push it off screen.
+    const goTo = (next) => {
+      if (next < 0 || next >= questions.length) return;
+      step = next;
+      refresh();
+      items[step].querySelector('.plan-question-input')?.focus();
+      card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    };
+
+    // Next on the last question is Submit. The dots allow jumping around, so before
+    // submitting, land on the first question that was left blank rather than sending
+    // Leo a slot it can't map an answer to.
+    const advance = () => {
+      if (!isAnswered(states[step])) return;
+      if (step < questions.length - 1) { goTo(step + 1); return; }
+      const gap = states.findIndex(st => !isAnswered(st));
+      if (gap !== -1) { goTo(gap); return; }
+      submit();
     };
 
     const submit = () => {
@@ -881,10 +922,19 @@ export class MessageHandler {
           return;
         }
         const i = Number(btn.dataset.qi || 0);
-        setSkipped(i, !states[i].skipped);
+        setSkipped(i, true);
         refresh();
+        // Skip is an answer ("no preference"), so it steps forward like Next does.
+        advance();
       });
     });
+
+    // Dots are random access — jump straight to a question to change an answer.
+    dots.forEach(dot => {
+      dot.addEventListener('click', () => goTo(Number(dot.dataset.di || 0)));
+    });
+
+    backBtn?.addEventListener('click', () => goTo(step - 1));
 
     card.querySelector('.plan-skip-all-btn')?.addEventListener('click', () => {
       this._submitQuestionAnswer(card, 'skip', threadId, agentName);
@@ -892,7 +942,8 @@ export class MessageHandler {
 
     continueBtn?.addEventListener('click', () => {
       if (continueBtn.disabled) return;
-      submit();
+      if (batched) advance();
+      else submit();
     });
 
     // Free text, per question.
@@ -903,6 +954,16 @@ export class MessageHandler {
         if (states[i].skipped && input.value.trim()) setSkipped(i, false);
         refresh();
       });
+      // Enter moves on (Shift+Enter still writes a newline), so a typed batch can be
+      // answered without reaching for the mouse.
+      if (batched) {
+        input.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            advance();
+          }
+        });
+      }
     });
 
     // Single-question send arrow (a batch submits through Continue instead).

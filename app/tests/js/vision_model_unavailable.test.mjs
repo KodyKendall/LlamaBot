@@ -53,11 +53,16 @@ test('the operator vision switch still wins on a Muse box', () => {
   assert.equal(visionUsable(false, true), false);
 });
 
-test('the auto-switch target is Muse, not gpt-5-nano', () => {
-  assert.match(INDEX_JS, /const IMAGE_MODEL = 'muse-spark-1\.2-contributor'/);
+test('the auto-switch target is a backend-resolved vision model, not gpt-5-nano', () => {
+  // 0.7.5: the target stopped being a constant (it is Muse on a META-keyed box,
+  // DeepSeek's vision model on a DeepSeek-only one), so what is pinned here is
+  // that it comes from the backend at all — see vision_model_follows_server for
+  // the full contract. The gpt-5-nano guard survives unchanged: whatever the
+  // target is, it must never be a model outside the enabled set.
+  assert.match(INDEX_JS, /this\.visionModel = data\.vision_model/);
   assert.doesNotMatch(
     INDEX_JS,
-    /const IMAGE_MODEL = 'gpt-5-nano'/,
+    /IMAGE_MODEL = 'gpt-5-nano'/,
     'gpt-5-nano is out of the default enabled set — switching to it would land on a disabled model',
   );
 });
@@ -68,7 +73,10 @@ test('the switch toast names the model the user is actually moved to', () => {
     /I switched to GPT-5 Nano/,
     'the toast must not name a model we no longer switch to',
   );
-  assert.match(INDEX_JS, /IMAGE_MODEL_LABEL/);
+  // Was the IMAGE_MODEL_LABEL constant; since the target is box-dependent, a
+  // constant label would name the wrong model on a DeepSeek box. modelLabel()
+  // reads it off the dropdown option actually being switched to.
+  assert.match(INDEX_JS, /this\.modelLabel\(imageModel\)/);
 });
 
 test('an unavailable image model refuses the send instead of falling through', () => {

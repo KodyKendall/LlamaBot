@@ -261,10 +261,17 @@ def test_wrap_model_call_does_NOT_retry_deterministic(monkeypatch):
 
 
 def test_wrap_model_call_stops_after_max_attempts(monkeypatch):
-    """A persistently transient endpoint gives up (and re-raises) after the cap."""
+    """A persistently transient endpoint gives up (and re-raises) after the cap.
+
+    Rung 2 is pinned off here on purpose (0.7.5): with a fallback available the
+    loop correctly moves to a second model instead of re-raising, which is a
+    different behaviour with its own tests in test_model_stall_resilience.py.
+    What this one still guards is that rung 1 does not retry forever.
+    """
     from app.agents.leonardo.rails_agent import middleware as mw
     monkeypatch.setattr(mw, "get_llm", lambda name: _ToolBindableModel())
     monkeypatch.setattr(mw.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(mw, "fallback_model", lambda *a, **k: None)
 
     calls = {"n": 0}
 
@@ -275,3 +282,50 @@ def test_wrap_model_call_stops_after_max_attempts(monkeypatch):
     with pytest.raises(ConnectionError):
         mw.DynamicModelMiddleware().wrap_model_call(_Req(), handler)
     assert calls["n"] == mw._MODEL_RETRY_MAX_ATTEMPTS
+
+
+# ---------------------------------------------------------------------------
+# OpenRouter-shaped errors (0.7.5)
+# ---------------------------------------------------------------------------
+#
+# OpenRouter reports an upstream provider failure as a plain ValueError whose
+# single arg is a dict — there is no `.status_code` and no `.response`, so the
+# two attribute lookups above both miss and a 502 that literally says
+# "Retry after 2s" was classed non-transient. Measured on the real endpoint:
+# pinned Relace requests 502 under queue pressure several times in a dozen calls,
+# so this is the dominant failure mode of the routed path, not a corner case.
+
+def _openrouter_error(code, message="Upstream error from Relace: Queued past the 5s queue-time bound."):
+    return ValueError({"message": message, "code": code})
+
+
+def test_openrouter_502_is_transient():
+    from app.agents.leonardo.resilience import is_transient_error
+
+    assert is_transient_error(_openrouter_error(502)) is True
+
+
+@pytest.mark.parametrize("code", [408, 429, 500, 502, 503, 504])
+def test_openrouter_transient_codes_are_retried(code):
+    from app.agents.leonardo.resilience import is_transient_error
+
+    assert is_transient_error(_openrouter_error(code)) is True
+
+
+@pytest.mark.parametrize("code", [400, 401, 403, 404, 422])
+def test_openrouter_deterministic_codes_are_not_retried(code):
+    """A malformed or unauthorized request fails identically on retry; retrying
+    only delays the fallback rung."""
+    from app.agents.leonardo.resilience import is_transient_error
+
+    assert is_transient_error(_openrouter_error(code)) is False
+
+
+def test_a_plain_valueerror_is_still_not_transient():
+    """The dict-arg path must stay narrow. A bare ValueError carries no status
+    signal and must not become retryable just because it is a ValueError."""
+    from app.agents.leonardo.resilience import is_transient_error
+
+    assert is_transient_error(ValueError("something went wrong")) is False
+    assert is_transient_error(ValueError({"message": "no code here"})) is False
+    assert is_transient_error(ValueError({"code": "not-an-int"})) is False

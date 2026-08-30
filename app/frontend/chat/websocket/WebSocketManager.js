@@ -8,6 +8,7 @@ import { ActionCableAdapter } from './ActionCableAdapter.js';
 import { TokenManager } from '../auth/TokenManager.js';
 
 import { leoDiagnostics } from '../utils/LeoDiagnostics.js';
+import { shouldResumeAfterReconnect, fetchAuthoritativeMessage, nextResumeGeneration, isStaleResume } from './StreamResume.js';
 // Control messages that must NOT be queued for replay after a reconnect:
 //  - `auth` tokens are regenerated fresh on every (re)connect, so a stale one is useless.
 //  - `cancel` only means something for the run that was live when it was issued;
@@ -104,6 +105,15 @@ export class WebSocketManager {
     this.updateConnectionStatus(true);
     leoDiagnostics.noteOpen(this.socket ? this.socket.readyState : null);
     this.reconnectAttempts = 0;
+    this.clearActionCableWatchdog();
+
+    // Reconnecting the pipe does not recover the turn. If a run was in flight when the
+    // socket died, chunks sent during the dead window are gone for good, and appending
+    // whatever arrives next produces an answer that starts mid-sentence. Re-sync instead.
+    if (this.runWasInFlightAtClose) {
+      this.runWasInFlightAtClose = false;
+      this.resumeInFlightRun();
+    }
 
     if (this.elements.sendButton) {
       this.elements.sendButton.disabled = false;
@@ -184,6 +194,11 @@ export class WebSocketManager {
     });
 
     this.updateConnectionStatus(false);
+
+    // Remember whether Leo was mid-answer when the pipe died. The thinking indicator is
+    // the same signal the box already reports as "Lost connection mid-run", and it is what
+    // decides on reconnect whether we must re-sync the reply or leave the thread alone.
+    this.runWasInFlightAtClose = this.isRunInFlight();
 
     if (this.elements.sendButton) {
       this.elements.sendButton.disabled = true;
@@ -397,8 +412,17 @@ export class WebSocketManager {
    * error only after we've truly given up — not on transient drops.
    */
   scheduleReconnect() {
-    // ActionCable handles reconnection automatically, skip for ActionCable
+    // ActionCable reconnects the transport itself, so we must NOT also drive connect().
+    // But the old bare `return` here left two things broken on every ActionCable box:
+    // handleClose() had already disabled the send button and nothing on this path ever
+    // re-enabled it, and reconnectAttempts never moved — so `reconnect_attempts=0` in the
+    // diagnostics was a dead gauge that told the last investigation the client had not
+    // even tried. Count the attempt, and arm a watchdog so a reconnect that never lands
+    // surfaces as a real failure instead of a permanently disabled composer.
     if (this.isActionCable) {
+      this.reconnectAttempts += 1;
+      leoDiagnostics.noteReconnect(this.reconnectAttempts, this.maxReconnectAttempts);
+      this.armActionCableWatchdog();
       return;
     }
 
@@ -423,6 +447,81 @@ export class WebSocketManager {
     this.reconnectTimer = setTimeout(() => {
       this.connect();
     }, this.config.reconnectDelay || 3000);
+  }
+
+  /**
+   * Is Leo mid-answer right now?
+   *
+   * The visible thinking indicator is the signal — it is what the frontend already
+   * reports as "Lost connection mid-run (thinking indicator active)", so resume keys off
+   * the same fact the telemetry does rather than inventing a second notion of "running".
+   */
+  isRunInFlight() {
+    const area = window.chatApp?.elements?.thinkingArea;
+    return Boolean(area && !area.classList.contains('hidden'));
+  }
+
+  /**
+   * Give ActionCable a bounded window to recover on its own.
+   *
+   * The old comment claimed ActionCable "handles reconnection automatically", but the
+   * customer evidence is a UI stuck on "Lost connection" with input disabled until a
+   * manual page reload (lohman, July 2026, twice). If the socket really does come back,
+   * handleOpen() clears this and nothing is shown. If it does not, the user gets a real
+   * failure they can act on instead of a dead composer.
+   */
+  armActionCableWatchdog() {
+    this.clearActionCableWatchdog();
+    this.actionCableWatchdog = setTimeout(() => {
+      if (this.elements.sendButton) {
+        this.elements.sendButton.disabled = false;
+      }
+      window.dispatchEvent(new CustomEvent('websocketReconnectFailed', {
+        detail: {
+          attempts: this.reconnectAttempts,
+          maxAttempts: this.maxReconnectAttempts,
+          url: this.wsUrl,
+          transport: 'actioncable',
+        }
+      }));
+    }, this.config.actionCableRecoveryMs || 15000);
+  }
+
+  clearActionCableWatchdog() {
+    if (this.actionCableWatchdog) {
+      clearTimeout(this.actionCableWatchdog);
+      this.actionCableWatchdog = null;
+    }
+  }
+
+  /**
+   * Replace the orphaned partial bubble with what the server actually produced.
+   *
+   * Idempotent by generation token: the fetch is async and chunks may still be arriving,
+   * so a slow answer from an older reconnect must never overwrite a newer render.
+   * Fail-open throughout — if anything goes wrong we leave the existing bubble alone,
+   * because a resume that breaks is worse than the truncation it is fixing.
+   */
+  async resumeInFlightRun() {
+    const app = window.chatApp;
+    const threadId = app?.appState?.getThreadId?.() || null;
+    const partialText = app?.streamingState?.getCleanedFullMessage?.() || '';
+
+    if (!shouldResumeAfterReconnect({ wasRunInFlight: true, threadId })) return;
+
+    const generation = nextResumeGeneration(this.resumeGeneration);
+    this.resumeGeneration = generation;
+
+    const authoritative = await fetchAuthoritativeMessage(threadId, { partialText });
+
+    // A newer resume started while we were waiting — discard this one.
+    if (isStaleResume(generation, this.resumeGeneration)) return;
+    if (!authoritative) return;
+
+    // The run is over as far as this browser is concerned; a spinner left running is what
+    // made the customer believe Leo had died.
+    app?.hideThinkingIndicator?.();
+    app?.replaceStreamingMessage?.(authoritative);
   }
 
   /**

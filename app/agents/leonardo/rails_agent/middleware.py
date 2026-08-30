@@ -15,16 +15,23 @@ import logging
 import time
 
 from app.agents.leonardo.rails_agent.state import RailsAgentState
-from app.agents.leonardo.llm_factory import get_llm, system_message_for_model
+from app.agents.leonardo.llm_factory import (
+    DEEPSEEK_DIRECT_MODELS,
+    get_llm,
+    system_message_for_model,
+)
 # The box's resolved default (Muse where the box has a META key, DeepSeek
 # where it does not) — never a hardcoded id, or a turn that arrives without
 # an explicit llm_model silently ignores the fleet default.
-from app.agents.leonardo.model_policy import enabled_default_model
+from app.agents.leonardo.model_policy import enabled_default_model, fallback_model
 from app.agents.leonardo.resilience import (
     is_transient_error,
+    retry_notice_text,
     _MODEL_RETRY_MAX_ATTEMPTS,
     _MODEL_RETRY_BASE_DELAY,
     _MODEL_RETRY_MAX_DELAY,
+    _MODEL_RETRY_MAX_TOTAL_SECONDS,
+    _RETRY_NOTICE_AFTER_SECONDS,
     _model_retry_delay,
 )
 from app.agents.leonardo.model_capabilities import (
@@ -332,12 +339,18 @@ class DeepSeekReasoningMiddleware(AgentMiddleware):
     ensures that AIMessages without reasoning_content get an empty string value,
     which satisfies the API requirement.
 
+    Scoped to DEEPSEEK_DIRECT_MODELS (api.deepseek.com), not every model with
+    "deepseek" in the name: the same weights served by GMI and Fireworks accept
+    assistant messages without reasoning_content, so this must not fire there.
+    The membership test replaced a hardcoded ``== "deepseek-v4-flash"``, which
+    silently skipped every other DeepSeek-direct model on the dropdown.
+
     See: https://api-docs.deepseek.com/guides/thinking_mode#tool-calls
     """
 
     def _inject_reasoning_content(self, messages, model_name: str):
         """Inject reasoning_content into AIMessages for DeepSeek reasoner."""
-        if model_name != "deepseek-v4-flash":
+        if model_name not in DEEPSEEK_DIRECT_MODELS:
             return messages
 
         modified_messages = []
@@ -365,7 +378,7 @@ class DeepSeekReasoningMiddleware(AgentMiddleware):
     def wrap_model_call(self, request, handler):
         """Sync version: Inject reasoning_content for DeepSeek."""
         model_name = request.state.get('llm_model', '')
-        if model_name == "deepseek-v4-flash":
+        if model_name in DEEPSEEK_DIRECT_MODELS:
             messages = self._inject_reasoning_content(list(request.messages), model_name)
             return handler(request.override(messages=messages))
         return handler(request)
@@ -373,7 +386,7 @@ class DeepSeekReasoningMiddleware(AgentMiddleware):
     async def awrap_model_call(self, request, handler):
         """Async version: Inject reasoning_content for DeepSeek."""
         model_name = request.state.get('llm_model', '')
-        if model_name == "deepseek-v4-flash":
+        if model_name in DEEPSEEK_DIRECT_MODELS:
             messages = self._inject_reasoning_content(list(request.messages), model_name)
             return await handler(request.override(messages=messages))
         return await handler(request)
@@ -399,6 +412,123 @@ class DeepSeekReasoningMiddleware(AgentMiddleware):
 # tests reaching mw._MODEL_RETRY_MAX_ATTEMPTS) resolve unchanged.
 
 
+# How many times one step may move to a different model. One: escalation stays
+# inside a single turn (docs/dev/error_telemetry.md §3, "the over-engineering
+# trap"), and every extra rung is another full retry budget the user waits
+# through. If the second model is down too, the box has a bigger problem than
+# this ladder can paper over.
+_MODEL_FALLBACK_MAX_RUNGS = 1
+
+_IMAGE_BLOCK_TYPES = frozenset(
+    {"image", "image_url", "input_image", "media", "video", "video_url"}
+)
+
+
+def _notify_retry(attempt: int, *, sync: bool):
+    """Push "Model is not responding. Retrying (N of M)…" into the shimmer.
+
+    Only called once the retry has cost the user real time — the threshold check
+    lives at the call site so the fast-503 case does not even build a frame.
+    Rides the same ``AIMessageChunk``-with-thinking shape ``/compact`` already
+    uses, so it lands in the shimmer and not in the transcript as a message from
+    Leo.
+
+    Returns a coroutine to await on the async path, None on the sync path.
+    """
+    from app.lib import turn_notices
+
+    frame = turn_notices.thinking_frame(retry_notice_text(attempt))
+    if sync:
+        try:
+            turn_notices.notify(frame)
+        except Exception as e:  # noqa: BLE001 - a notice never fails a turn
+            logger.debug("could not announce a retry: %s", e)
+        return None
+    return turn_notices.anotify(frame)
+
+
+def _request_carries_an_image(request) -> bool:
+    """Whether this step is asking a model to look at something.
+
+    Decides which fallback pool rung 2 may draw from, and the two ways of being
+    wrong are NOT symmetric. Saying "image" about a text turn only narrows the
+    fallback pool. Saying "text" about an image turn lets rung 2 pick a model
+    that cannot see, which then either 400s on the image blocks or — worse —
+    answers the question about the screenshot without the screenshot. So this
+    reads every shape it can and treats any doubt as an image.
+
+    Scope is the whole message list, not just the newest message, on purpose:
+    the history travels with every step, so an image three turns back still has
+    to be legible to whatever model finishes this one.
+    """
+    def _blocks(message):
+        # Raw content AND LangChain's normalized view: the normalizer rewrites
+        # `image_url` to `image`, and a provider-specific shape may only be
+        # legible in one of the two. Checking both costs nothing and the cost of
+        # a miss is a blind model answering a question about a screenshot.
+        yield getattr(message, "content", None)
+        try:
+            yield message.content_blocks
+        except Exception:  # noqa: BLE001 - older messages have no such view
+            pass
+
+    try:
+        for message in getattr(request, "messages", None) or []:
+            for content in _blocks(message):
+                if not isinstance(content, list):
+                    continue
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") in _IMAGE_BLOCK_TYPES:
+                        return True
+    except Exception as e:  # noqa: BLE001 - never break a turn deciding this
+        logger.debug("could not inspect the request for images: %s", e)
+    return False
+
+
+def _announce_fallback(primary: str, fallback: str, *, sync: bool):
+    """Say in the UI that the step finished somewhere else.
+
+    Reuses ``model_substituted``, which is already built end to end (raised in
+    request_handler, branched in MessageHandler.js, rendered as the banner above
+    the composer). It only ever fired for *policy* substitution before the run
+    started; ``reason`` is what lets the same banner word a mid-turn failure
+    fallback differently.
+
+    Returns the coroutine to await on the async path, or None on the sync path
+    (where it has already been queued).
+    """
+    frame = {
+        "type": "model_substituted",
+        "requested": primary,
+        "effective": fallback,
+        "reason": "fallback",
+    }
+    from app.lib import turn_notices
+
+    if sync:
+        try:
+            turn_notices.notify(frame)
+        except Exception as e:  # noqa: BLE001 - a notice never fails a turn
+            logger.debug("could not announce the model fallback: %s", e)
+        return None
+    return turn_notices.anotify(frame)
+
+
+def _model_request_params(request):
+    """Best-effort snapshot of the invocation parameters on the bound model.
+
+    Reads whatever the provider client exposes rather than a fixed list — the next
+    offending parameter is by definition one we are not thinking about today. Redaction
+    happens in message_invariants.redact_request_params, not here.
+    """
+    model = getattr(request, "model", None)
+    for attr in ("_default_params", "_identifying_params", "model_kwargs"):
+        params = getattr(model, attr, None)
+        if isinstance(params, dict) and params:
+            return dict(params)
+    return {}
+
+
 def _record_bad_request_shape(exc, request, llm_model):
     """Attach a redacted description of a rejected request to the exception."""
     from app.agents.leonardo.message_invariants import (
@@ -415,6 +545,10 @@ def _record_bad_request_shape(exc, request, llm_model):
             tools=getattr(request, "tools", None),
             model=llm_model,
             label=f"model={llm_model}",
+            # The parameters we actually sent. The provider answers "invalid parameters"
+            # and then reports param=null on every occurrence, so this is the only way to
+            # diff a failing box against a working one.
+            request_params=_model_request_params(request),
         )
     except Exception:  # noqa: BLE001 - diagnosis must never mask the real error
         logger.debug("could not describe the rejected request", exc_info=True)
@@ -446,58 +580,146 @@ class DynamicModelMiddleware(AgentMiddleware):
             overrides["system_message"] = system_message_for_model(system_message, llm_model)
         return request.override(**overrides)
 
+    def _next_rung(self, request, llm_model, tried):
+        """Rung 2: the model to finish this step on, or None to give up.
+
+        Resolved through model_policy — never a literal id here (see
+        ``fallback_model``'s docstring and ``test_no_agent_hardcodes_a_fallback_
+        model``). ``tried`` is what stops the two-dead-endpoint loop: on a Muse
+        box the policy default IS the model that just stalled, so without it the
+        resolver would hand Muse back as DeepSeek's fallback and the pair would
+        bounce forever.
+        """
+        try:
+            return fallback_model(
+                llm_model,
+                needs_vision=_request_carries_an_image(request),
+                exclude=tried,
+            )
+        except Exception as e:  # noqa: BLE001 - no rung 2 beats no turn
+            logger.warning("Could not resolve a fallback model: %s", e)
+            return None
+
     def wrap_model_call(self, request, handler):
-        """Sync: select the model, then retry the call on transient failures."""
+        """Sync: select the model, retry it, then fall back to another model.
+
+        Two bounds, not one. The attempt counter alone is meaningless against a
+        provider that stalls — see ``_MODEL_RETRY_MAX_TOTAL_SECONDS`` — so the
+        wall clock ends rung 1 too, and rung 2 gets a turn instead of the user
+        watching the same dead endpoint be retried five times.
+        """
         llm_model = request.state.get('llm_model') or enabled_default_model()
         logger.info(f"Using LLM model: {llm_model}")
         req = self._override(request, llm_model)
+        tried = {llm_model}
+        fallbacks_used = 0
         attempt = 0
+        started_at = time.monotonic()
         while True:
             try:
                 return handler(req)
             except Exception as e:
                 attempt += 1
-                if attempt >= _MODEL_RETRY_MAX_ATTEMPTS or not is_transient_error(e):
-                    # A provider that rejects the REQUEST tells us nothing
-                    # actionable ("'param': None" — 32 occurrences on 7 boxes in
-                    # 7 days for our own default model). Describe the shape of
-                    # what we sent, redacted, so the fleet report has something
-                    # to diagnose from.
+                elapsed = time.monotonic() - started_at
+                # A deterministic error (bad kwarg, 400) fails identically on
+                # every provider, so it must not spend rung 2's budget either.
+                if not is_transient_error(e):
                     _record_bad_request_shape(e, req, llm_model)
                     raise
+                if attempt >= _MODEL_RETRY_MAX_ATTEMPTS or elapsed >= _MODEL_RETRY_MAX_TOTAL_SECONDS:
+                    fallback = (
+                        None if fallbacks_used >= _MODEL_FALLBACK_MAX_RUNGS
+                        else self._next_rung(request, llm_model, tried)
+                    )
+                    if fallback is None:
+                        logger.warning(
+                            f"Giving up on {llm_model} after {elapsed:.0f}s and "
+                            f"{attempt} attempts; no fallback model available"
+                        )
+                        _record_bad_request_shape(e, req, llm_model)
+                        raise
+                    logger.warning(
+                        f"{llm_model} stalled for {elapsed:.0f}s over {attempt} "
+                        f"attempts; finishing this step on {fallback}"
+                    )
+                    _announce_fallback(llm_model, fallback, sync=True)
+                    llm_model = fallback
+                    tried.add(fallback)
+                    fallbacks_used += 1
+                    req = self._override(request, llm_model)
+                    attempt = 0
+                    started_at = time.monotonic()
+                    # No backoff: the whole point of moving is that waiting on
+                    # this provider has stopped being worth anything.
+                    continue
                 logger.warning(
                     f"Transient model error on {llm_model} (attempt {attempt}/"
                     f"{_MODEL_RETRY_MAX_ATTEMPTS - 1}): {e!r}; retrying"
                 )
+                if elapsed >= _RETRY_NOTICE_AFTER_SECONDS:
+                    _notify_retry(attempt, sync=True)
                 time.sleep(_model_retry_delay(attempt))
 
     async def awrap_model_call(self, request, handler):
-        """Async: select the model, then retry the call on transient failures.
+        """Async: select the model, retry it, then fall back to another model.
 
         The async path previously had NO retry at all — this closes that gap for
-        the websocket chat path, which runs through here.
+        the websocket chat path, which runs through here. Same two bounds and
+        same rung 2 as the sync loop above; this is the path a customer is
+        actually on, so it is also the one that pushes the status frames.
         """
         llm_model = request.state.get('llm_model') or enabled_default_model()
         logger.info(f"Using LLM model: {llm_model}")
         req = self._override(request, llm_model)
+        tried = {llm_model}
+        fallbacks_used = 0
         attempt = 0
+        started_at = time.monotonic()
         while True:
             try:
                 return await handler(req)
             except Exception as e:
                 attempt += 1
-                if attempt >= _MODEL_RETRY_MAX_ATTEMPTS or not is_transient_error(e):
+                elapsed = time.monotonic() - started_at
+                if not is_transient_error(e):
                     # A provider that rejects the REQUEST tells us nothing
                     # actionable ("'param': None" — 32 occurrences on 7 boxes in
                     # 7 days for our own default model). Describe the shape of
                     # what we sent, redacted, so the fleet report has something
-                    # to diagnose from.
+                    # to diagnose from. It also fails identically on any other
+                    # provider, so it must not reach rung 2.
                     _record_bad_request_shape(e, req, llm_model)
                     raise
+                if attempt >= _MODEL_RETRY_MAX_ATTEMPTS or elapsed >= _MODEL_RETRY_MAX_TOTAL_SECONDS:
+                    fallback = (
+                        None if fallbacks_used >= _MODEL_FALLBACK_MAX_RUNGS
+                        else self._next_rung(request, llm_model, tried)
+                    )
+                    if fallback is None:
+                        logger.warning(
+                            f"Giving up on {llm_model} after {elapsed:.0f}s and "
+                            f"{attempt} attempts; no fallback model available"
+                        )
+                        _record_bad_request_shape(e, req, llm_model)
+                        raise
+                    logger.warning(
+                        f"{llm_model} stalled for {elapsed:.0f}s over {attempt} "
+                        f"attempts; finishing this step on {fallback}"
+                    )
+                    await _announce_fallback(llm_model, fallback, sync=False)
+                    llm_model = fallback
+                    tried.add(fallback)
+                    fallbacks_used += 1
+                    req = self._override(request, llm_model)
+                    attempt = 0
+                    started_at = time.monotonic()
+                    continue
                 logger.warning(
                     f"Transient model error on {llm_model} (attempt {attempt}/"
                     f"{_MODEL_RETRY_MAX_ATTEMPTS - 1}): {e!r}; retrying"
                 )
+                if elapsed >= _RETRY_NOTICE_AFTER_SECONDS:
+                    await _notify_retry(attempt, sync=False)
                 await asyncio.sleep(_model_retry_delay(attempt))
 
 

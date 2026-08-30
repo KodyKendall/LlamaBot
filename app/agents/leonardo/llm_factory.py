@@ -27,6 +27,11 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
 from langchain_qwq import ChatQwen
 
+from app.agents.leonardo.openrouter_models import (
+    api_base as openrouter_api_base,
+    get_openrouter_model,
+)
+
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +45,81 @@ DEFAULT_LLM_MODEL = "muse-spark-1.2-contributor"
 # always build this one, so it is what keeps chat working on a box the Muse
 # rollout has not reached (or that deliberately opts out).
 FALLBACK_TEXT_MODEL = "deepseek-v4-flash"
+
+# --- Stall detection -------------------------------------------------------
+#
+# How long an async stream may go without producing a content chunk before the
+# client gives up on it. This is `langchain_openai`'s `stream_chunk_timeout`,
+# which measures the gap between *parsed* chunks — SSE keepalives do not reset
+# it, so it is the only thing that catches "HTTP 200, then nothing".
+#
+# 25s is chosen, not inherited. The library's own default is 120s, and on
+# 2026-08-26 a Muse Spark endpoint accepted requests and streamed nothing:
+# 120s per attempt x 5 rung-1 attempts was ~10 minutes of a spinning shimmer
+# before anything else in the ladder got a turn. No healthy call on any fleet
+# model waits 25s for a first chunk (measured 0.5-2.0s on the same endpoint an
+# hour later), so this only ever fires on a genuinely dead stream.
+#
+# Deliberately NOT disabled and not unbounded — a disabled chunk timeout is how
+# you get a turn that hangs forever. The env var is the same one the library
+# reads, so an operator override lands once and means one thing.
+STREAM_CHUNK_TIMEOUT_ENV = "LANGCHAIN_OPENAI_STREAM_CHUNK_TIMEOUT_S"
+_DEFAULT_STREAM_CHUNK_TIMEOUT_S = 25.0
+
+
+def stream_chunk_timeout_s() -> float:
+    """Seconds of content silence tolerated on a stream before it is abandoned."""
+    raw = os.getenv(STREAM_CHUNK_TIMEOUT_ENV, "").strip()
+    if raw:
+        try:
+            value = float(raw)
+            if value > 0:
+                return value
+            logger.warning(
+                "%s=%r is not positive; a disabled chunk timeout hangs a turn "
+                "forever. Using %ss.", STREAM_CHUNK_TIMEOUT_ENV, raw,
+                _DEFAULT_STREAM_CHUNK_TIMEOUT_S,
+            )
+        except ValueError:
+            logger.warning(
+                "%s=%r is not a number; using %ss.",
+                STREAM_CHUNK_TIMEOUT_ENV, raw, _DEFAULT_STREAM_CHUNK_TIMEOUT_S,
+            )
+    return _DEFAULT_STREAM_CHUNK_TIMEOUT_S
+
+
+def _apply_stream_chunk_timeout(client):
+    """Stamp the chosen chunk timeout onto a freshly built client.
+
+    Applied here rather than in each constructor call because llm_factory has
+    eleven `ChatOpenAI(` call sites, each with its own kwargs dict; a per-site
+    fix reliably misses one and leaves a 120s hole in the fleet. Set after
+    construction so the branches stay untouched.
+
+    Silently skipped for clients that have no such field (Anthropic, Gemini —
+    they are not OpenAI-compatible and carry their own timeouts), and never
+    fatal: a client that cannot take the hint is still a working client.
+    """
+    try:
+        if "stream_chunk_timeout" in getattr(type(client), "model_fields", {}):
+            client.stream_chunk_timeout = stream_chunk_timeout_s()
+    except Exception as e:  # noqa: BLE001 - never break model construction
+        logger.debug("could not set stream_chunk_timeout on %r: %s", type(client), e)
+    return client
+
+
+# DeepSeek's own API (api.deepseek.com), as opposed to the same weights served by
+# GMI/Fireworks. Only these need DeepSeekReasoningMiddleware: DeepSeek direct is
+# the strict one about assistant messages carrying reasoning_content, while the
+# OpenAI-compatible resellers accept messages without it. Kept here rather than
+# in the middleware so adding a DeepSeek-direct model is one edit, not two —
+# `deepseek-v4-pro` spent several releases missing from the middleware's
+# hardcoded name check precisely because they were separate lists.
+DEEPSEEK_DIRECT_MODELS = frozenset({
+    "deepseek-v4-flash",
+    "deepseek-v4-pro",
+    "deepseek-v4-flash-vision-exp",
+})
 
 
 class FakeTestChatModel(BaseChatModel):
@@ -151,14 +231,19 @@ def provider_key(*env_vars: str) -> str:
     return _MISSING_KEY_PLACEHOLDER
 
 
-# Which env vars credential the two models the default can resolve to, in the
-# same precedence `get_llm` uses to build them. Only these two are listed: this
-# map answers "can this box actually construct its default model", not "what is
-# in the dropdown" — that question belongs to /api/available-models, which keeps
-# the full registry (test_model_registry_consistency pins the two in agreement).
+# Which env vars credential the models a POLICY DEFAULT can resolve to, in the
+# same precedence `get_llm` uses to build them. Deliberately not the full
+# registry — this map answers "can this box actually construct the model it is
+# about to fall back to", not "what is in the dropdown", which belongs to
+# /api/available-models (test_model_registry_consistency pins them in agreement).
+#
+# Two kinds of default resolve through here: the default TEXT model
+# (`default_text_model`) and the box's vision model (`vision_model`), which is
+# why the vision entry is listed alongside the other two.
 DEFAULT_MODEL_KEY_ENVS = {
     "muse-spark-1.2-contributor": ("META_API_KEY", "MODEL_API_KEY"),
     "deepseek-v4-flash": ("DEEPSEEK_API_KEY",),
+    "deepseek-v4-flash-vision-exp": ("DEEPSEEK_API_KEY",),
 }
 
 
@@ -417,6 +502,20 @@ def get_llm(model_name: str):
         )
         model_name = replacement
 
+    # Construction lives in _build_client so the stall guard is applied in ONE
+    # place. See _apply_stream_chunk_timeout: the alternative was editing eleven
+    # constructor call sites and missing one.
+    return _apply_stream_chunk_timeout(_build_client(model_name))
+
+
+def _build_client(model_name: str):
+    """Construct the provider client for an ALREADY policy-resolved model name.
+
+    Split out of :func:`get_llm` purely so every branch below flows through one
+    post-construction hook. Call ``get_llm``, never this — the operator policy
+    gate lives up there, and this function will happily build a model the box is
+    not allowed to run.
+    """
     if model_name == "deepseek-v4-flash":
         return ChatDeepSeekWithReasoning(
             model="deepseek-v4-flash",
@@ -426,6 +525,64 @@ def get_llm(model_name: str):
     if model_name == "deepseek-v4-pro":
         return ChatDeepSeekWithReasoning(
             model="deepseek-v4-pro",
+            timeout=180,
+            max_retries=0,
+        )
+    # Config-driven OpenRouter entries (see openrouter_models). ONE branch serves
+    # every OpenRouter endpoint — the provider pin, model id and client choice all
+    # come from the registry — so adding an endpoint is a config block, not a code
+    # change. Checked BEFORE the hardcoded branches so an overlay can deliberately
+    # shadow a compiled-in name; checked AFTER the policy gate above so a
+    # registered model is still subject to DISABLED_MODELS like any other.
+    openrouter_entry = get_openrouter_model(model_name)
+    if openrouter_entry is not None:
+        # provider_key(), never a bare os.getenv: the OpenAI SDK falls back to
+        # OPENAI_API_KEY when api_key is None, which would send our OpenAI key to
+        # openrouter.ai (see test_provider_key_never_leaks_openai).
+        kwargs = dict(
+            model=openrouter_entry["model"],
+            api_base=openrouter_api_base(),
+            api_key=provider_key("OPENROUTER_API_KEY"),
+            timeout=180,
+            max_retries=0,
+        )
+        extra_body = openrouter_entry.get("extra_body")
+        if extra_body:
+            # Where the provider/quantization pin actually travels. OpenRouter
+            # reads `provider` as a top-level request field, and extra_body is
+            # what the OpenAI-compatible client passes through untouched.
+            kwargs["extra_body"] = extra_body
+        if openrouter_entry.get("reasoning", True):
+            return ChatDeepSeekWithReasoning(**kwargs)
+        return ChatOpenAI(**kwargs)
+
+    if model_name == "deepseek-v4-flash-vision-exp":
+        # DeepSeek V4 Flash's multimodal sibling on DeepSeek's own API — the only
+        # vision model a box can run on the DEEPSEEK_API_KEY it already has.
+        # Before this entry, image understanding anywhere in the fleet required a
+        # META key for Muse, so a DeepSeek-only box refused image attachments
+        # outright (see model_policy.vision_model).
+        #
+        # Verified live against api.deepseek.com (2026-08-25), because the vision
+        # guide documents none of it: image + tool calling in one request works
+        # (returns a real tool_calls block describing the image), tool calling
+        # without an image works, a system prompt alongside an image works, and
+        # reasoning_content still streams as deltas — so the same
+        # ChatDeepSeekWithReasoning client carries it, only the model id differs.
+        #
+        # Two API-side constraints worth knowing (both 400s, both verified):
+        #   * images are accepted ONLY in user messages — an image block in an
+        #     assistant message is rejected outright. Nothing sends one today;
+        #     don't add an image-carrying tool result without re-checking.
+        #   * the text-only models reject images ("This model does not support
+        #     image"), which is what MODEL_CAPABILITIES + the multimodal stripper
+        #     exist to prevent.
+        #
+        # `-exp` is DeepSeek's own name for it: experimental, with no published
+        # deprecation policy. Treat a sudden 400 on this id as "it was withdrawn"
+        # rather than a bug on our side — vision_model() falls back on its own.
+        return ChatDeepSeekWithReasoning(
+            model="deepseek-v4-flash-vision-exp",
             timeout=180,
             max_retries=0,
         )
@@ -472,8 +629,13 @@ def get_llm(model_name: str):
         # rationale above.
         return ChatDeepSeekWithReasoning(
             model=os.getenv(
+                # Fireworks retired the unversioned `deepseek-v4-flash` alias
+                # (2026-08: 404 "Model not found, inaccessible, and/or not
+                # deployed"); only dated snapshots are listed now. Pin the
+                # snapshot explicitly and re-pin when Fireworks publishes a
+                # newer one — the env var is the escape hatch in between.
                 "FIREWORKS_DEEPSEEK_MODEL",
-                "accounts/fireworks/models/deepseek-v4-flash",
+                "accounts/fireworks/models/deepseek-v4-flash-0731",
             ),
             api_base=os.getenv(
                 "FIREWORKS_BASE_URL", "https://api.fireworks.ai/inference/v1"
@@ -665,6 +827,10 @@ def get_llm(model_name: str):
         client = _chatgpt_subscription_client(model_name)
         if client is not None:
             return client
+        # Deferred, like the policy import in get_llm, for the same circular-
+        # import reason (model_policy reads DEFAULT_LLM_MODEL from this module).
+        from app.agents.leonardo.model_policy import enabled_default_model
+
         fallback = enabled_default_model()
         logger.warning(
             "No usable ChatGPT credential for %r; falling back to %r. "
@@ -726,6 +892,47 @@ def get_llm(model_name: str):
             api_key=provider_key("ALIBABA_API_KEY"),
             enable_thinking=True,
             thinking_budget=8192,
+            max_retries=0,
+        )
+    if model_name == "qwen3.8-27b-hetzner":
+        # Qwen3.8-27B on Hetzner's Inference API — an EU-hosted,
+        # OpenAI-compatible endpoint, so a plain ChatOpenAI with an overridden
+        # base_url is the whole client (same shape as the self-hosted vLLM
+        # entries above). The base_url is load-bearing: without it ChatOpenAI
+        # talks to api.openai.com, which has never heard of this model id.
+        #
+        # Deliberately NOT ChatQwen: langchain_qwq exists for Alibaba
+        # DashScope's thinking/reasoning_content shape (see `qwen3.7-plus`).
+        # This is a generic gateway in front of open weights, not DashScope.
+        #
+        # Dense 27B, 262k context, text + image in. Hetzner's /v1/models is the
+        # definitive list of what they serve; HETZNER_QWEN_MODEL moves this
+        # entry to their other one (`Qwen/Qwen3.6-35B-A3B-FP8`, MoE, 35B total /
+        # 3B active, same context and modalities) with no code change.
+        #
+        # THE SHARP EDGE IS REQUESTS, NOT TOKENS: 10 requests per 60s per key
+        # (alongside a generous 4M in / 100k out tokens per 60s). A single
+        # agentic Leo turn is many sequential requests, so even one busy user on
+        # a key will hit 429s. Those are classified transient and retried by the
+        # resilience middleware, so they show up as slow turns rather than
+        # failed ones — but it is why this must not become a fleet default while
+        # the API is in its free experimental phase.
+        #
+        # `provider_key` (not os.getenv) is load-bearing — see its docstring: an
+        # api_key of None would address our OpenAI secret to inference.hetzner.com.
+        #
+        # No `chat_template_kwargs={"enable_thinking": False}` here, unlike the
+        # RunPod Qwen3-8B branch: we control neither Hetzner's serve flags nor
+        # their chat template, and an unknown kwarg risks a 400 for no benefit.
+        # If thinking leaks inline as <think>...</think> inside `content`, that
+        # is the first knob to try.
+        return ChatOpenAI(
+            model=os.getenv("HETZNER_QWEN_MODEL", "Qwen3.8-27B"),
+            base_url=os.getenv(
+                "HETZNER_BASE_URL", "https://inference.hetzner.com/api/v1"
+            ),
+            api_key=provider_key("HETZNER_API_KEY"),
+            timeout=180,
             max_retries=0,
         )
     if model_name == "muse-spark-1.2-contributor":

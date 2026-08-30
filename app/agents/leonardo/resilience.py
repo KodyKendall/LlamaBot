@@ -108,6 +108,21 @@ def _status_code_of(exc: BaseException):
     code = getattr(response, "status_code", None)
     if isinstance(code, int):
         return code
+    # OpenRouter reports an upstream provider failure as a plain ValueError whose
+    # single arg is a dict — no `.status_code`, no `.response`, so both lookups
+    # above miss and a 502 saying "Retry after 2s" was classed non-transient.
+    # Measured on the real endpoint: this is the dominant failure mode of the
+    # routed path, not a corner case.
+    #
+    # Deliberately narrow — only a dict arg with an INT under a status-ish key.
+    # `bool` is excluded because it is an int subclass, and a non-int code (a
+    # provider string like "rate_limited") must not be mistaken for a status.
+    for arg in getattr(exc, "args", ()):
+        if isinstance(arg, dict):
+            for key in ("code", "status_code", "status"):
+                value = arg.get(key)
+                if isinstance(value, int) and not isinstance(value, bool):
+                    return value
     return None
 
 
@@ -144,10 +159,80 @@ _MODEL_RETRY_MAX_ATTEMPTS = 5          # initial call + up to 4 retries
 _MODEL_RETRY_BASE_DELAY = 0.5          # seconds
 _MODEL_RETRY_MAX_DELAY = 8.0           # seconds
 
+# Total wall clock the whole rung may spend on one model before handing over to
+# rung 2, regardless of attempts remaining.
+#
+# The attempt count was never the bug. The backoff (0.5-8s) was sized against a
+# 503, where the failing attempt itself costs about a second — five of those is
+# a few seconds and nobody notices. It was never sized against an attempt that
+# costs a full chunk timeout: on 2026-08-26 a Muse Spark endpoint returned HTTP
+# 200 and streamed nothing, so each attempt burned the library's inherited 120s
+# default and five of them was ~10 minutes of silence. The customer's report was
+# "it runs for like 10 minutes with no changes".
+#
+# 60, not 90, because what the user sits through is this budget PLUS the attempt
+# that was still in flight when it ran out: 60 + a 25s chunk timeout = 85s, which
+# is the "abandoned in under 90 seconds" the incident review asked for. Raising
+# this to 90 quietly buys a 115s worst case.
+_MODEL_RETRY_MAX_TOTAL_SECONDS = 60.0
+
+# How long the user must already have been waiting before a retry is worth
+# telling them about. Below this the retry is genuinely invisible — a 503 comes
+# back in a second or two — and a notice on every one of those trains people to
+# ignore the notice that matters. Above it, the shimmer has been spinning long
+# enough that silence is indistinguishable from a frozen agent.
+_RETRY_NOTICE_AFTER_SECONDS = 10.0
+
 
 def _model_retry_delay(attempt: int) -> float:
     """Exponential backoff (capped) for the Nth failed attempt (1-based)."""
     return min(_MODEL_RETRY_BASE_DELAY * (2 ** (attempt - 1)), _MODEL_RETRY_MAX_DELAY)
+
+
+def retry_notice_text(attempt: int, max_attempts: int = None) -> str:
+    """What the shimmer says while the ladder is working.
+
+    Names the situation the user is actually in ("not responding"), not the
+    mechanism. Retries are counted from the user's point of view — attempt 1 is
+    the first *retry*, because the failed original call is not something they
+    were ever shown.
+    """
+    if max_attempts is None:
+        max_attempts = _MODEL_RETRY_MAX_ATTEMPTS
+    return (
+        f"Model is not responding. Retrying ({attempt} of {max_attempts - 1})…"
+    )
+
+
+def _notify_slow_retry(label: str, attempt: int, elapsed: float) -> bool:
+    """Tell the user about a retry they have already felt. Sync path.
+
+    Below :data:`_RETRY_NOTICE_AFTER_SECONDS` this does nothing on purpose — see
+    the constant. Best effort in every direction: no channel installed (cron, a
+    sub-agent, a test) is the normal case, not an error.
+    """
+    if elapsed < _RETRY_NOTICE_AFTER_SECONDS:
+        return False
+    try:
+        from app.lib.turn_notices import notify, thinking_frame
+
+        return notify(thinking_frame(retry_notice_text(attempt)))
+    except Exception as e:  # noqa: BLE001 - a notice never fails a turn
+        logger.debug("could not announce a retry on %s: %s", label, e)
+        return False
+
+
+def retry_budget_spent(started_at: float, budget: float = None) -> bool:
+    """True once this model has had all the wall clock the rung will give it.
+
+    ``started_at`` is a ``time.monotonic()`` stamp from when the first attempt
+    began. Checked *before* sleeping and retrying, never as a deadline on an
+    in-flight call — cancelling a request mid-flight would lose a response that
+    may still be coming.
+    """
+    if budget is None:
+        budget = _MODEL_RETRY_MAX_TOTAL_SECONDS
+    return (time.monotonic() - started_at) >= budget
 
 
 def _record_raw_model_call(turn, started_at: float, response) -> None:
@@ -221,7 +306,21 @@ def invoke_with_transient_retry(fn, *, label: str = "model call", messages=None,
             result = fn()
         except Exception as e:
             attempt += 1
-            if attempt >= _MODEL_RETRY_MAX_ATTEMPTS or not is_transient_error(e):
+            # The wall clock gets a vote alongside the counter. Five attempts is
+            # the right number when each costs a second and the wrong number when
+            # each costs a chunk timeout — see _MODEL_RETRY_MAX_TOTAL_SECONDS.
+            out_of_budget = retry_budget_spent(started_at)
+            if (
+                attempt >= _MODEL_RETRY_MAX_ATTEMPTS
+                or out_of_budget
+                or not is_transient_error(e)
+            ):
+                if out_of_budget and is_transient_error(e):
+                    logger.warning(
+                        "Giving up on %s after %.0fs of transient failures "
+                        "(%d attempts): %r",
+                        label, time.monotonic() - started_at, attempt, e,
+                    )
                 # Same diagnosis the middleware path records: a provider 400
                 # carries nothing actionable, so describe the shape we sent.
                 _describe_if_bad_request(e, messages, tools, label)
@@ -231,6 +330,7 @@ def invoke_with_transient_retry(fn, *, label: str = "model call", messages=None,
                 "Transient error on %s (attempt %d/%d): %r; retrying",
                 label, attempt, _MODEL_RETRY_MAX_ATTEMPTS - 1, e,
             )
+            _notify_slow_retry(label, attempt, time.monotonic() - started_at)
             time.sleep(_model_retry_delay(attempt))
         else:
             _record_raw_model_call(turn, started_at, result)

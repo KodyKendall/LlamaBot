@@ -45,6 +45,7 @@ from app.services.sso_origin import (
     resolve_sso_origin,
 )
 from app.services.user_service import get_user_by_username, hash_password
+from app.lib.cors_preflight import preflight_response
 
 logger = logging.getLogger(__name__)
 
@@ -259,6 +260,12 @@ def _login_page_with_error(mothership: MothershipClient, request: Request) -> HT
     else:
         html = html.replace("</body>", f'<div id="message">{banner}</div></body>')
     return HTMLResponse(content=html)
+
+
+@router.options("/auth/consume")
+async def auth_consume_preflight(request: Request):
+    """Answer the CORS preflight instead of 400ing it (see app/lib/cors_preflight)."""
+    return preflight_response(request)
 
 
 @router.get("/auth/consume")
