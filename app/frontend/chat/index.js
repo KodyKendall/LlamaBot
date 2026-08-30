@@ -41,8 +41,13 @@ import { safeInit, selectedElementsOf } from './utils/safeInit.js';
 
 // Image auto-switch: when a user attaches an image while on a text-only model,
 // we move them onto an image-capable model so the image is actually seen.
-const IMAGE_MODEL = 'muse-spark-1.2-contributor';   // vision-capable target
-const IMAGE_MODEL_LABEL = 'Muse Spark 1.2';
+//
+// WHICH model is box-dependent (Muse where the box has a META key, DeepSeek's
+// vision model where it does not), so it is resolved server-side by model_policy
+// and reported as `vision_model` on /api/available-models; this.visionModel
+// holds it from then on. This constant is only the pre-0.7.5 answer, used when
+// an older backend omits the field — never as a general default.
+const LEGACY_IMAGE_MODEL = 'muse-spark-1.2-contributor';
 // There is deliberately NO compile-time default model here. It is box-dependent
 // (Muse where the box has a META key, DeepSeek where it does not), so it is
 // resolved server-side by model_policy and reported as `default_model` on
@@ -127,6 +132,9 @@ class ChatApp {
       // Qwen3-8B on our RunPod pod is the dense TEXT model — seed it false so an
       // image upload auto-switches instead of 400ing on image_url.
       ['qwen3-8b-runpod', { images: false }],
+      // Qwen3.8-27B on Hetzner reads images (Hetzner's own model table lists
+      // Text + Image), so seed it true for the same reason as Qwen3.7 Plus.
+      ['qwen3.8-27b-hetzner', { images: true }],
       // Glimmer's base model is multimodal, but the AWQ checkpoint we serve has
       // an unverified vision path — declared text-only on the backend too.
       ['muse-glimmer-30b-runpod', { images: false }],
@@ -161,6 +169,12 @@ class ChatApp {
     // model and 400s with `unknown variant image_url`. Optimistic until the
     // fetch resolves, matching the gates above.
     this.visionModelAvailable = true;
+
+    // Where the image auto-switch sends a user who attaches an image while on a
+    // text-only model. Null until fetchAvailableModels() hydrates it from the
+    // backend's resolved `vision_model`; empty string means this box has no
+    // vision model at all, and the auto-switch refuses instead of switching.
+    this.visionModel = null;
 
     // Set once an image attach has been refused, so the banner still explains
     // itself even though nothing ended up in the composer.
@@ -1490,6 +1504,31 @@ class ChatApp {
   }
 
   /**
+   * Add a dropdown <option> for every backend model the static markup lacks.
+   *
+   * Only models that ship a `label` get one: that field is the backend saying
+   * "this is config-driven, the markup cannot know about me". A hardcoded model
+   * missing from the dropdown is a build error, not something to paper over at
+   * runtime — inventing an option for it would hide the skew.
+   */
+  addMissingModelOptions(models) {
+    const select = this.elements.modelSelect;
+    if (!select) return;
+    const existing = new Set(Array.from(select.options).map(o => o.value));
+    models.forEach(m => {
+      if (!m.label || existing.has(m.value)) return;
+      const option = document.createElement('option');
+      option.value = m.value;
+      option.textContent = m.label;
+      // Same contract as the static options: modelLabel() prefers the short
+      // label for inline notices, falling back to the full one.
+      if (m.short_label) option.dataset.shortLabel = m.short_label;
+      select.appendChild(option);
+      existing.add(m.value);
+    });
+  }
+
+  /**
    * The human label for a model value, straight from the dropdown so the notice
    * never invents a name the user has not seen. Falls back to the raw value for
    * a model the dropdown doesn't carry (frontend/backend version skew).
@@ -1503,25 +1542,34 @@ class ChatApp {
   }
 
   /**
-   * Say, above the composer, that operator policy ran this turn on a different
-   * model than the dropdown shows (`model_substituted` frame).
+   * Say, above the composer, that this turn is not running on the model the
+   * dropdown shows (`model_substituted` frame).
    *
    * This used to be invisible: the substitution happens inside get_llm, so the
    * dropdown went on showing the user's pick while every turn ran on the box
    * default and the only trace was a container-log WARNING.
    *
+   * `reason` says which of the two swaps this is, and they read completely
+   * differently to a user. 'policy' is a standing configuration fact about the
+   * box, raised before the run starts. 'fallback' (0.7.5) is a thing that just
+   * happened to *this* turn: the model they picked stopped responding mid-step
+   * and Leo finished somewhere else. Wording them the same would explain a
+   * provider outage as a permissions problem.
+   *
    * Auto-hides like a flash — the notice is about the turn that just started,
    * not a standing condition — but is dismissable for a user who reads faster.
    */
-  showModelSubstitutionNotice(requested, effective) {
+  showModelSubstitutionNotice(requested, effective, reason) {
     const banner = this.container.querySelector('[data-llamabot="model-switch-banner"]');
     if (!banner) return;
 
     const text = banner.querySelector('[data-llamabot="model-switch-text"]');
     if (text) {
-      text.textContent =
-        `${this.modelLabel(requested)} isn't enabled on this instance — ` +
-        `answering with ${this.modelLabel(effective)} instead.`;
+      text.textContent = reason === 'fallback'
+        ? `${this.modelLabel(requested)} stopped responding — `
+          + `finished this step on ${this.modelLabel(effective)}.`
+        : `${this.modelLabel(requested)} isn't enabled on this instance — `
+          + `answering with ${this.modelLabel(effective)} instead.`;
     }
     banner.classList.remove('hidden');
 
@@ -1739,16 +1787,19 @@ class ChatApp {
     // fresh thread we just switch silently for this send. This must run BEFORE
     // the human bubble renders and BEFORE ensureThreadId() below.
     if (this.hasImageAttachment(attachments) && !this.modelSupportsImages(llmModel)) {
-      const imageOpt = Array.from(this.elements.modelSelect?.options || [])
-        .find(o => o.value === IMAGE_MODEL);
+      const imageModel = this.visionModel ?? LEGACY_IMAGE_MODEL;
+      const imageOpt = imageModel
+        ? Array.from(this.elements.modelSelect?.options || [])
+            .find(o => o.value === imageModel)
+        : null;
       const imageModelAvailable = imageOpt && !imageOpt.disabled;
 
       if (imageModelAvailable) {
         if (this.conversationHasMessages()) {
           // Mid-conversation: switch model, start a new thread, carry transcript.
           const transcript = this.buildConversationTranscript();
-          this.setModel(IMAGE_MODEL);
-          effectiveLlmModel = IMAGE_MODEL;
+          this.setModel(imageModel);
+          effectiveLlmModel = imageModel;
           // Clears the message history and sets the new thread id synchronously.
           this.threadManager.createNewThread({ isImageSwitch: true });
           if (transcript) {
@@ -1756,19 +1807,20 @@ class ChatApp {
           }
           this.slashCommandManager?.showToast(
             "You attached an image, but your current model can't see images. " +
-            `I switched to ${IMAGE_MODEL_LABEL} and started a new conversation, ` +
+            `I switched to ${this.modelLabel(imageModel)} and started a new conversation, ` +
             'carrying your previous messages over.',
             'info'
           );
           this.updateImageSwitchBanner();
         } else {
           // Fresh/empty thread: silently switch this send to the vision model.
-          this.setModel(IMAGE_MODEL);
-          effectiveLlmModel = IMAGE_MODEL;
+          this.setModel(imageModel);
+          effectiveLlmModel = imageModel;
         }
       } else {
         // Nowhere to switch to — this box has no vision-capable model it can
-        // run (no META key, so Muse is unavailable and DeepSeek is text-only).
+        // run (no META key AND no DEEPSEEK_API_KEY, so neither vision model
+        // resolves; `vision_model` came back empty or its option is disabled).
         // Sending anyway would put an image block in front of a text-only model
         // and 400 mid-stream, which surfaces to the user as a stack trace. Stop
         // and say so instead. Nothing destructive has happened yet — the input
@@ -2112,6 +2164,12 @@ class ChatApp {
       this.visionAllowed = data.vision_allowed !== false;
       // Box-dependent since 0.7.0. Keep the seed if an older backend omits it.
       if (data.default_model) this.defaultTextModel = data.default_model;
+      // Box-dependent since 0.7.5. An older backend omits the field entirely —
+      // fall back to the model that WAS hardcoded here, so a skewed frontend
+      // behaves exactly as it did before rather than losing the auto-switch.
+      // Note `??`, not `||`: "" is a real answer (this box has no vision model)
+      // and must not be overwritten by the legacy default.
+      this.visionModel = data.vision_model ?? LEGACY_IMAGE_MODEL;
       // Is there a vision-capable model this box can actually run? A box with no
       // META key reports the auto-switch target unavailable, which is what turns
       // the "vision unavailable" message on. Must be set BEFORE applyVisionPolicy.
@@ -2121,6 +2179,14 @@ class ChatApp {
       this.applyModelSwitchingPolicy();
       this.applyVisionPolicy();
       this.updateImageSwitchBanner();
+
+      // Config-registered models (OpenRouter endpoints) have no <option> in
+      // chat.html — they are config, so the markup cannot know their names.
+      // Create the missing options before the availability pass below, which
+      // only ever walks options that already exist. Without this the backend
+      // would offer a model the dropdown could never show, and setModel() on it
+      // would silently no-op.
+      this.addMissingModelOptions(data.models || []);
 
       const modelAvailability = new Map(
         data.models.map(m => [m.value, {
@@ -2411,6 +2477,19 @@ class ChatApp {
    * Stops the loading verb cycling and hides the thinking area
    * Shows error message if we were in the middle of thinking
    */
+  /**
+   * Swap the in-flight assistant bubble for what the server actually produced.
+   *
+   * Called by stream resume after the socket reconnects mid-run. Also resets the streaming
+   * buffers, so any chunk that arrives late from the old run cannot append itself onto the
+   * authoritative text and re-create the mid-sentence bubble we just fixed.
+   */
+  replaceStreamingMessage(content) {
+    const replaced = this.messageRenderer?.replaceLastAiMessage?.(content);
+    this.streamingState?.reset?.();
+    return Boolean(replaced);
+  }
+
   hideThinkingIndicator() {
     // Check if we were thinking (thinking area was visible)
     const wasThinking = this.elements.thinkingArea &&

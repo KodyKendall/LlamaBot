@@ -5,6 +5,7 @@ load_dotenv()
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from app.lib.cors_preflight import login_preflight_middleware
 from starlette.responses import Response as _StarletteResponse
 
 import os
@@ -68,6 +69,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Registered AFTER CORSMiddleware so it runs BEFORE it (Starlette runs the most recently
+# added middleware outermost). CORSMiddleware answers a preflight from a non-allowed origin
+# with 400 "Disallowed CORS origin" itself, which silently killed customer logins — a
+# browser abandons the navigation and neither the user nor the logs learn anything
+# (leo-nefe, 2026-08-06: 7 one-time grants burned in an afternoon). Scoped to the two login
+# entry points only; the same-origin-only policy above is unchanged everywhere else.
+app.middleware("http")(login_preflight_middleware)
 
 
 # Keep the entire app out of search engines. Every response — pages, the

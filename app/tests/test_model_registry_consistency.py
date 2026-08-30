@@ -23,6 +23,24 @@ from app.agents.leonardo.model_capabilities import MODEL_CAPABILITIES
 from app.agents.leonardo.model_policy import _KNOWN_MODELS
 
 
+def _model_dispatch_source(llm_factory) -> str:
+    """The source text where get_llm decides which client to build.
+
+    Both halves, because 0.7.5 split construction into ``_build_client`` so the
+    stall guard (``_apply_stream_chunk_timeout``) could be applied in ONE place
+    instead of at eleven ``ChatOpenAI(`` call sites. The policy gate stayed in
+    ``get_llm``; the per-model branches moved. These structural guards care about
+    the dispatch, not about which of the two functions currently holds it.
+    """
+    import inspect
+
+    return inspect.getsource(llm_factory.get_llm) + inspect.getsource(
+        llm_factory._build_client
+    )
+
+
+
+
 CHAT_HTML = Path(__file__).resolve().parents[1] / "frontend" / "chat.html"
 
 
@@ -112,7 +130,7 @@ def test_dropdown_model_builds_a_real_client(model, monkeypatch):
 
     from app.agents.leonardo import llm_factory
 
-    src = inspect.getsource(llm_factory.get_llm)
+    src = _model_dispatch_source(llm_factory)
     # The subscription models are dispatched as a set membership test rather than
     # one `==` branch each, because they share a single credential-backed client.
     dispatched = (
@@ -161,7 +179,7 @@ def test_luna_builds_an_openai_client_with_the_exact_api_id(monkeypatch):
 
     from app.agents.leonardo import llm_factory
 
-    src = inspect.getsource(llm_factory.get_llm)
+    src = _model_dispatch_source(llm_factory)
     branch = src.split(f'model_name == "{LUNA}"', 1)[1].split("if model_name ==", 1)[0]
     assert 'model="gpt-5.6-luna"' in branch
     assert 'model="gpt-5.6"' not in branch, "the bare gpt-5.6 alias routes to Sol, not Luna"
@@ -208,7 +226,7 @@ def test_muse_builds_an_openai_compatible_client_against_the_meta_endpoint():
 
     from app.agents.leonardo import llm_factory
 
-    src = inspect.getsource(llm_factory.get_llm)
+    src = _model_dispatch_source(llm_factory)
     branch = src.split(f'model_name == "{MUSE}"', 1)[1].split("if model_name ==", 1)[0]
     assert "ChatOpenAI(" in branch
     assert "https://api.meta.ai/v1" in branch
@@ -226,7 +244,7 @@ def test_muse_pins_the_contributor_tier_id():
 
     from app.agents.leonardo import llm_factory
 
-    src = inspect.getsource(llm_factory.get_llm)
+    src = _model_dispatch_source(llm_factory)
     branch = src.split(f'model_name == "{MUSE}"', 1)[1].split("if model_name ==", 1)[0]
     assert '"muse-spark-1.2-contributor"' in branch
 
@@ -300,7 +318,7 @@ def test_muse_contributor_tier_stays_escapable():
 
     from app.agents.leonardo import llm_factory
 
-    src = inspect.getsource(llm_factory.get_llm)
+    src = _model_dispatch_source(llm_factory)
     branch = src.split(f'model_name == "{MUSE}"', 1)[1]
     assert 'os.getenv("META_MUSE_MODEL"' in branch, (
         "the model id must stay overridable per box, or a compliance box has no "
@@ -379,7 +397,7 @@ def test_runpod_qwen_pod_url_is_never_hardcoded():
 
     from app.agents.leonardo import llm_factory
 
-    src = inspect.getsource(llm_factory.get_llm)
+    src = _model_dispatch_source(llm_factory)
     branch = src.split(f'model_name == "{RUNPOD_QWEN}"', 1)[1].split("if model_name ==", 1)[0]
     assert 'os.getenv("RUNPOD_QWEN_BASE_URL")' in branch
     assert "proxy.runpod.net" not in branch, "the pod URL must not be committed"
@@ -493,7 +511,7 @@ def test_glimmer_pod_url_is_never_hardcoded():
 
     from app.agents.leonardo import llm_factory
 
-    src = inspect.getsource(llm_factory.get_llm)
+    src = _model_dispatch_source(llm_factory)
     branch = src.split(f'model_name == "{GLIMMER}"', 1)[1].split("if model_name ==", 1)[0]
     assert 'os.getenv("RUNPOD_GLIMMER_BASE_URL")' in branch
     assert "proxy.runpod.net" not in branch, "the pod URL must not be committed"
@@ -633,7 +651,7 @@ def test_nemotron_pod_url_is_never_hardcoded():
 
     from app.agents.leonardo import llm_factory
 
-    src = inspect.getsource(llm_factory.get_llm)
+    src = _model_dispatch_source(llm_factory)
     branch = src.split(f'model_name == "{NEMOTRON}"', 1)[1].split("if model_name ==", 1)[0]
     assert 'os.getenv("RUNPOD_NEMOTRON_BASE_URL")' in branch
     assert "proxy.runpod.net" not in branch, "the pod URL must not be committed"
@@ -836,3 +854,150 @@ def test_nemotron_fw_is_not_the_fleet_default():
     from app.agents.leonardo.llm_factory import DEFAULT_LLM_MODEL
 
     assert NEMOTRON_FW != DEFAULT_LLM_MODEL
+
+
+# --------------------------------------------------------------------------
+# DeepSeek V4 Flash Vision (experimental) — 0.7.5
+# --------------------------------------------------------------------------
+
+DS_VISION = "deepseek-v4-flash-vision-exp"
+
+
+def test_ds_vision_is_offered_in_the_dropdown():
+    assert DS_VISION in _dropdown_models()
+
+
+def test_ds_vision_supports_images_only():
+    """Images yes; no video, and PDFs only via DeepSeek's separate Files API,
+    which we don't use — so declaring pdf:True would send a `file` block the
+    chat-completions endpoint rejects."""
+    assert MODEL_CAPABILITIES[DS_VISION] == {
+        "images": True, "video": False, "pdf": False,
+    }
+
+
+def test_ds_vision_is_the_only_deepseek_entry_with_vision():
+    """The text entries must stay text-only. DeepSeek 400s an image sent to them
+    ("This model does not support image"), and MODEL_CAPABILITIES is what stops
+    the frontend offering the upload and the stripper leaving it in history."""
+    for text_model in (
+        "deepseek-v4-flash",
+        "deepseek-v4-pro",
+        "deepseek-v4-flash-gmi",
+        "deepseek-v4-flash-fireworks",
+    ):
+        assert MODEL_CAPABILITIES[text_model]["images"] is False
+
+
+def test_ds_vision_uses_the_deepseek_key():
+    assert DS_VISION in _api_key_map()
+    assert _api_key_map()[DS_VISION] is True
+
+
+def test_ds_vision_is_known_to_the_policy():
+    assert DS_VISION in _KNOWN_MODELS
+
+
+def test_ds_vision_builds_a_reasoning_client_with_the_exact_api_id():
+    """The client must be ChatDeepSeekWithReasoning, not a bare ChatDeepSeek:
+    the model streams reasoning_content deltas like its text siblings (verified
+    live), and a plain client drops the thinking on the floor."""
+    import inspect
+
+    from app.agents.leonardo import llm_factory
+
+    src = _model_dispatch_source(llm_factory)
+    branch = src.split(f'model_name == "{DS_VISION}"', 1)[1].split("if model_name ==", 1)[0]
+    assert f'model="{DS_VISION}"' in branch
+    assert "ChatDeepSeekWithReasoning(" in branch
+
+
+def test_ds_vision_goes_to_deepseek_direct_not_a_reseller():
+    """No api_base override — it is only on DeepSeek's own API, unlike the text
+    model, which has GMI and Fireworks siblings."""
+    import inspect
+
+    from app.agents.leonardo import llm_factory
+
+    src = _model_dispatch_source(llm_factory)
+    branch = src.split(f'model_name == "{DS_VISION}"', 1)[1].split("if model_name ==", 1)[0]
+    assert "api_base" not in branch
+
+
+def test_ds_vision_is_covered_by_the_deepseek_reasoning_middleware():
+    """DeepSeek direct is the strict one about assistant messages carrying
+    reasoning_content. The middleware used to gate on the literal string
+    "deepseek-v4-flash", which silently skipped every other direct model —
+    including v4-pro, which shipped that way for several releases."""
+    from app.agents.leonardo.llm_factory import DEEPSEEK_DIRECT_MODELS
+
+    assert DS_VISION in DEEPSEEK_DIRECT_MODELS
+    assert "deepseek-v4-pro" in DEEPSEEK_DIRECT_MODELS
+    # The resellers must NOT be in it: they reject nothing, and injecting an
+    # empty reasoning_content there would be a pointless message rewrite.
+    assert "deepseek-v4-flash-gmi" not in DEEPSEEK_DIRECT_MODELS
+    assert "deepseek-v4-flash-fireworks" not in DEEPSEEK_DIRECT_MODELS
+
+
+def test_ds_vision_is_not_the_fleet_default():
+    """Adding an option must not change what the fleet actually runs."""
+    from app.agents.leonardo.llm_factory import DEFAULT_LLM_MODEL, FALLBACK_TEXT_MODEL
+
+    assert DS_VISION != DEFAULT_LLM_MODEL
+    assert DS_VISION != FALLBACK_TEXT_MODEL
+
+
+# --------------------------------------------------------------------------
+# Qwen3.8 27B (Hetzner Inference API)
+# --------------------------------------------------------------------------
+
+HETZNER_QWEN = "qwen3.8-27b-hetzner"
+
+
+def test_hetzner_qwen_is_offered_in_the_dropdown():
+    assert HETZNER_QWEN in _dropdown_models()
+
+
+def test_hetzner_qwen_supports_images_but_not_video_or_pdf():
+    """Hetzner's published model table lists this one as Text + Image."""
+    assert MODEL_CAPABILITIES[HETZNER_QWEN] == {
+        "images": True,
+        "video": False,
+        "pdf": False,
+    }
+
+
+def test_hetzner_qwen_uses_the_hetzner_key():
+    assert HETZNER_QWEN in _api_key_map()
+
+
+def test_hetzner_qwen_is_known_to_the_policy():
+    assert HETZNER_QWEN in _KNOWN_MODELS
+
+
+def test_hetzner_qwen_builds_an_openai_compatible_client_against_hetzner():
+    """OpenAI-compatible gateway, so ChatOpenAI + a base_url.
+
+    The base_url is NOT optional: without it ChatOpenAI silently talks to
+    api.openai.com, which has never heard of `Qwen3.8-27B`.
+    """
+    from app.agents.leonardo import llm_factory
+
+    src = _model_dispatch_source(llm_factory)
+    branch = src.split(f'model_name == "{HETZNER_QWEN}"', 1)[1].split(
+        "if model_name ==", 1
+    )[0]
+    assert "ChatOpenAI(" in branch
+    assert "https://inference.hetzner.com/api/v1" in branch
+    assert '"Qwen3.8-27B"' in branch
+
+
+def test_hetzner_qwen_is_not_the_default_model():
+    """Adding an option must not change what the fleet actually runs.
+
+    Especially this one: the Hetzner API is free/experimental and rate limited
+    to 10 requests per minute per key, which one agentic turn can exhaust.
+    """
+    from app.agents.leonardo.llm_factory import DEFAULT_LLM_MODEL
+
+    assert HETZNER_QWEN != DEFAULT_LLM_MODEL

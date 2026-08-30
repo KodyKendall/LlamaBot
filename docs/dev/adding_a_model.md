@@ -106,3 +106,24 @@ print(type(m).__name__, m.model_name, m.openai_api_base)"'
   error, and Fireworks imposes no small default of its own. Key: `FIREWORKS_API_KEY`,
   falling back to the `FIREWORKS_DEEPSEEK_API_KEY` name already deployed on boxes (one
   Fireworks account issues one key, so a per-model key name would be fiction).
+
+- **`qwen3.8-27b-hetzner`** — Qwen3.8-27B (dense) on **Hetzner's Inference API**
+  (`https://inference.hetzner.com/api/v1`), an EU-hosted OpenAI-compatible gateway, so
+  the client is a plain `ChatOpenAI` with an overridden `base_url` — not `ChatQwen`,
+  which exists for Alibaba DashScope's reasoning shape. Key: `HETZNER_API_KEY`.
+  262k context, text + image in. Hetzner serves a small, changing set of models and
+  `/v1/models` is the definitive list; `HETZNER_QWEN_MODEL` re-points this entry to
+  their other one (`Qwen/Qwen3.6-35B-A3B-FP8`, MoE, 35B total / 3B active, same context
+  and modalities) with no code change, and `HETZNER_BASE_URL` overrides the endpoint.
+
+  **The rate limit is on requests, not tokens: 10 per 60s per key** (against 4M in /
+  100k out tokens per 60s). One agentic Leo turn is many sequential requests, so a
+  single busy user can exhaust it. 429s are classified transient and retried by the
+  resilience middleware, so they surface as slow turns rather than failed ones — but
+  it is why this must not become a fleet default while the API is free/experimental.
+
+  Not yet verified against the live endpoint (no `HETZNER_API_KEY` on the dev box as
+  of 2026-08-30). Two things to check on first use: whether tool calling works at all
+  through their vLLM serve flags, and whether thinking arrives inline as
+  `<think>…</think>` inside `content` — if it does, `chat_template_kwargs=
+  {"enable_thinking": False}` (as on the RunPod Qwen3-8B entry) is the first knob.

@@ -279,13 +279,94 @@ def looks_like_bad_request(exc) -> bool:
     return status in (400, 422)
 
 
-def log_bad_request_shape(exc, messages, *, tools=None, model=None, label: str = "") -> Dict[str, Any]:
+# The three distinct conditions hiding behind BadRequestError on the fleet. Counting them
+# as one made P1-3 look bigger than it is and hid the fact that two of them already have
+# owners: the context ceiling is not a bad request, and malformed history is the repair
+# path's class. Substrings, because providers reword their prose but keep the shape.
+_BAD_REQUEST_SIGNATURES = (
+    ("context_length_exceeded", ("maximum context length", "context_length_exceeded",
+                                 "reduce the length of the messages")),
+    ("malformed_history", ("must contain at least one message",
+                           "insufficient tool messages",
+                           "tool_call_id", "invalid_request_error: messages")),
+    ("invalid_parameters", ("contains invalid parameters", "invalid parameters",
+                            "check the request body")),
+)
+
+
+def classify_bad_request(exc) -> str:
+    """Name which KIND of 400 this is, so three different bugs stop being one number.
+
+    Returns "unknown" rather than guessing: an unrecognised rejection is a thing we want
+    to see arrive, not something to file under the nearest existing label.
+    """
+    text = str(getattr(exc, "message", "") or exc or "").lower()
+    for name, needles in _BAD_REQUEST_SIGNATURES:
+        if any(needle in text for needle in needles):
+            return name
+    return "unknown"
+
+
+# Anything whose NAME says credential. The payload reaches the mothership, so a key in it
+# would be a disclosure rather than a clue.
+_SECRET_KEY_HINTS = ("key", "token", "secret", "password", "authorization", "credential")
+
+# ...except these, which merely CONTAIN one of those words. `max_tokens` is the parameter
+# most likely to be the culprit in an "invalid parameters" rejection, so redacting it would
+# have removed the single most useful field from the payload this exists to produce.
+_NEVER_SECRET = frozenset({
+    "max_tokens", "max_completion_tokens", "max_output_tokens", "max_new_tokens",
+    "max_prompt_tokens", "token_usage", "logit_bias", "top_logprobs",
+})
+
+# Message bodies are described separately by describe_message_shape(); copying them here
+# would duplicate user content into a second payload for no diagnostic gain.
+_BULK_KEYS = ("messages", "tools", "input", "prompt", "contents")
+
+_MAX_PARAM_CHARS = 512
+
+
+def redact_request_params(params: Dict[str, Any] | None) -> Dict[str, Any]:
+    """The outgoing request parameters, safe to log.
+
+    P1-3 is a provider answering "the request contains invalid parameters" and then
+    declining to say WHICH one — `param` is null on every one of the 15 occurrences. We
+    have never recorded what we sent, so there is nothing to compare a working box
+    against. Unknown keys are deliberately kept: the next offending parameter is, by
+    definition, one we are not thinking about today.
+    """
+    out: Dict[str, Any] = {}
+    for key, value in (params or {}).items():
+        lowered = str(key).lower()
+        if lowered in _BULK_KEYS:
+            continue
+        if lowered not in _NEVER_SECRET and any(hint in lowered for hint in _SECRET_HINT_SET):
+            out[key] = "[redacted]"
+            continue
+        if isinstance(value, dict):
+            out[key] = redact_request_params(value)
+            continue
+        text = str(value)
+        out[key] = value if len(text) <= _MAX_PARAM_CHARS else text[:_MAX_PARAM_CHARS]
+    return out
+
+
+_SECRET_HINT_SET = _SECRET_KEY_HINTS
+
+
+def log_bad_request_shape(exc, messages, *, tools=None, model=None, label: str = "",
+                          request_params: Dict[str, Any] | None = None) -> Dict[str, Any]:
     """Log (and return) the shape of a request a provider rejected.
 
     Returned so the caller can attach it to a ``report_error`` payload; the
     mothership has nothing else to go on when the provider says ``'param': None``.
     """
     shape = describe_message_shape(messages, tools=tools, model=model)
+    # WHICH 400 this is, and what we actually sent. Without these the mothership sees a
+    # message it cannot act on and three unrelated bugs averaged into one count.
+    shape["bad_request_kind"] = classify_bad_request(exc)
+    if request_params:
+        shape["request_params"] = redact_request_params(request_params)
     try:
         logger.error(
             "Provider rejected the request (%s) %s — request shape: %s",

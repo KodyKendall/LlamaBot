@@ -39,6 +39,10 @@ MODEL_CAPABILITIES = {
     # DeepSeek - primarily text focused
     'deepseek-v4-flash': {'images': False, 'video': False, 'pdf': False},
     'deepseek-v4-pro': {'images': False, 'video': False, 'pdf': False},
+    # ...except this one: DeepSeek's multimodal sibling, images only. No video,
+    # and PDFs are not ingested natively (DeepSeek's Files API is a separate
+    # upload path we don't use), so both stay off.
+    'deepseek-v4-flash-vision-exp': {'images': True, 'video': False, 'pdf': False},
     # Same model as deepseek-v4-flash, served by GMI Cloud rather than
     # DeepSeek's own API — same (text-only) capabilities.
     'deepseek-v4-flash-gmi': {'images': False, 'video': False, 'pdf': False},
@@ -55,6 +59,11 @@ MODEL_CAPABILITIES = {
 
     # Qwen3-8B on our own RunPod GPU (vLLM) - the dense text model, no vision.
     'qwen3-8b-runpod': {'images': False, 'video': False, 'pdf': False},
+
+    # Qwen3.8-27B (dense) on Hetzner's Inference API - text + image in, per
+    # Hetzner's published model table. No video, and PDFs are not ingested
+    # natively, so both stay off.
+    'qwen3.8-27b-hetzner': {'images': True, 'video': False, 'pdf': False},
 
     # Muse Glimmer 30B on the same self-hosted pod. The base model is multimodal,
     # but this community AWQ INT4 checkpoint's vision path is unverified — declared
@@ -84,7 +93,17 @@ def get_model_capabilities(model_name: str) -> dict:
     ``unknown variant image_url, expected text``. Keep every real model listed
     explicitly above so only genuine skew/typos ever hit this default.
     """
-    return MODEL_CAPABILITIES.get(model_name, {'images': True, 'video': True, 'pdf': True})
+    if model_name in MODEL_CAPABILITIES:
+        return MODEL_CAPABILITIES[model_name]
+    # Config-driven OpenRouter entries declare their own capabilities, so they
+    # never reach the permissive default below. Imported lazily: this module is a
+    # leaf that half the app imports, and openrouter_models reads a file.
+    from app.agents.leonardo.openrouter_models import get_openrouter_model
+
+    entry = get_openrouter_model(model_name)
+    if entry is not None:
+        return dict(entry["capabilities"])
+    return {'images': True, 'video': True, 'pdf': True}
 
 
 def get_file_category(mime_type: str) -> str:

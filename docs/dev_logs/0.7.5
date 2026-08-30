@@ -1,0 +1,20 @@
+0.7.5:
+[x] - Leo can look at images on a box with no META key — DeepSeek's vision model is now an option, so image understanding runs on the DeepSeek key every box already has.
+[x] - The model Leo switches to when you attach an image is now chosen per box instead of always being Muse Spark.
+[x] - Models can be added from a config file now, no code change — drop a block in .leonardo/openrouter_models.json and it shows up in the dropdown.
+[x] - Added DeepSeek V4 Flash 0731 via OpenRouter pinned to Relace fp4 — same model, roughly a fifth of the price per token.
+[x] - Added the same model on DigitalOcean as a second choice — costs more than Relace, but better uptime and a US host.
+[x] - When Leo asks several questions at once you now answer them one at a time — "Question 2 of 3" with Back/Next — instead of scrolling a stacked list.
+[x] - A stalled model is dropped in 90 seconds, not 10 minutes.
+[x] - Leo finishes on a second model when the first stops responding.
+[x] - Leo now says it's retrying instead of silently spinning.
+[x] - Added GLM 5.3 Flash (Z.AI) as a model option — over a million tokens of context, it can look at images, and it is the cheapest per-token option in the dropdown.
+[x] - Leo's answer survives a dropped connection instead of cutting off mid-sentence.
+[x] - A rejected model request now logs what we sent, so the 400s are diagnosable.
+[x] - Rails restarts itself after a crash instead of sitting there dead.
+[x] - Agent and CLI credentials can no longer be committed by accident.
+[x] - Uploads written to the wrong folder survive an update instead of vanishing.
+[x] - Login stops failing when the browser sends a preflight request first.
+[x] - /cookbook now searches your own recipes too, not just the public ones.
+[x] - Feedback bubble keeps your text and retries after a session times out.
+[x] - Added Qwen3.8 27B on Hetzner's EU inference API as a model option — 262k context, reads images, and free while Hetzner's API is experimental.

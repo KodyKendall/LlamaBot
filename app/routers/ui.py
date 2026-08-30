@@ -39,6 +39,7 @@ from app.services.sso_origin import (
 # truth this router and the WebSocket gate both read. Re-exported here because
 # load_custom_agent_modes() validates against the built-in keys.
 from app.permissions import BUILTIN_AGENT_MODE_KEYS, visible_modes  # noqa: F401
+from app.lib.cors_preflight import preflight_response
 
 logger = logging.getLogger(__name__)
 
@@ -420,6 +421,12 @@ async def login(
     response = JSONResponse({"ok": True, "username": user.username})
     _set_session_cookie(response, user)
     return response
+
+
+@router.options("/login")
+async def login_preflight(request: Request):
+    """Answer the CORS preflight instead of 400ing it (see app/lib/cors_preflight)."""
+    return preflight_response(request)
 
 
 @router.get("/login")
@@ -3925,9 +3932,18 @@ async def scheduled_jobs_page(user: User = Depends(engineer_or_admin_required)):
             'gpt-5-mini': 'GPT-5 Mini',
             'gpt-5-codex': 'GPT-5 Codex',
             'deepseek-v4-flash': 'DeepSeek V4 Flash',
+            'deepseek-v4-flash-vision-exp': 'DeepSeek V4 Flash Vision',
             'deepseek-v4-flash-gmi': 'DeepSeek V4 Flash (GMI)',
             'deepseek-v4-flash-fireworks': 'DeepSeek V4 Flash (Fireworks)',
         };
+
+        // Labels for config-registered models arrive with the model list rather
+        // than the static map above. Cached on load so a saved job still renders
+        // a real name after a reload.
+        let dynamicModelLabels = {};
+        function modelLabelFromList(value) {
+            return dynamicModelLabels[value] || value;
+        }
 
         function prettyAgentLabel(name) {
             return name.replace(/_/g, ' ').replace(/\\b\\w/g, c => c.toUpperCase());
@@ -3953,8 +3969,12 @@ async def scheduled_jobs_page(user: User = Depends(engineer_or_admin_required)):
                 const data = await response.json();
                 const sel = document.getElementById('jobModel');
                 const models = data.models || [];
+                models.forEach(m => { if (m.label) dynamicModelLabels[m.value] = m.label; });
                 sel.innerHTML = models.map(m => {
-                    const label = MODEL_LABELS[m.value] || m.value;
+                    // m.label is sent for config-registered (OpenRouter) models,
+                    // which MODEL_LABELS below cannot know about; the static map
+                    // stays authoritative for the hardcoded ones.
+                    const label = MODEL_LABELS[m.value] || m.label || m.value;
                     const suffix = m.available ? '' : ' (No API Key)';
                     const disabled = m.available ? '' : 'disabled';
                     const title = m.reason ? ` title="${m.reason}"` : '';
@@ -4131,7 +4151,7 @@ async def scheduled_jobs_page(user: User = Depends(engineer_or_admin_required)):
             ensureOptionPresent(
                 document.getElementById('jobModel'),
                 job.llm_model,
-                MODEL_LABELS[job.llm_model] || job.llm_model
+                MODEL_LABELS[job.llm_model] || modelLabelFromList(job.llm_model)
             );
             document.getElementById('jobPrompt').value = job.prompt;
             document.getElementById('jobCron').value = job.cron_expression;

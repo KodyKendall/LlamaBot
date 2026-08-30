@@ -294,3 +294,46 @@ test('recipes are fetched from the backend proxy, not llamapress.ai directly', a
   assert.deepEqual(urls, ['/api/cookbook']);
   assert.equal(manager.cookbookGuides.length, 3);
 });
+
+// ── Personal cookbook (0.7.5) ────────────────────────────────────────────────
+// Every LlamaPress user now has a personal cookbook of recipes published from their own
+// boxes. A recipe published on one Leo must be findable on their others, and be
+// distinguishable from a fleet guide at a glance.
+
+test('the owner\'s own recipes rank above fleet guides', () => {
+  const guides = [
+    { slug: 'fleet-toggle', title: 'Toggle', category: 'ui' },
+    { slug: 'my-toggle', title: 'Toggle', category: 'ui', personal: true },
+  ];
+
+  const filtered = filterCookbookGuides(guides, 'toggle');
+
+  assert.equal(filtered[0].slug, 'my-toggle', 'the user published this one for exactly this');
+});
+
+test('personal recipes lead the list even with no query typed', () => {
+  const guides = [
+    { slug: 'fleet-a', title: 'A' },
+    { slug: 'mine', title: 'B', personal: true },
+  ];
+
+  assert.equal(filterCookbookGuides(guides, '')[0].slug, 'mine');
+});
+
+test('a personal recipe still loses to a better fleet match', () => {
+  // Ownership breaks ties; it does not override relevance being wrong.
+  const guides = [
+    { slug: 'mine', title: 'Something else', category: 'pdf', personal: true },
+    { slug: 'fleet-pdf', title: 'PDF export', category: 'docs' },
+  ];
+
+  assert.equal(filterCookbookGuides(guides, 'pdf')[0].slug, 'fleet-pdf');
+});
+
+test('the mention URL mechanics are unchanged for a personal recipe', () => {
+  // .json and .md both exist under /cookbook/u/<handle>/<slug>, so nothing special needed.
+  const guide = { slug: 'glow-toggle', title: 'Glow', personal: true,
+                  url: 'https://llamapress.ai/cookbook/u/kody/glow-toggle' };
+
+  assert.equal(cookbookJsonUrl(guide), 'https://llamapress.ai/cookbook/u/kody/glow-toggle.json');
+});

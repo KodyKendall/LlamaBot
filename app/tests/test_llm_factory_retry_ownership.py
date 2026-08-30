@@ -89,7 +89,7 @@ def test_fireworks_deepseek_routes_to_fireworks_endpoint_and_key(monkeypatch):
 
     assert captured["api_base"] == "https://api.fireworks.ai/inference/v1"
     assert captured["api_key"] == "fw-test-key"
-    assert captured["model"] == "accounts/fireworks/models/deepseek-v4-flash"
+    assert captured["model"] == "accounts/fireworks/models/deepseek-v4-flash-0731"
 
 
 def test_deepseek_direct_does_not_point_at_third_party(monkeypatch):

@@ -19,11 +19,17 @@ from app.services.user_service import (
     get_all_users, get_user_by_username, update_user, delete_user
 )
 from app.agents.leonardo.model_capabilities import get_model_capabilities
+from app.agents.leonardo.openrouter_models import (
+    API_KEY_ENV as OPENROUTER_API_KEY_ENV,
+    get_openrouter_model,
+    openrouter_models,
+)
 from app.agents.leonardo.model_policy import (
     enabled_default_model,
     is_model_enabled,
     model_switching_allowed,
     vision_allowed,
+    vision_model,
 )
 
 logger = logging.getLogger(__name__)
@@ -887,12 +893,16 @@ async def available_models(request: Request):
         "gemini-3.1-flash-lite": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
         "deepseek-v4-flash": "DEEPSEEK_API_KEY",
         "deepseek-v4-pro": "DEEPSEEK_API_KEY",
+        # DeepSeek's vision sibling — same key as the text models, which is the
+        # whole point of it (vision with no extra credential to provision).
+        "deepseek-v4-flash-vision-exp": "DEEPSEEK_API_KEY",
         "deepseek-v4-flash-gmi": "GMI_DEEPSEEK_API_KEY",
         "deepseek-v4-flash-fireworks": "FIREWORKS_DEEPSEEK_API_KEY",
         # Fireworks' account-wide key name, falling back to the DeepSeek-specific
         # name already deployed on boxes — matches get_llm's precedence.
         "nemotron-lightning-30b-fireworks": ("FIREWORKS_API_KEY", "FIREWORKS_DEEPSEEK_API_KEY"),
         "qwen3.7-plus": "ALIBABA_API_KEY",
+        "qwen3.8-27b-hetzner": "HETZNER_API_KEY",
         # Self-hosted vLLM pod: the "key" here is deliberately the BASE URL, not
         # an API key. Availability means "this box is pointed at a RunPod
         # endpoint" — the pod may legitimately run unauthenticated, so keying it
@@ -929,6 +939,13 @@ async def available_models(request: Request):
         # Dropdown shaping must never 500 the chat page.
         logger.warning("Could not resolve ChatGPT connection status: %s", e)
 
+    # Config-driven OpenRouter entries (see openrouter_models). They are not in
+    # model_api_keys above — that map is hand-maintained per model, and the whole
+    # point of the registry is that adding an endpoint touches no code — so they
+    # are folded in here, all keyed on the single OPENROUTER_API_KEY.
+    for model_value in openrouter_models():
+        model_api_keys.setdefault(model_value, OPENROUTER_API_KEY_ENV)
+
     models = []
     for model_value, env_vars in model_api_keys.items():
         # Support both single string and tuple of env vars
@@ -958,12 +975,21 @@ async def available_models(request: Request):
         else:
             reason = None
 
-        models.append({
+        entry = {
             "value": model_value,
             "available": has_key and enabled,
             "reason": reason,
             "capabilities": get_model_capabilities(model_value),
-        })
+        }
+        # Registry models have no <option> in chat.html — they are config, so the
+        # markup cannot know their names. Ship their labels and the frontend
+        # creates the option. Only sent for those: for a hardcoded model the
+        # dropdown's own markup stays authoritative.
+        registry_entry = get_openrouter_model(model_value)
+        if registry_entry is not None:
+            entry["label"] = registry_entry["label"]
+            entry["short_label"] = registry_entry["short_label"]
+        models.append(entry)
 
     for model_value in _CHATGPT_SUBSCRIPTION_MODELS:
         enabled = is_model_enabled(model_value)
@@ -994,6 +1020,13 @@ async def available_models(request: Request):
         # META key, DeepSeek where there is not), so it can no longer be a
         # constant in index.js.
         "default_model": enabled_default_model(),
+        # Where the image auto-switch sends a user who attaches an image while on
+        # a text-only model. Box-dependent for the same reason since 0.7.5 (Muse
+        # where there is a META key, DeepSeek's vision model where there is not),
+        # so index.js can no longer hardcode Muse. Empty string means this box has
+        # no vision model at all, which is what turns on the "no image-capable
+        # model is configured" banner.
+        "vision_model": vision_model(),
     }
 
 
@@ -1075,6 +1108,10 @@ class FeedbackRequest(BaseModel):
     note: str | None = None
     content: str | None = None
     sent_at: str | None = None
+    # Stable id of the rated assistant message, echoed back from the bubble. Lets the
+    # mothership join on identity instead of comparing message bodies — text matching
+    # silently fabricated a placeholder row whenever a stream was truncated (#688).
+    message_key: str | None = None
     # Bounded, redacted browser snapshot (ws close code, reconnect count, recent
     # console output, model/mode). See frontend/chat/utils/LeoDiagnostics.js.
     debug_context: dict | None = None
@@ -1131,6 +1168,7 @@ async def api_submit_feedback(request: Request, body: FeedbackRequest, username:
         scope=body.scope,
         note=body.note,
         content=body.content,
+        message_key=body.message_key,
         sent_at=body.sent_at,
         debug_context=debug_context,
         # HTTP path: no turn stamp to fall back on, so resolve the signed-in
@@ -2150,25 +2188,111 @@ async def _fetch_cookbook_index() -> list:
         return _normalize_cookbook_guides(response.json())
 
 
-@router.get("/api/cookbook", response_class=JSONResponse)
-async def api_get_cookbook(username: str = Depends(auth)):
-    """List published cookbook recipes for the /cookbook slash menu."""
+# The owner's personal list is per-instance-owner and changes the moment they publish, so
+# it gets its own short-TTL cache rather than riding the process-global fleet cache.
+_personal_cookbook_cache: dict = {}
+PERSONAL_COOKBOOK_CACHE_TTL_SECONDS = 60
+
+
+def _normalize_personal_recipes(payload) -> list:
+    """Shape the owner's recipes into the same guide dict the slash menu already consumes.
+
+    Unlisted recipes are kept: they are the owner's own, and hiding them here would mean a
+    user could not find a recipe they had just published. Entries without a slug, or a
+    payload with no handle, are dropped — there is no resolvable URL for either.
+    """
+    if not isinstance(payload, dict):
+        return []
+    handle = str(payload.get("handle") or "").strip()
+    raw = payload.get("recipes")
+    if not handle or not isinstance(raw, list):
+        return []
+
+    guides = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        slug = str(entry.get("slug") or "").strip()
+        if not slug:
+            continue
+        guides.append({
+            "slug": slug,
+            "title": str(entry.get("title") or slug),
+            "category": str(entry.get("category") or ""),
+            "summary": str(entry.get("summary") or ""),
+            # Both .json and .md of this URL exist, so the frontend's existing
+            # cookbookJsonUrl mention mechanics work unchanged.
+            "url": f"https://llamapress.ai/cookbook/u/{handle}/{slug}",
+            "handle": handle,
+            "visibility": str(entry.get("visibility") or ""),
+            "updated_at": str(entry.get("updated_at") or ""),
+            "personal": True,
+        })
+    return guides
+
+
+def _merge_personal_cookbook(fleet_guides: list, personal_guides) -> list:
+    """Owner's recipes first, then the fleet's.
+
+    A personal recipe SHADOWS a fleet guide with the same slug: if the user has their own
+    version of a pattern, that is the one they meant.
+    """
+    if not personal_guides:
+        return fleet_guides
+    owned = {g["slug"] for g in personal_guides}
+    return list(personal_guides) + [g for g in (fleet_guides or []) if g.get("slug") not in owned]
+
+
+async def _fetch_personal_cookbook(request) -> list:
+    """The owner's recipes, cached briefly. Never raises — an empty list is the floor."""
     import time
+
+    cached = _personal_cookbook_cache.get("guides")
+    age = time.monotonic() - _personal_cookbook_cache.get("fetched_at", 0.0)
+    if cached is not None and age < PERSONAL_COOKBOOK_CACHE_TTL_SECONDS:
+        return cached
+
+    if request is None:
+        return []
+    mothership = getattr(getattr(request, "app", None), "state", None)
+    client = getattr(mothership, "mothership_client", None) if mothership else None
+    if client is None:
+        return []
+
+    try:
+        guides = _normalize_personal_recipes(await client.get_personal_cookbook())
+    except Exception as e:  # noqa: BLE001 - the fleet menu must survive this
+        logger.warning(f"Could not fetch personal cookbook: {e}")
+        return cached or []
+
+    _personal_cookbook_cache["guides"] = guides
+    _personal_cookbook_cache["fetched_at"] = time.monotonic()
+    return guides
+
+
+@router.get("/api/cookbook", response_class=JSONResponse)
+async def api_get_cookbook(request: Request = None, username: str = Depends(auth)):
+    """List cookbook recipes for the /cookbook slash menu — the owner's, then the fleet's."""
+    import time
+
+    personal = await _fetch_personal_cookbook(request)
 
     cached = _cookbook_cache.get("guides")
     age = time.monotonic() - _cookbook_cache.get("fetched_at", 0.0)
     if cached is not None and age < COOKBOOK_CACHE_TTL_SECONDS:
-        return {"guides": cached, "stale": False}
+        return {"guides": _merge_personal_cookbook(cached, personal), "stale": False}
 
     try:
         guides = await _fetch_cookbook_index()
         _cookbook_cache["guides"] = guides
         _cookbook_cache["fetched_at"] = time.monotonic()
-        return {"guides": guides, "stale": False}
+        return {"guides": _merge_personal_cookbook(guides, personal), "stale": False}
     except Exception as e:
         logger.warning(f"Could not fetch cookbook index from {COOKBOOK_INDEX_URL}: {e}")
-        # Serve the last good payload rather than an empty menu.
-        return {"guides": cached or [], "stale": True, "error": str(e)}
+        # Serve the last good payload rather than an empty menu — and the owner's own
+        # recipes still show even when the fleet index is unreachable.
+        return {"guides": _merge_personal_cookbook(cached or [], personal),
+                "stale": True, "error": str(e)}
 
 
 # ============== File Upload to Assets ==============

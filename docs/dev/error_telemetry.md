@@ -104,8 +104,8 @@ Different error classes need different rungs. **Blindly chaining "retry 3× → 
 | Rung | Trigger | Action | Status |
 |---|---|---|---|
 | **0. Tool-call repair** | malformed/orphaned tool call | re-feed error to model | ✅ exists |
-| **1. Retry same model** | *transient only* (429, timeout, 5xx, connection) | `with_retry` + backoff, silent | ⚠️ broaden from Google-only |
-| **2. Fallback model** | anything rung 1 didn't fix | `with_fallbacks([...])` → another enabled model | ➕ add (one-liner) |
+| **1. Retry same model** | *transient only* (429, timeout, 5xx, connection, zero-chunk stall) | re-call the handler + backoff, bounded by BOTH an attempt cap and a **wall-clock budget**; announced in the shimmer once it costs >10s | ✅ live (budget + notice: 0.7.5) |
+| **2. Fallback model** | rung 1 spent its budget on a *transient* failure | `model_policy.fallback_model()` → another enabled, buildable model; capability-aware; one rung only | ✅ live (0.7.5) |
 | **3. Graceful floor** | the *graph itself* threw | **stripped-down** DeepSeek call → friendly message + escape hatches | ➕ add (the UX win) |
 | **—. Report + escalate** | any rung fired | `report_error` to mothership + [Contact support] | ➕ §4 |
 
@@ -114,49 +114,79 @@ Different error classes need different rungs. **Blindly chaining "retry 3× → 
 1. **Retry the model call, never the whole turn.** Tools have side effects (Rails writes). Re-running a whole failed turn can double-write. The existing middleware already retries at the safe level (the model call) — keep it there.
 2. **Escalation is *within a single turn*, and mode-switching is an *offer*, not automatic.** No cross-session "3 errors → switch mode" counter (stateful bug farm). Silently moving a user into beginner mode mid-conversation is surprising UX. When rung 3 fires, *offer* a simpler retry — the user stays in control.
 
-### Rungs 1–2 live in `wrap_model_call` (`rails_agent/middleware.py:389`)
+### Rungs 1–2 live in `DynamicModelMiddleware` (`rails_agent/middleware.py:522`)
 
 > **Rung 1 also lives outside the middleware.** Raw StateGraph nodes
 > (`rails_beginner_agent`, `rails_ai_builder_agent`) invoke the model directly and
 > never touch `wrap_model_call`, so before 2026-07-12 they had *no* transient retry
 > at all — a single connection blip killed the turn. They now wrap each direct
 > `.invoke(...)` in `resilience.invoke_with_transient_retry(fn)`, which shares the
-> same classifier + backoff constants as the middleware loop. **Any new raw-node
+> same classifier, backoff constants AND wall-clock budget as the middleware loop (rung 2 does not reach them — a raw node hands over a thunk, not a model name). **Any new raw-node
 > agent must do the same** (or be built via `create_agent`, which gets the
 > middleware for free). Also note `httpx.ReadError`/`WriteError` (mid-stream socket
 > failures, empty `str(e)`) are classified transient as of the same date.
 
-Today (Google rate-limits only):
+`with_fallbacks` is deliberately *not* what shipped: it wraps the model, and a
+wrapped model has no `bind_tools`, which breaks every tool-calling agent (see
+`with_retry` breaking `bind_tools`, 0.6.x). Both rungs are an inline loop over
+`handler(...)` instead — the same pattern langchain's own `ModelRetryMiddleware`
+uses — so the raw chat model reaches the handler untouched:
 
 ```python
-model = get_llm(llm_model)
-model = model.with_retry(
-    retry_if_exception_type=(ResourceExhausted,),
-    stop_after_attempt=5,
-    wait_exponential_jitter=True,
-)
+llm_model = request.state.get('llm_model') or enabled_default_model()
+req, tried, started_at = self._override(request, llm_model), {llm_model}, time.monotonic()
+while True:
+    try:
+        return await handler(req)
+    except Exception as e:
+        if not is_transient_error(e):
+            raise                        # a 400 fails identically everywhere
+        if attempt >= _MODEL_RETRY_MAX_ATTEMPTS or elapsed >= _MODEL_RETRY_MAX_TOTAL_SECONDS:
+            fallback = fallback_model(llm_model, needs_vision=..., exclude=tried)
+            if fallback is None:
+                raise                    # rung 2 has nowhere to go
+            await _announce_fallback(llm_model, fallback, sync=False)
+            llm_model = fallback; ...; continue
+        if elapsed >= _RETRY_NOTICE_AFTER_SECONDS:
+            await _notify_retry(attempt, sync=False)
+        await asyncio.sleep(_model_retry_delay(attempt))
 ```
 
-Target — broaden retry to the *transient* class, then add a capability-aware fallback:
+### Why rung 1 needed a *clock*, not more attempts (0.7.5)
 
-```python
-model = get_llm(llm_model)
-# Rung 1: retry only genuinely transient failures (never deterministic 4xx)
-model = model.with_retry(
-    retry_if_exception_type=(ResourceExhausted, APITimeoutError, APIConnectionError, InternalServerError),
-    stop_after_attempt=3,
-    wait_exponential_jitter=True,
-)
-# Rung 2: fall back to a second enabled model if the primary keeps failing.
-#   Capability-aware: if the request carries an image, the fallback must be a
-#   vision-capable model; otherwise fall back to the text floor (DeepSeek).
-fallbacks = choose_fallbacks(llm_model, request)   # returns [] when none apply
-if fallbacks:
-    model = model.with_fallbacks([get_llm(m) for m in fallbacks])
-return handler(request.override(model=model))
-```
+2026-08-26, rsb-dev: the Muse Spark endpoint returned HTTP 200 and then streamed
+**zero chunks**. `langchain_openai`'s inherited 120s `stream_chunk_timeout` fired,
+the classifier called it transient — correctly — and rung 1 retried the same dead
+endpoint five times. **5 × 120s ≈ 10 minutes of a spinning shimmer.** The customer's
+report was "it runs for like 10 minutes with no changes."
 
-`with_fallbacks` alone would have **silently absorbed the `cache_control` crash** (fall to a model whose client accepts it, or to the stripped floor).
+The retry *count* was never wrong. The backoff (0.5–8s) was sized against a 503,
+whose failing attempt costs about a second; nobody sized the budget against an
+attempt that costs two minutes. **A 503 and a zero-chunk stall hit the same rung
+with a 100× difference in user impact — that asymmetry was the bug.** Three
+changes, all in this ladder:
+
+1. `llm_factory.stream_chunk_timeout_s()` — **25s, chosen not inherited**, applied
+   centrally in `get_llm` (11 `ChatOpenAI(` call sites; a per-site fix misses one).
+   Never disabled: a disabled chunk timeout is how a turn hangs forever.
+2. `resilience._MODEL_RETRY_MAX_TOTAL_SECONDS` — **60s**, checked before each
+   retry in all three loops. 60 and not 90 because what the user sits through is
+   the budget *plus* the attempt still in flight when it ran out: 60 + 25 = 85s.
+3. `_RETRY_NOTICE_AFTER_SECONDS` — a retry past 10s pushes
+   *"Model is not responding. Retrying (N of M)…"* into the thinking shimmer via
+   `app/lib/turn_notices.py`. Below the threshold it stays silent: a notice on
+   every 1-second 503 trains users to ignore the notice that matters.
+
+Rung 2's fallback rides the **existing** `model_substituted` frame (raised in
+`request_handler`, branched in `MessageHandler.js`, rendered as the banner above
+the composer) with a new `reason` field — `"policy"` for the pre-run substitution,
+`"fallback"` for a mid-turn stall. They are worded differently on purpose: reading
+a provider outage as "isn't enabled on this instance" is the wrong explanation.
+
+Escalation is capped at **one** fallback rung. `fallback_model` takes the models
+already tried, because on a Muse box the policy default *is* the model that
+stalled — without that, the resolver hands Muse back as DeepSeek's fallback and
+the pair bounces forever.
 
 ### Rung 3 lives at the outer net (`request_handler.py:824`)
 
@@ -340,7 +370,7 @@ The net makes failures graceful; these make the *common, known* cases actually s
 3. Rung-3 graceful floor at `request_handler.py` catch sites — bare DeepSeek call with **content stripped**.
 4. ✅ **DONE (method + wiring)** — `MothershipClient.report_error` + wired into all 3 handler catch sites via `RequestHandler._report_error_to_mothership`. Tests: `test_report_error.py`. *Remaining: the [Contact support] button → mothership emails support@llamapress.ai (frontend + mothership endpoint).*
 
-**Implementation status (this branch):** rungs 0 (tool-repair, pre-existing) and 1 (transient retry) are live; error telemetry to the mothership is live for all three chat error paths (`recovered=False` until the graceful floor lands). Not yet built: rung 2 fallback, rung 3 graceful floor, the [Contact support] button, and the §5 cures.
+**Implementation status (0.7.5):** rungs 0 (tool-repair), 1 (transient retry — now bounded by a wall clock and visible in the shimmer) and 2 (policy-resolved fallback model) are live; error telemetry to the mothership is live for all three chat error paths (`recovered=False` until the graceful floor lands). Not yet built: rung 3 graceful floor, the [Contact support] button, the §5 cures, and — the gap the 2026-08-26 incident exposed — **a `report_error`/`report_degradation` for a turn the ladder *recovered***. A retried transient error is still caught and swallowed, so `check_spike!` never runs: across that whole 20-minute customer-facing outage the box sent 0 `report_error` POSTs. The only detector we had was the customer.
 
 **Phase 2 — cures & mothership (driven by Phase-1 telemetry):**
 5. Model-aware image format (§5.1) + conservative capability default (§5.3).
@@ -360,7 +390,10 @@ Don't build Phase 3 until Phase 1's telemetry shows where the pain actually is.
 - Frontend render (lost): `app/frontend/chat/websocket/MessageHandler.js:1300-1301`
 - Phone-home channel: `app/services/mothership_client.py` (esp. `report_disconnect:281`)
 - Instance identity: `.leonardo/instance.json` via `MothershipClient._load_config` (`:27-49`)
-- Model retry chokepoint: `app/agents/leonardo/rails_agent/middleware.py:389-400` (`wrap_model_call`)
+- Model retry + fallback chokepoint: `app/agents/leonardo/rails_agent/middleware.py:568` (`wrap_model_call`) / `:629` (`awrap_model_call`)
+- Retry policy constants + classifier: `app/agents/leonardo/resilience.py`
+- Fallback resolution: `app/agents/leonardo/model_policy.py` (`fallback_model`)
+- Mid-run status frames: `app/lib/turn_notices.py`
 - Tool-call repair (exists): `app/agents/leonardo/agent_factory.py:112-126` (`build_leonardo_agent`)
 - Capability table + preflight: `app/agents/leonardo/model_capabilities.py`; consulted at `request_handler.py:1392`, `middleware.py:279`
 - Model wiring (Responses API): `app/agents/leonardo/llm_factory.py:171-184` (`gpt-5-nano`, `use_responses_api=True`)

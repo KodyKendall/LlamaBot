@@ -233,20 +233,30 @@ def test_switching_locked_pins_default_only(monkeypatch):
 def test_switching_locked_with_vision_off_closes_the_vision_model(monkeypatch):
     """Only observable on a box whose vision model differs from its default.
 
-    Since 0.7.0 the vision model IS the default (both Muse), so on a META-keyed
-    box the vision clause never decides anything. A box with no META key is where
-    they diverge — default deepseek, vision model Muse — and there the clause is
-    exactly what the VISION_MODEL_ALLOWED gate controls.
+    Since 0.7.0 the vision model IS the default on a META-keyed box (both Muse),
+    so there the vision clause never decides anything. A box with no META key is
+    where they diverge — default deepseek-v4-flash, vision model DeepSeek's
+    vision sibling since 0.7.5 — and there the clause is exactly what the
+    VISION_MODEL_ALLOWED gate controls.
+
+    Asserts on ``vision_model()``, not the ``VISION_MODEL`` constant: since 0.7.5
+    the constant is only the PREFERRED vision model, while the clause under test
+    gates whichever one this box can actually build.
     """
     monkeypatch.delenv("META_API_KEY", raising=False)
     monkeypatch.delenv("MODEL_API_KEY", raising=False)
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
     monkeypatch.setenv("MODEL_SWITCHING_ALLOWED", "false")
+    box_vision_model = model_policy.vision_model()
+    assert box_vision_model != model_policy.default_text_model(), (
+        "this test is vacuous unless the box's vision model differs from its default"
+    )
 
     monkeypatch.setenv("VISION_MODEL_ALLOWED", "false")
-    assert model_policy.is_model_enabled(model_policy.VISION_MODEL) is False
+    assert model_policy.is_model_enabled(box_vision_model) is False
 
     monkeypatch.setenv("VISION_MODEL_ALLOWED", "true")
-    assert model_policy.is_model_enabled(model_policy.VISION_MODEL) is True
+    assert model_policy.is_model_enabled(box_vision_model) is True
 
 
 def test_switching_locked_keeps_vision_model_when_vision_on(monkeypatch):
@@ -255,7 +265,7 @@ def test_switching_locked_keeps_vision_model_when_vision_on(monkeypatch):
     monkeypatch.setenv("MODEL_SWITCHING_ALLOWED", "false")
     monkeypatch.setenv("VISION_MODEL_ALLOWED", "true")
     assert model_policy.is_model_enabled(DEFAULT_LLM_MODEL) is True
-    assert model_policy.is_model_enabled(model_policy.VISION_MODEL) is True
+    assert model_policy.is_model_enabled(model_policy.vision_model()) is True
     # ...but no other model opens up.
     assert model_policy.is_model_enabled("gpt-5-codex") is False
 

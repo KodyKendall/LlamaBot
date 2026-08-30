@@ -11,6 +11,9 @@ the user has no write path to:
     names). Authoritative: mothership owns this file.
   * The ``ENABLED_MODELS`` / ``DISABLED_MODELS`` environment variables
     (comma-separated), baked into the container by the box operator.
+  * The OpenRouter model registry (``.leonardo/openrouter_models.json``, see
+    :mod:`app.agents.leonardo.openrouter_models`). Also operator-owned and
+    host-mounted; registering an entry there enables it (step 2b below).
 
 **Resolution (most-specific wins):**
 
@@ -20,7 +23,7 @@ the user has no write path to:
      Disable sources UNION: any source can turn a model off.
   1a. **Model-switching lock** — when ``MODEL_SWITCHING_ALLOWED`` is off (it is
      ON by default since 0.7.0; the var is a per-box opt-OUT), only the resolved
-     default text model is enabled, plus the vision model when
+     default text model is enabled, plus the box's resolved vision model when
      ``VISION_MODEL_ALLOWED`` is on (so the image auto-switch still works). This
      coarse operator gate sits above the fail-open/allow-list logic below but
      still yields to an explicit disable in step 1.
@@ -29,6 +32,16 @@ the user has no write path to:
      default degrades to on a box with no META key) are globally enabled, so
      every instance always keeps a model it can actually run. Only an explicit
      disable (step 1) turns them off.
+  2a. **Resolved vision model** — whichever vision model this box holds a key for
+     (see :func:`vision_model`) is enabled while ``VISION_MODEL_ALLOWED`` is on,
+     so image uploads work without the operator hand-editing an allow-list on
+     every box. Yields to an explicit disable in step 1.
+  2b. **Registered OpenRouter models** — an entry in the OpenRouter registry is
+     enabled by that registration. The file is operator-owned and host-mounted,
+     exactly like the two sources above, so requiring the operator to ALSO name
+     it in ``ENABLED_MODELS`` would be configuring one intent twice — the
+     friction that registry exists to remove. Yields to an explicit disable in
+     step 1, and to ``"enabled": false`` in the entry itself.
   3. **Allow-list** — if ``enabled_models`` / ``ENABLED_MODELS`` is configured,
      only the named models are enabled (for everything not covered above). Allow
      sources INTERSECT: neither can broaden what the other restricts.
@@ -57,6 +70,11 @@ from app.agents.leonardo.llm_factory import (
     FALLBACK_TEXT_MODEL,
     has_provider_key,
 )
+from app.agents.leonardo.openrouter_models import (
+    API_KEY_ENV as OPENROUTER_API_KEY_ENV,
+    is_openrouter_model,
+    openrouter_models,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -81,16 +99,52 @@ _INSTANCE_CONFIG_PATH = ".leonardo/instance.json"
 _MODEL_SWITCHING_ALLOWED_DEFAULT = True
 _VISION_ALLOWED_DEFAULT = False
 
-# The single vision model the frontend image auto-switch targets. Kept reachable
-# (when vision is allowed) even while manual switching is locked, so image sends
-# still work without opening up the whole dropdown.
+# The vision model the frontend image auto-switch targets, in preference order.
+# Whichever one this box holds a key for is kept reachable (when vision is
+# allowed) even while manual switching is locked, so image sends still work
+# without opening up the whole dropdown.
 #
-# Same model as the fleet default: Muse is multimodal (see model_capabilities),
-# so on a box with a META key there is nothing to switch TO — the auto-switch
-# only fires for a user who has manually moved to a text-only model. A box
-# WITHOUT a META key has no vision at all, and the frontend says so rather than
-# sending an image to a model that cannot read it.
-VISION_MODEL = "muse-spark-1.2-contributor"
+# First choice is the fleet default itself: Muse is multimodal (see
+# model_capabilities), so on a box with a META key there is nothing to switch TO
+# — the auto-switch only fires for a user who has manually moved to a text-only
+# model. Second choice (0.7.5) is DeepSeek's vision sibling, which runs on the
+# DEEPSEEK_API_KEY every box already has. Before it existed, a box without a META
+# key had no vision at all and the frontend said so; now that is only true of a
+# box with no usable key of either kind.
+_VISION_MODELS = (
+    "muse-spark-1.2-contributor",
+    "deepseek-v4-flash-vision-exp",
+)
+
+# The subset of the above that is ONLY a vision target. Muse is absent on
+# purpose: it is a general-purpose model that happens to be multimodal, and is
+# the fleet's default text model. DeepSeek's vision sibling is not — it is a
+# variant you switch TO for an image and back from, so it must never be picked
+# as a box's default text model (see enabled_default_model).
+_VISION_ONLY_MODELS = frozenset({"deepseek-v4-flash-vision-exp"})
+
+# Preserved as the *preferred* vision model. Prefer `vision_model()` — this
+# constant is what a box with every key resolves to, not what any given box runs.
+VISION_MODEL = _VISION_MODELS[0]
+
+
+def vision_model() -> str:
+    """The vision model THIS box can actually build, or "" if it has none.
+
+    Same shape as :func:`default_text_model` and for the same reason: naming a
+    model whose key the box does not hold is not a degraded box, it is a box
+    where every image send 401s. Returning "" is meaningful — it is what makes
+    the frontend show "no image-capable model is configured" instead of sending
+    an image somewhere it cannot be read.
+
+    Policy (disable lists, allow-lists, the switching lock) is NOT consulted
+    here; this answers only "is it buildable", exactly like default_text_model.
+    """
+    for name in _VISION_MODELS:
+        if has_provider_key(name):
+            return name
+    return ""
+
 
 # Always enabled regardless of any allow-list, so every instance keeps a model it
 # can actually run: the fleet default (Muse, also the image auto-switch target)
@@ -118,6 +172,7 @@ _DEFAULT_ENABLED_MODELS = _FAIL_OPEN_MODELS | {
 _KNOWN_MODELS = [
     "deepseek-v4-flash",
     "deepseek-v4-pro",
+    "deepseek-v4-flash-vision-exp",
     "deepseek-v4-flash-gmi",
     "deepseek-v4-flash-fireworks",
     "claude-4.5-sonnet",
@@ -136,12 +191,26 @@ _KNOWN_MODELS = [
     "gemini-3-pro",
     "gemini-3.1-flash-lite",
     "qwen3.7-plus",
+    "qwen3.8-27b-hetzner",
     "qwen3-8b-runpod",
     "muse-glimmer-30b-runpod",
     "nemotron-lightning-30b-runpod",
     "nemotron-lightning-30b-fireworks",
     "muse-spark-1.2-contributor",
 ]
+
+
+def known_models() -> list:
+    """Every model name the policy knows how to fall back to.
+
+    The compiled list plus whatever the OpenRouter registry currently holds, so a
+    config-registered model can be chosen as a fallback instead of being invisible
+    to the walk in :func:`enabled_default_model`. Registry names go LAST: a
+    third-party-routed endpoint should never outrank a first-party model when
+    picking what a box runs by default.
+    """
+    extra = [name for name in openrouter_models() if name not in _KNOWN_MODELS]
+    return [*_KNOWN_MODELS, *extra]
 
 
 def _csv_names(raw: str) -> list:
@@ -262,11 +331,31 @@ def is_model_enabled(model_name: str) -> bool:
         # chat down entirely instead of merely restricting it.
         if model_name == default_text_model():
             return True
-        if model_name == VISION_MODEL and vision_allowed():
+        if model_name == vision_model() and vision_allowed():
             return True
         return False
     # 3. The fail-open defaults are globally enabled (survive any allow-list).
     if model_name in _FAIL_OPEN_MODELS:
+        return True
+    # 3a. So is the box's resolved vision model, whenever vision is switched on.
+    #     Without this, a DeepSeek-only box could never reach the vision model:
+    #     the compiled default allow-list (step 4) names only the two blessed
+    #     text models, so the operator would have to hand-edit ENABLED_MODELS on
+    #     every box just to make image uploads work. Muse-keyed boxes are
+    #     unaffected — their vision model is already a fail-open default above.
+    #     Still yields to an explicit disable (step 1) and to VISION_MODEL_ALLOWED.
+    if model_name and model_name == vision_model() and vision_allowed():
+        return True
+    # 2b. A registered OpenRouter entry is enabled by its registration — the
+    #     registry file is operator-owned, so the act of adding a block IS the
+    #     operator saying "offer this". See the module docstring.
+    #
+    #     ...but only on a box that holds an OPENROUTER_API_KEY. The registry
+    #     ships a compiled-in example entry, and without this clause EVERY fleet
+    #     box would grow a dropdown option it cannot run, breaking the invariant
+    #     that an unconfigured box offers exactly the two blessed models. A key
+    #     is what turns the compiled-in default from an example into an offer.
+    if is_openrouter_model(model_name) and os.getenv(OPENROUTER_API_KEY_ENV, "").strip():
         return True
     # 4. The allow-list — the box's own, or the compiled two-model default.
     return model_name in _allowlist()
@@ -284,13 +373,24 @@ def enabled_default_model() -> str:
     preferred = default_text_model()
     if is_model_enabled(preferred):
         return preferred
-    for name in _KNOWN_MODELS:
+    for name in known_models():
         # Never resolve the box default onto a model paid for by an individual
         # user's ChatGPT plan: a user who has connected nothing could not chat at
         # all. _KNOWN_MODELS lists them last, which used to be enough — it stopped
         # being enough once the compiled default set turned the API-key models
         # off, leaving a subscription model as the first survivor of this walk.
         if name in _CHATGPT_SUBSCRIPTION_MODELS:
+            continue
+        # Nor onto a model that exists only as a vision switch target. Step 2a
+        # can enable one on a box whose allow-list names nothing else, and this
+        # walk would then hand it every text turn as well.
+        if name in _VISION_ONLY_MODELS:
+            continue
+        # Nor onto a config-registered OpenRouter endpoint. Step 2b enables those
+        # wherever a key exists, so without this the lockout fallback would quietly
+        # move a box onto a third-party-routed endpoint someone added to try — a
+        # thing a user PICKS, never what a box falls back to running.
+        if is_openrouter_model(name):
             continue
         if is_model_enabled(name):
             return name
@@ -301,6 +401,76 @@ def enabled_default_model() -> str:
         FALLBACK_TEXT_MODEL,
     )
     return FALLBACK_TEXT_MODEL
+
+
+def fallback_model(
+    primary: str,
+    *,
+    needs_vision: bool = False,
+    exclude=(),
+) -> Optional[str]:
+    """A different model to finish this step on when ``primary`` stops answering.
+
+    Rung 2 of the resilience ladder (docs/dev/error_telemetry.md §3), which until
+    0.7.5 was never built: when the Muse Spark endpoint accepted requests and
+    streamed nothing on 2026-08-26, rung 1 retried that same dead endpoint five
+    times and there was nowhere else to go.
+
+    Resolved from policy, never from a literal model id — the rule
+    ``test_no_agent_hardcodes_a_fallback_model`` exists to enforce, after every
+    ``rails_*`` agent spent 0.7.0 naming a DeepSeek id inline as its fallback and
+    silently ignoring the fleet default. (That sweep is line-based over source
+    text, so even writing the offending idiom in a comment here trips it — as it
+    should: this is the one function most tempted to reintroduce it.)
+
+    Candidates must be BOTH enabled by policy and buildable on this box's keys.
+    A fallback the box cannot build is a second failure, and one policy disables
+    is one ``get_llm`` would immediately substitute straight back — which on a
+    single-model box would be the model that just stalled.
+
+    ``needs_vision`` keeps the image routing rule intact across the fallback: a
+    turn carrying a screenshot must not be finished by a model that cannot see
+    it, because answering the question without the image is worse than failing.
+
+    Returns ``None`` when there is genuinely nowhere to go (a box pinned to one
+    model, or an image turn with a single vision-capable model). The caller must
+    treat that as "no rung 2" and let the original error surface.
+    """
+    tried = {primary, *exclude}
+
+    if needs_vision:
+        if not vision_allowed():
+            return None
+        for name in _VISION_MODELS:
+            if name in tried:
+                continue
+            if has_provider_key(name) and is_model_enabled(name):
+                return name
+        return None
+
+    # The box's own default first: it is what the operator chose to run, and on
+    # the Muse box in the incident it is also the model that stalled — hence the
+    # tried check rather than returning it outright.
+    preferred = enabled_default_model()
+    if preferred not in tried and has_provider_key(preferred):
+        return preferred
+
+    for name in known_models():
+        if name in tried:
+            continue
+        # The same three exclusions enabled_default_model() walks past, for the
+        # same reasons: never spend an individual user's ChatGPT plan, never hand
+        # a text turn to a vision-only switch target, and never quietly move a
+        # box onto a third-party-routed endpoint someone registered to try out.
+        if name in _CHATGPT_SUBSCRIPTION_MODELS:
+            continue
+        if name in _VISION_ONLY_MODELS:
+            continue
+        if is_openrouter_model(name):
+            continue
+        if is_model_enabled(name) and has_provider_key(name):
+            return name
+    return None
 
 
 def effective_model(model_name: str) -> str:
