@@ -126,6 +126,45 @@ def _status_code_of(exc: BaseException):
     return None
 
 
+#: What a provider says when a model id no longer exists. Matched case-insensitively
+#: against the message, because the shape differs per provider and only the 404 is
+#: reliable across all of them.
+_MODEL_GONE_MARKERS = (
+    "model_not_found",
+    "does not exist",
+    "no longer available",
+    "has been deprecated",
+    "unknown model",
+)
+
+
+def is_model_gone(exc: BaseException) -> bool:
+    """True if this error means the MODEL is retired, not that the call failed.
+
+    Meta retired ``muse-spark-1.2-contributor`` on 2026-08-31 and every request to
+    it returned a deterministic 404. The ladder classified that as "not transient"
+    — correct — and therefore also as "not worth falling back from", which was not:
+    the raw provider 404 went straight to the customer while seven other models sat
+    there working.
+
+    A dead model is the one failure that is BOTH pointless to retry and perfectly
+    recoverable by switching, so it gets its own classification.
+
+    Note ``GET /v1/models`` still listed the retired id, so no health check that
+    reads the model list could have caught this. Only a real completion tells the
+    truth, which is why this is decided from a live error rather than a probe.
+    """
+    if _status_code_of(exc) == 404:
+        return True
+    # OpenRouter surfaces upstream failures as a bare ValueError carrying a dict,
+    # with no status code anywhere — the same blind spot that hid its 502s.
+    haystack = str(exc).lower()
+    for arg in getattr(exc, "args", ()):
+        if isinstance(arg, dict):
+            haystack += " " + " ".join(str(v).lower() for v in arg.values())
+    return any(marker in haystack for marker in _MODEL_GONE_MARKERS)
+
+
 def is_transient_error(exc: BaseException) -> bool:
     """Model-agnostic predicate: is this exception worth retrying?
 

@@ -243,3 +243,22 @@ def mock_build_workflow():
         workflow.get_state = MagicMock(return_value={"messages": []})
         mock.return_value = workflow
         yield mock 
+
+@pytest.fixture(autouse=True)
+def _reset_model_health():
+    """Clear the dead-model cache between tests.
+
+    ``model_health`` is process-global by design (it is a cache, not a decision), so a
+    test that marks a model retired leaks that record into every later test in the
+    session. Under random ordering that surfaces as an unrelated file failing —
+    `test_enabled_default_model_prefers_project_default` did exactly that, and passed
+    in isolation, which is the worst shape of flake to chase.
+
+    Reset on both sides so it does not matter whether the leak came from before or
+    after.
+    """
+    from app.agents.leonardo import model_health
+
+    model_health.reset()
+    yield
+    model_health.reset()

@@ -28,9 +28,16 @@ from langchain_openai import ChatOpenAI
 from langchain_qwq import ChatQwen
 
 from app.agents.leonardo.openrouter_models import (
+    API_KEY_ENV as _OPENROUTER_API_KEY_ENV,
     api_base as openrouter_api_base,
     get_openrouter_model,
+    is_openrouter_model,
 )
+
+
+def openrouter_api_key_env() -> str:
+    """The single env var every OpenRouter-routed model authenticates with."""
+    return _OPENROUTER_API_KEY_ENV
 
 
 logger = logging.getLogger(__name__)
@@ -45,6 +52,29 @@ DEFAULT_LLM_MODEL = "muse-spark-1.2-contributor"
 # always build this one, so it is what keeps chat working on a box the Muse
 # rollout has not reached (or that deliberately opts out).
 FALLBACK_TEXT_MODEL = "deepseek-v4-flash"
+
+
+def default_llm_model() -> str:
+    """The default model this box is TOLD to run, before any buildability check.
+
+    Read at call time so a .env sweep plus a restart moves the fleet. Until 0.7.6
+    this was a bare constant, so when Meta retired the compiled default on
+    2026-08-31 — 89% of fleet turns — nothing in the box could be told to run
+    anything else, and a config outage needed a release to fix.
+
+    Env only; the mothership override is layered on in
+    :func:`model_policy.configured_default_model`, which owns the full precedence.
+    """
+    return (os.getenv("DEFAULT_LLM_MODEL") or "").strip() or DEFAULT_LLM_MODEL
+
+
+def fallback_text_model() -> str:
+    """What a locked-out box runs, overridable with ``FALLBACK_TEXT_MODEL``.
+
+    A fleet forbidden from running DeepSeek has to be able to move this too, or
+    the last line of defence is still a banned model.
+    """
+    return (os.getenv("FALLBACK_TEXT_MODEL") or "").strip() or FALLBACK_TEXT_MODEL
 
 # --- Stall detection -------------------------------------------------------
 #
@@ -257,7 +287,17 @@ def has_provider_key(model_name: str) -> bool:
     A model absent from `DEFAULT_MODEL_KEY_ENVS` reports True: this is not a
     general reachability check and must not start disabling models it has no
     opinion about.
+
+    The one exception is an OpenRouter-registered model. Those are absent from the
+    map by construction (they are added from config, not code), so they all
+    reported True — including on a box with no OPENROUTER_API_KEY. That was
+    harmless while such a model could never BE the default; once an operator can
+    name one, it means the box "defaults" to something that 401s on every turn.
+    They route through one shared credential, so the check is exact.
     """
+    if is_openrouter_model(model_name):
+        return provider_key(openrouter_api_key_env()) != _MISSING_KEY_PLACEHOLDER
+
     env_vars = DEFAULT_MODEL_KEY_ENVS.get(model_name)
     if not env_vars:
         return True
