@@ -10,6 +10,7 @@ import httpx
 import json
 import logging
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -152,6 +153,55 @@ class MothershipClient:
         except httpx.RequestError as e:
             logger.error(f"Lease renewal request failed: {e}")
             return None
+
+    async def report_rails_health(self, *, rails_status: int, rails_ms: int) -> Optional[dict]:
+        """
+        POST /api/leonardo/report_health
+
+        Tell the mothership whether the customer's Rails app is answering.
+
+        Until this existed the fleet heartbeat came from LlamaBot alone, so a box
+        whose Rails app was completely down still looked healthy: crm-4 called the
+        mothership 12 times during a 10 minute outage (SI#417). LlamaBot's liveness
+        is not the box's liveness.
+
+        Fail-open on purpose. A 404 means the mothership is older than this build
+        and does not serve the endpoint yet; the two halves may ship in either
+        order, so 404 is a no-op rather than an error. Nothing here may raise —
+        the caller's next job is lease renewal, which keeps the box alive.
+        """
+        if not self.reporting_enabled:
+            return
+
+        try:
+            async with httpx.AsyncClient(timeout=self.TIMEOUT) as client:
+                response = await client.post(
+                    f"{self.config['mothership_url']}/api/leonardo/report_health",
+                    json={
+                        "instance_name": self.config["instance_name"],
+                        "rails_status": rails_status,
+                        "rails_ms": rails_ms,
+                        "checked_at": datetime.now(timezone.utc).isoformat(),
+                    },
+                    headers={"Authorization": f"Bearer {self.config['mothership_api_token']}"},
+                )
+                response.raise_for_status()
+                # The response is also the delivery path for model policy: it is the
+                # only mothership call every box makes on every tick, gated on nothing.
+                try:
+                    return response.json()
+                except ValueError:
+                    return None
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                logger.debug("Mothership has no report_health endpoint yet; skipping")
+                return None
+            logger.error(
+                f"Rails health report failed (HTTP {e.response.status_code}): {e.response.text}"
+            )
+        except httpx.RequestError as e:
+            logger.error(f"Rails health report request failed: {e}")
+        return None
 
     async def report_message(
         self,

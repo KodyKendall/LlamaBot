@@ -23,8 +23,10 @@ from app.agents.leonardo.llm_factory import (
 # The box's resolved default (Muse where the box has a META key, DeepSeek
 # where it does not) — never a hardcoded id, or a turn that arrives without
 # an explicit llm_model silently ignores the fleet default.
+from app.agents.leonardo import model_health
 from app.agents.leonardo.model_policy import enabled_default_model, fallback_model
 from app.agents.leonardo.resilience import (
+    is_model_gone,
     is_transient_error,
     retry_notice_text,
     _MODEL_RETRY_MAX_ATTEMPTS,
@@ -623,6 +625,39 @@ class DynamicModelMiddleware(AgentMiddleware):
                 elapsed = time.monotonic() - started_at
                 # A deterministic error (bad kwarg, 400) fails identically on
                 # every provider, so it must not spend rung 2's budget either.
+                # A RETIRED model is the one failure that is both pointless to
+                # retry and perfectly recoverable by moving. It is not transient,
+                # so before 0.7.6 it fell into the branch below and the raw
+                # provider 404 went straight to the customer while every other
+                # model sat there working — which is what turned Meta's
+                # 2026-08-31 retirement of our default into a fleet outage.
+                # Skip rung 1 entirely (a 404 is known-permanent on the first
+                # response) and remember it so later turns do not pay for it.
+                if is_model_gone(e):
+                    model_health.mark_model_gone(llm_model)
+                    fallback = (
+                        None if fallbacks_used >= _MODEL_FALLBACK_MAX_RUNGS
+                        else self._next_rung(request, llm_model, tried)
+                    )
+                    if fallback is None:
+                        logger.error(
+                            f"{llm_model} reports itself retired and there is no "
+                            f"other model available on this box"
+                        )
+                        _record_bad_request_shape(e, req, llm_model)
+                        raise
+                    logger.warning(
+                        f"{llm_model} reports itself retired; finishing this step "
+                        f"on {fallback}"
+                    )
+                    _announce_fallback(llm_model, fallback, sync=True)
+                    llm_model = fallback
+                    tried.add(fallback)
+                    fallbacks_used += 1
+                    req = self._override(request, llm_model)
+                    attempt = 0
+                    started_at = time.monotonic()
+                    continue
                 if not is_transient_error(e):
                     _record_bad_request_shape(e, req, llm_model)
                     raise
@@ -681,6 +716,39 @@ class DynamicModelMiddleware(AgentMiddleware):
             except Exception as e:
                 attempt += 1
                 elapsed = time.monotonic() - started_at
+                # A RETIRED model is the one failure that is both pointless to
+                # retry and perfectly recoverable by moving. It is not transient,
+                # so before 0.7.6 it fell into the branch below and the raw
+                # provider 404 went straight to the customer while every other
+                # model sat there working — which is what turned Meta's
+                # 2026-08-31 retirement of our default into a fleet outage.
+                # Skip rung 1 entirely (a 404 is known-permanent on the first
+                # response) and remember it so later turns do not pay for it.
+                if is_model_gone(e):
+                    model_health.mark_model_gone(llm_model)
+                    fallback = (
+                        None if fallbacks_used >= _MODEL_FALLBACK_MAX_RUNGS
+                        else self._next_rung(request, llm_model, tried)
+                    )
+                    if fallback is None:
+                        logger.error(
+                            f"{llm_model} reports itself retired and there is no "
+                            f"other model available on this box"
+                        )
+                        _record_bad_request_shape(e, req, llm_model)
+                        raise
+                    logger.warning(
+                        f"{llm_model} reports itself retired; finishing this step "
+                        f"on {fallback}"
+                    )
+                    await _announce_fallback(llm_model, fallback, sync=False)
+                    llm_model = fallback
+                    tried.add(fallback)
+                    fallbacks_used += 1
+                    req = self._override(request, llm_model)
+                    attempt = 0
+                    started_at = time.monotonic()
+                    continue
                 if not is_transient_error(e):
                     # A provider that rejects the REQUEST tells us nothing
                     # actionable ("'param': None" — 32 occurrences on 7 boxes in

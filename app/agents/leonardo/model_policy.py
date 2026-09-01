@@ -64,10 +64,12 @@ import logging
 import os
 from typing import Optional
 
+from app.agents.leonardo import model_health
 from app.agents.leonardo.llm_factory import (
     _CHATGPT_SUBSCRIPTION_MODELS,
     DEFAULT_LLM_MODEL,
     FALLBACK_TEXT_MODEL,
+    fallback_text_model,
     has_provider_key,
 )
 from app.agents.leonardo.openrouter_models import (
@@ -235,6 +237,100 @@ def model_switching_allowed() -> bool:
     return _env_bool("MODEL_SWITCHING_ALLOWED", _MODEL_SWITCHING_ALLOWED_DEFAULT)
 
 
+def remote_policy() -> dict:
+    """Model policy the mothership pushed to this box. ``{}`` when none.
+
+    Every key is validated independently and a malformed one is DROPPED rather
+    than poisoning the payload: this channel reaches every box in a single lease
+    interval, so one bad value must not be able to take the fleet down. Patched
+    wholesale in tests.
+    """
+    try:
+        from app.services import model_policy_store
+
+        raw = model_policy_store.load()
+    except Exception as e:  # noqa: BLE001 — never let telemetry config break chat
+        logger.warning("Ignoring unreadable remote model policy: %s", e)
+        return {}
+
+    clean: dict = {}
+    default_model = raw.get("default_model")
+    if isinstance(default_model, str) and default_model.strip():
+        clean["default_model"] = default_model.strip()
+    elif default_model is not None:
+        logger.warning("Remote model policy: ignoring non-string default_model %r", default_model)
+
+    for key in ("disabled_models", "enabled_models"):
+        value = raw.get(key)
+        if value is None:
+            continue
+        if isinstance(value, list) and all(isinstance(v, str) for v in value):
+            names = [v.strip() for v in value if v.strip()]
+            if names:
+                clean[key] = names
+        else:
+            logger.warning("Remote model policy: ignoring malformed %s %r", key, value)
+    return clean
+
+
+def configured_default_model() -> Optional[str]:
+    """The model this box was TOLD to run, or None if nobody said.
+
+    Precedence, most specific first: **mothership > instance.json > env**. The
+    compiled constant is deliberately NOT part of this — "nobody configured a
+    default" and "the default happens to equal the compiled one" are different
+    facts, and only the first should fall through to the normal policy walk.
+
+    The mothership outranks a box's own .env because it is the operator of record
+    on a fleet box: a stale hand-edit made during the last incident must not make
+    the next remote fix silently no-op on exactly the boxes someone touched.
+    """
+    remote = remote_policy().get("default_model")
+    if remote:
+        return remote
+
+    config = _read_instance_config() or {}
+    instance_default = config.get("default_model")
+    if isinstance(instance_default, str) and instance_default.strip():
+        return instance_default.strip()
+
+    env_default = (os.getenv("DEFAULT_LLM_MODEL") or "").strip()
+    return env_default or None
+
+
+def _usable_configured_default() -> Optional[str]:
+    """The configured default, but only if this box can actually run it.
+
+    The invariant that outranks the operator's intent: the box always resolves to
+    a model it can build. A default that is unknown, keyless, or currently
+    answering 404 degrades to the normal walk instead of locking chat out — a bad
+    remote value must never be more damaging than the outage it was sent to fix.
+    """
+    name = configured_default_model()
+    if not name:
+        return None
+    if name not in known_models():
+        logger.warning(
+            "Configured default model %r is not a model this build knows; "
+            "ignoring it and resolving normally.", name,
+        )
+        return None
+    if not has_provider_key(name):
+        logger.warning(
+            "Configured default model %r has no provider key on this box; "
+            "ignoring it so turns do not 401. Set the key or change the default.",
+            name,
+        )
+        return None
+    if model_health.is_gone(name):
+        logger.warning(
+            "Configured default model %r is reporting itself retired; routing "
+            "around it until the record expires.", name,
+        )
+        return None
+    return name
+
+
 def default_text_model() -> str:
     """The default model THIS box can actually build.
 
@@ -248,9 +344,13 @@ def default_text_model() -> str:
     here; this answers only "is it buildable". ``enabled_default_model`` layers
     the policy on top.
     """
+    configured = _usable_configured_default()
+    if configured:
+        return configured
+
     if has_provider_key(DEFAULT_LLM_MODEL):
         return DEFAULT_LLM_MODEL
-    return FALLBACK_TEXT_MODEL
+    return fallback_text_model()
 
 
 def vision_allowed() -> bool:
@@ -291,13 +391,20 @@ def _allowlist() -> Optional[set]:
     in the module docstring) rather than "everything is enabled".
     """
     env_allow = _csv_names(os.environ.get("ENABLED_MODELS", "")) or None
+    remote_allow = remote_policy().get("enabled_models") or None
     allow: Optional[set] = None
-    for source in (_instance_list("enabled_models"), env_allow):
+    for source in (_instance_list("enabled_models"), env_allow, remote_allow):
         if source is None:
             continue
         source_set = set(source)
         allow = source_set if allow is None else (allow & source_set)
     if allow is None:
+        # No allow-list configured anywhere. A box told to run a specific model
+        # gets that model, not the compiled two — same reasoning as the fail-open
+        # narrowing above.
+        configured = _usable_configured_default()
+        if configured:
+            return {configured, *_CHATGPT_SUBSCRIPTION_MODELS}
         return set(_DEFAULT_ENABLED_MODELS)
     return allow
 
@@ -309,7 +416,23 @@ def _disabled_set() -> set:
     instance_disabled = _instance_list("disabled_models") or []
     disabled.update(env_disabled)
     disabled.update(instance_disabled)
+    # The mothership can disable too — same union rule as every other source, so
+    # a remote ban cannot be broadened away by a stale local list.
+    disabled.update(remote_policy().get("disabled_models") or [])
     return disabled
+
+
+def _fail_open_models() -> frozenset:
+    """Models that survive any allow-list, so a box always keeps something runnable.
+
+    Normally the compiled pair. Once the operator names a default this box can
+    actually build, that model IS the guarantee and the compiled pair loses the
+    privilege — otherwise a retired compiled default stays selectable forever.
+    """
+    configured = _usable_configured_default()
+    if configured:
+        return frozenset({configured})
+    return _FAIL_OPEN_MODELS
 
 
 def is_model_enabled(model_name: str) -> bool:
@@ -317,6 +440,13 @@ def is_model_enabled(model_name: str) -> bool:
 
     See the module docstring for the full resolution order.
     """
+    # 0. The box's CONFIGURED default outranks even an explicit disable. An
+    #    operator who names a default and then disables it has contradicted
+    #    himself, and the alternative reading leaves the box with no model at all.
+    #    Scoped to an explicitly configured default: disabling the COMPILED
+    #    default keeps its old meaning.
+    if model_name and model_name == configured_default_model():
+        return True
     # 1. Explicit disable wins over everything — even the fail-open defaults.
     if model_name in _disabled_set():
         return False
@@ -334,8 +464,13 @@ def is_model_enabled(model_name: str) -> bool:
         if model_name == vision_model() and vision_allowed():
             return True
         return False
-    # 3. The fail-open defaults are globally enabled (survive any allow-list).
-    if model_name in _FAIL_OPEN_MODELS:
+    # 3. The fail-open defaults are globally enabled (survive any allow-list) —
+    #    but a box with a usable CONFIGURED default already has its guaranteed
+    #    runnable model, so the compiled pair stops being fail-open. That is what
+    #    lets the substitution reach a user whose 365-day llmModel cookie still
+    #    names the retired model: while Muse stayed fail-open it remained
+    #    "enabled" and effective_model handed it straight back.
+    if model_name in _fail_open_models():
         return True
     # 3a. So is the box's resolved vision model, whenever vision is switched on.
     #     Without this, a DeepSeek-only box could never reach the vision model:
@@ -370,10 +505,24 @@ def enabled_default_model() -> str:
     (misconfiguration), returns the fallback text model anyway so the instance is
     never locked out of chat.
     """
+    # A configured default wins outright, fail-open: the policy lists must not be
+    # able to disable the box's own default out from under it and drop it back on
+    # the compiled fallback. That is exactly the shape of the 2026-08-31 outage —
+    # banning DeepSeek fleet-wide would have put every box ON DeepSeek, because
+    # the lockout path returned the compiled constant and ignored the disable list.
+    configured = _usable_configured_default()
+    if configured:
+        return configured
+
     preferred = default_text_model()
-    if is_model_enabled(preferred):
+    if is_model_enabled(preferred) and not model_health.is_gone(preferred):
         return preferred
     for name in known_models():
+        # A model that just told us it no longer exists is not a fallback. Without
+        # this, every turn re-discovers the same 404 and pays for it before
+        # answering, for as long as the retirement lasts.
+        if model_health.is_gone(name):
+            continue
         # Never resolve the box default onto a model paid for by an individual
         # user's ChatGPT plan: a user who has connected nothing could not chat at
         # all. _KNOWN_MODELS lists them last, which used to be enough — it stopped
@@ -394,13 +543,15 @@ def enabled_default_model() -> str:
             continue
         if is_model_enabled(name):
             return name
+    lockout_fallback = fallback_text_model()
     logger.warning(
         "Model policy disables all known models; falling back to %s. "
         "Check enabled_models/disabled_models in instance.json and "
-        "ENABLED_MODELS/DISABLED_MODELS.",
-        FALLBACK_TEXT_MODEL,
+        "ENABLED_MODELS/DISABLED_MODELS. Set DEFAULT_LLM_MODEL (or "
+        "FALLBACK_TEXT_MODEL) to choose what a locked-out box runs.",
+        lockout_fallback,
     )
-    return FALLBACK_TEXT_MODEL
+    return lockout_fallback
 
 
 def fallback_model(
@@ -452,7 +603,8 @@ def fallback_model(
     # the Muse box in the incident it is also the model that stalled — hence the
     # tried check rather than returning it outright.
     preferred = enabled_default_model()
-    if preferred not in tried and has_provider_key(preferred):
+    if (preferred not in tried and has_provider_key(preferred)
+            and not model_health.is_gone(preferred)):
         return preferred
 
     for name in known_models():
@@ -468,6 +620,10 @@ def fallback_model(
             continue
         if is_openrouter_model(name):
             continue
+        # Rung 2 exists to finish the turn somewhere else; a model that just told
+        # us it is retired is the one place guaranteed not to work.
+        if model_health.is_gone(name):
+            continue
         if is_model_enabled(name) and has_provider_key(name):
             return name
     return None
@@ -482,6 +638,13 @@ def effective_model(model_name: str) -> str:
     silent: the dropdown kept showing the model the user chose while every turn
     ran on the default, and the only trace was a WARNING in the container log.
     """
+    # A model that reported itself retired is never "effective", whatever the policy
+    # says. An allow-list is the operator stating a model MAY be used; it is not a
+    # claim that the model still exists. Without this a box whose instance.json names
+    # the retired model kept handing it back — and because the llmModel cookie lives
+    # 365 days, this function is the only thing that reaches an already-pinned user.
+    if model_health.is_gone(model_name):
+        return enabled_default_model()
     if is_model_enabled(model_name):
         return model_name
     return enabled_default_model()
