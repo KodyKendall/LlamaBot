@@ -81,7 +81,7 @@ def plain_chat(state: RailsAgentState):
     # on its own. A long chat thread has no ceiling without it. Same shared
     # middleware every create_agent mode runs.
     convo, compaction_ops = compact_messages_if_needed(
-        state["messages"], summary_prompt=SUMMARIZATION_PROMPT,
+        state["messages"], summary_prompt=SUMMARIZATION_PROMPT, llm_model=llm_model,
     )
     # Raw node — no DynamicModelMiddleware, so the rung-1 transient retry has to
     # be at the call site, same as rails_beginner_agent / rails_ai_builder_agent.

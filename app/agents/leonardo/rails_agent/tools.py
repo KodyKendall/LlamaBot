@@ -1308,6 +1308,12 @@ _EXEC_ENV_ALLOWLIST = frozenset({
     # Shell / runtime plumbing
     "PATH", "HOME", "HOSTNAME", "TERM", "LANG", "LC_ALL", "PWD", "SHELL", "USER",
     "TZ", "RUBYOPT", "RAILS_ENV", "RACK_ENV", "NODE_ENV",
+    # Temp-dir plumbing. Carries no secret, and every native toolchain reads it
+    # (Bun, Node, Chromium, Ruby's Dir.tmpdir). The 0.7.6 base image bakes
+    # TMPDIR=/rails/tmp; blanking it made Tailwind v4 — a single-file Bun binary
+    # that extracts its native addon into $TMPDIR — die with ERR_DLOPEN_FAILED
+    # on every box, so `tailwindcss:build` was broken fleet-wide.
+    "TMPDIR", "TMP", "TEMP",
     # Bundler / gem / build caches
     "GEM_HOME", "GEM_PATH", "BUNDLE_PATH", "BUNDLE_APP_CONFIG", "BUNDLE_WITHOUT",
     "BOOTSNAP_CACHE_DIR", "MALLOC_ARENA_MAX",
@@ -1399,6 +1405,24 @@ def build_exec_env(container_name: str, extra: Optional[list] = None) -> list:
     return entries
 
 
+def scrub_unset_prefix(env_entries: list) -> str:
+    """``unset A B C; `` for every name ``build_exec_env`` blanked.
+
+    Blanking is what Docker's exec API supports, but a blank variable and a
+    missing variable are different things to ``Dir.tmpdir``, ``os.tmpdir()``,
+    Bun, ``git`` (``GIT_DIR=``) and every ``${VAR:-default}`` in a shell script.
+    Prefixing the snippet with an ``unset`` closes that gap for the shell case;
+    the ``Env`` blanks stay as the defence for anything that is not a shell.
+
+    A blanked-then-unset secret is no more readable than a blanked one —
+    ``printenv OPENAI_API_KEY`` prints nothing either way.
+    """
+    names = [e[:-1] for e in env_entries if e.endswith("=")]
+    if not names:
+        return ""
+    return "unset " + " ".join(shlex.quote(n) for n in names) + "; "
+
+
 def get_rails_container_name():
     """Dynamically get the Rails container name by looking for containers with 'llamapress' in the name.
 
@@ -1460,20 +1484,26 @@ def rails_api_sh(snippet: str, workdir: str = WORKDIR, timeout_seconds: int = 60
         # Get container name dynamically (handles restarts and varying prefixes)
         container_name = get_rails_container_name()
 
+        # RUBYOPT suppresses gem deprecation noise; everything else in here is
+        # a blank that hides a secret from the command. See build_exec_env.
+        scrub_env = build_exec_env(container_name, ["RUBYOPT=-W0"])
+        # `sh -l` sources the profile files after Env is applied but before the
+        # snippet, so the unset runs last and wins over anything /etc/profile.d
+        # puts back. See scrub_unset_prefix for why blanking alone is not enough.
+        unset_prefix = scrub_unset_prefix(scrub_env)
+
         # Create the exec payload
         payload = {
             "AttachStdout": True,
             "AttachStderr": True,
             "Tty": True,
-            "Cmd": ["/bin/sh", "-lc", snippet],
+            "Cmd": ["/bin/sh", "-lc", unset_prefix + snippet],
             "WorkingDir": workdir,
             # uid 1000 while the Rails server runs as root — which is also what
             # makes /proc/1/environ unreadable from here, so the scrub below
             # can't be sidestepped by reading the server's environment.
             "User": "1000:1000",
-            # RUBYOPT suppresses gem deprecation noise; everything else in here is
-            # a blank that hides a secret from the command. See build_exec_env.
-            "Env": build_exec_env(container_name, ["RUBYOPT=-W0"]),
+            "Env": scrub_env,
         }
 
         # Create exec instance using curl

@@ -1,0 +1,22 @@
+0.7.7:
+[x] - A model that dies mid-answer now switches models instead of retrying itself.
+[x] - Model choices are ordered fallback lists now, so one dead provider isn't a dead turn.
+[x] - The vision model follows config, so a bad one is a setting change, not a release.
+[x] - A single box can be pointed at different models than the rest of the fleet.
+[x] - Meta's Muse Spark 1.3 is registered and selectable (Meta hasn't granted our API key access yet, so it 404s and falls back until they do).
+[x] - Your chosen model now survives a page reload instead of snapping back to the default.
+[x] - Saving a recipe to your personal cookbook works again.
+[x] - New models can be added from the mothership without shipping a LlamaBot release, and a pushed model config can never point one of this box's API keys at someone else's server.
+[x] - Browser-extension errors (MetaMask et al.) no longer ride along in your prompt.
+[x] - Leo can build Tailwind again; its temp dir was blanked to nothing.
+[x] - Scrubbed variables are now unset in Leo's shell, not left empty.
+[x] - The out-of-messages card no longer says "free" to paying customers.
+[x] - That card now tells you the real time your messages come back.
+[x] - Two new building-screen tips: new chats, and bring your ChatGPT plan.
+[x] - Clicking "Ask Leo to fix this" twice no longer sends it twice.
+[x] - Leo's automatic save-points work again on every box.
+[x] - Leo is told never to precompile assets, which freezes them in dev.
+[x] - Compaction now triggers on the provider's real token count, so Muse and others stop hitting 600k.
+[x] - The summarizer is whatever model you're chatting with, with the old chain as fallback.
+[x] - A failed summary is dropped, never stored as the thread's memory.
+[x] - Sub-agents get the same compaction and tool-output caps as the main agent.

@@ -28,3 +28,41 @@ export function chooseInitialModel({ options, defaultModel }) {
   const wanted = selectable.find(o => o.value === defaultModel);
   return (wanted || selectable[0]).value;
 }
+
+/**
+ * Whether a REMEMBERED model choice can be applied to the dropdown yet.
+ *
+ * A user's own choice arrives before the dropdown is complete. chat.html carries
+ * a static <option> only for registry models; config-registered models
+ * (OpenRouter endpoints) are injected at runtime by addMissingModelOptions()
+ * inside fetchAvailableModels(). Both startup paths that read a remembered
+ * choice — the llmModel cookie and the ?llm_model= pin — run before that
+ * injection, so validating there discards every config-registered choice. On a
+ * box whose selectable models are all config-registered that is 100% of choices,
+ * and the user is returned to the fleet default on every page load (0.7.7).
+ *
+ * So the startup paths record the choice as INTENT and this decides, once the
+ * options exist. Kept as a standalone pure function for the same reason as
+ * chooseInitialModel: the decision is testable without standing up the ChatApp.
+ *
+ * @param {{value: string, disabled?: boolean}[]} options  The dropdown's options,
+ *   AFTER addMissingModelOptions() and BEFORE availability is applied.
+ * @param {?string} remembered  The cookie's model, or the ?llm_model= pin.
+ * @returns {{select: ?string, userChoseModel: boolean}} `select` is the value to
+ *   put on the dropdown, or null to leave it alone. `userChoseModel` is false
+ *   when the choice cannot be honoured, which lets the server default apply.
+ */
+export function resolveRememberedModel({ options, remembered }) {
+  const none = { select: null, userChoseModel: false };
+  if (!remembered) return none;
+  // A DISABLED option still counts as chosen. Availability is applied after this
+  // runs and the needsNewSelection repair already owns that case: it moves to the
+  // first available model, leaves the llmModel cookie intact and raises
+  // showModelSubstitutionNotice(). Discarding the choice here would destroy the
+  // user's pick on a box that is only temporarily missing a key.
+  const match = (options || []).some(o => o.value === remembered);
+  // No option at all means this build cannot run the id — a model removed from
+  // the registry. Pinning it would leave the dropdown on a value setModel()
+  // silently no-ops on, so the server default takes over instead.
+  return match ? { select: remembered, userChoseModel: true } : none;
+}

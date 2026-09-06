@@ -53,6 +53,10 @@ MODEL_CAPABILITIES = {
     # (Audio has no category of its own in get_file_category, so it isn't listed.)
     'muse-spark-1.2-contributor': {'images': True, 'video': True, 'pdf': True},
 
+    # Muse Spark 1.3 (Meta, 2026-09-02) - same "native multimodal perception"
+    # over video, images and documents as 1.2, per Meta's model page.
+    'muse-spark-1.3-contributor': {'images': True, 'video': True, 'pdf': True},
+
     # Qwen3.7 Plus (Alibaba) - multimodal agent model: images and video; PDFs
     # are ingested as page-images, not natively, so we leave pdf off.
     'qwen3.7-plus': {'images': True, 'video': True, 'pdf': False},

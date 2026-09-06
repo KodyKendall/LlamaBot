@@ -692,3 +692,238 @@ async def test_policy_substitution_still_labels_itself():
 
     assert frame["type"] == "model_substituted"
     assert frame["reason"] == "policy"
+
+
+# ---------------------------------------------------------------------------
+# Acceptance 6 — a MID-STREAM stall skips rung 1 entirely (0.7.7)
+# ---------------------------------------------------------------------------
+#
+# The tests above are the chunks_received == 0 case: the provider accepted the
+# request and produced nothing, so rung 1 is right — a retry costs one timeout
+# and may well land on a healthy replica.
+#
+# This is the other variant, and it is a different animal. On 2026-08-31 the
+# fleet default moved to glm-5.3-flash-zai, pinned to z-ai/fp8 with
+# allow_fallbacks: false. Turns started dying with chunks_received=478: the
+# provider accepted the request, did the expensive work, streamed most of an
+# answer, and then went quiet. 38 rows across 6 customer boxes in 7 days, none
+# before 08-31. The customer's report was "they insist they're still making
+# progress but the task step hasn't progressed for hours".
+#
+# Retrying THAT is strictly worse than moving. The work is already thrown away,
+# the pin guarantees the retry lands on the same sick replica, and each attempt
+# costs a whole generation rather than a fast 503 — so rung 1's 60s budget buys
+# nothing at all before rung 2 finally gets a turn.
+
+def _midstream_stall(model="glm-5.3-flash-zai", chunks=478):
+    """A stream that produced content and then stopped.
+
+    Built from the real ``langchain_openai`` class, not a stand-in: the whole
+    fix rests on that exception being a ``TimeoutError`` that carries
+    ``chunks_received``, and a library change to either is a change this must
+    notice.
+    """
+    from langchain_openai.chat_models._client_utils import StreamChunkTimeoutError
+
+    return StreamChunkTimeoutError(25.0, model_name=model, chunks_received=chunks)
+
+
+def test_the_real_exception_carries_the_chunk_count():
+    """The attribute the fix reads, on the class the provider actually raises.
+
+    Its own docstring promises these "so diagnostic code doesn't need to regex
+    the message" — this is that diagnostic code taking it at its word.
+    """
+    exc = _midstream_stall()
+
+    assert isinstance(exc, TimeoutError), (
+        "if this stops holding, is_transient_error stops seeing it at all"
+    )
+    assert exc.chunks_received == 478
+    assert _midstream_stall(chunks=0).chunks_received == 0
+
+
+def test_a_midstream_stall_is_told_apart_from_a_zero_chunk_one():
+    from app.agents.leonardo.resilience import is_midstream_stall, is_transient_error
+
+    assert is_midstream_stall(_midstream_stall(chunks=478)) is True
+    assert is_midstream_stall(_midstream_stall(chunks=0)) is False
+
+    # Untouched: a zero-chunk stall keeps its rung-1 retry, which is the
+    # 2026-08-26 Muse fix and still correct.
+    assert is_transient_error(_midstream_stall(chunks=0)) is True
+
+    # Not every timeout is a stall, and not every object with a chunk count is
+    # a timeout.
+    assert is_midstream_stall(TimeoutError("read timed out")) is False
+    assert is_midstream_stall(ValueError("chunks_received=478")) is False
+
+
+def test_a_midstream_stall_moves_to_rung_2_without_retrying(
+    monkeypatch, models_build, no_backoff
+):
+    """The behavioural claim: one call on the primary, then a different model."""
+    monkeypatch.setattr(mw, "fallback_model", lambda *a, **k: "deepseek-v4-flash")
+
+    req = _Req("glm-5.3-flash-zai")
+    calls = []
+
+    def handler(r):
+        calls.append(r.model.name)
+        if r.model.name == "glm-5.3-flash-zai":
+            raise _midstream_stall()
+        return "answered"
+
+    assert mw.DynamicModelMiddleware().wrap_model_call(req, handler) == "answered"
+    assert calls == ["glm-5.3-flash-zai", "deepseek-v4-flash"], (
+        f"retried the replica that already threw the work away: {calls}"
+    )
+
+
+def test_a_midstream_stall_moves_to_rung_2_without_retrying_async(
+    monkeypatch, models_build, no_backoff
+):
+    """The websocket path carries its own copy of the ladder; it must not drift."""
+    monkeypatch.setattr(mw, "fallback_model", lambda *a, **k: "deepseek-v4-flash")
+
+    req = _Req("glm-5.3-flash-zai")
+    calls = []
+
+    async def handler(r):
+        calls.append(r.model.name)
+        if r.model.name == "glm-5.3-flash-zai":
+            raise _midstream_stall()
+        return "answered"
+
+    out = asyncio.run(mw.DynamicModelMiddleware().awrap_model_call(req, handler))
+    assert out == "answered"
+    assert calls == ["glm-5.3-flash-zai", "deepseek-v4-flash"], (
+        f"async path still retries the stalled replica: {calls}"
+    )
+
+
+def test_a_zero_chunk_stall_still_retries_the_same_model(
+    monkeypatch, models_build, no_backoff
+):
+    """Regression guard on the 2026-08-26 fix.
+
+    The narrow reading of this ticket — "stalls skip rung 1" — would delete the
+    retry that incident bought. It must stay: a provider that produced nothing
+    has thrown nothing away, and the next attempt often lands on a healthy
+    replica.
+    """
+    monkeypatch.setattr(mw, "fallback_model", lambda *a, **k: "deepseek-v4-flash")
+
+    req = _Req("glm-5.3-flash-zai")
+    calls = []
+
+    def handler(r):
+        calls.append(r.model.name)
+        if len(calls) == 1:
+            raise _midstream_stall(chunks=0)
+        return "answered"
+
+    assert mw.DynamicModelMiddleware().wrap_model_call(req, handler) == "answered"
+    assert calls == ["glm-5.3-flash-zai", "glm-5.3-flash-zai"], (
+        f"a zero-chunk stall lost its rung-1 retry: {calls}"
+    )
+
+
+def test_a_zero_chunk_stall_still_retries_the_same_model_async(
+    monkeypatch, models_build, no_backoff
+):
+    monkeypatch.setattr(mw, "fallback_model", lambda *a, **k: "deepseek-v4-flash")
+
+    req = _Req("glm-5.3-flash-zai")
+    calls = []
+
+    async def handler(r):
+        calls.append(r.model.name)
+        if len(calls) == 1:
+            raise _midstream_stall(chunks=0)
+        return "answered"
+
+    out = asyncio.run(mw.DynamicModelMiddleware().awrap_model_call(req, handler))
+    assert out == "answered"
+    assert calls == ["glm-5.3-flash-zai", "glm-5.3-flash-zai"]
+
+
+def test_a_midstream_stall_does_not_mark_the_model_gone(
+    monkeypatch, models_build, no_backoff
+):
+    """The model is fine; this replica is sick.
+
+    ``mark_model_gone`` carries a 15-minute TTL and steers every later turn on
+    the box away. That is right for a 404 (the id no longer exists anywhere) and
+    wrong here — the next turn may well be routed to a healthy replica, and
+    banning the box default over one bad stream is a self-inflicted outage.
+    """
+    monkeypatch.setattr(mw, "fallback_model", lambda *a, **k: "deepseek-v4-flash")
+    marked = []
+    monkeypatch.setattr(
+        mw.model_health, "mark_model_gone", lambda name: marked.append(name)
+    )
+
+    def handler(r):
+        if r.model.name == "glm-5.3-flash-zai":
+            raise _midstream_stall()
+        return "answered"
+
+    mw.DynamicModelMiddleware().wrap_model_call(_Req("glm-5.3-flash-zai"), handler)
+    assert marked == [], f"banned a model that is merely serving one bad replica: {marked}"
+
+
+def test_a_midstream_stall_does_not_mark_the_model_gone_async(
+    monkeypatch, models_build, no_backoff
+):
+    monkeypatch.setattr(mw, "fallback_model", lambda *a, **k: "deepseek-v4-flash")
+    marked = []
+    monkeypatch.setattr(
+        mw.model_health, "mark_model_gone", lambda name: marked.append(name)
+    )
+
+    async def handler(r):
+        if r.model.name == "glm-5.3-flash-zai":
+            raise _midstream_stall()
+        return "answered"
+
+    asyncio.run(
+        mw.DynamicModelMiddleware().awrap_model_call(_Req("glm-5.3-flash-zai"), handler)
+    )
+    assert marked == []
+
+
+def test_a_midstream_stall_with_nowhere_to_go_surfaces_the_error(
+    monkeypatch, models_build, no_fallback, no_backoff
+):
+    """No new terminal path. A box pinned to one model still gets the raise —
+    and gets it on the FIRST failure rather than 60s later."""
+    calls = {"n": 0}
+
+    def handler(r):
+        calls["n"] += 1
+        raise _midstream_stall()
+
+    with pytest.raises(TimeoutError):
+        mw.DynamicModelMiddleware().wrap_model_call(_Req("glm-5.3-flash-zai"), handler)
+
+    assert calls["n"] == 1, (
+        f"spent rung 1's budget on a replica that had already given up: {calls['n']}"
+    )
+
+
+def test_a_midstream_stall_with_nowhere_to_go_surfaces_the_error_async(
+    monkeypatch, models_build, no_fallback, no_backoff
+):
+    calls = {"n": 0}
+
+    async def handler(r):
+        calls["n"] += 1
+        raise _midstream_stall()
+
+    with pytest.raises(TimeoutError):
+        asyncio.run(
+            mw.DynamicModelMiddleware().awrap_model_call(_Req("glm-5.3-flash-zai"), handler)
+        )
+
+    assert calls["n"] == 1

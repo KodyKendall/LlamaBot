@@ -96,7 +96,7 @@ def leonardo_ai_builder(state: RailsAgentState) -> Command[Literal["tools"]]:
    # Compact the conversation only: the system message and the per-turn notes
    # below are rebuilt every turn and must not be summarized away.
    convo, compaction_ops = compact_messages_if_needed(
-      state["messages"], summary_prompt=SUMMARIZATION_PROMPT,
+      state["messages"], summary_prompt=SUMMARIZATION_PROMPT, llm_model=llm_model,
    )
 
    messages = [system_message_for_model(get_sys_msg(), llm_model)] + convo

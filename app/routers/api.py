@@ -28,6 +28,7 @@ from app.agents.leonardo.model_policy import (
     enabled_default_model,
     is_model_enabled,
     model_switching_allowed,
+    policy_report,
     vision_allowed,
     vision_model,
 )
@@ -913,6 +914,9 @@ async def available_models(request: Request):
         # Meta's docs call the key MODEL_API_KEY; their LiteLLM integration calls
         # it META_API_KEY. Accept either, matching get_llm's precedence.
         "muse-spark-1.2-contributor": ("META_API_KEY", "MODEL_API_KEY"),
+        # 1.3 is the same account and the same key as 1.2 — one Meta Model API
+        # key covers both ids, so a per-model key name would be fiction.
+        "muse-spark-1.3-contributor": ("META_API_KEY", "MODEL_API_KEY"),
     }
 
     # Models paid for by the SIGNED-IN USER's ChatGPT plan. Their availability is
@@ -939,12 +943,15 @@ async def available_models(request: Request):
         # Dropdown shaping must never 500 the chat page.
         logger.warning("Could not resolve ChatGPT connection status: %s", e)
 
-    # Config-driven OpenRouter entries (see openrouter_models). They are not in
+    # Config-driven registry entries (see openrouter_models). They are not in
     # model_api_keys above — that map is hand-maintained per model, and the whole
     # point of the registry is that adding an endpoint touches no code — so they
-    # are folded in here, all keyed on the single OPENROUTER_API_KEY.
-    for model_value in openrouter_models():
-        model_api_keys.setdefault(model_value, OPENROUTER_API_KEY_ENV)
+    # are folded in here. Since 0.7.7 each entry carries its OWN key env(s)
+    # rather than all sharing OPENROUTER_API_KEY: an entry may name any
+    # OpenAI-compatible gateway, and greying it out on the wrong key would say
+    # "not configured" about a model the box can perfectly well run.
+    for model_value, registry_entry in openrouter_models().items():
+        model_api_keys.setdefault(model_value, tuple(registry_entry["api_key_env"]))
 
     models = []
     for model_value, env_vars in model_api_keys.items():
@@ -1027,6 +1034,13 @@ async def available_models(request: Request):
         # no vision model at all, which is what turns on the "no image-capable
         # model is configured" banner.
         "vision_model": vision_model(),
+        # The resolved routing AND which channel decided it (0.7.7). Not used by
+        # the frontend — this is here so "what is this box actually running, and
+        # who told it that" is answerable over HTTP instead of over SSH, which is
+        # what made the 2026-08-31 incident a three-hour one. See
+        # model_policy.policy_report for why it reports the resolved value rather
+        # than the configured intent.
+        "policy": policy_report(),
     }
 
 

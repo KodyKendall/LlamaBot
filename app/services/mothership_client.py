@@ -225,7 +225,8 @@ class MothershipClient:
         to the mothership for usage analytics. Never raises — failures return None.
 
         For role="user", the response includes paywall fields
-        ({allowed_next, messages_remaining}) which callers use to populate
+        ({allowed_next, messages_remaining}, plus {block_reason, plan,
+        resets_at} from a 2026-09-05 mothership) which callers use to populate
         the local paywall cache. For role="assistant", the response contains
         no paywall fields.
 
@@ -401,6 +402,12 @@ class MothershipClient:
         says blocked, to detect "user just paid / daily reset" transitions.
         Returns {"allowed": bool, "messages_remaining": int|None} or None on
         any error. Fail-open contract — callers treat None as "allow".
+
+        A 2026-09-05 mothership also returns {block_reason, plan, resets_at},
+        which shape the card's copy — see RequestHandler._paywall_context. They
+        are absent on an older mothership and must never be invented here: the
+        per-plan caps are unpublished, and the daily window resets on the user's
+        own local day, which only the mothership can resolve.
         """
         if not self.enabled:
             return None

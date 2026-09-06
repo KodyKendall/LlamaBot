@@ -25,6 +25,7 @@ THIRD_PARTY_ENDPOINT_MODELS = [
     ("qwen3.7-plus", "ALIBABA_API_KEY"),
     ("qwen3.8-27b-hetzner", "HETZNER_API_KEY"),
     ("muse-spark-1.2-contributor", "META_API_KEY"),
+    ("muse-spark-1.3-contributor", "META_API_KEY"),
     # Self-hosted vLLM on our own RunPod GPU. Unauthenticated today, which is
     # exactly why it belongs here: "no key needed" is the case where api_key=None
     # looks harmless and quietly ships OPENAI_API_KEY to the pod's proxy URL.

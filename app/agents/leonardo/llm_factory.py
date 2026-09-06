@@ -118,6 +118,33 @@ def stream_chunk_timeout_s() -> float:
     return _DEFAULT_STREAM_CHUNK_TIMEOUT_S
 
 
+def _apply_stream_usage(client):
+    """Make every OpenAI-compatible client stream its token usage.
+
+    ``ChatOpenAI`` only sends ``stream_options: {include_usage: true}`` when
+    ``stream_usage`` is True, and leaves it unset for custom ``base_url``
+    clients (Muse, GMI, Fireworks, RunPod, OpenRouter...). Without it a
+    streamed turn carries no ``usage_metadata`` — so the provider-reported
+    compaction trigger (``summarization.reported_context_tokens``) has nothing
+    to read and turn telemetry reports zero input tokens. Applied here, post
+    construction, for the same reason as ``_apply_stream_chunk_timeout``: a
+    per-call-site flag reliably misses one.
+
+    ``LLM_STREAM_USAGE=false`` is the kill switch for a provider that rejects
+    ``stream_options`` outright (that shows up as a 400 on every streamed
+    turn, not as a stall). Anthropic/Gemini clients have no such field and are
+    left alone — they always report usage.
+    """
+    try:
+        if os.getenv("LLM_STREAM_USAGE", "true").strip().lower() in ("0", "false", "no", "off"):
+            return client
+        if "stream_usage" in getattr(type(client), "model_fields", {}):
+            client.stream_usage = True
+    except Exception as e:  # noqa: BLE001 - never break model construction
+        logger.debug("could not set stream_usage on %r: %s", type(client), e)
+    return client
+
+
 def _apply_stream_chunk_timeout(client):
     """Stamp the chosen chunk timeout onto a freshly built client.
 
@@ -295,8 +322,13 @@ def has_provider_key(model_name: str) -> bool:
     name one, it means the box "defaults" to something that 401s on every turn.
     They route through one shared credential, so the check is exact.
     """
-    if is_openrouter_model(model_name):
-        return provider_key(openrouter_api_key_env()) != _MISSING_KEY_PLACEHOLDER
+    entry = get_openrouter_model(model_name)
+    if entry is not None:
+        # The entry's own key env(s) since 0.7.7 — holding an OPENROUTER_API_KEY
+        # says nothing about a config entry pointed at some other gateway, and
+        # answering True there would let a box default to a model that 401s on
+        # every turn.
+        return provider_key(*entry["api_key_env"]) != _MISSING_KEY_PLACEHOLDER
 
     env_vars = DEFAULT_MODEL_KEY_ENVS.get(model_name)
     if not env_vars:
@@ -545,7 +577,7 @@ def get_llm(model_name: str):
     # Construction lives in _build_client so the stall guard is applied in ONE
     # place. See _apply_stream_chunk_timeout: the alternative was editing eleven
     # constructor call sites and missing one.
-    return _apply_stream_chunk_timeout(_build_client(model_name))
+    return _apply_stream_usage(_apply_stream_chunk_timeout(_build_client(model_name)))
 
 
 def _build_client(model_name: str):
@@ -579,10 +611,19 @@ def _build_client(model_name: str):
         # provider_key(), never a bare os.getenv: the OpenAI SDK falls back to
         # OPENAI_API_KEY when api_key is None, which would send our OpenAI key to
         # openrouter.ai (see test_provider_key_never_leaks_openai).
+        # Since 0.7.7 the endpoint and the key come from the ENTRY, not from
+        # OpenRouter constants. That is what turns this from "the OpenRouter
+        # branch" into the generic OpenAI-compatible-endpoint branch — the shape
+        # 10 of the 24 hand-written branches below already have. An entry that
+        # names neither still resolves to OpenRouter's, so nothing written
+        # before 0.7.7 changes.
+        endpoint = openrouter_entry["api_base"]
         kwargs = dict(
             model=openrouter_entry["model"],
-            api_base=openrouter_api_base(),
-            api_key=provider_key("OPENROUTER_API_KEY"),
+            # provider_key(), never a bare os.getenv, and now doubly so: the
+            # base_url is CONFIG, so an api_key of None would send our OpenAI
+            # key to whatever host the config names.
+            api_key=provider_key(*openrouter_entry["api_key_env"]),
             timeout=180,
             max_retries=0,
         )
@@ -592,9 +633,19 @@ def _build_client(model_name: str):
             # reads `provider` as a top-level request field, and extra_body is
             # what the OpenAI-compatible client passes through untouched.
             kwargs["extra_body"] = extra_body
+        # The endpoint kwarg differs by client and the mismatch is SILENT.
+        # ChatDeepSeek takes `api_base`; ChatOpenAI has no such field, so
+        # pydantic sweeps it into model_kwargs behind a warning nobody reads and
+        # the client then talks to api.openai.com with the gateway's key in the
+        # Authorization header. The reverse is just as quiet: passing `base_url`
+        # to ChatDeepSeek leaves api_base at DeepSeek's own default. Latent
+        # until 0.7.7 because every compiled entry sets `reasoning: true` and so
+        # took the ChatDeepSeek path; an overlay entry with `"reasoning": false`
+        # was already wrong. Pinned by
+        # test_a_non_reasoning_entry_reaches_its_own_endpoint.
         if openrouter_entry.get("reasoning", True):
-            return ChatDeepSeekWithReasoning(**kwargs)
-        return ChatOpenAI(**kwargs)
+            return ChatDeepSeekWithReasoning(api_base=endpoint, **kwargs)
+        return ChatOpenAI(base_url=endpoint, **kwargs)
 
     if model_name == "deepseek-v4-flash-vision-exp":
         # DeepSeek V4 Flash's multimodal sibling on DeepSeek's own API — the only
@@ -1003,6 +1054,41 @@ def _build_client(model_name: str):
         # a None key would send our OpenAI secret to api.meta.ai.
         return ChatOpenAI(
             model=os.getenv("META_MUSE_MODEL", "muse-spark-1.2-contributor"),
+            base_url=os.getenv("META_BASE_URL", "https://api.meta.ai/v1"),
+            api_key=provider_key("META_API_KEY", "MODEL_API_KEY"),
+            reasoning_effort="low",
+            max_retries=0,
+        )
+    if model_name == "muse-spark-1.3-contributor":
+        # Meta's Muse Spark 1.3 (released 2026-09-02), CONTRIBUTOR tier.
+        #
+        # A SIBLING of the 1.2 entry, not a re-point of it. 1.2 is the compiled
+        # fleet default, sits in `_FAIL_OPEN_MODELS`, and is named in pushed
+        # policies and in boxes' `enabled_models` — swapping the id underneath
+        # that name would move the whole fleet onto an unmeasured model in a
+        # release, with no operator route back short of another release. Both
+        # ids stay live; promoting 1.3 is a separate, deliberate decision.
+        #
+        # Everything else matches 1.2: same OpenAI-compatible Model API, same
+        # base_url (load-bearing — without it ChatOpenAI talks to api.openai.com,
+        # which has never heard of this id), same key (one Meta account issues
+        # one key, hence no new env var), same reasoning modes. Meta reports 1.3
+        # uses ~20% fewer tool calls and ~25% fewer tokens than 1.2 for the same
+        # agentic work, at the same price. 1M context.
+        #
+        # TIER WARNING, unchanged and still encoded ONLY in the model id:
+        #   muse-spark-1.3              $1.25/$4.25 per 1M, not trained on
+        #   muse-spark-1.3-contributor  $0.10/$0.20 per 1M, Meta trains on every
+        #                               prompt and completion we send it
+        #
+        # The override is `META_MUSE_1_3_MODEL`, NOT `META_MUSE_MODEL`. Boxes
+        # that already moved off the training tier carry
+        # `META_MUSE_MODEL=muse-spark-1.2`; sharing the variable would make
+        # picking 1.3 on one of those boxes silently run 1.2 instead, turning a
+        # compliance override into a quiet model downgrade. Pinned by
+        # test_muse_13_has_its_own_id_override_env_var.
+        return ChatOpenAI(
+            model=os.getenv("META_MUSE_1_3_MODEL", "muse-spark-1.3-contributor"),
             base_url=os.getenv("META_BASE_URL", "https://api.meta.ai/v1"),
             api_key=provider_key("META_API_KEY", "MODEL_API_KEY"),
             reasoning_effort="low",

