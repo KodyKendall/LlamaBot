@@ -327,6 +327,118 @@ def test_muse_contributor_tier_stays_escapable():
 
 
 # --------------------------------------------------------------------------
+# Muse Spark 1.3 (Meta) — contributor tier
+# --------------------------------------------------------------------------
+#
+# Released 2026-09-02, Meta's fourth Muse Spark in five months. Registered as a
+# SIBLING of the 1.2 entry rather than a re-point of it, for the same reason
+# `nemotron-lightning-30b-fireworks` sits beside the RunPod entry: 1.2 is the
+# fleet default and named in `_FAIL_OPEN_MODELS`, in pushed model policies, and
+# in boxes' `enabled_models`. Silently swapping the id under that name would
+# migrate the whole fleet onto an unmeasured model in a release, with no way for
+# an operator to go back short of another release.
+#
+# Same endpoint, same key, same price as 1.2 ($0.10/$0.20 per 1M contributor,
+# $1.25/$4.25 standard), 1M context, same reasoning modes ("previously available
+# reasoning modes are available today", max reasoning still in safety testing).
+
+MUSE_13 = "muse-spark-1.3-contributor"
+
+
+def test_muse_13_is_offered_in_the_dropdown():
+    assert MUSE_13 in _dropdown_models()
+
+
+def test_muse_13_supports_images_video_and_pdf():
+    """1.3 keeps 1.2's native multimodal perception — video, images, documents."""
+    assert MODEL_CAPABILITIES[MUSE_13] == {"images": True, "video": True, "pdf": True}
+
+
+def test_muse_13_uses_the_meta_key():
+    assert MUSE_13 in _api_key_map()
+
+
+def test_muse_13_is_known_to_the_policy():
+    assert MUSE_13 in _KNOWN_MODELS
+
+
+def test_muse_13_builds_an_openai_compatible_client_against_the_meta_endpoint():
+    import inspect
+
+    from app.agents.leonardo import llm_factory
+
+    src = _model_dispatch_source(llm_factory)
+    branch = src.split(f'model_name == "{MUSE_13}"', 1)[1].split("if model_name ==", 1)[0]
+    assert "ChatOpenAI(" in branch
+    assert "https://api.meta.ai/v1" in branch
+
+
+def test_muse_13_pins_the_contributor_tier_id():
+    """Same ~12x price and data-handling split as 1.2 — the tier is only the id."""
+    import inspect
+
+    from app.agents.leonardo import llm_factory
+
+    src = _model_dispatch_source(llm_factory)
+    branch = src.split(f'model_name == "{MUSE_13}"', 1)[1].split("if model_name ==", 1)[0]
+    assert '"muse-spark-1.3-contributor"' in branch
+
+
+def test_muse_13_has_its_own_id_override_env_var():
+    """1.3 must not read META_MUSE_MODEL.
+
+    That variable is already deployed on boxes that moved 1.2 to the paid,
+    non-training tier (`META_MUSE_MODEL=muse-spark-1.2`). If 1.3 read the same
+    name, selecting 1.3 on one of those boxes would silently run 1.2 instead —
+    a compliance override quietly turning into a model downgrade.
+    """
+    import inspect
+
+    from app.agents.leonardo import llm_factory
+
+    src = _model_dispatch_source(llm_factory)
+    branch = src.split(f'model_name == "{MUSE_13}"', 1)[1].split("if model_name ==", 1)[0]
+    assert 'os.getenv("META_MUSE_1_3_MODEL"' in branch
+    assert 'os.getenv("META_MUSE_MODEL"' not in branch
+
+
+def test_muse_13_never_sends_the_openai_key_to_meta(monkeypatch):
+    """Same leak shape as 1.2 — base_url points at a third party, so api_key=None
+    would address our OpenAI secret to api.meta.ai."""
+    monkeypatch.setenv("MODEL_SWITCHING_ALLOWED", "true")
+    # Unlike 1.2, 1.3 is not fail-open, so without an allow-list naming it
+    # get_llm swaps it for the box default and the branch under test never runs.
+    monkeypatch.setenv("ENABLED_MODELS", MUSE_13)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-should-never-leave")
+    monkeypatch.delenv("META_API_KEY", raising=False)
+    monkeypatch.delenv("MODEL_API_KEY", raising=False)
+
+    from app.agents.leonardo.llm_factory import get_llm
+
+    llm = get_llm(MUSE_13)
+    key = llm.openai_api_key
+
+    assert key is not None, "api_key=None lets the OpenAI SDK fall back to OPENAI_API_KEY"
+    assert key.get_secret_value() != "sk-openai-should-never-leave"
+
+
+def test_muse_13_does_not_change_what_the_fleet_runs():
+    """Registering 1.3 is not the same as shipping it.
+
+    1.2 stays the compiled default and the fail-open entry until someone
+    measures 1.3 on this stack and makes that call deliberately — the same
+    guard Luna carries, and the one the 1.2 entry was allowed to break only
+    after an explicit decision.
+    """
+    from app.agents.leonardo import model_policy
+    from app.agents.leonardo.llm_factory import DEFAULT_LLM_MODEL
+
+    assert DEFAULT_LLM_MODEL == MUSE
+    assert MUSE_13 != DEFAULT_LLM_MODEL
+    assert MUSE_13 not in model_policy._FAIL_OPEN_MODELS
+
+
+# --------------------------------------------------------------------------
 # Qwen3-8B on our own RunPod GPU (self-hosted vLLM)
 # --------------------------------------------------------------------------
 

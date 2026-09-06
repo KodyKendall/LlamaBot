@@ -14,6 +14,21 @@ the user has no write path to:
   * The OpenRouter model registry (``.leonardo/openrouter_models.json``, see
     :mod:`app.agents.leonardo.openrouter_models`). Also operator-owned and
     host-mounted; registering an entry there enables it (step 2b below).
+  * The mothership's pushed policy document (``.leonardo/model_policy.json``, see
+    :mod:`app.services.model_policy_store`), delivered on the lease tick. Carries
+    ``default_model``, ``enabled_models``, ``disabled_models``, ``roles`` and a
+    per-box ``instance_overrides`` block.
+
+**Roles (0.7.7).** ``roles`` maps a role — ``chat`` or ``vision`` — to an ORDERED
+fallback chain instead of a single name, and :func:`resolve_role` takes the first
+entry this box can actually serve. This is what makes a provider withdrawal a
+degraded answer rather than a dead turn: on 2026-08-31 Meta answered 404 for
+``muse-spark-1.2-contributor`` for 3h22m, 87 turns died across 14 boxes, and
+nothing in the config could route around it because the choice was compiled in.
+An explicit ``roles.chat`` outranks ``default_model``, which is kept as the
+back-compat spelling. ``roles.vision`` replaces the compiled ``_VISION_MODELS``
+floor. :func:`policy_report` reports what actually won, over HTTP, so the
+resolved routing is readable without SSH.
 
 **Resolution (most-specific wins):**
 
@@ -42,6 +57,11 @@ the user has no write path to:
      it in ``ENABLED_MODELS`` would be configuring one intent twice — the
      friction that registry exists to remove. Yields to an explicit disable in
      step 1, and to ``"enabled": false`` in the entry itself.
+  2c. **A configured chat chain** — on a box that names no allow-list, every
+     entry of ``roles.chat`` is enabled along with the resolved default. An
+     operator who wrote an ordered chain has already said those models are
+     acceptable; without this, rung 2 could not use the very entries the chain
+     exists to name.
   3. **Allow-list** — if ``enabled_models`` / ``ENABLED_MODELS`` is configured,
      only the named models are enabled (for everything not covered above). Allow
      sources INTERSECT: neither can broaden what the other restricts.
@@ -74,6 +94,7 @@ from app.agents.leonardo.llm_factory import (
 )
 from app.agents.leonardo.openrouter_models import (
     API_KEY_ENV as OPENROUTER_API_KEY_ENV,
+    get_openrouter_model,
     is_openrouter_model,
     openrouter_models,
 )
@@ -101,19 +122,33 @@ _INSTANCE_CONFIG_PATH = ".leonardo/instance.json"
 _MODEL_SWITCHING_ALLOWED_DEFAULT = True
 _VISION_ALLOWED_DEFAULT = False
 
-# The vision model the frontend image auto-switch targets, in preference order.
-# Whichever one this box holds a key for is kept reachable (when vision is
+# The COMPILED FLOOR for the vision role, in preference order — what this box
+# resolves to when no operator has said otherwise. Since 0.7.7 it is a floor and
+# not the answer: `roles.vision` in a pushed policy replaces it outright, which
+# is what makes a bad vision model a config edit instead of a release. See
+# :func:`role_chain`.
+#
+# Whichever entry this box holds a key for is kept reachable (when vision is
 # allowed) even while manual switching is locked, so image sends still work
 # without opening up the whole dropdown.
 #
-# First choice is the fleet default itself: Muse is multimodal (see
-# model_capabilities), so on a box with a META key there is nothing to switch TO
-# — the auto-switch only fires for a user who has manually moved to a text-only
-# model. Second choice (0.7.5) is DeepSeek's vision sibling, which runs on the
-# DEEPSEEK_API_KEY every box already has. Before it existed, a box without a META
-# key had no vision at all and the frontend said so; now that is only true of a
-# box with no usable key of either kind.
+# Order, and why it moved in 0.7.7:
+#
+#   * GLM first — it is the fleet default text model as of 2026-08-31 and it is
+#     multimodal (MEASURED, not read off a model card: see openrouter_models).
+#     Putting the default first means the common box has nothing to switch TO,
+#     and the auto-switch only fires for a user who manually moved to a
+#     text-only model.
+#   * Muse second, for the same reason it was first before: also multimodal,
+#     also a general-purpose default, and still the answer on a META-keyed box
+#     that has no OpenRouter key. It was NOT retired — the 2026-08-31 404s were
+#     a 3h22m upstream blip that recovered — so demoting it is about following
+#     the default, not about routing around a dead model.
+#   * DeepSeek's vision sibling last (0.7.5), which runs on the DEEPSEEK_API_KEY
+#     every box already has. It is the floor under the floor: a box with no
+#     OpenRouter and no META key still gets images.
 _VISION_MODELS = (
+    "glm-5.3-flash-zai",
     "muse-spark-1.2-contributor",
     "deepseek-v4-flash-vision-exp",
 )
@@ -126,7 +161,8 @@ _VISION_MODELS = (
 _VISION_ONLY_MODELS = frozenset({"deepseek-v4-flash-vision-exp"})
 
 # Preserved as the *preferred* vision model. Prefer `vision_model()` — this
-# constant is what a box with every key resolves to, not what any given box runs.
+# constant is the head of the compiled floor, which is neither what a box with a
+# pushed `roles.vision` runs nor what a box missing that key can build.
 VISION_MODEL = _VISION_MODELS[0]
 
 
@@ -139,12 +175,107 @@ def vision_model() -> str:
     the frontend show "no image-capable model is configured" instead of sending
     an image somewhere it cannot be read.
 
-    Policy (disable lists, allow-lists, the switching lock) is NOT consulted
-    here; this answers only "is it buildable", exactly like default_text_model.
+    Since 0.7.7 this walks the ``vision`` role chain (:func:`role_chain`), so a
+    pushed ``roles.vision`` overrides the compiled floor and an explicitly
+    DISABLED model is routed around. Both are new, and the second one is a bug
+    fix, not a refinement: during the 2026-08-31 incident
+    ``DISABLED_MODELS=muse-spark-1.2-contributor`` was swept into .env fleet-wide
+    and this function went right on returning Muse, because its docstring used to
+    say policy "is NOT consulted here". Every image send on those boxes kept
+    going to the model the operator had just banned.
+
+    Allow-lists and the switching lock are still NOT consulted — those decide
+    what a *user* may pick, and step 2a of :func:`is_model_enabled` exists to
+    open whatever this resolves to. Only the disable list, which is the operator
+    saying "not this one, anywhere", takes part in routing.
     """
-    for name in _VISION_MODELS:
-        if has_provider_key(name):
-            return name
+    return resolve_role("vision")
+
+
+def policy_roles() -> dict:
+    """Role chains configured for this box. ``{}`` when nobody configured any.
+
+    Precedence matches :func:`configured_default_model` — **mothership (with any
+    per-instance override already merged) > instance.json** — for the same
+    reason: the mothership is the operator of record on a fleet box, and a stale
+    hand-edit from the last incident must not make the next remote fix a silent
+    no-op.
+
+    There is deliberately no environment spelling. ``ENABLED_MODELS``-style CSV
+    cannot express an ordered map without inventing a syntax, and the env layer
+    is the one place an operator edit does NOT reach a box without a restart —
+    which is the property (AGENT_POLICY P-F1b) this whole feature exists to give
+    the model choice.
+    """
+    remote = remote_policy().get("roles")
+    if remote:
+        return remote
+
+    config = _read_instance_config() or {}
+    chains = _clean_role_chains(config.get("roles")) if config.get("roles") else None
+    return chains or {}
+
+
+def role_chain(role: str) -> list:
+    """The ordered list of candidates for ``role``, most-preferred first.
+
+    A configured chain REPLACES the compiled floor rather than extending it: an
+    operator naming an order and then silently inheriting three more entries
+    behind it is not an order, and during an incident the surprising extra entry
+    is exactly the one that gets picked.
+
+    ``chat`` has no compiled floor on purpose. Its floor is the whole existing
+    resolution path (``default_model`` -> DEFAULT_LLM_MODEL -> fallback_text_model),
+    which is richer than a list and which 0.7.6 boxes already depend on; returning
+    ``[]`` here means "nobody configured a chain, resolve exactly as before".
+    """
+    configured = policy_roles().get(role)
+    if configured:
+        return list(configured)
+    if role == "vision":
+        return list(_VISION_MODELS)
+    return []
+
+
+def resolve_role(role: str) -> str:
+    """The first entry in ``role``'s chain this box can actually serve, or "".
+
+    Four ways an entry is passed over, and each is a real failure someone hit:
+
+      * **not a model this build knows** — a typo, or a name from a newer
+        mothership than this box's image. ``has_provider_key`` answers True for
+        an unrecognised name (it has no key requirement to check), so without
+        this check a misspelled first choice would resolve and then fail at
+        ``get_llm``.
+      * **no provider key** — the box would 401 on every turn. This is the case
+        the chain exists for: entry 1 is an intent, not a guarantee.
+      * **explicitly disabled** — an operator ban is a routing fact, not just a
+        dropdown fact. See :func:`vision_model` for what happens when it is not.
+      * **reporting itself retired** — the ``model_health`` record 0.7.6 added,
+        so a 404'd model is skipped for the 15 minutes the record lives instead
+        of being re-discovered (and re-paid for) on every turn.
+
+    Returns "" when nothing survives, which hands the decision back to the normal
+    walk rather than naming a model the box cannot run. That is the invariant
+    that outranks the operator's intent, and it is what keeps a bad remote value
+    from being more damaging than the outage it was pushed to fix.
+    """
+    disabled = _disabled_set()
+    known = set(known_models())
+    for name in role_chain(role):
+        if name not in known:
+            logger.warning(
+                "Model policy: %s chain names %r, which this build does not know; "
+                "skipping it.", role, name,
+            )
+            continue
+        if name in disabled:
+            continue
+        if not has_provider_key(name):
+            continue
+        if model_health.is_gone(name):
+            continue
+        return name
     return ""
 
 
@@ -199,7 +330,22 @@ _KNOWN_MODELS = [
     "nemotron-lightning-30b-runpod",
     "nemotron-lightning-30b-fireworks",
     "muse-spark-1.2-contributor",
+    "muse-spark-1.3-contributor",
 ]
+
+
+def _registry_entry_has_key(name: str) -> bool:
+    """True if this box holds a credential for config-registered ``name``.
+
+    Deliberately not ``llm_factory.has_provider_key``: model_policy is imported
+    by llm_factory, so calling back into it at module scope would be a cycle.
+    The entry already carries the env names; this is the same first-found-wins
+    read, without the import.
+    """
+    entry = get_openrouter_model(name)
+    if entry is None:
+        return False
+    return any(os.getenv(var, "").strip() for var in entry["api_key_env"])
 
 
 def known_models() -> list:
@@ -237,23 +383,49 @@ def model_switching_allowed() -> bool:
     return _env_bool("MODEL_SWITCHING_ALLOWED", _MODEL_SWITCHING_ALLOWED_DEFAULT)
 
 
-def remote_policy() -> dict:
-    """Model policy the mothership pushed to this box. ``{}`` when none.
+#: Roles a pushed policy may name, and the only ones :func:`role_chain` answers
+#: for. An unknown role is dropped rather than stored: nothing resolves it, so
+#: keeping it would make :func:`policy_report` describe routing the box does not
+#: actually do — which is worse than no answer when someone is reading it mid
+#: incident.
+_KNOWN_ROLES = ("chat", "vision")
 
-    Every key is validated independently and a malformed one is DROPPED rather
-    than poisoning the payload: this channel reaches every box in a single lease
-    interval, so one bad value must not be able to take the fleet down. Patched
-    wholesale in tests.
+
+def _clean_role_chains(value) -> Optional[dict]:
+    """Validate a ``roles`` mapping, or None when nothing usable survives.
+
+    Each role is validated INDEPENDENTLY, for the same reason the top-level keys
+    are: a mistyped ``vision`` chain must not take ``chat`` down with it.
     """
-    try:
-        from app.services import model_policy_store
-
-        raw = model_policy_store.load()
-    except Exception as e:  # noqa: BLE001 — never let telemetry config break chat
-        logger.warning("Ignoring unreadable remote model policy: %s", e)
-        return {}
+    if not isinstance(value, dict):
+        logger.warning("Remote model policy: ignoring malformed roles %r", value)
+        return None
 
     clean: dict = {}
+    for role, chain in value.items():
+        if role not in _KNOWN_ROLES:
+            logger.warning("Remote model policy: ignoring unknown role %r", role)
+            continue
+        if not isinstance(chain, list) or not all(isinstance(m, str) for m in chain):
+            logger.warning(
+                "Remote model policy: ignoring malformed %s chain %r", role, chain
+            )
+            continue
+        names = [m.strip() for m in chain if m.strip()]
+        if names:
+            clean[role] = names
+    return clean or None
+
+
+def _clean_policy_document(raw: dict) -> dict:
+    """Validate one policy document — the fleet one, or a per-instance override.
+
+    Factored out precisely so the two cannot drift: an override that skipped a
+    check would be a validation hole reachable by exactly the payload that is
+    hardest to test from the mothership side.
+    """
+    clean: dict = {}
+
     default_model = raw.get("default_model")
     if isinstance(default_model, str) and default_model.strip():
         clean["default_model"] = default_model.strip()
@@ -270,7 +442,68 @@ def remote_policy() -> dict:
                 clean[key] = names
         else:
             logger.warning("Remote model policy: ignoring malformed %s %r", key, value)
+
+    roles = raw.get("roles")
+    if roles is not None:
+        chains = _clean_role_chains(roles)
+        if chains:
+            clean["roles"] = chains
+
     return clean
+
+
+def _apply_instance_override(fleet: dict, instance: dict) -> dict:
+    """Merge a per-instance document over the fleet one.
+
+    Narrower scope wins — that is the whole point of the override, and it is why
+    one customer's constraint no longer forces a fleet-wide decision.
+
+    ``disabled_models`` is the deliberate exception: it UNIONS, exactly as it
+    does across env/instance.json/mothership. A ban that a narrower scope can
+    lift is not a ban, and the safe direction is the one where a stale list can
+    only ever *widen* a prohibition (see the module docstring, step 1).
+    """
+    merged = dict(fleet)
+    for key, value in instance.items():
+        if key == "disabled_models":
+            merged[key] = sorted({*fleet.get(key, []), *value})
+        else:
+            merged[key] = value
+    return merged
+
+
+def remote_policy() -> dict:
+    """Model policy the mothership pushed to this box. ``{}`` when none.
+
+    Every key is validated independently and a malformed one is DROPPED rather
+    than poisoning the payload: this channel reaches every box in a single lease
+    interval, so one bad value must not be able to take the fleet down. Patched
+    wholesale in tests.
+
+    The returned document is already flattened: a ``instance_overrides`` block
+    has been merged over the fleet-level keys, so every caller sees one answer
+    and none of them has to re-derive the precedence. :func:`policy_report` is
+    where the provenance is recovered for humans.
+    """
+    try:
+        from app.services import model_policy_store
+
+        raw = model_policy_store.load()
+    except Exception as e:  # noqa: BLE001 — never let telemetry config break chat
+        logger.warning("Ignoring unreadable remote model policy: %s", e)
+        return {}
+
+    clean = _clean_policy_document(raw)
+
+    override = raw.get("instance_overrides")
+    if override is None:
+        return clean
+    if not isinstance(override, dict):
+        logger.warning(
+            "Remote model policy: ignoring malformed instance_overrides %r", override
+        )
+        return clean
+    return _apply_instance_override(clean, _clean_policy_document(override))
 
 
 def configured_default_model() -> Optional[str]:
@@ -284,7 +517,20 @@ def configured_default_model() -> Optional[str]:
     The mothership outranks a box's own .env because it is the operator of record
     on a fleet box: a stale hand-edit made during the last incident must not make
     the next remote fix silently no-op on exactly the boxes someone touched.
+
+    ``roles.chat`` and ``default_model`` express the same intent, so one has to
+    win: **an explicit ``roles.chat`` does**, and ``default_model`` stays as the
+    back-compat spelling so a 0.7.6-era policy document keeps working unchanged.
+    The chain wins because it is strictly more informative — it says what to do
+    when the first choice is unavailable, which is the entire reason it exists —
+    and because a resolved chain has already been checked against this box's
+    keys, so it can only ever name something runnable. A chain that resolves to
+    nothing falls through to ``default_model`` rather than shadowing it.
     """
+    chain = resolve_role("chat")
+    if chain:
+        return chain
+
     remote = remote_policy().get("default_model")
     if remote:
         return remote
@@ -404,7 +650,14 @@ def _allowlist() -> Optional[set]:
         # narrowing above.
         configured = _usable_configured_default()
         if configured:
-            return {configured, *_CHATGPT_SUBSCRIPTION_MODELS}
+            # ...and the REST of its chat chain with it. An operator who wrote an
+            # ordered chain has already said those models are acceptable here;
+            # leaving them out of the implied allow-list made rung 2 unable to use
+            # the very entries the chain exists to name, so the second choice was
+            # "Disabled by administrator" by an administrator who had just chosen
+            # it. Explicit allow-lists still intersect normally above — this
+            # branch is only the "nobody configured one" case.
+            return {configured, *role_chain("chat"), *_CHATGPT_SUBSCRIPTION_MODELS}
         return set(_DEFAULT_ENABLED_MODELS)
     return allow
 
@@ -490,7 +743,11 @@ def is_model_enabled(model_name: str) -> bool:
     #     box would grow a dropdown option it cannot run, breaking the invariant
     #     that an unconfigured box offers exactly the two blessed models. A key
     #     is what turns the compiled-in default from an example into an offer.
-    if is_openrouter_model(model_name) and os.getenv(OPENROUTER_API_KEY_ENV, "").strip():
+    #     Since 0.7.7 an entry carries its own key env, so the check asks the
+    #     entry rather than assuming OPENROUTER_API_KEY — an entry pointed at
+    #     another gateway is enabled by ITS key, and a box holding neither still
+    #     offers exactly the two blessed models.
+    if is_openrouter_model(model_name) and _registry_entry_has_key(model_name):
         return True
     # 4. The allow-list — the box's own, or the compiled two-model default.
     return model_name in _allowlist()
@@ -592,12 +849,30 @@ def fallback_model(
     if needs_vision:
         if not vision_allowed():
             return None
-        for name in _VISION_MODELS:
+        # The vision ROLE CHAIN, not the compiled tuple: an operator who pushed
+        # roles.vision has already said what an image turn should degrade to, and
+        # rung 2 is exactly the moment that answer is needed. role_chain falls
+        # back to the compiled tuple when nothing is pushed, so an unconfigured
+        # box behaves as it did in 0.7.6.
+        for name in role_chain("vision"):
             if name in tried:
                 continue
             if has_provider_key(name) and is_model_enabled(name):
                 return name
         return None
+
+    # An explicit chat chain outranks everything below, for the same reason it
+    # outranks default_model in configured_default_model: it is the operator
+    # saying what to do when the first choice is unavailable, which is precisely
+    # the question being asked here. Entries already tried are skipped so a turn
+    # cannot bounce between two endpoints it has already burned.
+    for name in role_chain("chat"):
+        if name in tried:
+            continue
+        if model_health.is_gone(name):
+            continue
+        if is_model_enabled(name) and has_provider_key(name):
+            return name
 
     # The box's own default first: it is what the operator chose to run, and on
     # the Muse box in the incident it is also the model that stalled — hence the
@@ -648,3 +923,110 @@ def effective_model(model_name: str) -> str:
     if is_model_enabled(model_name):
         return model_name
     return enabled_default_model()
+
+
+# =============================================================================
+# Provenance — what the box resolved, and which channel said so
+# =============================================================================
+#
+# Remote control is only half a feature without this. During the 2026-08-31
+# incident the question that cost the most time was not "what should this box
+# run" but "what does this box think it is running, and who told it that" — and
+# the only way to answer it was to SSH in and read three files. A policy that can
+# be changed from the mothership has to be READABLE from outside the box too, or
+# every push is a guess followed by a wait.
+#
+# Source names are a closed set, most-specific first:
+#
+#   mothership-instance  this box's own override in the pushed document
+#   mothership-fleet     the fleet-wide pushed document
+#   instance.json        the box's provisioned config file
+#   env                  DEFAULT_LLM_MODEL and friends, baked into the container
+#   compiled             nobody configured anything; the code's own default won
+
+def _raw_remote_document() -> dict:
+    """The pushed document BEFORE the instance override is merged in.
+
+    :func:`remote_policy` deliberately flattens the two so no caller has to
+    re-derive precedence; provenance is the one question that needs them apart.
+    """
+    try:
+        from app.services import model_policy_store
+
+        raw = model_policy_store.load()
+    except Exception:  # noqa: BLE001 — provenance never breaks chat
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def _roles_source() -> str:
+    """Which channel supplied the role chains this box is using."""
+    raw = _raw_remote_document()
+    override = raw.get("instance_overrides")
+    if isinstance(override, dict) and _clean_role_chains(override.get("roles") or {}):
+        return "mothership-instance"
+    if _clean_role_chains(raw.get("roles") or {}):
+        return "mothership-fleet"
+    config = _read_instance_config() or {}
+    if _clean_role_chains(config.get("roles") or {}):
+        return "instance.json"
+    return "compiled"
+
+
+def _configured_default_source() -> str:
+    """Which channel named the default, or "" if nobody did."""
+    if resolve_role("chat"):
+        return _roles_source()
+
+    if remote_policy().get("default_model"):
+        override = _raw_remote_document().get("instance_overrides")
+        if isinstance(override, dict) and isinstance(override.get("default_model"), str):
+            return "mothership-instance"
+        return "mothership-fleet"
+
+    config = _read_instance_config() or {}
+    instance_default = config.get("default_model")
+    if isinstance(instance_default, str) and instance_default.strip():
+        return "instance.json"
+
+    if (os.getenv("DEFAULT_LLM_MODEL") or "").strip():
+        return "env"
+    return ""
+
+
+def policy_report() -> dict:
+    """The resolved routing plus its provenance, for ``/api/available-models``.
+
+    Reports what the box ACTUALLY resolved, not what it was told: a configured
+    default the box cannot build is reported as ``compiled``, because that is
+    what is really answering turns. Reporting the intent instead would make this
+    endpoint agree with the mothership and disagree with reality, which is the
+    one failure mode a debugging aid must not have.
+
+    Safe to expose to any signed-in user: model names are already published by
+    the dropdown, and no key name, key value or file path appears here.
+    """
+    configured_source = _configured_default_source()
+    default_source = configured_source if _usable_configured_default() else "compiled"
+
+    resolved_vision = vision_model()
+    vision_source = _roles_source() if policy_roles().get("vision") else "compiled"
+
+    return {
+        "default_model": {
+            "value": enabled_default_model(),
+            "source": default_source or "compiled",
+        },
+        "vision_model": {
+            "value": resolved_vision,
+            "source": vision_source,
+        },
+        "roles": policy_roles(),
+        "roles_source": _roles_source(),
+        # Which config-registered models this box currently sees, so a remote
+        # push can be confirmed from outside the box (0.7.7). Names only — the
+        # entry itself carries an api_base and a key env, and this endpoint is
+        # readable by every signed-in user. Sorted so a diff between two boxes
+        # is a diff, not an ordering artifact.
+        "registered_models": sorted(openrouter_models()),
+    }

@@ -525,6 +525,13 @@ export class IframeManager {
       { icon: 'fa-paperclip', text: 'Upload files to include in your app' },
       { icon: 'fa-forward', text: "Switching to Plan Mode can improve Leo's performance" },
       { icon: 'fa-lightbulb', text: 'View Our Wiki for Guides & Tips to Use Leo', href: 'https://llamapress.ai/wiki' },
+      // The two below are here rather than on the model dropdown on purpose
+      // (Darren, 2026-09-05): the dropdown is only seen by someone already
+      // hunting for a model, while the build overlay is seen by everyone — and
+      // the people who don't know they can connect their own ChatGPT account are
+      // exactly the people who never open that menu.
+      { icon: 'fa-comments', text: 'Use less messages by starting new chats on new topics', href: 'https://llamapress.ai/wiki/using-your-messages-efficiently' },
+      { icon: 'fa-plug', text: 'Connect your ChatGPT account to use your account in Leo', href: 'https://llamapress.ai/wiki/use-your-chatgpt-plan-with-leo' },
     ];
     const tipEl = document.createElement('div');
     tipEl.style.display = 'inline-flex';

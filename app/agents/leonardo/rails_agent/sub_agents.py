@@ -204,6 +204,26 @@ CACHED_SYSTEM_PROMPT = SystemMessage(
 # Sub-Agent Factory
 # =============================================================================
 
+def _context_middleware():
+    """The context-management stack every sub-agent runs.
+
+    A delegated task is a full agent loop of its own, so it needs the same
+    guards as the main loop: compaction (the summarizer is the model in use,
+    see summarization.py) and the per-result output cap. Without them a
+    sub-agent was the one path with nothing between a huge ``read_file`` and
+    the provider's context wall. Imported lazily: rails_agent.nodes imports
+    this module, so a top-level import would be circular.
+    """
+    from app.agents.leonardo.rails_agent.nodes import SUMMARIZATION_PROMPT
+    from app.agents.leonardo.summarization import make_summarization_middleware
+    from app.agents.leonardo.tool_output_middleware import ToolResultSizeLimitMiddleware
+
+    return [
+        make_summarization_middleware(summary_prompt=SUMMARIZATION_PROMPT),
+        ToolResultSizeLimitMiddleware(),
+    ]
+
+
 def create_sub_agent(llm_model: str = None):
     """Create a sub-agent instance with the same config as the main Rails agent.
 
@@ -249,6 +269,7 @@ def create_sub_agent(llm_model: str = None):
         # flattened here for providers that reject list system content.
         system_prompt=system_message_for_model(CACHED_SYSTEM_PROMPT, llm_model or enabled_default_model()),
         state_schema=RailsAgentState,
+        middleware=_context_middleware(),
     )
 
 
@@ -403,6 +424,7 @@ def create_research_sub_agent(llm_model: str = None):
             get_research_system_prompt(), llm_model or enabled_default_model()
         ),  # Research-only prompt (block-list flattened for non-Anthropic)
         state_schema=RailsAgentState,
+        middleware=_context_middleware(),
     )
 
 

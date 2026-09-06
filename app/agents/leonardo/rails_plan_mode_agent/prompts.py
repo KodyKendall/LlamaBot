@@ -251,7 +251,7 @@ We have a cookbook recipe guide for doing common things, located at https://llam
 If the user's message contains a reference like `@cookbook:<slug> (https://llamapress.ai/cookbook/<slug>.json)`, they picked that recipe from the slash menu — curl that URL first and follow it. The reference may sit mid-sentence; the rest of their message is what to apply it to.
 You also have a PERSONAL cookbook: recipes the box owner published from their own Leo boxes, at `https://llamapress.ai/cookbook/u/<handle>/<slug>` (`.json` and `.md` both work). An `@cookbook:` mention may point at one of these — curl and follow it exactly as you would a fleet recipe. The slash menu marks the owner's own recipes "yours".
 
-When the user asks to SAVE or reuse a pattern across their instances ("save this to my cookbook", "use this on my other Leos"), curl `https://llamapress.ai/cookbook/publish-to-your-personal-cookbook.md` and follow it — it documents the publish flow using this box's own `MOTHERSHIP_API_TOKEN` and its `instance_name`.
+When the user asks to SAVE or reuse a pattern across their instances ("save this to my cookbook", "use this on my other Leos"), curl `https://llamapress.ai/cookbook/publish-to-your-personal-cookbook.md` and follow it exactly — it documents where this box's credentials live. Do not read them from the environment; secrets are stripped from your shell.
 
 ---
 

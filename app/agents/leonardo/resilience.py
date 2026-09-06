@@ -184,6 +184,32 @@ def is_transient_error(exc: BaseException) -> bool:
     return False
 
 
+def is_midstream_stall(exc: BaseException) -> bool:
+    """A stream that produced content and then stopped.
+
+    Distinct from a zero-chunk stall, and the two want opposite handling:
+
+      * ``chunks_received == 0`` — the provider accepted the request and did
+        nothing. Nothing was thrown away, the next attempt may land on a healthy
+        replica, and one attempt costs one chunk timeout. Rung 1 is right, and
+        that is the 2026-08-26 Muse fix this deliberately leaves alone.
+      * ``chunks_received > 0`` — the provider accepted the request, did the
+        expensive work, streamed most of an answer and went quiet. Retrying the
+        same replica discards real work and has no reason to succeed; on a model
+        pinned with ``allow_fallbacks: false`` it is guaranteed to land back on
+        the endpoint that just died. Rung 2 is right.
+
+    Reads ``langchain_openai``'s structured attribute rather than the message,
+    which its own docstring exists to permit — and which matters here because the
+    chunk count varies per occurrence.
+
+    The ``isinstance`` check is not redundant with the attribute: it keeps this
+    to the exception the streaming client actually raises, so an unrelated object
+    that happens to carry a ``chunks_received`` field cannot skip a rung.
+    """
+    return isinstance(exc, TimeoutError) and getattr(exc, "chunks_received", 0) > 0
+
+
 # =============================================================================
 # Rung 1 retry mechanics (shared by every call path, not just the middleware)
 # =============================================================================

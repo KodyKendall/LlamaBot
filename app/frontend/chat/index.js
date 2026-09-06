@@ -6,6 +6,7 @@
 import { DEFAULT_CONFIG, getRailsUrl, INACTIVITY_WARNING_BANNER_ENABLED } from './config.js';
 import { setCookie, getCookie } from './utils/cookies.js';
 import { errorReporter } from './utils/ErrorReporter.js';
+import { AutoSendGuard } from './utils/autoSendGuard.js';
 import { leoDiagnostics } from './utils/LeoDiagnostics.js';
 import { AppState } from './state/AppState.js';
 import { StreamingState } from './state/StreamingState.js';
@@ -36,7 +37,7 @@ import { CheckpointManager } from './checkpoints/CheckpointManager.js';
 import { DiffViewer } from './checkpoints/DiffViewer.js';
 import { FaviconBadgeManager } from './ui/FaviconBadgeManager.js';
 import { StallMonitor } from './ui/StallMonitor.js';
-import { chooseInitialModel } from './utils/modelDefaults.js';
+import { chooseInitialModel, resolveRememberedModel } from './utils/modelDefaults.js';
 import { safeInit, selectedElementsOf } from './utils/safeInit.js';
 
 // Image auto-switch: when a user attaches an image while on a text-only model,
@@ -84,6 +85,11 @@ class ChatApp {
     // console output from the rest of init is already captured.
     leoDiagnostics.patchConsole();
     window.LeoDiagnostics = leoDiagnostics;
+
+    // Drops a repeat "Ask Leo to fix this" click on the Rails crash page — it
+    // sends a real, billed user message and the button has no pending state, so
+    // a slow first response gets clicked again. See utils/autoSendGuard.js.
+    this.autoSendGuard = new AutoSendGuard();
 
     // Initialize UI components
     this.messageRenderer = null;
@@ -161,6 +167,12 @@ class ChatApp {
     // `?llm_model=` pin, or a manual dropdown pick. Their choice always wins;
     // only when it is absent does the dropdown follow the server default.
     this.userChoseModel = false;
+
+    // A remembered choice (cookie or ?llm_model= pin) waiting for the dropdown
+    // to be complete. Config-registered models have no <option> until
+    // addMissingModelOptions() runs, so the choice is recorded at startup and
+    // resolved by applyPendingModelChoice(). Null once resolved.
+    this.pendingModelChoice = null;
 
     // Whether this box has a usable vision model at all. Distinct from
     // visionAllowed: that is the operator switching vision OFF, this is a box
@@ -1025,6 +1037,20 @@ class ChatApp {
       if (event.data && event.data.source === 'launchpad' && event.data.type === 'prefill-chat') {
         const command = event.data.command;
         if (command && this.elements.messageInput) {
+          if (event.data.auto_send && !this.autoSendGuard.shouldSend(command)) {
+            // A repeat click on the Rails crash page's "Ask Leo to fix this"
+            // button. It sends a real user message that costs the customer a
+            // message off their daily cap, and the button gives no pending
+            // state, so a slow first response reliably gets clicked again.
+            // Say so instead of silently doing nothing — that is what produced
+            // the second click in the first place.
+            console.log('Launchpad: dropped a repeat auto-send of the same request');
+            this.messageRenderer.renderSystemMessage(
+              "Already sent — Leo is working on that. You don't need to click again."
+            );
+            return;
+          }
+
           this.elements.messageInput.value = command;
           this.elements.messageInput.focus();
           // Trigger input event to update send button state
@@ -1287,7 +1313,8 @@ class ChatApp {
    * Used by funnels (e.g. mothership picture-to-html) that need an image-capable
    * model since the default DeepSeek cannot view images. Persists to the llmModel
    * cookie so the whole session stays on the chosen model, not just the first turn.
-   * Ignores unknown keys, matching the cookie-restore guard in loadSettingsFromCookies().
+   * Records the pin as intent rather than validating it here, matching the
+   * cookie restore in loadSettingsFromCookies() — see applyPendingModelChoice().
    */
   checkModelParam() {
     const params = new URLSearchParams(window.location.search);
@@ -1300,14 +1327,46 @@ class ChatApp {
     window.history.replaceState({}, '', url);
 
     if (!this.elements.modelSelect) return;
-    const isValid = Array.from(this.elements.modelSelect.options).some(option => option.value === model);
-    if (!isValid) return;
 
-    this.elements.modelSelect.value = model;
+    // No dropdown test here. This ran before addMissingModelOptions(), so
+    // ?llm_model=<a config-registered model> silently no-opped — and the param
+    // had already been stripped above, leaving nothing to debug with. That
+    // killed the one workaround available while the cookie bug was live.
+    this.pendingModelChoice = model;
     // An explicit pin beats the server default (see fetchAvailableModels).
     this.userChoseModel = true;
+    if (Array.from(this.elements.modelSelect.options).some(option => option.value === model)) {
+      this.elements.modelSelect.value = model;
+    }
     setCookie('llmModel', model, this.config.cookieExpiryDays);
     this.updateDropdownLabel(this.elements.modelSelect);
+  }
+
+  /**
+   * Put a remembered model choice on the dropdown, once the options exist.
+   *
+   * Called from fetchAvailableModels() immediately after addMissingModelOptions()
+   * and before availability is read, so a choice this box cannot run right now
+   * still reaches the existing needsNewSelection repair.
+   */
+  applyPendingModelChoice() {
+    const pending = this.pendingModelChoice;
+    if (!pending || !this.elements.modelSelect) return;
+    this.pendingModelChoice = null;
+
+    const { select, userChoseModel } = resolveRememberedModel({
+      options: Array.from(this.elements.modelSelect.options),
+      remembered: pending,
+    });
+
+    // A model this build has no option for was dropped from the registry.
+    // Clearing the flag hands the selection back to the server default rather
+    // than pinning a dead id the send path cannot use.
+    this.userChoseModel = userChoseModel;
+    if (select) {
+      this.elements.modelSelect.value = select;
+      this.updateDropdownLabel(this.elements.modelSelect);
+    }
   }
 
   /**
@@ -2130,11 +2189,20 @@ class ChatApp {
 
     const savedModel = getCookie('llmModel');
     if (this.elements.modelSelect) {
-      if (savedModel && Array.from(this.elements.modelSelect.options).some(option => option.value === savedModel)) {
-        this.elements.modelSelect.value = savedModel;
-        // The user's own choice — fetchAvailableModels() must not overwrite it
-        // with the server default.
+      if (savedModel) {
+        // Record the INTENT, do not validate it here. Config-registered models
+        // have no <option> until addMissingModelOptions() runs inside
+        // fetchAvailableModels(), so a dropdown test at this point discards
+        // every config-registered choice and the server default then overwrites
+        // it — "it keeps auto switching back" (rsb-dev, 2026-09-02).
+        // applyPendingModelChoice() decides once the options exist.
+        this.pendingModelChoice = savedModel;
         this.userChoseModel = true;
+        // Applied immediately when the option is already there, so registry
+        // models keep behaving exactly as they did before this fix.
+        if (Array.from(this.elements.modelSelect.options).some(option => option.value === savedModel)) {
+          this.elements.modelSelect.value = savedModel;
+        }
         this.updateDropdownLabel(this.elements.modelSelect);
       } else {
         // No cookie — the dropdown sits on its empty placeholder until
@@ -2187,6 +2255,12 @@ class ChatApp {
       // would offer a model the dropdown could never show, and setModel() on it
       // would silently no-op.
       this.addMissingModelOptions(data.models || []);
+
+      // The user's own choice is resolved HERE and nowhere earlier: the options
+      // it names may have been created one line above. Runs before the
+      // availability pass so a remembered model this box cannot run right now
+      // still reaches the needsNewSelection repair below.
+      this.applyPendingModelChoice();
 
       const modelAvailability = new Map(
         data.models.map(m => [m.value, {

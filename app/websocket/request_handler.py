@@ -694,6 +694,30 @@ class RequestHandler:
             await websocket.send_json({"type": "instance_locked", **state})
         return True
 
+    @staticmethod
+    def _paywall_context(*sources: dict) -> dict:
+        """The paywall fields that shape the card, from the first source that has them.
+
+        ``block_reason`` (``message_limit`` | ``spend_limit``), ``plan``
+        (``free``/``starter``/``pro``/``business``) and ``resets_at`` (ISO 8601
+        carrying the customer's OWN UTC offset, so the box can render a local
+        time without knowing their timezone).
+
+        Every key is omitted when no source carries it — an older mothership
+        sends none of them, and the browser's fallbacks are today's behaviour.
+        Nothing here is inferred on the box: the per-plan caps are not published,
+        and the daily window resets on the user's local day, which only the
+        mothership can resolve.
+        """
+        out = {}
+        for key in ("block_reason", "plan", "resets_at"):
+            for source in sources:
+                value = (source or {}).get(key)
+                if value is not None:
+                    out[key] = value
+                    break
+        return out
+
     async def _check_paywall_or_block(self, websocket: WebSocket) -> bool:
         """
         Per-instance paywall gate. Returns True if the message should be blocked
@@ -733,21 +757,28 @@ class RequestHandler:
             self.app.state.paywall_credits = {
                 "allowed_next": True,
                 "messages_remaining": recheck.get("messages_remaining"),
+                **self._paywall_context(recheck, credits),
             }
             logger.info(f"paywall gate: recheck says allowed -> ALLOW, cache updated to {self.app.state.paywall_credits}")
             return False
 
         # Still blocked — refresh cache and notify frontend.
         messages_remaining = recheck.get("messages_remaining", 0)
+        # Why the turn was blocked, and on which plan. The card's copy depends on
+        # both: a spend ceiling is not a message count, and only a genuinely free
+        # account may be told it is out of "free" messages.
+        context = self._paywall_context(recheck, credits)
         self.app.state.paywall_credits = {
             "allowed_next": False,
             "messages_remaining": messages_remaining,
+            **context,
         }
-        logger.info(f"paywall gate: recheck confirms BLOCKED, sending paywall_hit (messages_remaining={messages_remaining})")
+        logger.info(f"paywall gate: recheck confirms BLOCKED, sending paywall_hit (messages_remaining={messages_remaining}, {context})")
         if self._is_websocket_open(websocket):
             await websocket.send_json({
                 "type": "paywall_hit",
                 "messages_remaining": messages_remaining,
+                **context,
             })
         return True
 
@@ -928,11 +959,14 @@ class RequestHandler:
                     content=str(incoming_message.get("message", "")),
                     sent_at=datetime.now(timezone.utc).isoformat(),
                 )
-                # Only role="user" responses carry paywall fields.
+                # Only role="user" responses carry paywall fields. plan/resets_at
+                # come back on ALLOWED turns too, so the card already knows which
+                # plan it is talking to by the time the block lands.
                 if result and "allowed_next" in result:
                     self.app.state.paywall_credits = {
                         "allowed_next": result.get("allowed_next"),
                         "messages_remaining": result.get("messages_remaining"),
+                        **self._paywall_context(result),
                     }
                     logger.info(f"paywall cache updated: {self.app.state.paywall_credits}")
             asyncio.create_task(_report_user_and_cache_paywall())

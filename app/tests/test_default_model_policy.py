@@ -248,10 +248,25 @@ def test_disabling_both_blessed_models_never_locks_the_box_out(monkeypatch):
     assert model_policy.enabled_default_model() == "claude-4.5-sonnet"
 
 
-# --- 5. vision routes through Muse ------------------------------------------
+# --- 5. vision routes through a multimodal general-purpose model -------------
 
-def test_the_vision_auto_switch_target_is_muse():
-    assert model_policy.VISION_MODEL == MUSE
+def test_the_vision_floor_is_headed_by_the_fleet_default(monkeypatch):
+    """0.7.7 moved GLM ahead of Muse here when GLM took the fleet default.
+
+    The property being pinned is not "which model" — that is data, and it moved
+    once already — it is that the HEAD of the vision floor is a general-purpose
+    multimodal model rather than a switch-only vision variant. That is what makes
+    the auto-switch a no-op on a normal box instead of a provider change midway
+    through a conversation.
+    """
+    assert model_policy.VISION_MODEL == "glm-5.3-flash-zai"
+    assert model_policy.VISION_MODEL not in model_policy._VISION_ONLY_MODELS
+
+
+def test_muse_is_still_on_the_vision_floor():
+    """It was never retired. The 2026-08-31 404s were a 3h22m upstream blip that
+    recovered, so a META-keyed box with no OpenRouter key still routes here."""
+    assert MUSE in model_policy._VISION_MODELS
 
 
 def test_muse_is_multimodal():

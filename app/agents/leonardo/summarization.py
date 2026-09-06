@@ -31,16 +31,138 @@ thing loops (SupportIncident #106).
 """
 from __future__ import annotations
 
+import contextvars
 import json
 import logging
 import re
 
 from langchain.agents.middleware import SummarizationMiddleware
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, RemoveMessage, get_buffer_string
 
 from app.lib.text_budget import shrink_to_token_budget
 
 logger = logging.getLogger(__name__)
+
+# --- Model independence --------------------------------------------------------
+#
+# Two things used to tie compaction to a specific model, and together they let a
+# Muse Spark thread reach 600k tokens with the trigger never firing:
+#
+# 1. The trigger was a local tiktoken ESTIMATE of the state. The provider's real
+#    `input_tokens` was never consulted — stock SummarizationMiddleware only
+#    trusts reported usage when the summarizer's provider matches the chat
+#    model's, and ours never match (the summarizer is picked by API key).
+#    `reported_context_tokens` makes the provider's number the trigger's floor
+#    for every model.
+# 2. The summarizer was whichever provider had a key on the box. On a box
+#    funded for one provider, compaction depended on a different one; when it
+#    failed, the literal "Error generating summary: ..." was stored as memory.
+#    The model in use is now asked first; the key chain is the fallback; total
+#    failure stores an honest notice, never an exception.
+
+# The chat model of the run currently being compacted (state["llm_model"]).
+# A contextvar rather than an instance attribute because one middleware
+# instance serves every concurrent run of its agent.
+_ACTIVE_CHAT_MODEL: contextvars.ContextVar = contextvars.ContextVar(
+    "leonardo_active_chat_model", default=None
+)
+
+_SUMMARY_CONFIG = {"metadata": {"lc_source": "summarization"}}
+
+# Calibration: reported / estimated, for the run being compacted. Every count
+# the middleware makes (trigger, keep-tail cutoff, loop guards, summary trim)
+# goes through `_calibrated_counter`, which multiplies the local estimate by
+# this. So a model whose real tokens run 3x the tiktoken estimate keeps a 30k
+# REAL tail, not a 90k one, and lands under the real trigger after compaction.
+_CALIBRATION: contextvars.ContextVar = contextvars.ContextVar(
+    "leonardo_token_calibration", default=1.0
+)
+
+# A ratio above this says the estimate cannot see most of the context (a video
+# attachment, a provider counting something we do not store). Scaling a
+# handful of tiny messages by 1000x would then force-truncate the summary
+# itself, which is worse than compacting a little too gently: the next call
+# reports fresh usage and compaction runs again.
+MAX_CALIBRATION_RATIO = 8.0
+
+
+def _calibrated_counter(counter):
+    def _count(messages):
+        ratio = _CALIBRATION.get()
+        raw = counter(messages)
+        return raw if ratio == 1.0 else int(round(raw * ratio))
+
+    return _count
+
+
+def calibration_ratio(messages, raw_counter):
+    """reported / estimated at the newest AI message that reported usage.
+
+    1.0 when nothing was reported, when the estimate is zero, or when the
+    estimate already over-counts; never above ``MAX_CALIBRATION_RATIO``.
+    """
+    msgs = list(messages or [])
+    for idx in range(len(msgs) - 1, -1, -1):
+        m = msgs[idx]
+        if not isinstance(m, AIMessage):
+            continue
+        usage = getattr(m, "usage_metadata", None) or {}
+        try:
+            reported = int(usage.get("input_tokens") or 0) + int(usage.get("output_tokens") or 0)
+        except (TypeError, ValueError):
+            continue
+        if reported <= 0:
+            continue
+        try:
+            estimated = int(raw_counter(msgs[: idx + 1]))
+        except Exception:  # noqa: BLE001 - an estimate must never break a turn
+            return 1.0
+        if estimated <= 0:
+            return 1.0
+        return max(1.0, min(MAX_CALIBRATION_RATIO, reported / estimated))
+    return 1.0
+
+SUMMARY_UNAVAILABLE_TEXT = (
+    "Summary unavailable: every summarizer model failed, so the earlier part of "
+    "this conversation was dropped WITHOUT a summary. Nothing from before this "
+    "point is known to you. If you need something from earlier, re-read the "
+    "relevant files or ask the user to restate it. Do not guess."
+)
+
+
+def reported_context_tokens(messages, token_counter):
+    """The context size the provider actually saw, or None if it never said.
+
+    The newest AI message carrying ``usage_metadata`` is the truth for
+    everything up to and including itself — system prompt, tool schemas and
+    the model's own tokenizer included. Whatever came after it (tool results,
+    the user's next message) is added by estimate. Provider-agnostic: no
+    check on who reported the number, because the number is what got billed.
+
+    Compaction clears ``usage_metadata`` from the AI messages it keeps
+    (``_clear_reported_usage``), so a pre-compaction figure can never fire
+    the trigger again on the next call.
+    """
+    msgs = list(messages or [])
+    for idx in range(len(msgs) - 1, -1, -1):
+        m = msgs[idx]
+        if not isinstance(m, AIMessage):
+            continue
+        usage = getattr(m, "usage_metadata", None) or {}
+        try:
+            inp = int(usage.get("input_tokens") or 0)
+            out = int(usage.get("output_tokens") or 0)
+        except (TypeError, ValueError):
+            continue
+        if inp <= 0:
+            continue
+        tail = msgs[idx + 1:]
+        try:
+            after = int(token_counter(tail)) if tail else 0
+        except Exception:  # an estimate must never be the thing that breaks a turn
+            after = 0
+        return inp + out + after
+    return None
 
 # --- Budgets that keep compaction winnable (SupportIncident #246) -------------
 #
@@ -247,22 +369,162 @@ class RailsSummarizationMiddleware(SummarizationMiddleware):
     def __init__(self, *args, keep_initial_human: int = 3, **kwargs):
         super().__init__(*args, **kwargs)
         self.keep_initial_human = keep_initial_human
+        # The estimate as given; every count the middleware makes is the
+        # calibrated view of it (see _CALIBRATION).
+        self._raw_counter = self.token_counter
+        self.token_counter = _calibrated_counter(self._raw_counter)
+        # Stock keeps a second counter for the keep-tail binary search; it must
+        # see the same calibrated numbers or the tail is sized in estimate tokens.
+        self._partial_token_counter = self.token_counter
 
     # -- hooks ----------------------------------------------------------------
 
-    def before_model(self, state, runtime):
+    def _enter(self, state):
         original = list(state["messages"])
-        result = super().before_model(state, runtime)
-        if result is None:
-            return self._enforce_without_summary(original, runtime)
-        return self._augment(original, result, runtime)
+        tokens = (
+            _ACTIVE_CHAT_MODEL.set(self._chat_model_of(state)),
+            _CALIBRATION.set(calibration_ratio(original, self._raw_counter)),
+        )
+        ratio = _CALIBRATION.get()
+        if ratio != 1.0:
+            logger.info(
+                "RailsSummarizationMiddleware: provider usage runs %.2fx the local "
+                "estimate; counting in calibrated tokens for this compaction check.",
+                ratio,
+            )
+        return original, tokens
+
+    @staticmethod
+    def _exit(tokens):
+        model_token, calibration_token = tokens
+        _ACTIVE_CHAT_MODEL.reset(model_token)
+        _CALIBRATION.reset(calibration_token)
+
+    def before_model(self, state, runtime):
+        original, tokens = self._enter(state)
+        try:
+            result = super().before_model(state, runtime)
+            if result is None:
+                result = self._enforce_without_summary(original, runtime)
+            else:
+                result = self._augment(original, result, runtime)
+        finally:
+            self._exit(tokens)
+        return self._clear_reported_usage(result)
 
     async def abefore_model(self, state, runtime):
-        original = list(state["messages"])
-        result = await super().abefore_model(state, runtime)
-        if result is None:
-            return self._enforce_without_summary(original, runtime)
-        return self._augment(original, result, runtime)
+        original, tokens = self._enter(state)
+        try:
+            result = await super().abefore_model(state, runtime)
+            if result is None:
+                result = self._enforce_without_summary(original, runtime)
+            else:
+                result = self._augment(original, result, runtime)
+        finally:
+            self._exit(tokens)
+        return self._clear_reported_usage(result)
+
+    # -- provider-reported usage ---------------------------------------------
+
+    def _should_summarize(self, messages, total_tokens):
+        """Trigger on the larger of the estimate and the provider's own count."""
+        reported = reported_context_tokens(messages, self._count)
+        if reported is not None and reported > total_tokens:
+            logger.info(
+                "RailsSummarizationMiddleware: provider reports %d tokens of context "
+                "(local estimate %d); using the reported figure for the trigger.",
+                reported, total_tokens,
+            )
+            total_tokens = reported
+        return super()._should_summarize(messages, total_tokens)
+
+    @staticmethod
+    def _clear_reported_usage(result):
+        """Strip usage from the AI messages a compaction keeps.
+
+        They were produced against the OLD context; carrying their
+        ``usage_metadata`` forward would re-fire the trigger on the very next
+        call — the summarize-on-every-turn loop by another door.
+        """
+        if not result or not result.get("messages"):
+            return result
+        cleared = []
+        for m in result["messages"]:
+            if isinstance(m, AIMessage) and getattr(m, "usage_metadata", None):
+                m = m.model_copy(update={"usage_metadata": None})
+            cleared.append(m)
+        return {**result, "messages": cleared}
+
+    # -- which model summarizes ----------------------------------------------
+
+    @staticmethod
+    def _chat_model_of(state):
+        try:
+            return state.get("llm_model") or None
+        except Exception:
+            return None
+
+    def _summarizer_candidates(self):
+        """The model in use first, then the key-chain fallback (``self.model``)."""
+        chat_model = _ACTIVE_CHAT_MODEL.get()
+        if chat_model:
+            try:
+                from app.agents.leonardo import llm_factory
+
+                yield f"chat model {chat_model}", llm_factory.get_llm(chat_model)
+            except Exception as e:  # noqa: BLE001 - fall through to the chain
+                logger.warning(
+                    "RailsSummarizationMiddleware: could not build the chat model %r "
+                    "as summarizer (%s); using the fallback chain.", chat_model, e,
+                )
+        yield "fallback chain", self.model
+
+    def _summary_prompt_for(self, messages_to_summarize):
+        """(prompt, early_return): the stock preamble, factored so both paths share it."""
+        if not messages_to_summarize:
+            return None, "No previous conversation history."
+        trimmed = self._trim_messages_for_summary(messages_to_summarize)
+        if not trimmed:
+            return None, "Previous conversation was too long to summarize."
+        return self.summary_prompt.format(messages=get_buffer_string(trimmed)).rstrip(), None
+
+    @staticmethod
+    def _summary_unavailable():
+        logger.error(
+            "RailsSummarizationMiddleware: every summarizer failed; compacting WITHOUT "
+            "a summary so the thread stays under the context limit."
+        )
+        return SUMMARY_UNAVAILABLE_TEXT
+
+    def _create_summary(self, messages_to_summarize):
+        prompt, early = self._summary_prompt_for(messages_to_summarize)
+        if early is not None:
+            return early
+        for label, model in self._summarizer_candidates():
+            try:
+                text = (model.invoke(prompt, config=_SUMMARY_CONFIG).text or "").strip()
+            except Exception as e:  # noqa: BLE001 - try the next summarizer
+                logger.warning("RailsSummarizationMiddleware: %s failed to summarize: %s", label, e)
+                continue
+            if text:
+                return text
+            logger.warning("RailsSummarizationMiddleware: %s returned an empty summary", label)
+        return self._summary_unavailable()
+
+    async def _acreate_summary(self, messages_to_summarize):
+        prompt, early = self._summary_prompt_for(messages_to_summarize)
+        if early is not None:
+            return early
+        for label, model in self._summarizer_candidates():
+            try:
+                text = ((await model.ainvoke(prompt, config=_SUMMARY_CONFIG)).text or "").strip()
+            except Exception as e:  # noqa: BLE001 - try the next summarizer
+                logger.warning("RailsSummarizationMiddleware: %s failed to summarize: %s", label, e)
+                continue
+            if text:
+                return text
+            logger.warning("RailsSummarizationMiddleware: %s returned an empty summary", label)
+        return self._summary_unavailable()
 
     # -- budgets --------------------------------------------------------------
 
@@ -901,12 +1163,14 @@ def compact_messages_if_needed(
     summary_prompt: str,
     keep_initial_human: int = 3,
     runtime=None,
+    llm_model: str | None = None,
 ):
     """Compact a raw ``StateGraph`` node's conversation before it hits the model.
 
     Pass ``state["messages"]`` — the conversation only, NOT the system message
     or any per-turn notes the node appends, which are rebuilt every turn and
-    must not be summarized away.
+    must not be summarized away. Pass ``llm_model`` (``state["llm_model"]``) so
+    the model in use writes the summary, exactly as the middleware path does.
 
     Returns ``(messages_for_the_model, ops_to_persist)``:
 
@@ -921,15 +1185,13 @@ def compact_messages_if_needed(
     and ``ops_to_persist`` is ``[]``. Compaction failing must never be the thing
     that kills a turn, so any exception falls through to the uncompacted list.
     """
-    from langchain_core.messages import RemoveMessage
-
     msgs = list(messages or [])
     if not msgs:
         return msgs, []
 
     try:
         result = _compactor(summary_prompt, keep_initial_human).before_model(
-            {"messages": msgs}, runtime
+            {"messages": msgs, "llm_model": llm_model}, runtime
         )
     except Exception:
         logger.exception(
