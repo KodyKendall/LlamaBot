@@ -371,6 +371,34 @@ class TestFailurePaths:
         assert q["retry"] == ["1"]
         assert q["prompt"] == ["hi"]  # passthrough preserved
 
+    def test_bounce_carries_the_host_the_browser_is_standing_on(self, db_engine, client):
+        """The recovery bounce loses the host too, so a user who recovers through it
+        lands on the canonical host anyway — the same cookie-on-the-wrong-hostname
+        bug the login CTA has. See TestLoginCtaCarriesReturnHost in
+        app/tests/test_sso_origin.py for the full story (box crm-4, 2026-09-08)."""
+        fake = FakeMothership(error_code="grant_expired")
+        with _install_mothership(fake):
+            resp = client.get(
+                "/auth/consume?token=OLD", follow_redirects=False,
+                headers={"host": "crm.llamapress.ai"},
+            )
+        assert resp.status_code == 302
+        q = parse_qs(urlparse(resp.headers["location"]).query)
+        assert q["retry"] == ["1"]
+        assert q["return_host"] == ["crm.llamapress.ai"]
+
+    def test_bounce_keeps_passthroughs_alongside_return_host(self, db_engine, client):
+        fake = FakeMothership(error_code="grant_expired")
+        with _install_mothership(fake):
+            resp = client.get(
+                "/auth/consume?token=OLD&prompt=hi", follow_redirects=False,
+                headers={"host": "crm.llamapress.ai"},
+            )
+        q = parse_qs(urlparse(resp.headers["location"]).query)
+        assert q["prompt"] == ["hi"]
+        assert q["return_host"] == ["crm.llamapress.ai"]
+        assert q["retry"] == ["1"]
+
     def test_expired_with_retry_renders_login_page_no_bounce(self, db_engine, client):
         fake = FakeMothership(error_code="grant_expired")
         with _install_mothership(fake):
