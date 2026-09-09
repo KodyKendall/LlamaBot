@@ -14,6 +14,12 @@ one. These tests pin the three properties that make that safe:
   * a box with no vision key at all still resolves to "" rather than guessing,
   * and the policy actually lets the resolved model through, which is what a
     default allow-list would otherwise block.
+
+0.7.7 turned the compiled tuple into a FLOOR: a pushed ``roles.vision`` replaces
+it, and an explicitly disabled model is routed around. Those two live in
+``test_model_routing_roles.py``; what stays here is the resolution the compiled
+floor produces on each shape of box, which is what a box with no pushed policy
+actually runs — still most of the fleet.
 """
 import pytest
 
@@ -38,6 +44,7 @@ def _model_dispatch_source(llm_factory) -> str:
 
 
 
+GLM = "glm-5.3-flash-zai"
 MUSE = "muse-spark-1.2-contributor"
 DS_VISION = "deepseek-v4-flash-vision-exp"
 
@@ -46,8 +53,15 @@ DS_VISION = "deepseek-v4-flash-vision-exp"
 def _clean_env(monkeypatch):
     """No keys, no policy config — each test opts into exactly what it needs."""
     monkeypatch.setattr(model_policy, "_read_instance_config", lambda: None)
+    monkeypatch.setattr(model_policy, "remote_policy", lambda: {})
     for var in (
         "META_API_KEY", "MODEL_API_KEY", "DEEPSEEK_API_KEY",
+        # 0.7.7: GLM joined the vision floor ahead of Muse, so OPENROUTER_API_KEY
+        # became a vision key. It is a REAL key on the dev box, and leaving it set
+        # here silently turns every "box with only key X" case below into a
+        # "box with key X and OpenRouter" case — which is how the first attempt at
+        # this change produced eight failures that all looked like assertion rot.
+        "OPENROUTER_API_KEY",
         "ENABLED_MODELS", "DISABLED_MODELS",
         "MODEL_SWITCHING_ALLOWED", "VISION_MODEL_ALLOWED",
     ):
@@ -57,9 +71,25 @@ def _clean_env(monkeypatch):
 
 # --- resolution ------------------------------------------------------------
 
+def test_openrouter_keyed_box_resolves_to_glm(monkeypatch):
+    """0.7.7: the vision target follows the fleet default text model.
+
+    GLM took the fleet default on 2026-08-31 and is multimodal, so on the common
+    box there is now nothing to switch TO — the auto-switch only fires for a user
+    who manually moved to a text-only model, which is the property that made Muse
+    the head of this list in the first place.
+    """
+    monkeypatch.setenv("OPENROUTER_API_KEY", "or-test-key")
+    monkeypatch.setenv("META_API_KEY", "meta-test-key")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "ds-test-key")
+    assert model_policy.vision_model() == GLM
+
+
 def test_meta_keyed_box_still_resolves_to_muse(monkeypatch):
-    """The pre-0.7.5 answer must not move. Muse is multimodal AND the fleet
-    default, so a META-keyed box has nothing to gain from switching providers."""
+    """Muse was NOT retired — the 2026-08-31 404s were a 3h22m upstream blip that
+    recovered — so a box with a META key and no OpenRouter key keeps its vision
+    exactly as before. Demoting Muse was about following the default, not about
+    routing around a dead model."""
     monkeypatch.setenv("META_API_KEY", "meta-test-key")
     monkeypatch.setenv("DEEPSEEK_API_KEY", "ds-test-key")
     assert model_policy.vision_model() == MUSE
@@ -86,15 +116,23 @@ def test_resolved_vision_model_can_always_see_images():
 
 
 def test_resolved_vision_model_is_buildable(monkeypatch):
-    """Every candidate must have a get_llm branch — a resolver naming a model
-    that falls through to the DeepSeek text default would silently drop images."""
-    import inspect
+    """Every candidate must have a build path — a resolver naming a model that
+    falls through to the DeepSeek text default would silently drop images.
 
+    Two legal paths since 0.7.7, because the head of the floor is now a registry
+    entry: a hand-written ``model_name == "..."`` branch, or a block in the
+    OpenRouter registry, which ``get_llm`` serves from ONE generic branch (that
+    is the whole point of the registry — adding an endpoint touches no code).
+    Asserting only the first would have failed GLM while GLM built perfectly.
+    """
     from app.agents.leonardo import llm_factory
+    from app.agents.leonardo.openrouter_models import get_openrouter_model
 
     src = _model_dispatch_source(llm_factory)
     for name in model_policy._VISION_MODELS:
-        assert f'model_name == "{name}"' in src
+        assert (
+            f'model_name == "{name}"' in src or get_openrouter_model(name) is not None
+        ), f"{name} is on the vision floor but nothing can build it"
 
 
 # --- policy: the resolved model has to actually be selectable ---------------
@@ -106,6 +144,14 @@ def test_deepseek_vision_is_enabled_on_a_stock_box_when_vision_is_on(monkeypatch
     monkeypatch.setenv("DEEPSEEK_API_KEY", "ds-test-key")
     monkeypatch.setenv("VISION_MODEL_ALLOWED", "true")
     assert model_policy.is_model_enabled(DS_VISION) is True
+
+
+def test_glm_vision_is_enabled_on_an_openrouter_box_when_vision_is_on(monkeypatch):
+    """Step 2a has to follow the resolver wherever it lands, not stay pinned to
+    whatever used to be first in the tuple."""
+    monkeypatch.setenv("OPENROUTER_API_KEY", "or-test-key")
+    monkeypatch.setenv("VISION_MODEL_ALLOWED", "true")
+    assert model_policy.is_model_enabled(GLM) is True
 
 
 def test_deepseek_vision_is_disabled_when_vision_is_off(monkeypatch):

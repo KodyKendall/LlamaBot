@@ -191,3 +191,61 @@ class TestNoSubstringBlocklist:
         for secret in ("OPENAI_API_KEY", "DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY",
                        "VSCODE_PASSWORD", "SSO_SHARED_SECRET"):
             assert secret not in _EXEC_ENV_ALLOWLIST
+
+
+# ---------------------------------------------------------------------------
+# Temp-dir plumbing, and the blank-vs-unset distinction behind it
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("plumbing", ["TMPDIR", "TMP", "TEMP"])
+def test_temp_dir_plumbing_is_never_blanked(container_env, plumbing):
+    """A blanked TMPDIR is not an unset TMPDIR.
+
+    Tailwind v4 ships as a single-file Bun executable that extracts its
+    @parcel/watcher native addon into $TMPDIR and dlopens it. With TMPDIR set to
+    the empty string that path is ""/watcher-*.node and the build dies with
+    ERR_DLOPEN_FAILED. The 0.7.6 base image bakes TMPDIR=/rails/tmp, so every box
+    on it hit this the next time Leo touched assets (leo-sepe, 2026-09-02).
+    """
+    container_env(["TMPDIR", "TMP", "TEMP", "OPENAI_API_KEY"])
+    entries = tools.build_exec_env("c")
+
+    assert plumbing not in _scrubbed(entries)
+    assert "OPENAI_API_KEY" in _scrubbed(entries), "secrets must still be blanked"
+
+
+def test_scrubbed_names_are_unset_not_merely_blanked(container_env):
+    """The class of bug, not just TMPDIR.
+
+    An empty string and a missing variable differ to Dir.tmpdir, os.tmpdir(),
+    Bun, git (GIT_DIR=), and every `${VAR:-default}`. So the snippet is prefixed
+    with an `unset` for each blanked name; the Env blanks stay as the defence for
+    anything that is not a shell.
+    """
+    container_env(["OPENAI_API_KEY", "SOME_FUTURE_TOKEN", "PATH", "TMPDIR"])
+    entries = tools.build_exec_env("c", ["RUBYOPT=-W0"])
+
+    prefix = tools.scrub_unset_prefix(entries)
+
+    assert prefix.startswith("unset ")
+    assert prefix.rstrip().endswith(";")
+    assert "OPENAI_API_KEY" in prefix
+    assert "SOME_FUTURE_TOKEN" in prefix
+    # Allowlisted plumbing must survive: unsetting these breaks the command.
+    assert "TMPDIR" not in prefix
+    assert "PATH" not in prefix
+    # RUBYOPT is explicitly SET, not blanked — unsetting it would undo the set.
+    assert "RUBYOPT" not in prefix
+
+
+def test_unset_prefix_is_empty_when_nothing_is_scrubbed(container_env):
+    container_env(["PATH", "HOME"])
+    entries = [e for e in tools.build_exec_env("c") if not e.endswith("=")]
+    assert tools.scrub_unset_prefix(entries) == ""
+
+
+def test_unset_prefix_quotes_names(container_env):
+    """Names come from the container's own config — quote rather than trust."""
+    container_env(["WEIRD;NAME", "OPENAI_API_KEY"])
+    prefix = tools.scrub_unset_prefix(tools.build_exec_env("c"))
+    assert "'WEIRD;NAME'" in prefix

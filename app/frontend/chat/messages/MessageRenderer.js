@@ -6,6 +6,7 @@ import { MarkdownParser } from './MarkdownParser.js';
 import { ToolMessageRenderer } from './ToolMessageRenderer.js';
 
 import { leoDiagnostics } from '../utils/LeoDiagnostics.js';
+import { EFFICIENCY_WIKI_URL, paywallCardCopy } from './paywallCopy.js';
 export class MessageRenderer {
   constructor(messageHistoryElement, iframeManager = null, getRailsDebugInfoCallback = null, scrollManager = null, loadingVerbs = null, config = {}, container = null, elements = {}, faviconBadgeManager = null, appState = null) {
     this.messageHistory = messageHistoryElement;
@@ -638,8 +639,15 @@ export class MessageRenderer {
 
   /**
    * Render paywall card with upgrade CTA
+   *
+   * `detail` is the paywall_hit frame — {block_reason, plan, resets_at}. The
+   * copy depends on all three (a paying customer must never be told they are out
+   * of FREE messages, and a spend ceiling is not a message count), so it lives in
+   * paywallCopy.js where it is tested on its own. An older mothership sends none
+   * of the fields and the fallbacks there reproduce the pre-0.7.7 card exactly.
    */
-  renderPaywallMessage(upgradeUrl) {
+  renderPaywallMessage(upgradeUrl, detail = {}) {
+    const { title, subtitle } = paywallCardCopy(detail);
     const messageDiv = document.createElement('div');
     messageDiv.setAttribute('data-llamabot', 'paywall-message');
     messageDiv.innerHTML = `
@@ -647,20 +655,31 @@ export class MessageRenderer {
         <i class="fa-solid fa-crown"></i>
       </div>
       <div class="paywall-card-body">
-        <div class="paywall-card-title">You've used your free messages for today</div>
-        <div class="paywall-card-subtitle">Come back tomorrow or upgrade for more messages</div>
+        <div class="paywall-card-title"></div>
+        <div class="paywall-card-subtitle"></div>
         <a href="${upgradeUrl}" target="_blank" rel="noopener noreferrer" class="paywall-card-cta">
           <i class="fa-solid fa-bolt"></i>
           <span>Upgrade to keep building</span>
         </a>
+        <a href="${EFFICIENCY_WIKI_URL}" target="_blank" rel="noopener noreferrer" class="paywall-card-link">
+          Use your messages efficiently
+        </a>
       </div>
     `;
+    // textContent, not innerHTML: the copy carries a rendered clock time from the
+    // mothership payload, so it is not a trusted literal.
+    messageDiv.querySelector('.paywall-card-title').textContent = title;
+    messageDiv.querySelector('.paywall-card-subtitle').textContent = subtitle;
 
     const cta = messageDiv.querySelector('.paywall-card-cta');
     if (cta) {
       cta.addEventListener('click', () => {
         if (window.posthog) {
-          window.posthog.capture('paywall_upgrade_clicked', { upgrade_url: upgradeUrl });
+          window.posthog.capture('paywall_upgrade_clicked', {
+            upgrade_url: upgradeUrl,
+            block_reason: detail.block_reason,
+            plan: detail.plan,
+          });
         }
       });
     }
@@ -669,7 +688,10 @@ export class MessageRenderer {
     this.stopThinking();
 
     if (window.posthog) {
-      window.posthog.capture('paywall_hit');
+      window.posthog.capture('paywall_hit', {
+        block_reason: detail.block_reason,
+        plan: detail.plan,
+      });
     }
 
     return messageDiv;

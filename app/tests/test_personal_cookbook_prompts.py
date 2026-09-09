@@ -48,3 +48,29 @@ def test_the_fleet_cookbook_is_still_described(relative):
     source = (AGENTS / relative).read_text()
 
     assert "cookbook.json" in source
+
+
+@pytest.mark.parametrize("relative", PROMPT_FILES)
+def test_prompt_does_not_send_leo_to_the_environment_for_the_token(relative):
+    """The publish flow must not name a variable the exec scrub blanks (0.7.7).
+
+    ``MOTHERSHIP_API_TOKEN`` is not in ``_EXEC_ENV_ALLOWLIST`` (rails_agent/tools.py),
+    and that list is default-deny, so ``build_exec_env`` blanks it for every
+    ``bash_command`` exec. Leo read an empty string, sent ``Authorization: Bearer ``
+    and the mothership answered ``{"success":false,"error":"Missing credentials"}``.
+    The customer on box leo-zuset was told the app "does not have the required
+    cookbook sign-in credentials" and left a thumbs-down (2026-09-01).
+
+    The credentials themselves are fine — they are readable from
+    ``/rails/.leonardo/instance.json``, which the scrub does not touch, and the
+    published guide now documents that path. Only the prompt's pointer was wrong.
+
+    Same failure mode as the ``HOSTED_DOMAIN`` note already in that allowlist:
+    "scrubbing it made the documented command return an empty string."
+    """
+    source = (AGENTS / relative).read_text()
+
+    assert "MOTHERSHIP_API_TOKEN" not in source, (
+        f"{relative} sends Leo to an environment variable the exec scrub blanks. "
+        "Point at the published guide instead; it documents where the credentials live."
+    )

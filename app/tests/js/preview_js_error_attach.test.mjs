@@ -157,6 +157,44 @@ test('an error with no message is ignored', () => {
   assert.equal(attach.errors.length, 0);
 });
 
+// A browser extension (MetaMask, a password manager, a request interceptor)
+// injects its scripts into the main world of the preview iframe, so its throws
+// fire the app's own listeners and arrive here from the correct Rails origin.
+// The Rails overlay drops these at the source, but boxes whose overlay lags the
+// image need the same guard on this side. The origin is right; only the URL
+// scheme in the frames says whose code it was.
+test('an error whose every frame is a browser extension is not recorded', () => {
+  const { attach, sendError } = harness();
+  sendError(anError({
+    kind: 'unhandled-rejection',
+    message: 'Failed to connect to MetaMask',
+    stack: 'i: Failed to connect to MetaMask\n'
+         + '    at Object.connect (chrome-extension://nkbihfbeogaeaoehlefnkodbefgpgknn/scripts/inpage.js:7:84292)'
+  }));
+  assert.equal(attach.errors.length, 0);
+});
+
+test('an extension frame on top of app frames is still recorded', () => {
+  // The extension monkey-patched window.fetch, so it is the top frame — but
+  // "Failed to fetch" was a real problem in the app's own Turbo underneath.
+  const { attach, sendError } = harness();
+  sendError(anError({
+    kind: 'console.error',
+    message: 'TypeError: Failed to fetch',
+    stack: 'TypeError: Failed to fetch\n'
+         + '    at s.fetch (chrome-extension://eppiocemhmnlbhjplcgkofciiegomcon/libs/requests.js:1:3633)\n'
+         + '    at $ (https://rails-leo-mevve.leo.llamapress.ai/assets/turbo.min-38d0308.js:5:8309)\n'
+         + '    at X.perform (https://rails-leo-mevve.leo.llamapress.ai/assets/turbo.min-38d0308.js:5:10084)'
+  }));
+  assert.equal(attach.errors.length, 1);
+});
+
+test('a bare "Script error." is kept — that is a CORS rule, not an extension', () => {
+  const { attach, sendError } = harness();
+  sendError(anError({ message: 'Script error. at :0', stack: null }));
+  assert.equal(attach.errors.length, 1);
+});
+
 // ---------------------------------------------------------------------------
 // Banner visibility
 // ---------------------------------------------------------------------------

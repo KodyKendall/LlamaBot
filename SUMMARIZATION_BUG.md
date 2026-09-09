@@ -7,6 +7,10 @@
 
 ---
 
+> **A third cause (0.7.7, 2026-09-06):** compaction never fired at all for non-default
+> models (Muse Spark threads at 600k+) because the trigger was a local estimate and the
+> provider's real usage was never read. See **`docs/dev/model_independent_compaction.md`**.
+
 > **A second, different cause of the same symptom** — a thread that summarizes on every step
 > and never completes a turn — was found on 2026-08-06 (SupportIncident #246): unbounded
 > page payloads (a 10 MB `full_html`, a 375 KB picked element) that compaction was

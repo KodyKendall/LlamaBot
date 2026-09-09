@@ -2836,6 +2836,23 @@ body.instance-locked .lock-modal-overlay {
     font-size: 0.75rem;
 }
 
+/* Secondary link on the paywall card. Upgrading is not the only useful next
+   step — this is the highest-intent moment for "how to make your messages go
+   further" — but it must stay visibly quieter than the CTA above it. */
+.paywall-card-link {
+    align-self: flex-start;
+    margin-top: 2px;
+    font-size: 0.775rem;
+    color: #c4b5fd;
+    opacity: 0.8;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+.paywall-card-link:hover {
+    opacity: 1;
+}
+
 .tool-collapsible {
     cursor: pointer;
     user-select: none;

@@ -24,6 +24,7 @@
  */
 
 import { getRailsUrl } from '../config.js';
+import { isExtensionOnly } from './extensionErrorFilter.js';
 
 /** Keep the tray useful, not a log file. Oldest fall off the end. */
 const MAX_ERRORS = 25;
@@ -80,6 +81,10 @@ export class ErrorAttach {
    */
   record(raw) {
     if (!raw || !raw.message) return;
+    // A browser extension running inside the preview throws on the app's own
+    // window, so its errors reach us from the right origin looking like the
+    // app's. They are not, and the tray feeds the user's prompt.
+    if (isExtensionOnly(raw)) return;
 
     const entry = {
       id: String(raw.id || `${Date.now()}-${this.errors.length}`),

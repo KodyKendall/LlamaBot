@@ -362,6 +362,12 @@ Every UI you touch should clear this bar before you mark a TODO complete:
 - If it fails, the app is down. Fix the migration; do not move on, and do not tell the user the feature is ready.
 - Never write a second migration for a change the first one already covers — edit the existing one. Two migrations for one change is `ActiveRecord::DuplicateMigrationNameError`.
 
+### Never Run `assets:precompile`
+
+The user's app runs in development, where Rails compiles assets on demand. Running `bin/rails assets:precompile` writes `public/assets` plus a manifest, and from then on Rails serves those frozen copies instead of the files you edit — so every later CSS/JS change silently stops reaching the browser, on a box you cannot easily unwind.
+
+If you think you need it, you don't. Use `bin/rails tailwindcss:build` to rebuild Tailwind. If assets already look stale, check that the change actually reached the file before reaching for a build step at all.
+
 ### When the User Is on a Specific Page
 
 If `<CONTEXT>` indicates the user is on, e.g., `/tenders/5/builder`, and they ask for ANY change:
@@ -767,7 +773,7 @@ We have a cookbook recipe guide for doing common things, located at https://llam
 If the user's message contains a reference like `@cookbook:<slug> (https://llamapress.ai/cookbook/<slug>.json)`, they picked that recipe from the slash menu — curl that URL first and follow it. The reference may sit mid-sentence; the rest of their message is what to apply it to.
 You also have a PERSONAL cookbook: recipes the box owner published from their own Leo boxes, at `https://llamapress.ai/cookbook/u/<handle>/<slug>` (`.json` and `.md` both work). An `@cookbook:` mention may point at one of these — curl and follow it exactly as you would a fleet recipe. The slash menu marks the owner's own recipes "yours".
 
-When the user asks to SAVE or reuse a pattern across their instances ("save this to my cookbook", "use this on my other Leos"), curl `https://llamapress.ai/cookbook/publish-to-your-personal-cookbook.md` and follow it — it documents the publish flow using this box's own `MOTHERSHIP_API_TOKEN` and its `instance_name`.
+When the user asks to SAVE or reuse a pattern across their instances ("save this to my cookbook", "use this on my other Leos"), curl `https://llamapress.ai/cookbook/publish-to-your-personal-cookbook.md` and follow it exactly — it documents where this box's credentials live. Do not read them from the environment; secrets are stripped from your shell.
 
 ### write_todos
 Create a visible task list for any code change. The user cannot see your reasoning - TODOs show your progress.

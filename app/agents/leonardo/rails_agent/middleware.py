@@ -26,6 +26,7 @@ from app.agents.leonardo.llm_factory import (
 from app.agents.leonardo import model_health
 from app.agents.leonardo.model_policy import enabled_default_model, fallback_model
 from app.agents.leonardo.resilience import (
+    is_midstream_stall,
     is_model_gone,
     is_transient_error,
     retry_notice_text,
@@ -658,6 +659,46 @@ class DynamicModelMiddleware(AgentMiddleware):
                     attempt = 0
                     started_at = time.monotonic()
                     continue
+                # A stall AFTER content is a spent replica, not a flaky one.
+                # StreamChunkTimeoutError is a TimeoutError, so it classifies as
+                # transient and without this it takes the rung-1 branch below and
+                # retries the endpoint that just threw away 478 chunks of real
+                # work. On a model pinned to one provider with allow_fallbacks:
+                # false that retry is guaranteed to land on the same sick replica,
+                # and each attempt costs a whole generation rather than a fast
+                # 503 — so rung 1's budget buys nothing before rung 2 finally
+                # gets a turn. 38 dead turns across 6 customer boxes in the week
+                # of 2026-08-31.
+                #
+                # Skip rung 1 the way a retirement does, but deliberately do NOT
+                # mark_model_gone: the model is fine, this replica is not, and a
+                # 15-minute fleet-wide ban on the box default over one bad stream
+                # would be a self-inflicted outage. A zero-chunk stall keeps its
+                # rung-1 retry — see is_midstream_stall.
+                if is_midstream_stall(e):
+                    stalled_after = getattr(e, "chunks_received", 0)
+                    fallback = (
+                        None if fallbacks_used >= _MODEL_FALLBACK_MAX_RUNGS
+                        else self._next_rung(request, llm_model, tried)
+                    )
+                    if fallback is None:
+                        logger.warning(
+                            f"{llm_model} stalled after {stalled_after} chunks and "
+                            f"there is no other model available on this box"
+                        )
+                        raise
+                    logger.warning(
+                        f"{llm_model} stalled after {stalled_after} chunks; "
+                        f"finishing this step on {fallback}"
+                    )
+                    _announce_fallback(llm_model, fallback, sync=True)
+                    llm_model = fallback
+                    tried.add(fallback)
+                    fallbacks_used += 1
+                    req = self._override(request, llm_model)
+                    attempt = 0
+                    started_at = time.monotonic()
+                    continue
                 if not is_transient_error(e):
                     _record_bad_request_shape(e, req, llm_model)
                     raise
@@ -740,6 +781,46 @@ class DynamicModelMiddleware(AgentMiddleware):
                     logger.warning(
                         f"{llm_model} reports itself retired; finishing this step "
                         f"on {fallback}"
+                    )
+                    await _announce_fallback(llm_model, fallback, sync=False)
+                    llm_model = fallback
+                    tried.add(fallback)
+                    fallbacks_used += 1
+                    req = self._override(request, llm_model)
+                    attempt = 0
+                    started_at = time.monotonic()
+                    continue
+                # A stall AFTER content is a spent replica, not a flaky one.
+                # StreamChunkTimeoutError is a TimeoutError, so it classifies as
+                # transient and without this it takes the rung-1 branch below and
+                # retries the endpoint that just threw away 478 chunks of real
+                # work. On a model pinned to one provider with allow_fallbacks:
+                # false that retry is guaranteed to land on the same sick replica,
+                # and each attempt costs a whole generation rather than a fast
+                # 503 — so rung 1's budget buys nothing before rung 2 finally
+                # gets a turn. 38 dead turns across 6 customer boxes in the week
+                # of 2026-08-31.
+                #
+                # Skip rung 1 the way a retirement does, but deliberately do NOT
+                # mark_model_gone: the model is fine, this replica is not, and a
+                # 15-minute fleet-wide ban on the box default over one bad stream
+                # would be a self-inflicted outage. A zero-chunk stall keeps its
+                # rung-1 retry — see is_midstream_stall.
+                if is_midstream_stall(e):
+                    stalled_after = getattr(e, "chunks_received", 0)
+                    fallback = (
+                        None if fallbacks_used >= _MODEL_FALLBACK_MAX_RUNGS
+                        else self._next_rung(request, llm_model, tried)
+                    )
+                    if fallback is None:
+                        logger.warning(
+                            f"{llm_model} stalled after {stalled_after} chunks and "
+                            f"there is no other model available on this box"
+                        )
+                        raise
+                    logger.warning(
+                        f"{llm_model} stalled after {stalled_after} chunks; "
+                        f"finishing this step on {fallback}"
                     )
                     await _announce_fallback(llm_model, fallback, sync=False)
                     llm_model = fallback

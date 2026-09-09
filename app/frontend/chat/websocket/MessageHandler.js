@@ -1521,7 +1521,7 @@ export class MessageHandler {
       }));
 
       if (data.type === 'paywall_hit') {
-        this.messageRenderer.renderPaywallMessage(PAYWALL_UPGRADE_URL);
+        this.messageRenderer.renderPaywallMessage(PAYWALL_UPGRADE_URL, data);
       } else if ((data.type === 'system_message' || data.type === 'error') && data.content) {
         this.messageRenderer.addMessage(data.content, data.type, data.base_message);
       }
