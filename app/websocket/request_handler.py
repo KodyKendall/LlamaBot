@@ -45,7 +45,7 @@ from app.agents.leonardo.model_policy import enabled_default_model, vision_allow
 # unbounded LangGraph state — and therefore unbounded checkpoints and an
 # uncompactable thread (SupportIncident #246).
 from app.websocket.payload_limits import cap_message_text, cap_state_value
-from app.websocket.error_text import describe_exception
+from app.websocket.error_text import chat_error_content, describe_exception
 
 # Per-message ceiling applied by the `/compact` repair. A message bigger than a
 # tenth of the whole context budget cannot be kept whatever we do with the rest.
@@ -1387,10 +1387,11 @@ class RequestHandler:
                 if self._is_websocket_open(websocket):
                     await websocket.send_json({
                         "type": "error",
-                        # describe_exception, not str(e): a mid-stream transport
+                        # chat_error_content, not str(e): a mid-stream transport
                         # failure (httpx.ReadError) has an EMPTY message, so this
-                        # frame used to reach the browser as a dangling colon.
-                        "content": f"Error processing request: {describe_exception(e)}"
+                        # frame used to reach the browser as a dangling colon — and
+                        # an expired ChatGPT link needs an explanation, not a 401.
+                        "content": chat_error_content("Error processing request", e)
                     })
                 raise e
             finally:
@@ -1532,7 +1533,7 @@ class RequestHandler:
                 if self._is_websocket_open(websocket):
                     await websocket.send_json({
                         "type": "error",
-                        "content": f"Error resuming after approval: {describe_exception(e)}"
+                        "content": chat_error_content("Error resuming after approval", e)
                     })
                 raise e
 
@@ -1773,7 +1774,7 @@ class RequestHandler:
                 if self._is_websocket_open(websocket):
                     await websocket.send_json({
                         "type": "error",
-                        "content": f"Error resuming after question: {describe_exception(e)}"
+                        "content": chat_error_content("Error resuming after question", e)
                     })
                 raise e
 
