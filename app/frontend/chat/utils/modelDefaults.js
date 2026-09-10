@@ -66,3 +66,37 @@ export function resolveRememberedModel({ options, remembered }) {
   // silently no-ops on, so the server default takes over instead.
   return match ? { select: remembered, userChoseModel: true } : none;
 }
+
+/**
+ * Which model a NEW THREAD starts on, and whether that choice may be persisted.
+ *
+ * Starting a thread used to reset the dropdown to the box default outright, and
+ * setModel() writes the llmModel cookie, so the reset was also SAVED as the user's
+ * preference. Two separate bugs in one line (0.7.8):
+ *
+ *   - the user's model was discarded on every new thread, and
+ *   - the box default was frozen onto them as a pin, so a later fleet default
+ *     change never reached them again.
+ *
+ * The handler's comment called this "user-initiated", but the createNewThread event
+ * has three dispatchers and two of them fire from the AGENT mid-conversation
+ * (suggest_mode_switch, and the "implement this ticket" card), then auto-send the
+ * user's own text on the fresh thread. So the reset happened while the user was
+ * doing nothing at all — reported from box rsb-dev, 2026-09-03, where a Luna
+ * conversation continued to answer as Luna while the dropdown read DeepSeek.
+ *
+ * Standalone and pure for the same reason as the other two helpers here: the
+ * decision is testable without standing up the whole ChatApp.
+ *
+ * @param {boolean} userChoseModel  Whether the user picked this model themselves —
+ *   set by a manual pick, the llmModel cookie, or a ?llm_model= pin.
+ * @param {?string} defaultTextModel  The box default, captured at page load.
+ * @returns {{select: ?string, persist: boolean}} `select` is the value to put on the
+ *   dropdown, or null to leave it where it is. `persist` is always false: a new
+ *   thread never records a preference, because nobody expressed one.
+ */
+export function resolveNewThreadModel({ userChoseModel, defaultTextModel }) {
+  // A choice the user made outlives the thread it was made in.
+  if (userChoseModel) return { select: null, persist: false };
+  return { select: defaultTextModel || null, persist: false };
+}

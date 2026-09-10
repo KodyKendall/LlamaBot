@@ -310,6 +310,33 @@ def claims_from_id_token(id_token: str) -> dict:
         return {}
 
 
+def expires_at_for_token(access_token: Optional[str], expires_in) -> datetime:
+    """When this access token actually dies.
+
+    Prefers the token's OWN ``exp`` claim over the caller's ``expires_in``. That
+    ordering is the point: ``import_credential`` has no ``expires_in`` to work with
+    (auth.json carries none) and assumes an hour, and a refresh that quietly
+    returned the old token would then have that dead token recorded as good for
+    another hour — which is precisely how an expired credential kept reaching
+    chatgpt.com for 11.3 days (box leo-zuset, 2026-09-09).
+
+    Reading the real ``exp`` makes that impossible: an already-expired token lands
+    in the past, so ``_needs_refresh`` keeps saying "refresh" instead of "fine".
+
+    Unverified decode, like ``claims_from_id_token``: this only sets a refresh
+    deadline, never an authorization decision, and a token we cannot parse simply
+    falls back to ``expires_in``.
+    """
+    fallback = datetime.now(timezone.utc) + timedelta(seconds=int(expires_in or 3600))
+    if not access_token:
+        return fallback
+    exp = claims_from_id_token(access_token).get("exp")
+    try:
+        return datetime.fromtimestamp(int(exp), tz=timezone.utc)
+    except (TypeError, ValueError, OSError, OverflowError):
+        return fallback
+
+
 def account_info(id_token: Optional[str]) -> dict:
     """Pull account id / plan / email out of an id_token, best-effort."""
     if not id_token:
@@ -336,8 +363,9 @@ def save_credential(session: Session, user_id: int, token_response: dict) -> Non
         raise DeviceCodeError("Token response contained no access_token.")
 
     info = account_info(token_response.get("id_token"))
-    expires_in = int(token_response.get("expires_in") or 3600)
-    expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+    # The token's own exp beats expires_in — see expires_at_for_token. A stale
+    # token must never be storable as fresh.
+    expires_at = expires_at_for_token(access_token, token_response.get("expires_in"))
 
     row = session.exec(
         select(ChatGptCredential).where(ChatGptCredential.user_id == user_id)
@@ -518,8 +546,14 @@ def _refresh_payload(user_id: int, row) -> Optional[dict]:
     from app.services import codex_cli_auth
 
     if codex_cli_auth.cli_available() and codex_cli_auth.login_finished(user_id):
+        # Pass what we hold NOW: the CLI reports success even when it rotated
+        # nothing, and only a comparison can tell those apart.
+        held = _decrypt(row.access_token_encrypted) if row is not None else None
         blob = _run_coro_blocking(
-            lambda: codex_cli_auth.refresh_via_cli(user_id), timeout=90
+            lambda: codex_cli_auth.refresh_via_cli(
+                user_id, previous_access_token=held
+            ),
+            timeout=90,
         )
         tokens = (blob or {}).get("tokens") or {}
         if tokens.get("access_token"):

@@ -12,7 +12,7 @@ Covered here:
 
 Run with: pytest app/tests/test_sso_origin.py -v
 """
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 from fastapi.testclient import TestClient
@@ -31,9 +31,11 @@ MOTHERSHIP = "https://llamapress.ai"
 
 
 class _FakeRequest:
-    def __init__(self, query=None, cookies=None):
+    def __init__(self, query=None, cookies=None, headers=None):
         self.query_params = query or {}
         self.cookies = cookies or {}
+        # Starlette lower-cases header names; the CTA reads "host" off this.
+        self.headers = headers or {}
 
 
 class _FakeResponse:
@@ -255,3 +257,94 @@ class TestLoginCtaHonorsOrigin:
 
     def test_empty_on_self_hosted(self):
         assert self._cta(_FakeRequest(), mothership_url="", name="") == ""
+
+
+class TestLoginCtaCarriesReturnHost:
+    """The CTA must tell the mothership WHICH HOST to land the user back on.
+
+    LlamaBot's llamabot_session cookie is HOST-ONLY, but the SSO round trip always
+    landed on the box's CANONICAL host. A box reached through a custom domain
+    therefore got its cookie set on a hostname the user's tab was never on, so their
+    own bookmark showed the login page on every visit, forever.
+
+    Measured on box crm-4 (our own CRM) 2026-09-08: crm.llamapress.ai is a verified
+    custom domain whose canonical chat host is crm-4.leo.llamapress.ai. 22 hits on
+    /login and 6 complete SSO round trips in 30 hours, every grant verified 200 OK.
+    Nothing in the SSO machinery was broken — it just set the cookie somewhere else.
+
+    return_host is a SEPARATE axis from sso_origin: sso_origin picks the BRAND
+    (llamapress.ai vs builtwithleo.com), return_host picks which host OF THIS BOX to
+    return to. A crm.builtwithleo.com user needs both.
+
+    Safety: the mothership validates return_host against the hosts this box verifiably
+    serves (canonical, its builtwithleo mirror, or a verified CustomDomain on the chat
+    port) before appending a login grant, so an unknown or forged value is ignored.
+    That half is already live (2026-09-08).
+    """
+
+    def _cta(self, request, mothership_url="https://llamapress.ai", name="my-box"):
+        from unittest.mock import MagicMock, patch
+
+        from app.routers import ui
+
+        fake = MagicMock()
+        fake.mothership_url = mothership_url
+        fake.instance_name = name
+        with patch.object(ui, "MothershipClient", return_value=fake):
+            return ui._render_sso_login_cta(request)
+
+    def _href(self, html):
+        import re
+        from html import unescape
+
+        match = re.search(r'href="([^"]*)"', html)
+        assert match, f"no href in CTA: {html!r}"
+        return unescape(match.group(1))
+
+    def test_carries_the_host_the_browser_is_standing_on(self):
+        html = self._cta(_FakeRequest(headers={"host": "crm.llamapress.ai"}))
+        q = parse_qs(urlparse(self._href(html)).query)
+        assert q["return_host"] == ["crm.llamapress.ai"]
+
+    def test_no_host_header_still_renders_a_working_cta(self):
+        # Never a broken button: the mothership falls back to Referer, then to the
+        # canonical host, which is exactly today's behaviour.
+        html = self._cta(_FakeRequest())
+        href = self._href(html)
+        assert href == "https://llamapress.ai/sso/leo/my-box"
+        assert "return_host" not in href
+
+    def test_no_request_at_all_does_not_crash(self):
+        # The self-hosted path calls this with request=None.
+        html = self._cta(None)
+        assert "return_host" not in html
+        assert "/sso/leo/my-box" in html
+
+    def test_host_is_url_encoded(self):
+        html = self._cta(_FakeRequest(headers={"host": "crm.llamapress.ai:8080"}))
+        href = self._href(html)
+        # The colon must not ride raw into the query string.
+        assert "return_host=crm.llamapress.ai%3A8080" in href
+        assert parse_qs(urlparse(href).query)["return_host"] == ["crm.llamapress.ai:8080"]
+
+    def test_brand_and_return_host_are_independent_axes(self):
+        # A builtwithleo user on a custom domain needs the builtwithleo BRAND and a
+        # return_host of the domain they are actually on.
+        req = _FakeRequest(
+            cookies={SSO_ORIGIN_COOKIE: "https://builtwithleo.com"},
+            headers={"host": "crm.builtwithleo.com"},
+        )
+        html = self._cta(req)
+        href = self._href(html)
+        assert href.startswith("https://builtwithleo.com/sso/leo/my-box")
+        assert parse_qs(urlparse(href).query)["return_host"] == ["crm.builtwithleo.com"]
+        assert "Sign in with your Leo account" in html
+
+    def test_exactly_one_question_mark(self):
+        href = self._href(self._cta(_FakeRequest(headers={"host": "box.example.com"})))
+        assert href.count("?") == 1
+
+    def test_href_is_still_attribute_escaped(self):
+        # escape(quote=True) must stay on the href — a host is attacker-influenced.
+        html = self._cta(_FakeRequest(headers={"host": 'evil"onmouseover="x'}))
+        assert '"onmouseover="' not in html

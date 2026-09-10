@@ -454,7 +454,13 @@ class TestLoginForm:
             resp = client_with_user.get("/login", follow_redirects=False)
         assert resp.status_code == 200
         assert "Sign in with your LlamaPress.ai account" in resp.text
-        assert 'href="https://llamapress.ai/sso/leo/my-box"' in resp.text
+        # The href gained ?return_host in 0.7.8 — the session cookie is host-only, so
+        # the mothership has to be told which host to land the user back on. Asserted
+        # as a prefix plus the param rather than an exact match, so the next param
+        # added here is not a false failure. Full coverage:
+        # test_sso_origin.py::TestLoginCtaCarriesReturnHost.
+        assert 'href="https://llamapress.ai/sso/leo/my-box?' in resp.text
+        assert "return_host=testserver" in resp.text
         assert 'target="_top"' in resp.text
 
     def test_login_form_hides_sso_cta_when_self_hosted(self, client_with_user):

@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+from urllib.parse import urlencode
 from html import escape
 from pathlib import Path
 
@@ -220,6 +221,23 @@ def _render_sso_login_cta(request: Request = None) -> str:
     if not base or not name:
         return ""
     sso_url = f"{base.rstrip('/')}/sso/leo/{name}"
+    # The browser's llamabot_session cookie is HOST-ONLY, so tell the mothership
+    # which host to land us back on. Without this, a box reached through a custom
+    # domain gets its cookie set on the CANONICAL host and the login page returns
+    # forever — crm.llamapress.ai on box crm-4, 22 /login hits and 6 complete SSO
+    # round trips in 30 hours, every grant verified 200 OK (2026-09-08).
+    #
+    # A separate axis from sso_origin above: that one picks the BRAND
+    # (llamapress.ai vs builtwithleo.com), this one picks which host OF THIS BOX to
+    # come back to. A crm.builtwithleo.com user needs both.
+    #
+    # Not an open redirect: the mothership validates this against the hosts the box
+    # verifiably serves (canonical, its builtwithleo mirror, or a verified custom
+    # domain on the chat port) before attaching a grant, and ignores anything else.
+    host = (request.headers.get("host") or "").strip() if request else ""
+    if host:
+        sso_url = f"{sso_url}?{urlencode({'return_host': host})}"
+    # brand_display_name reads the URL's host, so the query string is irrelevant to it.
     brand = escape(brand_display_name(sso_url))
     return (
         f'<a class="sso-cta" href="{escape(sso_url, quote=True)}" target="_top">'

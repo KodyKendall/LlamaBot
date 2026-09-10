@@ -121,6 +121,14 @@ def _sso_url(mothership: MothershipClient, request: Request, *, retry: bool) -> 
     if not base or not name:
         return None
     params = _passthrough_params(request)
+    # Same host-only-cookie reason as the login CTA (see ui._render_sso_login_cta):
+    # without this the recovery bounce drops the host and a user who recovers
+    # through it still lands on the canonical host. Set HERE rather than in
+    # _passthrough_params, because that helper also builds the redirect INTO the
+    # chat (with rails_token) and return_host has no business on that hop.
+    host = (request.headers.get("host") or "").strip() if request else ""
+    if host:
+        params["return_host"] = host
     if retry:
         params["retry"] = "1"
     query = urlencode(params)

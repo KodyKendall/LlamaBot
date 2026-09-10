@@ -37,7 +37,7 @@ import { CheckpointManager } from './checkpoints/CheckpointManager.js';
 import { DiffViewer } from './checkpoints/DiffViewer.js';
 import { FaviconBadgeManager } from './ui/FaviconBadgeManager.js';
 import { StallMonitor } from './ui/StallMonitor.js';
-import { chooseInitialModel, resolveRememberedModel } from './utils/modelDefaults.js';
+import { chooseInitialModel, resolveRememberedModel, resolveNewThreadModel } from './utils/modelDefaults.js';
 import { safeInit, selectedElementsOf } from './utils/safeInit.js';
 
 // Image auto-switch: when a user attaches an image while on a text-only model,
@@ -1021,10 +1021,22 @@ class ChatApp {
     // Listen for new thread creation
     window.addEventListener('createNewThread', () => {
       this.threadManager.createNewThread();
-      // A user-initiated new thread resets to the default text model. The
-      // image auto-switch path calls createNewThread() directly (not via this
-      // event), so it keeps the vision model it just selected.
-      this.setModel(this.defaultTextModel);
+      // A new thread resets to the default text model ONLY when the user never
+      // chose one. This event is not the user-initiated action its old comment
+      // claimed: two of its three dispatchers fire from the agent
+      // (suggest_mode_switch, and the "implement this ticket" card) and then
+      // auto-send the user's text on the fresh thread, so an unconditional reset
+      // moved people off their own model mid-conversation. Never persisted
+      // either — see resolveNewThreadModel.
+      // The image auto-switch path calls createNewThread() directly (not via
+      // this event), so it keeps the vision model it just selected.
+      const newThreadModel = resolveNewThreadModel({
+        userChoseModel: this.userChoseModel,
+        defaultTextModel: this.defaultTextModel,
+      });
+      if (newThreadModel.select) {
+        this.setModel(newThreadModel.select, { persist: newThreadModel.persist });
+      }
       this.updateImageSwitchBanner();
       // Reset token indicator for new conversation
       if (this.tokenIndicator) {
@@ -1399,16 +1411,23 @@ class ChatApp {
   }
 
   /**
-   * Programmatically select a model in the dropdown and persist it.
+   * Programmatically select a model in the dropdown.
    * No-ops if the model isn't a valid dropdown option.
+   *
+   * `persist` writes the llmModel cookie, which is what makes a model the user's
+   * REMEMBERED choice on the next load. Pass false for any switch the user did not
+   * ask for — the new-thread fallback, the switching-policy lock, the image
+   * auto-switch. Persisting those rewrote the user's preference behind their back
+   * and froze that day's box default onto them permanently (0.7.8); the comment in
+   * fetchAvailableModels() spells out why that must never happen.
    */
-  setModel(model) {
+  setModel(model, { persist = true } = {}) {
     if (!this.elements.modelSelect) return;
     const isValid = Array.from(this.elements.modelSelect.options)
       .some(option => option.value === model);
     if (!isValid) return;
     this.elements.modelSelect.value = model;
-    setCookie('llmModel', model, this.config.cookieExpiryDays);
+    if (persist) setCookie('llmModel', model, this.config.cookieExpiryDays);
     this.updateDropdownLabel(this.elements.modelSelect);
   }
 
@@ -1439,7 +1458,9 @@ class ChatApp {
     }
     if (locked) {
       // Pin to the default text model regardless of any saved cookie/URL param.
-      this.setModel(this.defaultTextModel);
+      // Not persisted: the lock is the operator's decision, not the user's, and
+      // saving it would outlive the lock as a pin on this box's default.
+      this.setModel(this.defaultTextModel, { persist: false });
     }
   }
 
@@ -1857,7 +1878,7 @@ class ChatApp {
         if (this.conversationHasMessages()) {
           // Mid-conversation: switch model, start a new thread, carry transcript.
           const transcript = this.buildConversationTranscript();
-          this.setModel(imageModel);
+          this.setModel(imageModel, { persist: false });
           effectiveLlmModel = imageModel;
           // Clears the message history and sets the new thread id synchronously.
           this.threadManager.createNewThread({ isImageSwitch: true });
@@ -1873,7 +1894,7 @@ class ChatApp {
           this.updateImageSwitchBanner();
         } else {
           // Fresh/empty thread: silently switch this send to the vision model.
-          this.setModel(imageModel);
+          this.setModel(imageModel, { persist: false });
           effectiveLlmModel = imageModel;
         }
       } else {

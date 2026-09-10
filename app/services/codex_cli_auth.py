@@ -216,13 +216,29 @@ async def poll_device_login(user_id: int) -> Optional[dict]:
     return None
 
 
-async def refresh_via_cli(user_id: int) -> Optional[dict]:
+async def refresh_via_cli(
+    user_id: int, *, previous_access_token: Optional[str] = None
+) -> Optional[dict]:
     """Ask the CLI to refresh this user's token, and return the new blob.
 
     ``codex login status`` is the cheapest command that touches the credential —
     it performs no model call, so a refresh costs nothing against the user's plan.
-    Returns None if the CLI is unavailable or the credential is gone (the caller
-    then fails open to the operator's default model).
+    Returns None if the CLI is unavailable, the command failed, or the credential
+    did not actually change (the caller then fails open to the operator's default
+    model).
+
+    ``previous_access_token`` is what we held BEFORE asking. Pass it: an unchanged
+    token means the refresh did nothing, and reporting that as success is what
+    stranded a paying customer for 62 minutes (box leo-zuset, 2026-09-09,
+    agent_task 323). This function used to discard the exit code and return
+    whatever auth.json already said, so a CLI that could not reach
+    ``auth.openai.com`` looked identical to a successful rotation. The caller then
+    re-stamped the SAME expired token with a fresh ``expires_at``, hid it for
+    another hour, and sent it to chatgpt.com — which 401s with
+    ``token_expired``. Meanwhile auth.json's mtime never moved: 11.3 days
+    untouched, which is how the incident was finally recognised.
+
+    A refresh that changes nothing is a FAILED refresh.
     """
     if not cli_available() or not login_finished(user_id):
         return None
@@ -235,11 +251,35 @@ async def refresh_via_cli(user_id: int) -> Optional[dict]:
             env=_env_for(user_id),
             cwd=str(codex_home_for_user(user_id)),
         )
-        await asyncio.wait_for(process.communicate(), timeout=60)
+        stdout, _ = await asyncio.wait_for(process.communicate(), timeout=60)
     except (asyncio.TimeoutError, OSError) as e:
         logger.warning("Codex refresh for user %s failed: %s", user_id, e)
         return None
-    return read_auth_json(user_id)
+
+    if process.returncode != 0:
+        logger.warning(
+            "Codex refresh for user %s exited %s: %s",
+            user_id, process.returncode,
+            _strip_ansi((stdout or b"").decode("utf-8", "replace")).strip()[:400],
+        )
+        return None
+
+    blob = read_auth_json(user_id)
+    token = ((blob or {}).get("tokens") or {}).get("access_token")
+    if not token:
+        return None
+
+    if previous_access_token and token == previous_access_token:
+        # The command succeeded and rotated nothing. Treat it as no usable
+        # credential so the turn falls open to the default model, instead of
+        # spending another hour pretending an expired token is fresh.
+        logger.warning(
+            "Codex refresh for user %s returned the same access token; "
+            "treating the credential as stale.", user_id,
+        )
+        return None
+
+    return blob
 
 
 def forget(user_id: int) -> None:
