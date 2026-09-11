@@ -9,6 +9,7 @@ import logging
 from typing import Optional
 
 from app.services import system_prompt_cache
+from app.agents.leonardo.personal_cookbook_context import personal_cookbook_section
 
 logger = logging.getLogger(__name__)
 
@@ -218,6 +219,12 @@ def build_system_prompt_with_project_context(
         parts.append("\n\n---\n\n# Agent Memories (from MEMORY.md)\n\n")
         parts.append(memory_md)
 
+    # The owner's own recipes. An ADDENDUM, not a prompt edit: resolve_base_prompt()
+    # above may have just replaced the whole static prompt with a mothership body that
+    # was seeded from 0.4.1 and knows nothing about personal cookbooks. Empty string on
+    # every box whose owner has published nothing, so it costs those boxes no tokens.
+    parts.append(personal_cookbook_section())
+
     if suffix:
         parts.append(suffix)
 
@@ -271,6 +278,12 @@ def build_beginner_system_prompt(
     if memory_md:
         parts.append("\n\n---\n\n# Agent Memories (from MEMORY.md)\n\n")
         parts.append(memory_md)
+
+    # The owner's own recipes. An ADDENDUM, not a prompt edit: resolve_base_prompt()
+    # above may have just replaced the whole static prompt with a mothership body that
+    # was seeded from 0.4.1 and knows nothing about personal cookbooks. Empty string on
+    # every box whose owner has published nothing, so it costs those boxes no tokens.
+    parts.append(personal_cookbook_section())
 
     if suffix:
         parts.append(suffix)
