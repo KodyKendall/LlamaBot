@@ -351,3 +351,219 @@ class TestTheRouterAndThePromptShareOneCache:
 
         assert await pcc.refresh_personal_cookbook(Empty()) == []
         assert pcc.build_personal_cookbook_context() == ""
+
+
+# ---------------------------------------------------------------------------
+# ...and the addendum has to reach A TURN, which the first attempt did not (0.7.9).
+#
+# `build_system_prompt_with_project_context` looked like the right place — it is where
+# LEONARDO.md and MEMORY.md go. But for every mode except beginner it runs exactly ONCE,
+# at container startup:
+#
+#   main.py:343         app.state.compiled_graphs = { ... build_rails_agent(...) ... }
+#   rails_agent/nodes.py:278   system_prompt=get_cached_system_prompt()
+#   -> build_system_prompt_with_project_context(RAILS_AGENT_PROMPT, ...)
+#
+# The graphs are compiled as singletons at boot, so whatever that call returns is frozen
+# for the life of the llamabot process. And the module cache is ALWAYS cold at boot, so
+# what it returns is always the empty string. A recipe published five minutes ago would
+# not appear until the box restarted — which on a permanent box is weeks. That defeats
+# the entire feature: "publish on box A, use it on box B right now" is the point.
+#
+# The fix is the per-turn pattern this codebase already has: AgentMiddleware, the way
+# ViewPathContextMiddleware injects fresh page context on every turn
+# (rails_agent/middleware.py:52, wired at nodes.py:262).
+#
+# rails_beginner_agent is the exception and keeps the project_context wiring: it is a raw
+# StateGraph that runs NO middleware, and rebuilds its system message inside the node on
+# every turn (nodes.py:182, "Rebuilt every turn" at :53). So it was never frozen.
+# ---------------------------------------------------------------------------
+
+from langchain_core.messages import HumanMessage, SystemMessage
+
+from app.agents.leonardo.rails_agent.middleware import (
+    PersonalCookbookMiddleware,
+    inject_personal_cookbook,
+)
+
+MIDDLEWARE_AGENTS = [
+    "rails_agent",
+    "rails_plan_mode_agent",
+    "rails_engineer_plan_mode_agent",
+    "rails_ticket_mode_agent",
+]
+
+
+class _Request:
+    """Enough of langchain's ModelRequest for these tests."""
+
+    def __init__(self, system_message, messages=None):
+        self.system_message = system_message
+        self.messages = messages or [HumanMessage(content="hi")]
+        self.overrides = {}
+
+    def override(self, **kw):
+        self.overrides.update(kw)
+        new = _Request(kw.get("system_message", self.system_message), kw.get("messages", self.messages))
+        new.overrides = self.overrides
+        return new
+
+
+def _run(request):
+    """Drive the middleware synchronously and hand back what the model would see."""
+    seen = {}
+
+    def handler(req):
+        seen["request"] = req
+        return "ok"
+
+    inject_personal_cookbook.wrap_model_call(request, handler)
+    return seen["request"]
+
+
+def _text_of(system_message):
+    content = getattr(system_message, "content", system_message)
+    if isinstance(content, str):
+        return content
+    return "".join(b.get("text", "") for b in content if isinstance(b, dict))
+
+
+# The cached system message rails_agent actually compiles: ONE text block carrying
+# Anthropic's ephemeral cache_control (~90% input-token saving).
+def _cached_system_message(text="You are Leo. " * 40):
+    return SystemMessage(content=[{"type": "text", "text": text, "cache_control": {"type": "ephemeral"}}])
+
+
+class TestTheBlockReachesATurn:
+    """The regression that matters. Compile with a COLD cache, publish, then take a turn."""
+
+    def test_a_recipe_published_after_startup_still_reaches_the_model(self):
+        # Boot: cache cold, so the compile-time prompt carries no cookbook block.
+        compiled = _cached_system_message()
+        assert "Personal Cookbook" not in _text_of(compiled)
+
+        # The user publishes on their other Leo; the background refresh lands.
+        _prime(PAYLOAD)
+
+        # Next turn.
+        out = _run(_Request(compiled))
+
+        assert "lionhearted-metallic-gold" in _text_of(out.system_message)
+
+    def test_the_same_block_appears_on_the_turn_after_that(self):
+        _prime(PAYLOAD)
+        compiled = _cached_system_message()
+
+        first = _run(_Request(compiled))
+        second = _run(_Request(compiled))
+
+        assert "lionhearted-metallic-gold" in _text_of(first.system_message)
+        assert "lionhearted-metallic-gold" in _text_of(second.system_message)
+
+
+class TestItDoesNotBreakWhatItTouches:
+    def test_the_cached_block_is_left_byte_identical(self):
+        """Mutating the cached block would throw away the prompt cache on every turn."""
+        _prime(PAYLOAD)
+        compiled = _cached_system_message()
+        original = compiled.content[0]
+
+        out = _run(_Request(compiled))
+
+        assert out.system_message.content[0] == original
+        assert out.system_message.content[0]["cache_control"] == {"type": "ephemeral"}
+
+    def test_the_cookbook_block_is_added_uncached(self):
+        """It changes whenever the user publishes, so caching it would defeat the point."""
+        _prime(PAYLOAD)
+
+        out = _run(_Request(_cached_system_message()))
+
+        added = out.system_message.content[-1]
+        assert "lionhearted-metallic-gold" in added["text"]
+        assert "cache_control" not in added
+
+    def test_a_plain_string_system_message_still_works(self):
+        _prime(PAYLOAD)
+
+        out = _run(_Request(SystemMessage(content="You are Leo. " * 40)))
+
+        assert "lionhearted-metallic-gold" in _text_of(out.system_message)
+
+    def test_it_never_injects_twice(self):
+        """Beginner mode already appends the block itself; nothing may double it."""
+        _prime(PAYLOAD)
+        already = SystemMessage(content=pcc.build_personal_cookbook_context())
+
+        out = _run(_Request(already))
+
+        assert _text_of(out.system_message).count("# Your Personal Cookbook") == 1
+
+    def test_an_empty_cookbook_leaves_the_request_completely_alone(self):
+        compiled = _cached_system_message()
+
+        out = _run(_Request(compiled))
+
+        assert out.system_message is compiled
+
+    def test_it_never_raises(self):
+        with patch.object(pcc, "build_personal_cookbook_context", side_effect=RuntimeError("boom")):
+            out = _run(_Request(_cached_system_message()))
+
+        assert out is not None
+
+    def test_it_leaves_the_conversation_untouched(self):
+        _prime(PAYLOAD)
+        messages = [HumanMessage(content="make the button gold")]
+
+        out = _run(_Request(_cached_system_message(), messages))
+
+        assert out.messages == messages
+
+
+class TestEveryMiddlewareModeIsWired:
+    """A mode left out is a mode where the feature silently does not exist."""
+
+    @pytest.mark.parametrize("agent", MIDDLEWARE_AGENTS)
+    def test_the_agent_wires_the_middleware(self, agent):
+        source = (AGENTS / agent / "nodes.py").read_text()
+
+        assert "inject_personal_cookbook" in source, (
+            f"{agent} never wires inject_personal_cookbook, so its system prompt is still "
+            "frozen at the value it had when the graph was compiled at container startup."
+        )
+
+    @pytest.mark.parametrize("agent", MIDDLEWARE_AGENTS)
+    def test_it_is_in_the_middleware_list_not_merely_imported(self, agent):
+        source = (AGENTS / agent / "nodes.py").read_text()
+
+        # Once in the import block, once in the middleware list.
+        assert source.count("inject_personal_cookbook") >= 2, (
+            f"{agent} imports inject_personal_cookbook but never puts it in the middleware list."
+        )
+
+    def test_beginner_mode_is_deliberately_not_wired(self):
+        """It runs no middleware at all; its prompt is rebuilt inside the node every turn."""
+        source = (AGENTS / "rails_beginner_agent" / "nodes.py").read_text()
+
+        assert "inject_personal_cookbook" not in source
+        assert "get_sys_msg()" in source  # rebuilt per turn — see nodes.py:182
+
+
+class TestTheMiddlewareStillMakesNoNetworkCall:
+    def test_a_turn_never_blocks_on_the_mothership(self):
+        import httpx
+
+        _prime(PAYLOAD)
+
+        def _boom(*a, **k):
+            raise AssertionError("a turn made a blocking HTTP call")
+
+        with patch.object(httpx, "AsyncClient", _boom), patch.object(httpx, "Client", _boom):
+            out = _run(_Request(_cached_system_message()))
+
+        assert "lionhearted-metallic-gold" in _text_of(out.system_message)
+
+
+def test_the_middleware_class_is_exported_as_a_singleton():
+    assert isinstance(inject_personal_cookbook, PersonalCookbookMiddleware)
