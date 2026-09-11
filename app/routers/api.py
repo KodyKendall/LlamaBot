@@ -899,6 +899,9 @@ async def available_models(request: Request):
         "deepseek-v4-flash-vision-exp": "DEEPSEEK_API_KEY",
         "deepseek-v4-flash-gmi": "GMI_DEEPSEEK_API_KEY",
         "deepseek-v4-flash-fireworks": "FIREWORKS_DEEPSEEK_API_KEY",
+        # V4.1 on the same Fireworks account; the account-wide key name is
+        # accepted as a fallback, matching get_llm's precedence.
+        "deepseek-v4.1-flash-fireworks": ("FIREWORKS_DEEPSEEK_API_KEY", "FIREWORKS_API_KEY"),
         # Fireworks' account-wide key name, falling back to the DeepSeek-specific
         # name already deployed on boxes — matches get_llm's precedence.
         "nemotron-lightning-30b-fireworks": ("FIREWORKS_API_KEY", "FIREWORKS_DEEPSEEK_API_KEY"),

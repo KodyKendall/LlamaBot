@@ -48,6 +48,12 @@ MODEL_CAPABILITIES = {
     'deepseek-v4-flash-gmi': {'images': False, 'video': False, 'pdf': False},
     # Same model again, served by Fireworks AI — same (text-only) capabilities.
     'deepseek-v4-flash-fireworks': {'images': False, 'video': False, 'pdf': False},
+    # DeepSeek V4.1 Flash on Fireworks — the first DeepSeek entry that is NOT
+    # text-only: 4.1 is natively multimodal and image input was verified against
+    # the live Fireworks endpoint (2026-09-10). Video and PDF stay off — neither
+    # is claimed by the model card as an API input path, and a wrong True here
+    # turns into a provider 400 on upload.
+    'deepseek-v4.1-flash-fireworks': {'images': True, 'video': False, 'pdf': False},
 
     # Muse Spark 1.2 (Meta) - fully multimodal: text, images, video, audio, PDF.
     # (Audio has no category of its own in get_file_category, so it isn't listed.)
