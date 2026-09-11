@@ -20,6 +20,7 @@ OPENAI_COMPATIBLE = [
     ("muse-spark-1.3-contributor", "META_API_KEY"),
     ("deepseek-v4-flash", "DEEPSEEK_API_KEY"),
     ("deepseek-v4-flash-fireworks", "FIREWORKS_DEEPSEEK_API_KEY"),
+    ("deepseek-v4.1-flash-fireworks", "FIREWORKS_DEEPSEEK_API_KEY"),
     ("qwen3-8b-runpod", "RUNPOD_QWEN_API_KEY"),
     ("deepseek-flash-0731-relace", "OPENROUTER_API_KEY"),
 ]

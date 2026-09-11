@@ -7,6 +7,22 @@ import { ToolMessageRenderer } from './ToolMessageRenderer.js';
 
 import { leoDiagnostics } from '../utils/LeoDiagnostics.js';
 import { EFFICIENCY_WIKI_URL, paywallCardCopy } from './paywallCopy.js';
+let _mintedKeySeq = 0;
+
+/**
+ * A client-side message key, for when the provider gave us no id.
+ *
+ * Verified against langchain: ``AIMessageChunk.id`` is stable across every chunk
+ * of a response AND survives merging into the final message — but it is ``None``
+ * on every chunk when the provider omits it. Mid-stream is exactly the case where
+ * `content` cannot identify a row (the text is half-written), so a rating with no
+ * key at all is the one that gets fabricated into a placeholder row on the
+ * mothership (annotation #688). A minted key beats no key.
+ */
+function mintMessageKey() {
+  return `client-${Date.now()}-${++_mintedKeySeq}`;
+}
+
 export class MessageRenderer {
   constructor(messageHistoryElement, iframeManager = null, getRailsDebugInfoCallback = null, scrollManager = null, loadingVerbs = null, config = {}, container = null, elements = {}, faviconBadgeManager = null, appState = null) {
     this.messageHistory = messageHistoryElement;
@@ -184,16 +200,26 @@ export class MessageRenderer {
     // message by comparing text, so a reply truncated by a dropped socket matched nothing
     // and a placeholder row was fabricated from the fragment (annotation #688) — the real
     // message stayed unrated, and 4% of end-user annotations landed on such rows.
-    const messageKey = baseMessage?.id || baseMessage?.message_key;
-    if (messageKey) {
-      messageDiv.setAttribute('data-message-key', String(messageKey));
-    }
+    //
+    // Minted when the provider sent none, so a mid-stream rating is never keyless.
+    const messageKey = baseMessage?.id || baseMessage?.message_key || mintMessageKey();
+    messageDiv.setAttribute('data-message-key', String(messageKey));
 
-    messageDiv.innerHTML = this.markdownParser.parse(safeContent);
+    // The streamed text and the control row are SIBLINGS, not parent and child.
+    // handleTextContent re-renders with `innerHTML =` on every chunk, which
+    // destroys child nodes — so buttons appended to the bubble itself would be
+    // eaten by the next chunk. Only message-body is ever rewritten.
+    const body = document.createElement('div');
+    body.setAttribute('data-llamabot', 'message-body');
+    body.innerHTML = this.markdownParser.parse(safeContent);
+    messageDiv.appendChild(body);
 
     // Check if this is a tool call message (OpenAI format)
     if ((content === '' || content === null) && baseMessage?.tool_calls?.length > 0) {
       messageDiv.setAttribute('data-llamabot', 'tool-message');
+      // Tool bubbles render their own markup into the bubble and are not
+      // streamed chunk-by-chunk, so they do not use the body/actions split.
+      messageDiv.innerHTML = '';
       const toolCall = baseMessage.tool_calls[0];
       let firstArgument = toolCall.args[Object.keys(toolCall.args)[0]] || '';
 
@@ -227,10 +253,9 @@ export class MessageRenderer {
         messageDiv.className = this.config.cssClasses.aiMessage;
       }
 
-      // Add copy button for regular AI messages (not tool messages)
-      if (safeContent) {
-        this.addCopyButton(messageDiv);
-      }
+      // Always, including for the empty bubble the stream opens with. Rating a
+      // reply is most valuable at the moment it goes wrong, which is mid-run.
+      this.addCopyButton(messageDiv);
     }
 
     this.insertMessage(messageDiv);
@@ -262,13 +287,27 @@ export class MessageRenderer {
     if (target.getAttribute('data-raw-content') === content) return true;
 
     target.setAttribute('data-raw-content', content);
-    target.innerHTML = this.markdownParser.parse(content);
+    // Body only — rewriting the bubble would take the control row with it.
+    const body = target.querySelector('[data-llamabot="message-body"]') || target;
+    body.innerHTML = this.markdownParser.parse(content);
     target.setAttribute('data-llamabot-resumed', 'true');
-    this.addCopyButton(target);
+    this.addCopyButton(target);  // no-op when the row is already there
     return true;
   }
 
+  /**
+   * Build the control row (copy, 👍, 👎, reply) for a message bubble.
+   *
+   * Idempotent: finalizeAiMessages() still sweeps at end of stream as a backstop
+   * for bubbles created by other paths, and replaceLastAiMessage() calls this
+   * again after a resume — neither may produce a second row.
+   */
   addCopyButton(messageDiv) {
+    if (messageDiv.querySelector('[data-llamabot="message-actions"]')) return;
+
+    const actions = document.createElement('div');
+    actions.setAttribute('data-llamabot', 'message-actions');
+
     const copyBtn = document.createElement('button');
     copyBtn.setAttribute('data-llamabot', 'copy-btn');
     copyBtn.innerHTML = '<i class="fa-regular fa-copy"></i>';
@@ -283,20 +322,20 @@ export class MessageRenderer {
         }, 1500);
       });
     };
-    messageDiv.appendChild(copyBtn);
+    actions.appendChild(copyBtn);
 
     // 👍 / 👎 end-user feedback, in the same control row as copy.
     const thumbUp = document.createElement('button');
     thumbUp.setAttribute('data-llamabot', 'thumb-up-btn');
     thumbUp.innerHTML = '<i class="fa-regular fa-thumbs-up"></i>';
     thumbUp.title = 'Good response';
-    messageDiv.appendChild(thumbUp);
+    actions.appendChild(thumbUp);
 
     const thumbDown = document.createElement('button');
     thumbDown.setAttribute('data-llamabot', 'thumb-down-btn');
     thumbDown.innerHTML = '<i class="fa-regular fa-thumbs-down"></i>';
     thumbDown.title = 'Bad response';
-    messageDiv.appendChild(thumbDown);
+    actions.appendChild(thumbDown);
 
     // Reply/quote this message: surfaces a quote preview above the input so the
     // user can reply to this specific message and have Leo quote it back.
@@ -304,7 +343,9 @@ export class MessageRenderer {
     replyBtn.setAttribute('data-llamabot', 'reply-btn');
     replyBtn.innerHTML = '<i class="fa-solid fa-reply"></i>';
     replyBtn.title = 'Reply to this message';
-    messageDiv.appendChild(replyBtn);
+    actions.appendChild(replyBtn);
+
+    messageDiv.appendChild(actions);
   }
 
   /**

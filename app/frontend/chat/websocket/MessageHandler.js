@@ -324,12 +324,19 @@ export class MessageHandler {
 
       this.appState.appendToMessageBuffer(textContent);
 
-      // Update message with parsed markdown
+      // Update message with parsed markdown.
+      //
+      // Into message-body, NOT the bubble: `innerHTML =` destroys child nodes,
+      // and the bubble now also holds the 👍/👎/copy/reply row, which has to
+      // survive every chunk so a user can rate a reply mid-run.
       const parser = this.messageRenderer.markdownParser;
       let fullMessage = this.appState.getMessageBuffer();
-      currentMessage.innerHTML = parser.parse(fullMessage);
+      const body = currentMessage.querySelector('[data-llamabot="message-body"]') || currentMessage;
+      body.innerHTML = parser.parse(fullMessage);
 
-      // Store raw content for copy functionality
+      // Store raw content for copy functionality — on the OUTER bubble, where
+      // setupFeedbackHandler/setupReplyHandler/ClipboardFormatter look for it
+      // with closest('[data-raw-content]').
       currentMessage.setAttribute('data-raw-content', fullMessage);
     }
 
@@ -471,8 +478,11 @@ export class MessageHandler {
     } else {
       // No tool calls - the message was already streamed via AIMessageChunk
       // Remove empty content message if it has no content
+      // "Did any text arrive?" — read data-raw-content, not innerHTML. The
+      // bubble now always contains the control row, so its innerHTML is never
+      // empty and this check would stop dropping the empty bubble.
       const currentAiMessage = this.appState.getCurrentAiMessage();
-      if (currentAiMessage && currentAiMessage.innerHTML.trim() === '') {
+      if (currentAiMessage && !(currentAiMessage.getAttribute('data-raw-content') || '').trim()) {
         currentAiMessage.remove();
       }
     }

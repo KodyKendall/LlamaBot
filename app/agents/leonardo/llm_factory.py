@@ -735,6 +735,50 @@ def _build_client(model_name: str):
             timeout=180,
             max_retries=0,
         )
+    if model_name == "deepseek-v4.1-flash-fireworks":
+        # DeepSeek V4.1 Flash (released 2026-09-10), served by Fireworks AI.
+        #
+        # A SIBLING of `deepseek-v4-flash-fireworks`, not a re-point of it, for
+        # the same reason Muse 1.3 is a sibling of 1.2: the V4 entry is named in
+        # pushed policies and in boxes' `enabled_models`, so swapping the id
+        # underneath it would move every box that picked "DeepSeek FW" onto an
+        # unmeasured model in a release, with no operator route back.
+        #
+        # Why Fireworks and not DeepSeek direct: DeepSeek's own API does not
+        # serve this id to our account yet (2026-09-10: `/models` lists only
+        # `deepseek-flash` and `deepseek-v4-pro`, and a 4.1 id 400s with "the
+        # supported API model names are..."), and the data-jurisdiction reason
+        # for preferring Fireworks in the V4 entry above is unchanged.
+        #
+        # Verified live against the endpoint on 2026-09-10: text, tool calls
+        # (`finish_reason: tool_calls` with well-formed arguments) and IMAGE
+        # input all return 200 — V4.1 Flash is natively multimodal, which is the
+        # one place it differs from every other DeepSeek entry here. Reasoning
+        # arrives as `reasoning_content`, exactly like the V4 Fireworks entry,
+        # so DeepSeekReasoningMiddleware (gated on the exact name
+        # "deepseek-v4-flash") still does not need to fire for this path.
+        #
+        # Same NOTE as above: stay on chat completions, because Fireworks'
+        # Response API defaults to store=True with 30-day retention.
+        return ChatDeepSeekWithReasoning(
+            model=os.getenv(
+                # Its own override, NOT the deployed `FIREWORKS_DEEPSEEK_MODEL`:
+                # boxes that pinned a V4 snapshot there would otherwise silently
+                # run V4 when a user picked V4.1. Fireworks spells the version
+                # `v4p1` (dots are not legal in their model paths).
+                "FIREWORKS_DEEPSEEK_V4_1_MODEL",
+                "accounts/fireworks/models/deepseek-v4p1-flash",
+            ),
+            api_base=os.getenv(
+                "FIREWORKS_BASE_URL", "https://api.fireworks.ai/inference/v1"
+            ),
+            # One Fireworks account issues one key. Prefer the DeepSeek-specific
+            # name because that is what is already deployed on boxes, and fall
+            # back to the account-wide name from Fireworks' own docs.
+            api_key=provider_key("FIREWORKS_DEEPSEEK_API_KEY", "FIREWORKS_API_KEY"),
+            timeout=180,
+            max_retries=0,
+        )
     if model_name == "nemotron-lightning-30b-fireworks":
         # NVIDIA Nemotron 3.5 Lightning 30B-A3B on Fireworks' SERVERLESS tier —
         # the same weights as `nemotron-lightning-30b-runpod`, with nobody having

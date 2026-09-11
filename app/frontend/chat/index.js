@@ -130,6 +130,10 @@ class ChatApp {
       ['deepseek-v4-pro', { images: false }],
       ['deepseek-v4-flash-gmi', { images: false }],
       ['deepseek-v4-flash-fireworks', { images: false }],
+      // ...but DeepSeek V4.1 Flash IS multimodal (verified against Fireworks),
+      // so seed it true or an image upload bounces off it to Gemini before
+      // /api/available-models resolves.
+      ['deepseek-v4.1-flash-fireworks', { images: true }],
       // Qwen3.7 Plus is image-capable — seed it so an image upload while it's
       // selected is NOT spuriously auto-switched to Gemini before the async
       // /api/available-models fetch resolves (the unknown-model default is

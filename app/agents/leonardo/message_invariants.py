@@ -45,6 +45,46 @@ SUPPORTED_BLOCK_TYPES = frozenset({
     "reasoning", "tool_use", "tool_result", "cache_control",
 })
 
+#: Item types the OpenAI **Responses API** puts in an assistant ``content`` list.
+#:
+#: On that API (the ChatGPT/Codex-auth path — gpt-5.6-sol, gpt-5.6-luna, anything
+#: through codex_cli_auth/chatgpt_auth) ``content`` is not text: it is the raw
+#: provider item list, e.g. ``[reasoning, function_call]`` with no text block at
+#: all. These pass through **unchanged**.
+#:
+#: Not dropped, deliberately. ``reasoning`` carries ``encrypted_content``, which
+#: gpt-5.x needs to continue its own reasoning across turns, and ``function_call``
+#: is how this API expresses a call it will later be handed a
+#: ``function_call_output`` for — so stripping either can break the very
+#: "tool_calls not followed by tool messages" invariant this module exists to
+#: protect. Stringifying them is worse still: the model reads its own prior tool
+#: calls back as assistant prose full of JSON, imitates the format, and emits that
+#: JSON as literal text to the user before making the real call.
+RESPONSES_API_ITEM_TYPES = frozenset({
+    "function_call", "function_call_output", "custom_tool_call", "refusal",
+    "output_text", "web_search_call", "file_search_call", "computer_call",
+    "computer_call_output", "image_generation_call", "code_interpreter_call",
+    "mcp_call", "mcp_list_tools", "mcp_approval_request",
+    # "reasoning" is already in SUPPORTED_BLOCK_TYPES — left there on purpose.
+})
+
+#: Responses items that ARE a tool call, for the empty-content check below.
+_RESPONSES_TOOL_CALL_TYPES = frozenset({
+    "function_call", "custom_tool_call", "computer_call", "mcp_call",
+})
+
+#: Block types already warned about, so one unknown type costs one line per
+#: process rather than one per block. The old code logged the same warning 40+
+#: times inside a single second on a real box — which is how a defect this loud
+#: stayed invisible: the signal was buried in its own volume.
+_WARNED_BLOCK_TYPES: set = set()
+
+
+def _reset_block_type_warnings() -> None:
+    """Test seam — the warning is deduped for the life of the process."""
+    _WARNED_BLOCK_TYPES.clear()
+
+
 #: What an assistant turn with no text becomes. An empty string is rejected
 #: outright by several providers; a space is not, and says nothing.
 _EMPTY_AI_PLACEHOLDER = "(no content)"
@@ -91,7 +131,7 @@ def _normalize_block(block):
             return {"type": "text", "text": str(block)}
 
     block_type = block.get("type")
-    if block_type in SUPPORTED_BLOCK_TYPES:
+    if block_type in SUPPORTED_BLOCK_TYPES or block_type in RESPONSES_API_ITEM_TYPES:
         return block
     if block_type is None:
         # Untyped dict — treat it as text if it plausibly is, else stringify.
@@ -99,11 +139,24 @@ def _normalize_block(block):
             return {"type": "text", "text": str(block["text"])}
         return {"type": "text", "text": json.dumps(block, default=str)}
 
-    logger.warning(
-        "message_invariants: stringifying unsupported content block type %r",
-        block_type,
-    )
+    if block_type not in _WARNED_BLOCK_TYPES:
+        _WARNED_BLOCK_TYPES.add(block_type)
+        logger.warning(
+            "message_invariants: stringifying unsupported content block type %r "
+            "(further occurrences of this type are not logged)",
+            block_type,
+        )
     return {"type": "text", "text": json.dumps(block, default=str)}
+
+
+def _has_responses_tool_call(content) -> bool:
+    """True when a content list carries a Responses-API tool-call item."""
+    if not isinstance(content, list):
+        return False
+    return any(
+        isinstance(b, dict) and b.get("type") in _RESPONSES_TOOL_CALL_TYPES
+        for b in content
+    )
 
 
 def _normalize_content(msg):
@@ -118,7 +171,13 @@ def _normalize_content(msg):
         if not blocks:
             # A content list that normalized down to nothing is the empty-content
             # 400 in a different costume.
-            if _is_role(msg, "ai") and emitted_tool_calls(msg):
+            # A Responses tool call lives in the content list, not in
+            # ``tool_calls``/``additional_kwargs`` — which is all
+            # ``emitted_tool_calls`` reads — so check the list too, or a
+            # tool-call-only turn gets "(no content)" stamped on it.
+            if _is_role(msg, "ai") and (
+                emitted_tool_calls(msg) or _has_responses_tool_call(content)
+            ):
                 return _with_content(msg, "")  # tool-call-only turns may be empty
             return _with_content(msg, _EMPTY_AI_PLACEHOLDER)
         if blocks == list(content):

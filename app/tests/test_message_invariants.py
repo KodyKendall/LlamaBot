@@ -226,3 +226,140 @@ class TestBadRequestDiagnosis:
         from app.websocket.request_handler import _prepend_request_shape
 
         assert _prepend_request_shape(ValueError("x"), "tb") == "tb"
+
+
+class TestResponsesApiItemsSurviveNormalization:
+    """Raw ``function_call`` JSON was reaching users as assistant prose (0.7.9).
+
+    Reported from the CRM box on a thread running Codex GPT authenticated with
+    the user's own ChatGPT account. An ordinary assistant bubble read::
+
+        Leonardo Said: {"type": "function_call", "name": "ask_user_question", ...}
+
+    …and only THEN did the real question card render underneath it.
+
+    On the Responses API, ``AIMessage.content`` is a list of provider ITEMS, not
+    text — an assistant turn can be ``[reasoning, function_call]`` with no text
+    block at all. None of those item types were in SUPPORTED_BLOCK_TYPES, so
+    ``_normalize_block`` stringified each one into ``{"type": "text"}`` carrying
+    its own JSON.
+
+    Nothing is persisted — but the corrupted history is what the model READS, so
+    its own prior tool calls came back to it looking like assistant prose full of
+    function-call JSON. GPT-5 imitates the format it is shown, emits that JSON as
+    literal text, and only then makes the real call. That is exactly the order
+    the user saw.
+    """
+
+    # One assistant turn off the wire, as stored on the mothership.
+    def _responses_turn(self):
+        return AIMessage(content=[
+            {
+                "id": "rs_0c3a3741",
+                "type": "reasoning",
+                "summary": [{"index": 0, "type": "summary_text",
+                             "text": "**Planning clarification on client links**"}],
+                "content": [],
+                "encrypted_content": "gAAAAABqou3-7D88aT",
+            },
+            {
+                "type": "function_call",
+                "name": "ask_user_question",
+                "arguments": '{"questions":[{"question":"Want me to build this?"}]}',
+                "call_id": "call_Uvjmavg53bV62DZ0wUnVG72a",
+                "id": "fc_0c3a3741",
+                "index": 1,
+            },
+        ])
+
+    def _blocks_out(self, msg):
+        out = normalize_messages_for_provider([HumanMessage(content="hi"), msg])
+        return out[-1].content
+
+    def test_no_block_becomes_text_carrying_function_call_json(self):
+        """The exact defect: the tool call arriving as assistant prose."""
+        blocks = self._blocks_out(self._responses_turn())
+
+        for b in blocks:
+            if isinstance(b, dict) and b.get("type") == "text":
+                assert "function_call" not in b.get("text", ""), (
+                    "a function_call item was stringified into assistant text — "
+                    "this is what the model then imitates back at the user"
+                )
+
+    def test_the_function_call_survives_intact(self):
+        """Pass through, don't drop.
+
+        ``function_call`` is how the Responses API expresses a call it will later
+        be handed a ``function_call_output`` for. Dropping it can break the very
+        "tool_calls not followed by tool messages" invariant this module exists
+        to protect.
+        """
+        blocks = self._blocks_out(self._responses_turn())
+
+        calls = [b for b in blocks if isinstance(b, dict) and b.get("type") == "function_call"]
+        assert len(calls) == 1
+        assert calls[0]["name"] == "ask_user_question"
+        assert calls[0]["call_id"] == "call_Uvjmavg53bV62DZ0wUnVG72a"
+        assert calls[0]["arguments"] == '{"questions":[{"question":"Want me to build this?"}]}'
+
+    def test_the_reasoning_block_keeps_its_encrypted_content(self):
+        """gpt-5.x needs ``encrypted_content`` to continue its own reasoning."""
+        blocks = self._blocks_out(self._responses_turn())
+
+        reasoning = [b for b in blocks if isinstance(b, dict) and b.get("type") == "reasoning"]
+        assert len(reasoning) == 1
+        assert reasoning[0]["encrypted_content"] == "gAAAAABqou3-7D88aT"
+
+    def test_a_tool_call_only_turn_is_not_stamped_no_content(self):
+        """An assistant turn whose only item is a function_call is legal, not empty."""
+        msg = AIMessage(content=[{
+            "type": "function_call",
+            "name": "write_file",
+            "arguments": "{}",
+            "call_id": "call_x",
+            "id": "fc_x",
+        }])
+        blocks = self._blocks_out(msg)
+
+        assert blocks != "(no content)"
+        if isinstance(blocks, list):
+            for b in blocks:
+                if isinstance(b, dict) and b.get("type") == "text":
+                    assert "(no content)" not in b.get("text", "")
+
+    def test_an_unchanged_turn_is_returned_untouched(self):
+        """No copy, no churn, when there was nothing to repair."""
+        msg = self._responses_turn()
+        out = normalize_messages_for_provider([HumanMessage(content="hi"), msg])
+        assert out[-1] is msg
+
+    def test_a_genuinely_unknown_block_type_is_still_stringified(self):
+        """The last-resort branch stays — this is a pass-through list, not a bypass."""
+        msg = AIMessage(content=[{"type": "wat_is_this", "payload": 1}])
+        blocks = self._blocks_out(msg)
+
+        assert any(
+            isinstance(b, dict) and b.get("type") == "text" and "wat_is_this" in b.get("text", "")
+            for b in blocks
+        )
+
+    def test_the_stringify_warning_does_not_fire_once_per_block(self, caplog):
+        """40 identical WARNING lines per turn is its own bug.
+
+        It is also what let this sit unnoticed — the signal was there, buried in
+        its own volume.
+        """
+        import logging as _logging
+
+        from app.agents.leonardo import message_invariants
+
+        message_invariants._reset_block_type_warnings()
+        msgs = [HumanMessage(content="hi")] + [
+            AIMessage(content=[{"type": "wat_is_this", "n": i}]) for i in range(20)
+        ]
+        with caplog.at_level(_logging.WARNING, logger=message_invariants.__name__):
+            normalize_messages_for_provider(msgs)
+
+        hits = [r for r in caplog.records if "wat_is_this" in r.getMessage()]
+        assert len(hits) == 1, f"expected one warning for the type, got {len(hits)}"
