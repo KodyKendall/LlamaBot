@@ -29,6 +29,55 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
+#: Content block types that are the assistant's actual reply. Everything else in
+#: a provider content list — reasoning, and every Responses-API item type — is
+#: either shown through its own channel or is not for the user at all.
+_UI_TEXT_BLOCK_TYPES = ("text", "text_delta")
+
+
+def ui_text_content(msg):
+    """The content to put in a chat bubble for ``msg``.
+
+    The streaming branch already reduced list content to text blocks; the three
+    ``updates``-stream branches shipped ``msg.content`` verbatim, so a provider
+    item could reach the browser as a bubble. That is how raw ``function_call``
+    JSON showed up in the chat on the ChatGPT/Codex path (0.7.9) — the root
+    cause was in ``message_invariants``, but this is the path it travelled.
+
+    String content — the overwhelmingly common case — is returned untouched.
+    """
+    if not hasattr(msg, "content"):
+        return str(msg)
+
+    content = msg.content
+    if not isinstance(content, list):
+        return content
+
+    return [
+        b for b in content
+        if isinstance(b, dict)
+        and b.get("type") in _UI_TEXT_BLOCK_TYPES
+        and not b.get("thought")
+    ]
+
+
+def plain_text_for_report(content) -> str:
+    """Flatten UI content to readable text for ``report_message``.
+
+    The report call was ``str(content)``, which on a list stored the Python repr
+    — ``"[{'type': 'text', 'text': 'hi'}]"`` — making assistant content
+    unreadable in /admin/message_annotations and in the eval miners. The UI
+    payload stays a block list because the frontend expects that shape; only
+    what we report is flattened.
+    """
+    if isinstance(content, list):
+        return "\n\n".join(
+            b["text"] for b in content
+            if isinstance(b, dict) and isinstance(b.get("text"), str) and b["text"]
+        )
+    return content if isinstance(content, str) else str(content)
+
 load_dotenv()
 
 from typing import Any, Dict, TypedDict
@@ -1240,7 +1289,7 @@ class RequestHandler:
                                                 # logger.info(f"🔨🔨🔨 Tool Call Args: {tool_call_args}")
 
                                     # AIMessage is not serializable to JSON, so we need to convert it to a string.
-                                    messages_as_string = [msg.content if hasattr(msg, 'content') else str(msg) for msg in messages]
+                                    messages_as_string = [ui_text_content(msg) for msg in messages]
 
                                     #NOTE: I found we're able to serialize AIMessage into dict using dumpd.
                                     try:
@@ -1289,7 +1338,7 @@ class RequestHandler:
                                                 asyncio.create_task(mothership.report_message(
                                                     thread_id=str(incoming_message.get("thread_id", "")),
                                                     role="assistant",
-                                                    content=str(llamapress_user_interface_json.get("content", "")),
+                                                    content=plain_text_for_report(llamapress_user_interface_json.get("content", "")),
                                                     sent_at=datetime.now(timezone.utc).isoformat(),
                                                     model=model_name,
                                                     token_usage=token_usage,
@@ -1497,7 +1546,7 @@ class RequestHandler:
                                         if tool_calls_data:
                                             tool_calls = tool_calls_data
 
-                                    messages_as_string = [msg.content if hasattr(msg, 'content') else str(msg) for msg in messages]
+                                    messages_as_string = [ui_text_content(msg) for msg in messages]
                                     try:
                                         base_message_as_dict = dumpd(message)["kwargs"]
                                     except Exception:
@@ -1738,7 +1787,7 @@ class RequestHandler:
                                         if tool_calls_data:
                                             tool_calls = tool_calls_data
 
-                                    messages_as_string = [msg.content if hasattr(msg, 'content') else str(msg) for msg in messages]
+                                    messages_as_string = [ui_text_content(msg) for msg in messages]
                                     try:
                                         base_message_as_dict = dumpd(message)["kwargs"]
                                     except Exception:
