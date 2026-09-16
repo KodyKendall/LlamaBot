@@ -50,6 +50,25 @@ VSCODE_PROFILE = "code"
 START_TIMEOUT = 180
 STOP_TIMEOUT = 60
 INSPECT_TIMEOUT = 15
+SEED_TIMEOUT = 60
+
+#: Where the editor container keeps its SSH state (inside the `code_config`
+#: volume, so a fresh volume means a fresh, empty directory).
+VSCODE_SSH_DIR = "/config/.ssh"
+VSCODE_SSH_CONFIG = f"{VSCODE_SSH_DIR}/config"
+
+#: Leonardo's directory is bind-mounted into the editor at /config/workspace,
+#: so the setup script that writes the SSH config is already in the container.
+VSCODE_SETUP_SCRIPT = "/config/workspace/bin/install/setup-ssh-for-lxd-vscode-container.sh"
+
+#: The jump key every child VM on a node shares, as seen from the host.
+SHARED_JUMP_KEY = ".ssh-shared/id_ed25519_lxd_jump"
+
+#: The per-VM key the setup script generates, as seen inside the container.
+CHILD_KEY = f"{VSCODE_SSH_DIR}/id_ed25519_leonardo"
+
+#: Written with an explicit path, never `~` — see :func:`_seed_leonardo_ssh`.
+HOST_AUTHORIZED_KEYS = "/home/ubuntu/.ssh/authorized_keys"
 
 
 def vscode_enabled(session) -> bool:
@@ -147,6 +166,124 @@ def _run(command: str, timeout: int) -> dict:
     return {"ok": result.returncode == 0, "output": output.strip()}
 
 
+def _is_lxd_box() -> bool:
+    """True when Leonardo's .env carries an LXD_HOST_IP.
+
+    Only an LXD child VM needs the ProxyJump, and only its .env has the four
+    LXD_* values the setup script reads. LlamaBot's own container is not given
+    them — compose passes them to the editor container only — so this reads the
+    file on the host.
+    """
+    probe = _run(
+        f"grep -s '^LXD_HOST_IP=' {HOST_LEONARDO_PATH}/.env | head -1",
+        INSPECT_TIMEOUT,
+    )
+    if not probe["ok"]:
+        return False
+    value = probe["output"].split("=", 1)[-1].strip().strip("\"'")
+    return bool(value)
+
+
+def _seed_leonardo_ssh() -> None:
+    """Write the editor container's `ssh leonardo` config if it has none.
+
+    The editor is opt-in, so its FIRST start creates a brand-new ``code_config``
+    volume: ``/config/.ssh`` exists but is empty, ``ssh`` treats ``leonardo`` as
+    a literal hostname, and the user gets "Could not resolve hostname leonardo"
+    — which reads like a network fault and is not one.
+
+    Guarded on the missing config file, so this is a no-op on every box that is
+    already set up, and a box that is already broken repairs itself the next
+    time the editor is toggled off and on.
+
+    Never raises: a failure here must not stop the editor from coming up.
+    """
+    try:
+        if not _is_lxd_box():
+            return  # no ProxyJump to configure (Docker Desktop, a bare VM)
+
+        already = _run(
+            _compose(f"exec -T -u abc {VSCODE_SERVICE} test -f {VSCODE_SSH_CONFIG}"),
+            INSPECT_TIMEOUT,
+        )
+        if already["ok"]:
+            return  # this container already knows how to reach Leonardo
+
+        jump_key = f"{HOST_LEONARDO_PATH}/{SHARED_JUMP_KEY}"
+        if not _run(f"test -f {jump_key}", INSPECT_TIMEOUT)["ok"]:
+            # Seeding a node's shared jump key from a sibling box is a
+            # mothership job; there is nothing this side can do about it.
+            logger.warning(f"Editor SSH seeding skipped: no shared jump key at {jump_key}")
+            return
+
+        logger.info("Seeding the code editor container's Leonardo SSH config")
+
+        # The setup script copies the jump key itself when it can see the
+        # workspace mount, but installing it first keeps this working on a box
+        # whose editor does not have Leonardo mounted at /config/workspace.
+        _run(_compose(f"exec -T -u abc {VSCODE_SERVICE} mkdir -p {VSCODE_SSH_DIR}"), SEED_TIMEOUT)
+        for src, dest, mode in (
+            (jump_key, f"{VSCODE_SSH_DIR}/id_ed25519_lxd_jump", "600"),
+            (f"{jump_key}.pub", f"{VSCODE_SSH_DIR}/id_ed25519_lxd_jump.pub", "644"),
+        ):
+            _run(_compose(f"cp {src} {VSCODE_SERVICE}:{dest}"), SEED_TIMEOUT)
+            _run(_compose(f"exec -T -u root {VSCODE_SERVICE} chown abc:abc {dest}"), SEED_TIMEOUT)
+            _run(_compose(f"exec -T -u root {VSCODE_SERVICE} chmod {mode} {dest}"), SEED_TIMEOUT)
+
+        # The script needs no arguments: compose already passes LXD_HOST_IP,
+        # LXD_HOST_PORT, LXD_HOST_USER and LEONARDO_IP into the container.
+        # HOME matters — it runs as `abc`, whose home is /config.
+        script = _run(
+            _compose(
+                f"exec -T -u abc -e HOME=/config {VSCODE_SERVICE} bash {VSCODE_SETUP_SCRIPT}"
+            ),
+            START_TIMEOUT,
+        )
+        if not script["ok"]:
+            logger.warning(f"Editor SSH setup script failed: {script['output'][-500:]}")
+            return
+
+        _authorize_child_key()
+    except Exception as e:
+        logger.warning(f"Editor SSH seeding skipped: {e}")
+
+
+def _authorize_child_key() -> None:
+    """Let the fresh per-VM key in on this VM.
+
+    ``run_host_command`` goes through ``nsenter -t 1``, so it runs as ROOT on
+    the host, not as ``ubuntu``. The mothership's version of this runs as the
+    node's ssh user and can say ``~/.ssh/authorized_keys``; this one cannot —
+    ``~`` would be ``/root``, the key would land in the wrong file, and
+    ``ssh leonardo`` would still fail while the config looked perfect. Hence
+    the explicit path and the chown afterwards.
+    """
+    pub = _run(
+        _compose(f"exec -T -u abc {VSCODE_SERVICE} cat {CHILD_KEY}.pub"),
+        INSPECT_TIMEOUT,
+    )
+    key = pub["output"].strip().splitlines()[-1].strip() if pub["ok"] and pub["output"] else ""
+    if not key.startswith("ssh-"):
+        logger.warning("Editor SSH seeding: no child public key to authorize")
+        return
+
+    # Drop the previous child key for this box (the script comments them
+    # " leonardo-<ip>") before appending, so toggling the editor repeatedly
+    # cannot grow the file, and de-duplicate what is left.
+    scratch = "/tmp/llamabot_authorized_keys"
+    _run(
+        f"mkdir -p /home/ubuntu/.ssh && chmod 700 /home/ubuntu/.ssh "
+        f"&& touch {HOST_AUTHORIZED_KEYS} "
+        f"&& grep -v ' leonardo-' {HOST_AUTHORIZED_KEYS} > {scratch} "
+        f"&& printf '%s\\n' '{key}' >> {scratch} "
+        f"&& awk '!seen[$0]++' {scratch} > {HOST_AUTHORIZED_KEYS} "
+        f"&& rm -f {scratch} "
+        f"&& chown ubuntu:ubuntu {HOST_AUTHORIZED_KEYS} "
+        f"&& chmod 600 {HOST_AUTHORIZED_KEYS}",
+        SEED_TIMEOUT,
+    )
+
+
 def start_vscode() -> dict:
     """Start the editor container. Returns ``{"ok": bool, "output": str}``.
 
@@ -155,7 +292,16 @@ def start_vscode() -> dict:
     one.
     """
     logger.info("Starting the code editor container")
-    return _run(_compose(f"up -d {VSCODE_SERVICE}"), START_TIMEOUT)
+    result = _run(_compose(f"up -d {VSCODE_SERVICE}"), START_TIMEOUT)
+    if result["ok"]:
+        # _seed_leonardo_ssh promises not to raise, and this guards the promise:
+        # the editor is what the customer asked for, and a bug in the seeder
+        # must never be the reason they do not get it.
+        try:
+            _seed_leonardo_ssh()
+        except Exception as e:
+            logger.warning(f"Editor SSH seeding skipped: {e}")
+    return result
 
 
 def stop_vscode() -> dict:

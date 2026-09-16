@@ -39,6 +39,7 @@ from app.agents.leonardo.project_context import build_system_prompt_with_project
 from app.agents.leonardo.friction import report_friction, with_friction_section
 from app.agents.leonardo.rails_agent.middleware import (
     inject_view_context,
+    inject_personal_cookbook,
     check_failure_limit,
     DynamicModelMiddleware,
     deepseek_reasoning_fix,
@@ -260,6 +261,10 @@ def build_workflow(checkpointer=None, ask_before_edits=False):
         deepseek_reasoning_fix,
         # 7. View path context injection - prepends page context to user messages
         inject_view_context,
+        # 7b. The owner's own cookbook recipes. Middleware, not part of the
+        #     compiled system prompt: the graphs are built once at startup, so a
+        #     recipe published today would otherwise wait for a container restart.
+        inject_personal_cookbook,
         # 8. Circuit breaker - stop tool calls after 3 failures
         check_failure_limit,
     ]

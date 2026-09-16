@@ -24,6 +24,7 @@ import { PromptManager } from './ui/PromptManager.js';
 import { BrandGuide } from './ui/BrandGuide.js';
 import { ColorAttach } from './ui/ColorAttach.js';
 import { ErrorAttach } from './ui/ErrorAttach.js';
+import { isCustomAgentMode } from './utils/agentModes.js';
 import { RailsErrorPoll } from './ui/RailsErrorPoll.js';
 import { FileAttachmentManager } from './ui/FileAttachmentManager.js';
 import { ScreenRecorder } from './ui/ScreenRecorder.js';
@@ -130,6 +131,10 @@ class ChatApp {
       ['deepseek-v4-pro', { images: false }],
       ['deepseek-v4-flash-gmi', { images: false }],
       ['deepseek-v4-flash-fireworks', { images: false }],
+      // ...but DeepSeek V4.1 Flash IS multimodal (verified against Fireworks),
+      // so seed it true or an image upload bounces off it to Gemini before
+      // /api/available-models resolves.
+      ['deepseek-v4.1-flash-fireworks', { images: true }],
       // Qwen3.7 Plus is image-capable — seed it so an image upload while it's
       // selected is NOT spuriously auto-switched to Gemini before the async
       // /api/available-models fetch resolves (the unknown-model default is
@@ -513,7 +518,13 @@ class ChatApp {
       // Errors from the Rails preview iframe, offered for attaching to a message.
       // Own safeInit: this listens on a postMessage channel the app pushes to, and
       // a skew in the preview must not cost the composer any of the steps below.
-      this.errorAttach = new ErrorAttach();
+      this.errorAttach = new ErrorAttach({
+        // The tray shows in every mode, but it only attaches itself to the
+        // prompt by default in the built-in ones — a per-instance custom mode
+        // is someone else's agent and has no instructions about the block.
+        // See ui/ErrorAttach.js `showLeo`.
+        isCustomMode: () => isCustomAgentMode(this.elements.agentModeSelect?.value),
+      });
       this.errorAttach.init(
         this.elements.jsErrorBanner,
         this.elements.messageInput
@@ -869,6 +880,9 @@ class ChatApp {
         this.appState.setAgentMode(e.target.value);
         setCookie('agentMode', e.target.value, this.config.cookieExpiryDays);
         this.updateDropdownLabel(this.elements.agentModeSelect);
+        // "Show Leo" defaults differently per mode, so a visible tray has to
+        // redraw its checkbox when the mode changes under it.
+        this.errorAttach?.render();
       });
       // Initialize with short label
       this.updateDropdownLabel(this.elements.agentModeSelect);

@@ -42,6 +42,7 @@ from app.agents.leonardo.project_context import build_system_prompt_with_project
 from app.agents.leonardo.friction import report_friction, with_friction_section
 from app.agents.leonardo.rails_ticket_mode_agent.middleware import (
     inject_view_context,
+    inject_personal_cookbook,
     inject_ticket_mode_context,
     check_failure_limit,
     ensure_implementation_offer,
@@ -328,6 +329,10 @@ def build_workflow(checkpointer=None):
         DynamicModelMiddleware(),
         # 3. View path context injection - prepends page context to user messages
         inject_view_context,
+        # 7b. The owner's own cookbook recipes. Middleware, not part of the
+        #     compiled system prompt: the graphs are built once at startup, so a
+        #     recipe published today would otherwise wait for a container restart.
+        inject_personal_cookbook,
         # 4. Ticket mode context - reminds agent of write restrictions
         inject_ticket_mode_context,
         # 5. Deterministic implementation offer - if the model creates a ticket but

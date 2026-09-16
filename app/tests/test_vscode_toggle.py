@@ -109,7 +109,7 @@ class TestContainerControl:
              patch.object(vscode_service, "run_host_command", return_value=_fake_run()) as run:
             result = vscode_service.start_vscode()
 
-        command = run.call_args.args[0]
+        command = run.call_args_list[0].args[0]
         assert "docker compose" in command
         assert "--profile code" in command
         assert "up -d code" in command
@@ -135,7 +135,7 @@ class TestContainerControl:
              patch.object(vscode_service, "run_host_command", return_value=_fake_run()) as run:
             vscode_service.start_vscode()
 
-        assert "-f docker-compose-dev.yml" in run.call_args.args[0]
+        assert "-f docker-compose-dev.yml" in run.call_args_list[0].args[0]
 
     def test_two_override_files_become_two_flags(self):
         from app.services import vscode_service
@@ -144,7 +144,7 @@ class TestContainerControl:
              patch.object(vscode_service, "run_host_command", return_value=_fake_run()) as run:
             vscode_service.start_vscode()
 
-        command = run.call_args.args[0]
+        command = run.call_args_list[0].args[0]
         assert "-f base.yml -f override.yml" in command
 
     def test_compose_file_is_read_off_the_existing_container(self):
@@ -264,3 +264,162 @@ class TestStartupReconcile:
             action = await vscode_service.reconcile_vscode(MagicMock())
 
         assert action == "error"
+
+
+# ------------------------------------------------- first start: ssh seeding
+
+
+class TestLeonardoSshSeeding:
+    """The first editor start has to write the container's `ssh leonardo` config.
+
+    The `code` service is opt-in, so its FIRST start creates a fresh /config
+    volume and /config/.ssh is empty — no config, no keys — and `ssh leonardo`
+    dies with "Could not resolve hostname leonardo". Everything needed is
+    already on the box; only the call was missing. Guarded on the missing
+    config file, so a box that is already set up is never touched, and a broken
+    box repairs itself the next time the editor is toggled.
+    """
+
+    def _seed_calls(self, run):
+        return [c.args[0] for c in run.call_args_list]
+
+    def _host_replies(self, *, lxd=True, config_present=False, shared_key=True):
+        """Stand in for the host: answer each probe the seeder makes."""
+
+        def reply(command, timeout=None):
+            if ".env" in command and "LXD_HOST_IP" in command:
+                return _fake_run(stdout="LXD_HOST_IP=65.109.108.78\n") if lxd \
+                    else _fake_run(returncode=1)
+            if "test -f /config/.ssh/config" in command:
+                return _fake_run() if config_present else _fake_run(returncode=1)
+            if "id_ed25519_lxd_jump" in command and "test -f" in command:
+                return _fake_run() if shared_key else _fake_run(returncode=1)
+            if "id_ed25519_leonardo.pub" in command and "cat" in command:
+                return _fake_run(stdout="ssh-ed25519 AAAAC3Nz leonardo-10.137.163.201\n")
+            return _fake_run()
+
+        return reply
+
+    def test_first_start_on_an_lxd_box_seeds_the_ssh_config(self):
+        from app.services import vscode_service
+
+        with patch.object(vscode_service, "_compose_files", return_value=[]), \
+             patch.object(vscode_service, "run_host_command",
+                          side_effect=self._host_replies()) as run:
+            result = vscode_service.start_vscode()
+
+        commands = self._seed_calls(run)
+        assert any("up -d code" in c for c in commands)
+        # The baked script writes the config; we never hand-roll one.
+        assert any("setup-ssh-for-lxd-vscode-container.sh" in c for c in commands)
+        # The shared jump key is installed before the script runs.
+        copy = next(i for i, c in enumerate(commands) if "cp " in c and "id_ed25519_lxd_jump" in c)
+        script = next(i for i, c in enumerate(commands) if "setup-ssh-for-lxd-vscode-container.sh" in c)
+        assert copy < script
+        # And the result is still the `up -d` result, not the seeding's.
+        assert result["ok"] is True
+
+    def test_the_child_key_is_authorized_by_explicit_path(self):
+        """run_host_command is root via nsenter, so `~` would be /root.
+
+        The mothership's version of this runs as the node's ssh user and can
+        say ~/.ssh/authorized_keys. Ours cannot: the key would land in root's
+        file, and `ssh leonardo` would still fail while the config looked
+        perfect.
+        """
+        from app.services import vscode_service
+
+        with patch.object(vscode_service, "_compose_files", return_value=[]), \
+             patch.object(vscode_service, "run_host_command",
+                          side_effect=self._host_replies()) as run:
+            vscode_service.start_vscode()
+
+        authorize = [c for c in self._seed_calls(run) if "authorized_keys" in c]
+        assert authorize, "the fresh child key was never authorized on this VM"
+        assert all("/home/ubuntu/.ssh/authorized_keys" in c for c in authorize)
+        assert not any("~/.ssh/authorized_keys" in c for c in authorize)
+        assert any("chown ubuntu:ubuntu" in c for c in authorize)
+
+    def test_an_existing_ssh_config_is_left_alone(self):
+        from app.services import vscode_service
+
+        with patch.object(vscode_service, "_compose_files", return_value=[]), \
+             patch.object(vscode_service, "run_host_command",
+                          side_effect=self._host_replies(config_present=True)) as run:
+            result = vscode_service.start_vscode()
+
+        commands = self._seed_calls(run)
+        assert any("up -d code" in c for c in commands)
+        assert not any("setup-ssh-for-lxd-vscode-container.sh" in c for c in commands)
+        assert not any("authorized_keys" in c for c in commands)
+        assert result["ok"] is True
+
+    def test_a_non_lxd_box_seeds_nothing(self):
+        """No LXD_HOST_IP means no ProxyJump — Docker Desktop, a bare VM."""
+        from app.services import vscode_service
+
+        with patch.object(vscode_service, "_compose_files", return_value=[]), \
+             patch.object(vscode_service, "run_host_command",
+                          side_effect=self._host_replies(lxd=False)) as run:
+            result = vscode_service.start_vscode()
+
+        commands = self._seed_calls(run)
+        assert not any("setup-ssh-for-lxd-vscode-container.sh" in c for c in commands)
+        assert result["ok"] is True
+
+    def test_a_missing_shared_jump_key_is_not_ours_to_fix(self):
+        """That case needs a mothership-side seed from a sibling box."""
+        from app.services import vscode_service
+
+        with patch.object(vscode_service, "_compose_files", return_value=[]), \
+             patch.object(vscode_service, "run_host_command",
+                          side_effect=self._host_replies(shared_key=False)) as run:
+            result = vscode_service.start_vscode()
+
+        assert not any("setup-ssh-for-lxd-vscode-container.sh" in c
+                       for c in self._seed_calls(run))
+        assert result["ok"] is True
+
+    def test_a_broken_seed_never_costs_the_customer_their_editor(self):
+        """The important one. The editor comes up even if seeding explodes."""
+        from app.services import vscode_service
+
+        with patch.object(vscode_service, "_compose_files", return_value=[]), \
+             patch.object(vscode_service, "run_host_command", return_value=_fake_run()), \
+             patch.object(vscode_service, "_seed_leonardo_ssh",
+                          side_effect=RuntimeError("boom")):
+            result = vscode_service.start_vscode()
+
+        assert result["ok"] is True
+
+    def test_a_seed_step_that_exits_nonzero_is_swallowed(self):
+        from app.services import vscode_service
+
+        def reply(command, timeout=None):
+            if "up -d code" in command:
+                return _fake_run()
+            if ".env" in command and "LXD_HOST_IP" in command:
+                return _fake_run(stdout="LXD_HOST_IP=65.109.108.78\n")
+            if "test -f /config/.ssh/config" in command:
+                return _fake_run(returncode=1)
+            if "id_ed25519_lxd_jump" in command and "test -f" in command:
+                return _fake_run()
+            return _fake_run(returncode=1, stderr="permission denied")
+
+        with patch.object(vscode_service, "_compose_files", return_value=[]), \
+             patch.object(vscode_service, "run_host_command", side_effect=reply):
+            result = vscode_service.start_vscode()
+
+        assert result["ok"] is True
+
+    def test_a_failed_start_seeds_nothing(self):
+        """No container, nothing to seed."""
+        from app.services import vscode_service
+
+        failed = _fake_run(returncode=1, stderr="no such service: code")
+        with patch.object(vscode_service, "_compose_files", return_value=[]), \
+             patch.object(vscode_service, "run_host_command", return_value=failed) as run:
+            result = vscode_service.start_vscode()
+
+        assert result["ok"] is False
+        assert len(run.call_args_list) == 1

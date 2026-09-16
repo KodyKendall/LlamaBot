@@ -3953,6 +3953,7 @@ async def scheduled_jobs_page(user: User = Depends(engineer_or_admin_required)):
             'deepseek-v4-flash-vision-exp': 'DeepSeek V4 Flash Vision',
             'deepseek-v4-flash-gmi': 'DeepSeek V4 Flash (GMI)',
             'deepseek-v4-flash-fireworks': 'DeepSeek V4 Flash (Fireworks)',
+            'deepseek-v4.1-flash-fireworks': 'DeepSeek V4.1 Flash (Fireworks)',
         };
 
         // Labels for config-registered models arrive with the model list rather

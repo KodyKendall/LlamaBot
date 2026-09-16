@@ -17,6 +17,7 @@ from app.agents.leonardo.rails_agent.middleware import (
     FailureCircuitBreakerMiddleware,
     DynamicModelMiddleware,
     inject_view_context,
+    inject_personal_cookbook,
     check_failure_limit,
 )
 

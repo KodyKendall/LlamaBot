@@ -189,9 +189,19 @@ def _connected_websocket():
 
 
 def _graph_that_dies_midstream():
-    """A compiled-graph stand-in whose astream raises ReadError mid-stream."""
+    """A compiled-graph stand-in whose astream raises ReadError mid-stream.
+
+    The snapshot carries a pending interrupt because that is what a thread being
+    resumed actually looks like: the graph is parked inside `interrupt()` waiting
+    for this answer. `handle_question_response` now refuses to resume a thread
+    with nothing paused (see `test_question_resume_without_interrupt.py`), so a
+    `tasks=[]` stand-in would never reach `astream` and this file would be
+    testing the wrong branch.
+    """
     app = MagicMock()
-    app.aget_state = AsyncMock(return_value=MagicMock(tasks=[]))
+    paused = MagicMock()
+    paused.interrupts = [MagicMock(value={"type": "user_question", "question": "?"})]
+    app.aget_state = AsyncMock(return_value=MagicMock(tasks=[paused]))
 
     async def astream(*a, **kw):
         raise make_midstream_read_error()

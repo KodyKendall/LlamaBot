@@ -1113,3 +1113,96 @@ def test_hetzner_qwen_is_not_the_default_model():
     from app.agents.leonardo.llm_factory import DEFAULT_LLM_MODEL
 
     assert HETZNER_QWEN != DEFAULT_LLM_MODEL
+
+
+# --------------------------------------------------------------------------
+# DeepSeek V4.1 Flash (Fireworks)
+# --------------------------------------------------------------------------
+
+DS_41_FW = "deepseek-v4.1-flash-fireworks"
+
+
+def test_deepseek_41_fireworks_is_offered_in_the_dropdown():
+    assert DS_41_FW in _dropdown_models()
+
+
+def test_deepseek_41_fireworks_supports_images_but_not_video_or_pdf():
+    """The one DeepSeek entry that is not text-only.
+
+    V4.1 Flash is natively multimodal and image input was verified against the
+    live Fireworks endpoint (2026-09-10). Video and PDF are NOT claimed as API
+    input paths, and a wrong True here becomes a provider 400 on upload.
+    """
+    assert MODEL_CAPABILITIES[DS_41_FW] == {
+        "images": True,
+        "video": False,
+        "pdf": False,
+    }
+
+
+def test_deepseek_41_fireworks_uses_a_fireworks_key():
+    assert DS_41_FW in _api_key_map()
+
+
+def test_deepseek_41_fireworks_is_known_to_the_policy():
+    assert DS_41_FW in _KNOWN_MODELS
+
+
+def test_deepseek_41_fireworks_targets_fireworks_with_the_v4p1_id():
+    """Fireworks endpoint + the exact V4.1 snapshot id.
+
+    `api_base` (not `base_url`) is load-bearing for ChatDeepSeek: the field is
+    ignored on that client, so the wrong kwarg silently sends our Fireworks key
+    to api.deepseek.com, which has never heard of this id.
+    """
+    from app.agents.leonardo import llm_factory
+
+    src = _model_dispatch_source(llm_factory)
+    branch = src.split(f'model_name == "{DS_41_FW}"', 1)[1].split(
+        "if model_name ==", 1
+    )[0]
+    assert "ChatDeepSeekWithReasoning(" in branch
+    assert "api_base=" in branch
+    assert "https://api.fireworks.ai/inference/v1" in branch
+    assert '"accounts/fireworks/models/deepseek-v4p1-flash"' in branch
+
+
+def test_deepseek_41_fireworks_has_its_own_id_override_env_var():
+    """NOT the deployed FIREWORKS_DEEPSEEK_MODEL.
+
+    Boxes that pinned a V4 snapshot in that variable would otherwise silently
+    run V4 whenever a user picked V4.1 — a model downgrade dressed up as an
+    operator override. Same trap as META_MUSE_1_3_MODEL vs META_MUSE_MODEL.
+    """
+    from app.agents.leonardo import llm_factory
+
+    src = _model_dispatch_source(llm_factory)
+    branch = src.split(f'model_name == "{DS_41_FW}"', 1)[1].split(
+        "if model_name ==", 1
+    )[0]
+    assert '"FIREWORKS_DEEPSEEK_V4_1_MODEL"' in branch
+    assert '"FIREWORKS_DEEPSEEK_MODEL"' not in branch
+
+
+def test_deepseek_v4_fireworks_still_points_at_its_own_v4_snapshot():
+    """The V4.1 entry is a SIBLING, not a re-point.
+
+    `deepseek-v4-flash-fireworks` is named in pushed policies and in boxes'
+    enabled_models; moving its id would migrate every box that picked it onto an
+    unmeasured model in a release, with no operator route back.
+    """
+    from app.agents.leonardo import llm_factory
+
+    src = _model_dispatch_source(llm_factory)
+    branch = src.split('model_name == "deepseek-v4-flash-fireworks"', 1)[1].split(
+        "if model_name ==", 1
+    )[0]
+    assert '"accounts/fireworks/models/deepseek-v4-flash-0731"' in branch
+
+
+def test_deepseek_41_fireworks_is_not_the_default_model():
+    """Adding an option must not change what the fleet actually runs."""
+    from app.agents.leonardo.llm_factory import DEFAULT_LLM_MODEL, FALLBACK_TEXT_MODEL
+
+    assert DS_41_FW != DEFAULT_LLM_MODEL
+    assert DS_41_FW != FALLBACK_TEXT_MODEL

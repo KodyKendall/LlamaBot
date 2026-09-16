@@ -899,6 +899,9 @@ async def available_models(request: Request):
         "deepseek-v4-flash-vision-exp": "DEEPSEEK_API_KEY",
         "deepseek-v4-flash-gmi": "GMI_DEEPSEEK_API_KEY",
         "deepseek-v4-flash-fireworks": "FIREWORKS_DEEPSEEK_API_KEY",
+        # V4.1 on the same Fireworks account; the account-wide key name is
+        # accepted as a fallback, matching get_llm's precedence.
+        "deepseek-v4.1-flash-fireworks": ("FIREWORKS_DEEPSEEK_API_KEY", "FIREWORKS_API_KEY"),
         # Fireworks' account-wide key name, falling back to the DeepSeek-specific
         # name already deployed on boxes — matches get_llm's precedence.
         "nemotron-lightning-30b-fireworks": ("FIREWORKS_API_KEY", "FIREWORKS_DEEPSEEK_API_KEY"),
@@ -2202,47 +2205,15 @@ async def _fetch_cookbook_index() -> list:
         return _normalize_cookbook_guides(response.json())
 
 
-# The owner's personal list is per-instance-owner and changes the moment they publish, so
-# it gets its own short-TTL cache rather than riding the process-global fleet cache.
-_personal_cookbook_cache: dict = {}
-PERSONAL_COOKBOOK_CACHE_TTL_SECONDS = 60
-
-
-def _normalize_personal_recipes(payload) -> list:
-    """Shape the owner's recipes into the same guide dict the slash menu already consumes.
-
-    Unlisted recipes are kept: they are the owner's own, and hiding them here would mean a
-    user could not find a recipe they had just published. Entries without a slug, or a
-    payload with no handle, are dropped — there is no resolvable URL for either.
-    """
-    if not isinstance(payload, dict):
-        return []
-    handle = str(payload.get("handle") or "").strip()
-    raw = payload.get("recipes")
-    if not handle or not isinstance(raw, list):
-        return []
-
-    guides = []
-    for entry in raw:
-        if not isinstance(entry, dict):
-            continue
-        slug = str(entry.get("slug") or "").strip()
-        if not slug:
-            continue
-        guides.append({
-            "slug": slug,
-            "title": str(entry.get("title") or slug),
-            "category": str(entry.get("category") or ""),
-            "summary": str(entry.get("summary") or ""),
-            # Both .json and .md of this URL exist, so the frontend's existing
-            # cookbookJsonUrl mention mechanics work unchanged.
-            "url": f"https://llamapress.ai/cookbook/u/{handle}/{slug}",
-            "handle": handle,
-            "visibility": str(entry.get("visibility") or ""),
-            "updated_at": str(entry.get("updated_at") or ""),
-            "personal": True,
-        })
-    return guides
+# The owner's personal recipe cache now lives in
+# app/agents/leonardo/personal_cookbook_context.py, so this slash-menu endpoint and the
+# runtime prompt addendum share ONE source of truth. They drifted apart otherwise: the
+# menu knew about the user's recipes and the agent did not.
+from app.agents.leonardo.personal_cookbook_context import (  # noqa: E402
+    PERSONAL_COOKBOOK_CACHE_TTL_SECONDS,
+    normalize_personal_recipes as _normalize_personal_recipes,
+    refresh_personal_cookbook,
+)
 
 
 def _merge_personal_cookbook(fleet_guides: list, personal_guides) -> list:
@@ -2259,13 +2230,6 @@ def _merge_personal_cookbook(fleet_guides: list, personal_guides) -> list:
 
 async def _fetch_personal_cookbook(request) -> list:
     """The owner's recipes, cached briefly. Never raises — an empty list is the floor."""
-    import time
-
-    cached = _personal_cookbook_cache.get("guides")
-    age = time.monotonic() - _personal_cookbook_cache.get("fetched_at", 0.0)
-    if cached is not None and age < PERSONAL_COOKBOOK_CACHE_TTL_SECONDS:
-        return cached
-
     if request is None:
         return []
     mothership = getattr(getattr(request, "app", None), "state", None)
@@ -2273,15 +2237,7 @@ async def _fetch_personal_cookbook(request) -> list:
     if client is None:
         return []
 
-    try:
-        guides = _normalize_personal_recipes(await client.get_personal_cookbook())
-    except Exception as e:  # noqa: BLE001 - the fleet menu must survive this
-        logger.warning(f"Could not fetch personal cookbook: {e}")
-        return cached or []
-
-    _personal_cookbook_cache["guides"] = guides
-    _personal_cookbook_cache["fetched_at"] = time.monotonic()
-    return guides
+    return await refresh_personal_cookbook(client)
 
 
 @router.get("/api/cookbook", response_class=JSONResponse)
