@@ -30,15 +30,36 @@ import { isExtensionOnly } from './extensionErrorFilter.js';
 const MAX_ERRORS = 25;
 
 export class ErrorAttach {
-  constructor({ getAllowedOrigin = getRailsUrl } = {}) {
+  constructor({ getAllowedOrigin = getRailsUrl, isCustomMode = () => false } = {}) {
     this.getAllowedOrigin = getAllowedOrigin;
+    this.isCustomMode = isCustomMode;
     this.banner = null;
     this.messageInput = null;
     this.errors = [];       // {id, kind, message, stack, path, timestamp, count}
-    this.showLeo = true;    // send them with the next message (the default)
+    this.showLeoOverride = null; // null = follow the mode default; see showLeo
     this.dismissed = false; // user closed the banner; a NEW error reopens it
     this.modal = null;      // the "Read more" popup, while it is open
     this._onMessage = this._onMessage.bind(this);
+  }
+
+  /**
+   * Whether the errors ride along with the next message — the state of the
+   * "Show Leo" box.
+   *
+   * The DEFAULT follows the agent mode. The built-in modes are told what a
+   * <PAGE_JS_ERRORS> block is in their prompts and have the tools to go fix
+   * one, so they get the errors automatically: that is the whole feature. A
+   * per-instance custom mode (agent_modes.json) is somebody else's agent — it
+   * may have no file tools and no instructions about this block at all — so
+   * pasting a stack trace into its prompt is noise at best and derails the
+   * conversation at worst. The tray still SHOWS in custom modes, because the
+   * user should know their app is broken; the box just starts unchecked.
+   *
+   * Once the user works the box themselves their choice wins, in every mode.
+   */
+  get showLeo() {
+    if (this.showLeoOverride !== null) return this.showLeoOverride;
+    try { return !this.isCustomMode(); } catch { return true; }
   }
 
   /**
@@ -121,7 +142,7 @@ export class ErrorAttach {
 
   /** The "Show Leo" box. Off means the errors stay put and nothing is sent. */
   toggleShowLeo() {
-    this.showLeo = !this.showLeo;
+    this.showLeoOverride = !this.showLeo;
     this.render();
   }
 
