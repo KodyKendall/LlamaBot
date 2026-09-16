@@ -103,6 +103,16 @@ MAX_TOKENS_PER_MESSAGE_ON_COMPACT = 15000
 # Support contact surfaced to users when vision is disabled by the operator.
 SUPPORT_EMAIL = "support@llamapress.ai"
 
+# Shown when an answer arrives for a question the thread is no longer paused on
+# (a stale card from an earlier turn, a second answer to an already-answered
+# batch, a browser_command result that came back after the turn moved on). There
+# is no interrupt left to hand the answer to, so resuming would run the graph
+# with no input at all — which is the 400 this message replaces.
+QUESTION_ALREADY_ANSWERED_MESSAGE = (
+    "That question isn't waiting on an answer any more — the assistant has "
+    "already moved on. Send your message in the chat box to continue."
+)
+
 # Attachment categories that require a vision model; gated by VISION_MODEL_ALLOWED.
 _VISION_CATEGORIES = ("images", "video")
 
@@ -493,6 +503,27 @@ class RequestHandler:
             if getattr(task, "interrupts", None):
                 return True
         return False
+
+    async def _thread_is_still_paused(self, app, config) -> bool:
+        """Is there an interrupt on this thread for `Command(resume=...)` to answer?
+
+        `Command(resume=...)` only means something while the graph is paused. Send
+        one to a thread that has moved on and LangGraph re-enters the graph with
+        no input, which reaches the provider as an empty history and comes back as
+        `400 ... "messages" must contain at least one message with role "user" or
+        "tool"` — the error the user sees as "Error resuming after question"
+        (feedback #52 on leo-rozeze, 14 Sep 2026: two questions in one turn, the
+        second answered 75s later against a thread with no interrupt left).
+
+        A failed read is NOT evidence that the thread moved on, so it answers True
+        and lets the resume go ahead exactly as it did before this check existed.
+        """
+        try:
+            state_snapshot = await app.aget_state(config)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"Could not read state before resuming; resuming anyway: {e}")
+            return True
+        return self._snapshot_has_pending_interrupt(state_snapshot)
 
     @staticmethod
     def _normalize_messages(raw):
@@ -1727,6 +1758,23 @@ class RequestHandler:
                 # paused on the question interrupt we are about to resume —
                 # repairing there would discard the user's answer (0.7.1 bug).
                 await self._repair_thread_state_if_needed(app, config)
+
+                # Nothing paused => nothing to resume. Say so and stop, instead of
+                # re-entering the graph with no input and handing the user the
+                # provider's 400 (see _thread_is_still_paused).
+                if not await self._thread_is_still_paused(app, config):
+                    logger.warning(
+                        "question_response for thread %s has no pending interrupt to "
+                        "resume; telling the user the question expired instead of "
+                        "resuming into an empty-history request",
+                        response_message.get("thread_id"),
+                    )
+                    if self._is_websocket_open(websocket):
+                        await websocket.send_json({
+                            "type": "system_message",
+                            "content": QUESTION_ALREADY_ANSWERED_MESSAGE,
+                        })
+                    return
 
                 # Resume the graph — interrupt() returns this answer string
                 answer = response_message.get("answer", "")

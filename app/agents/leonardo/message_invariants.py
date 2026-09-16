@@ -238,7 +238,13 @@ def normalize_messages_for_provider(messages: List[Any]) -> List[Any]:
     # A history with nothing but system/assistant messages is rejected outright:
     # "`messages` must contain at least one message with role `user` or `tool`".
     # Seen on the question-card resume path across 4 boxes.
-    if out and not _has_user_or_tool(out):
+    #
+    # An EMPTY history is the SAME provider rejection, and the `out and` guard
+    # used to skip it — the one shape this validator exists to stop went
+    # straight through. Reported as feedback #52 on leo-rozeze (14 Sep 2026):
+    # a question-card resume sent `{"message_count": 0, "messages": [],
+    # "has_user_or_tool": false}` and got the 400 back verbatim.
+    if not _has_user_or_tool(out):
         logger.warning(
             "message_invariants: no user/tool message in a %d-message history; "
             "appending a continuation note so the provider accepts it",

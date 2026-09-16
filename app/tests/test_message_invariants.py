@@ -40,8 +40,17 @@ class TestAtLeastOneUserOrToolMessage:
         ]
         assert normalize_messages_for_provider(msgs) is msgs
 
-    def test_an_empty_history_is_left_alone(self):
-        assert normalize_messages_for_provider([]) == []
+    def test_an_empty_history_gets_one_too(self):
+        """Empty is the SAME provider rejection, not an exempt case.
+
+        The guard read `if out and not _has_user_or_tool(out)`, so a zero-message
+        history — the one shape that can only ever be rejected — was the one
+        shape that skipped the fix. That is what the question-card resume sent on
+        leo-rozeze (feedback #52, 14 Sep 2026): `{"message_count": 0,
+        "messages": [], "has_user_or_tool": false}` straight into a 400.
+        """
+        out = normalize_messages_for_provider([])
+        assert [m.type for m in out] == ["human"]
 
 
 class TestContentTypes:
