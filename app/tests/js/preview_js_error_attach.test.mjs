@@ -48,7 +48,7 @@ class FakeElement {
   focus() {}
 }
 
-function harness() {
+function harness({ isCustomMode } = {}) {
   const listeners = [];
   globalThis.window = { addEventListener: (t, fn) => { if (t === 'message') listeners.push(fn); } };
   const body = new FakeElement('body');
@@ -63,7 +63,10 @@ function harness() {
   const input = new FakeElement('message-input');
   input.parentElement = new FakeElement('composer');
 
-  const attach = new ErrorAttach({ getAllowedOrigin: () => RAILS_ORIGIN });
+  const attach = new ErrorAttach({
+    getAllowedOrigin: () => RAILS_ORIGIN,
+    ...(isCustomMode ? { isCustomMode } : {}),
+  });
   attach.init(banner, input);
 
   // Deliver a postMessage exactly as the browser would.
@@ -683,4 +686,59 @@ test('the kind label cannot be injected from error text', () => {
   const { tray } = trayWith([{ id: 'x', kind: '<img src=x onerror=alert(1)>', message: 'hi' }]);
   const html = tray._detailsHtml();
   assert.doesNotMatch(html, /<img src=x/);
+});
+
+
+// ---------------------------------------------------------------------------
+// Custom agent modes — the tray shows, but does not attach itself
+// ---------------------------------------------------------------------------
+
+test('a custom mode still gets the tray', () => {
+  // The user must know their app is broken regardless of which agent they are
+  // talking to; only the sending half is mode-dependent.
+  const { attach, banner, sendError } = harness({ isCustomMode: () => true });
+  sendError(anError());
+  assert.equal(banner.classList.contains('hidden'), false);
+  assert.match(banner.innerHTML, /1 JavaScript error detected/);
+});
+
+test('a custom mode does not attach the errors to the message by default', () => {
+  const { attach, sendError } = harness({ isCustomMode: () => true });
+  sendError(anError());
+  assert.equal(attach.showLeo, false);
+  assert.equal(attach.buildMessageBlock(), '');
+  assert.equal(attach.sending(), false);
+});
+
+test('a built-in mode keeps attaching them by default', () => {
+  const { attach, sendError } = harness({ isCustomMode: () => false });
+  sendError(anError());
+  assert.equal(attach.showLeo, true);
+  assert.match(attach.buildMessageBlock(), /TypeError/);
+});
+
+test('ticking Show Leo in a custom mode wins over the mode default', () => {
+  const { attach, sendError } = harness({ isCustomMode: () => true });
+  sendError(anError());
+  attach.toggleShowLeo();
+  assert.equal(attach.showLeo, true);
+  assert.match(attach.buildMessageBlock(), /TypeError/);
+});
+
+test('the default follows a mode switch while the tray is up', () => {
+  // The dropdown is read live, so switching from a built-in mode to a custom one
+  // with errors already showing unchecks the box rather than leaving it armed.
+  let custom = false;
+  const { attach, sendError } = harness({ isCustomMode: () => custom });
+  sendError(anError());
+  assert.equal(attach.showLeo, true);
+  custom = true;
+  assert.equal(attach.showLeo, false);
+  assert.equal(attach.buildMessageBlock(), '');
+});
+
+test('a broken mode lookup falls back to sending', () => {
+  const { attach, sendError } = harness({ isCustomMode: () => { throw new Error('no dropdown'); } });
+  sendError(anError());
+  assert.equal(attach.showLeo, true);
 });

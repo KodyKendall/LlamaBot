@@ -47,6 +47,7 @@ from app.agents.leonardo.project_context import build_beginner_system_prompt
 from app.agents.leonardo.friction import report_friction, with_friction_section
 from app.agents.leonardo.rails_plan_mode_agent.middleware import (
     inject_view_context,
+    inject_personal_cookbook,
     inject_plan_mode_context,
     check_failure_limit,
     DynamicModelMiddleware,
@@ -405,6 +406,10 @@ def build_workflow(checkpointer=None):
         DynamicModelMiddleware(),
         # 3. View path context injection
         inject_view_context,
+        # 7b. The owner's own cookbook recipes. Middleware, not part of the
+        #     compiled system prompt: the graphs are built once at startup, so a
+        #     recipe published today would otherwise wait for a container restart.
+        inject_personal_cookbook,
         # 4. Plan mode context - reminds agent of phase workflow
         inject_plan_mode_context,
         # 5. Circuit breaker - stop tool calls after 3 failures

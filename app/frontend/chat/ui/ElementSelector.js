@@ -41,6 +41,42 @@ export class ElementSelector {
 
     // Listen for messages from the iframe
     window.addEventListener('message', this.handlePostMessage);
+
+    // Re-arm the iframe every time it finishes loading.
+    //
+    // The enable is a one-shot postMessage, and the iframe reloads constantly —
+    // after every agent edit and every navigation from the chat header. Two
+    // everyday sequences used to leave the button lit with a dead tool behind
+    // it: clicking during a load (the Rails page's message listener isn't
+    // registered yet, so the message is dropped), and a reload while the tool is
+    // on (the fresh document starts with selection mode off). Both looked to the
+    // user like "the tool doesn't work" — the next click read as "turn off", so
+    // it took three clicks to recover.
+    //
+    // `load` is observable cross-origin from the parent and fires after the
+    // document's module scripts have run, so the listener is there by then.
+    const frame = this.iframeManager && this.iframeManager.liveSiteFrame;
+    if (frame) {
+      frame.addEventListener('load', () => {
+        if (this.isSelectionMode) this._postEnable();
+      });
+    }
+  }
+
+  /**
+   * Tell the iframe to enter selection mode.
+   *
+   * A frame mid-navigation can have a null contentWindow; a re-arm must never
+   * take the chat UI down with it.
+   */
+  _postEnable() {
+    const frame = this.iframeManager && this.iframeManager.liveSiteFrame;
+    if (!frame || !frame.contentWindow) return;
+
+    frame.contentWindow.postMessage({
+      source: 'leonardo',
+      type: 'enable-element-selector'
+    }, '*');
   }
 
   /**
@@ -82,11 +118,14 @@ export class ElementSelector {
     this.selectorButton.dataset.tooltip = 'Selection mode on — click an element, or click here to turn it off';
     this.selectorButton.setAttribute('aria-label', 'Disable selection mode');
 
+    // Mirror disableSelectionMode()'s defensive write. toggleSelectionMode() has
+    // already set this today, but the re-arm on iframe load reads the flag as the
+    // source of truth — leaving it to the one caller that happens to set it makes
+    // a direct enableSelectionMode() call silently un-re-armable.
+    this.isSelectionMode = true;
+
     // Send message to iframe to enable selection mode
-    this.iframeManager.liveSiteFrame.contentWindow.postMessage({
-      source: 'leonardo',
-      type: 'enable-element-selector'
-    }, '*');
+    this._postEnable();
   }
 
   /**

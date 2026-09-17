@@ -8,7 +8,7 @@ This module contains:
 """
 
 from langchain.agents.middleware import AgentMiddleware
-from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
+from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, SystemMessage
 from typing import Any
 import asyncio
 import logging
@@ -24,6 +24,7 @@ from app.agents.leonardo.llm_factory import (
 # where it does not) — never a hardcoded id, or a turn that arrives without
 # an explicit llm_model silently ignores the fleet default.
 from app.agents.leonardo import model_health
+from app.agents.leonardo.personal_cookbook_context import personal_cookbook_section
 from app.agents.leonardo.model_policy import enabled_default_model, fallback_model
 from app.agents.leonardo.resilience import (
     is_midstream_stall,
@@ -949,12 +950,83 @@ from app.agents.leonardo.agent_factory import (  # noqa: E402
 )
 
 
+class PersonalCookbookMiddleware(AgentMiddleware):
+    """Append the box owner's own cookbook recipes to the system prompt, EVERY TURN.
+
+    This has to be middleware rather than part of the system prompt the graph is built
+    with. `main.py` compiles the graphs once at container startup and caches them on
+    `app.state.compiled_graphs`, and `nodes.py` passes `get_cached_system_prompt()` in at
+    that moment — so anything added inside `build_system_prompt_with_project_context` is
+    frozen for the life of the process, at the value it had when the cache was still
+    cold (i.e. empty). A recipe the user published five minutes ago would not show up
+    until the box restarted, which on a permanent box is weeks. "Publish on box A, use it
+    on box B right now" is the whole feature.
+
+    (`rails_beginner_agent` is the exception and is deliberately NOT wired to this: it is
+    a raw StateGraph that runs no middleware and rebuilds its system message inside the
+    node on every turn, so it was never frozen.)
+
+    Appended as a SEPARATE, UNCACHED content block. The first block carries Anthropic's
+    ephemeral `cache_control` and must stay byte-identical or every turn pays full price
+    for the prompt; and this block changes the moment the user publishes, so caching it
+    would be wrong anyway.
+    """
+
+    #: Stable enough to recognise our own block and refuse to add a second one.
+    MARKER = "# Your Personal Cookbook"
+
+    def _already_present(self, system_message) -> bool:
+        content = getattr(system_message, "content", system_message)
+        if isinstance(content, str):
+            return self.MARKER in content
+        if isinstance(content, list):
+            return any(
+                isinstance(b, dict) and self.MARKER in str(b.get("text", ""))
+                for b in content
+            )
+        return False
+
+    def _with_block(self, system_message, block: str):
+        """A copy of the system message with `block` appended as its own text block."""
+        content = getattr(system_message, "content", system_message)
+
+        if isinstance(content, str):
+            return SystemMessage(content=content + block)
+        if isinstance(content, list):
+            return SystemMessage(content=list(content) + [{"type": "text", "text": block}])
+        return system_message
+
+    def _augment(self, request):
+        """The request the model should see, or None to leave it exactly as it is."""
+        try:
+            if self._already_present(request.system_message):
+                return None
+
+            block = personal_cookbook_section()
+            if not block:
+                return None
+
+            return request.override(
+                system_message=self._with_block(request.system_message, block)
+            )
+        except Exception as e:  # noqa: BLE001 - an enrichment may never break a turn
+            logger.warning(f"Could not inject personal cookbook context: {e}")
+            return None
+
+    def wrap_model_call(self, request, handler):
+        return handler(self._augment(request) or request)
+
+    async def awrap_model_call(self, request, handler):
+        return await handler(self._augment(request) or request)
+
+
 # =============================================================================
 # Convenience exports (instantiated middleware)
 # =============================================================================
 
 # Middleware instances to use in nodes.py
 inject_view_context = ViewPathContextMiddleware()
+inject_personal_cookbook = PersonalCookbookMiddleware()
 check_failure_limit = FailureCircuitBreakerMiddleware()
 deepseek_reasoning_fix = DeepSeekReasoningMiddleware()
 strip_unsupported_multimodal = StripUnsupportedMultimodalMiddleware()

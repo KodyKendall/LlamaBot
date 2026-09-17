@@ -22,6 +22,7 @@ import pytest
 THIRD_PARTY_ENDPOINT_MODELS = [
     ("deepseek-v4-flash-gmi", "GMI_DEEPSEEK_API_KEY"),
     ("deepseek-v4-flash-fireworks", "FIREWORKS_DEEPSEEK_API_KEY"),
+    ("deepseek-v4.1-flash-fireworks", "FIREWORKS_DEEPSEEK_API_KEY"),
     ("qwen3.7-plus", "ALIBABA_API_KEY"),
     ("qwen3.8-27b-hetzner", "HETZNER_API_KEY"),
     ("muse-spark-1.2-contributor", "META_API_KEY"),

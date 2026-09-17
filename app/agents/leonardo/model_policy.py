@@ -308,6 +308,7 @@ _KNOWN_MODELS = [
     "deepseek-v4-flash-vision-exp",
     "deepseek-v4-flash-gmi",
     "deepseek-v4-flash-fireworks",
+    "deepseek-v4.1-flash-fireworks",
     "claude-4.5-sonnet",
     "claude-4.5-haiku",
     "gpt-5-codex",

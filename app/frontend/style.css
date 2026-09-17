@@ -2705,6 +2705,19 @@ body.instance-locked .lock-modal-overlay {
     min-width: 140px;
 }
 
+/* The streamed text and the control row are siblings inside the bubble, so a
+   chunk's `innerHTML =` on message-body cannot destroy the buttons. Both stay
+   position:static so the absolutely-positioned buttons below still resolve
+   against the bubble (which is position:relative), and message-actions adds no
+   height of its own. */
+[data-llamabot="message-body"] {
+    display: block;
+}
+
+[data-llamabot="message-actions"] {
+    display: block;
+}
+
 /* Copy + feedback (👍/👎) buttons for AI messages — shared control row, top-right */
 [data-llamabot="copy-btn"],
 [data-llamabot="thumb-up-btn"],
