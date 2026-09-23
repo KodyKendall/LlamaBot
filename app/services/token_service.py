@@ -1,5 +1,7 @@
 """JWT token service for WebSocket authentication and browser session cookies."""
 
+import hashlib
+import hmac
 import os
 import secrets
 import logging
@@ -19,8 +21,6 @@ RAILS_ROLE = "rails"
 
 logger = logging.getLogger(__name__)
 
-# Configuration with fallbacks
-SECRET_KEY = os.getenv("WS_SECRET_KEY", os.getenv("SECRET_KEY", "fallback-dev-key-change-in-production"))
 EXPIRY_MINUTES = int(os.getenv("WS_TOKEN_EXPIRY_MINUTES", "30"))
 
 
@@ -108,6 +108,33 @@ def _ensure_session_secret() -> str:
 
 
 SESSION_SECRET = _ensure_session_secret()
+
+# Values that are "set" but public: the compose files ship `WS_SECRET_KEY=`
+# (empty), and the placeholder below was this module's own default until 0.7.9.
+_PUBLIC_WS_KEYS = {"", "fallback-dev-key-change-in-production"}
+
+
+def _resolve_ws_secret() -> str:
+    """The key browser WebSocket JWTs are signed and verified with.
+
+    An operator-set ``WS_SECRET_KEY`` (or ``SECRET_KEY``) wins. Otherwise the key
+    is derived from this box's SESSION_SECRET, which is random per box and
+    durable in the auth DB — so an unconfigured box gets a private, stable key
+    instead of a public one. It used to fall back to a string in this repo, and
+    no box was ever provisioned with either variable: anyone could mint a
+    ``ws_auth`` token claiming an admin role.
+
+    Derived, not reused: a leaked WS token must not be able to mint a browser
+    session, so the two keys stay distinct.
+    """
+    for name in ("WS_SECRET_KEY", "SECRET_KEY"):
+        value = (os.getenv(name) or "").strip()
+        if value and value not in _PUBLIC_WS_KEYS:
+            return value
+    return hmac.new(SESSION_SECRET.encode(), b"llamabot ws_auth jwt v1", hashlib.sha256).hexdigest()
+
+
+SECRET_KEY = _resolve_ws_secret()
 SESSION_TTL_DAYS = int(os.getenv("SESSION_TTL_DAYS", "30"))
 SESSION_COOKIE_NAME = "llamabot_session"
 
