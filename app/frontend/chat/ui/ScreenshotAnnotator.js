@@ -5,7 +5,11 @@
  */
 
 export class ScreenshotAnnotator {
-  constructor() {
+  constructor(options = {}) {
+    // Element the capture should be limited to (the preview iframe). A
+    // function, not an element, so it re-resolves on every capture — which
+    // iframe is on screen changes as the user switches tabs.
+    this.getCaptureTarget = options.getCaptureTarget || null;
     this.isCapturing = false;
     this.fabricCanvas = null;
     this.modal = null;
@@ -19,12 +23,88 @@ export class ScreenshotAnnotator {
   }
 
   /**
-   * Capture a screenshot using getDisplayMedia
+   * The element the screenshot should be cropped to, if we have one.
+   * @returns {Element|null}
+   */
+  resolveCaptureTarget() {
+    if (!this.getCaptureTarget) return null;
+    try {
+      return this.getCaptureTarget() || null;
+    } catch (err) {
+      console.warn('Screenshot capture target lookup failed:', err?.message);
+      return null;
+    }
+  }
+
+  /**
+   * Ask the browser to crop the stream itself to an element (Region Capture,
+   * Chromium only). When this works the video we read is already just the
+   * iframe, chat panel excluded.
+   * @returns {Promise<boolean>} - whether the crop was applied
+   */
+  async cropTrackToElement(track, element) {
+    const CropTargetCtor = globalThis.CropTarget;
+    if (!track || typeof track.cropTo !== 'function') return false;
+    if (!CropTargetCtor || typeof CropTargetCtor.fromElement !== 'function') return false;
+
+    try {
+      await track.cropTo(await CropTargetCtor.fromElement(element));
+      return true;
+    } catch (err) {
+      console.warn('Region Capture unavailable, falling back to a pixel crop:', err?.message);
+      return false;
+    }
+  }
+
+  /**
+   * Fallback crop: map the element's page coordinates onto the captured
+   * pixels. Only valid for a tab capture — a window or screen capture also
+   * contains browser chrome and desktop, so page coordinates don't line up.
+   * @returns {{x: number, y: number, width: number, height: number}|null}
+   */
+  viewportCropFor(video, track, target) {
+    if (!target || typeof target.getBoundingClientRect !== 'function') return null;
+
+    const surface = typeof track?.getSettings === 'function' ? track.getSettings().displaySurface : null;
+    if (surface !== 'browser') return null;
+
+    const viewportW = window.innerWidth;
+    const viewportH = window.innerHeight;
+    const videoW = video.videoWidth;
+    const videoH = video.videoHeight;
+    if (!viewportW || !viewportH || !videoW || !videoH) return null;
+
+    const scaleX = videoW / viewportW;
+    const scaleY = videoH / viewportH;
+    // A capture that isn't the viewport's shape isn't the viewport: crop
+    // nothing rather than crop the wrong region.
+    if (Math.abs(scaleX - scaleY) > 0.02 * Math.max(scaleX, scaleY)) return null;
+
+    const rect = target.getBoundingClientRect();
+    const x = Math.max(0, Math.round(rect.left * scaleX));
+    const y = Math.max(0, Math.round(rect.top * scaleY));
+    const width = Math.min(videoW - x, Math.round(rect.width * scaleX));
+    const height = Math.min(videoH - y, Math.round(rect.height * scaleY));
+    if (width < 10 || height < 10) return null;
+
+    return { x, y, width, height };
+  }
+
+  /**
+   * Capture a screenshot using getDisplayMedia, cropped to the preview iframe
+   * when we can manage it — an uncropped tab capture also contains the chat
+   * panel on the left.
    * @returns {Promise<string>} - Data URL of the captured screenshot
    */
   async captureScreen() {
+    const target = this.resolveCaptureTarget();
+
     const constraints = {
       audio: false,
+      // Chromium: capture THIS tab rather than making the user pick a screen
+      // or window. Other browsers ignore it and still show the picker, which
+      // the displaySurface guard below handles.
+      preferCurrentTab: true,
       video: {
         width: { ideal: 1920 },
         height: { ideal: 1080 },
@@ -33,6 +113,9 @@ export class ScreenshotAnnotator {
     };
 
     const stream = await navigator.mediaDevices.getDisplayMedia(constraints);
+    const track = stream.getVideoTracks()[0];
+
+    const browserCropped = target ? await this.cropTrackToElement(track, target) : false;
 
     // Create video element to capture frame
     const video = document.createElement('video');
@@ -46,16 +129,22 @@ export class ScreenshotAnnotator {
       };
     });
 
-    // Wait a frame for the video to render
-    await new Promise(resolve => setTimeout(resolve, 100));
+    // Wait a frame for the video to render (and for any crop to take effect)
+    await new Promise(resolve => setTimeout(resolve, 150));
+
+    const crop = browserCropped ? null : this.viewportCropFor(video, track, target);
 
     // Create canvas to capture the frame
     const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    canvas.width = crop ? crop.width : video.videoWidth;
+    canvas.height = crop ? crop.height : video.videoHeight;
 
     const ctx = canvas.getContext('2d');
-    ctx.drawImage(video, 0, 0);
+    if (crop) {
+      ctx.drawImage(video, crop.x, crop.y, crop.width, crop.height, 0, 0, crop.width, crop.height);
+    } else {
+      ctx.drawImage(video, 0, 0);
+    }
 
     // Stop the stream immediately after capture
     stream.getTracks().forEach(track => track.stop());
