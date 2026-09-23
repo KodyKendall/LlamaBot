@@ -95,32 +95,45 @@ def _calibrated_counter(counter):
     return _count
 
 
-def calibration_ratio(messages, raw_counter):
-    """reported / estimated at the newest AI message that reported usage.
+def _reported_usage(msg):
+    """input + output tokens a message's provider reported, or None."""
+    if not isinstance(msg, AIMessage):
+        return None
+    usage = getattr(msg, "usage_metadata", None) or {}
+    try:
+        reported = int(usage.get("input_tokens") or 0) + int(usage.get("output_tokens") or 0)
+    except (TypeError, ValueError):
+        return None
+    return reported if reported > 0 else None
 
-    1.0 when nothing was reported, when the estimate is zero, or when the
-    estimate already over-counts; never above ``MAX_CALIBRATION_RATIO``.
+
+def calibration_ratio(messages, raw_counter):
+    """How many real tokens each estimated token is worth, for this thread.
+
+    Affine, not multiplicative: every report is a FIXED overhead (system prompt
+    and tool schemas, ~42k on rails_agent) plus the messages, and the estimate
+    only sees the messages. Dividing one report by one estimate is mostly
+    overhead — a new thread pinned at the cap and the next big tool result
+    was counted at 8x, firing compaction on the first message (crm-4,
+    2026-09-21). So the ratio is the growth between the oldest and newest
+    reports over the growth of the estimate between them; the overhead
+    cancels out.
+
+    1.0 with fewer than two reports, when the estimate did not grow, or when
+    it already over-counts; never above ``MAX_CALIBRATION_RATIO``.
     """
     msgs = list(messages or [])
-    for idx in range(len(msgs) - 1, -1, -1):
-        m = msgs[idx]
-        if not isinstance(m, AIMessage):
-            continue
-        usage = getattr(m, "usage_metadata", None) or {}
-        try:
-            reported = int(usage.get("input_tokens") or 0) + int(usage.get("output_tokens") or 0)
-        except (TypeError, ValueError):
-            continue
-        if reported <= 0:
-            continue
-        try:
-            estimated = int(raw_counter(msgs[: idx + 1]))
-        except Exception:  # noqa: BLE001 - an estimate must never break a turn
-            return 1.0
-        if estimated <= 0:
-            return 1.0
-        return max(1.0, min(MAX_CALIBRATION_RATIO, reported / estimated))
-    return 1.0
+    reports = [(idx, r) for idx, r in ((i, _reported_usage(m)) for i, m in enumerate(msgs)) if r]
+    if len(reports) < 2:
+        return 1.0
+    (old_idx, old_reported), (new_idx, new_reported) = reports[0], reports[-1]
+    try:
+        grew_by = int(raw_counter(msgs[old_idx + 1: new_idx + 1]))
+    except Exception:  # noqa: BLE001 - an estimate must never break a turn
+        return 1.0
+    if grew_by <= 0:
+        return 1.0
+    return max(1.0, min(MAX_CALIBRATION_RATIO, (new_reported - old_reported) / grew_by))
 
 SUMMARY_UNAVAILABLE_TEXT = (
     "Summary unavailable: every summarizer model failed, so the earlier part of "
@@ -428,7 +441,10 @@ class RailsSummarizationMiddleware(SummarizationMiddleware):
 
     def _should_summarize(self, messages, total_tokens):
         """Trigger on the larger of the estimate and the provider's own count."""
-        reported = reported_context_tokens(messages, self._count)
+        # The provider figure covers everything up to its message; the tail
+        # after it is plain text the raw estimate reads well. Calibrating it
+        # too double-counts (a 20k schema.rb read became 175k).
+        reported = reported_context_tokens(messages, self._raw_counter)
         if reported is not None and reported > total_tokens:
             logger.info(
                 "RailsSummarizationMiddleware: provider reports %d tokens of context "

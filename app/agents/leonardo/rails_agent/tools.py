@@ -558,6 +558,13 @@ def ls(directory: str = "") -> list[str]:
 
     return os.listdir(dir_path)
 
+# The 2000-line limit alone let a whole db/schema.rb (73k chars, ~20k tokens)
+# through on the first turn of a thread, and compaction choked on that one
+# message (crm-4, 2026-09-21). Past this many characters the rest of the file
+# is left for the next page.
+READ_FILE_MAX_CHARS = 25_000
+
+
 @tool(description=TOOL_DESCRIPTION)
 def read_file(
     file_path: str,
@@ -598,6 +605,7 @@ def read_file(
 
     # Format output with line numbers (cat -n format)
     result_lines = []
+    chars = 0
     for i in range(start_idx, end_idx):
         line_content = lines[i]
 
@@ -607,7 +615,15 @@ def read_file(
 
         # Line numbers start at 1, so add 1 to the index
         line_number = i + 1
-        result_lines.append(f"{line_number:6d}\t{line_content}")
+        formatted = f"{line_number:6d}\t{line_content}"
+        if result_lines and chars + len(formatted) + 1 > READ_FILE_MAX_CHARS:
+            return "\n".join(result_lines) + (
+                f"\n\n[Stopped at line {i} of {len(lines)}: output is capped at "
+                f"{READ_FILE_MAX_CHARS:,} characters. Read the next page with "
+                f"offset={i}, or use grep_files to find the part you need.]"
+            )
+        result_lines.append(formatted)
+        chars += len(formatted) + 1
 
     return "\n".join(result_lines)
 
