@@ -1853,7 +1853,7 @@ Never repeat the same failing edit command.
 
 TOOL_DESCRIPTION = """Read the contents of a file from the filesystem. This provides the complete,
 authoritative file contents (with optional pagination via offset/limit parameters).
-If you've read a file without offset/limit, you have the complete current contents.
+If you've read a file without offset/limit and the output does not end with a "[Stopped at line ...]" note, you have the complete current contents.
 Use this when you need to see the full file structure and all content.
 
 Usage:
@@ -1861,6 +1861,7 @@ Usage:
 - By default, it reads up to 2000 lines starting from the beginning of the file
 - You can optionally specify a line offset and limit (especially handy for long files), but it's recommended to read the whole file by not providing these parameters
 - Any lines longer than 2000 characters will be truncated
+- Output is capped at about 25,000 characters. A longer file ends with a note giving the offset of the next page; read that page only if you need it, or grep_files for the part you want
 - Results are returned using cat -n format, with line numbers starting at 1
 - You have the capability to call multiple tools in a single response. It is always better to speculatively read multiple files as a batch that are potentially useful. Batch READS freely; batch WRITES only across DIFFERENT files. Two edits to the same file in one response are edits to the same base content — sequence them instead.
 - If you read a file that exists but has empty contents you will receive a system reminder warning in place of file contents."""

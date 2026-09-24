@@ -69,14 +69,21 @@ def _usage(input_tokens, output_tokens=100):
     }
 
 
-def _convo(n_pairs, last_ai_usage=None):
-    """n_pairs of (human, ai); the last AI optionally reports provider usage."""
+def _convo(n_pairs, last_ai_usage=None, usages=None):
+    """n_pairs of (human, ai); the last AI optionally reports provider usage.
+
+    ``usages`` maps a pair index to the usage its AI message reports, for
+    threads with more than one provider report.
+    """
+    usages = dict(usages or {})
+    if last_ai_usage is not None:
+        usages[n_pairs - 1] = last_ai_usage
     msgs = []
     for i in range(n_pairs):
         msgs.append(HumanMessage(content=f"user turn {i}", id=f"h{i}"))
         kwargs = {}
-        if last_ai_usage is not None and i == n_pairs - 1:
-            kwargs["usage_metadata"] = last_ai_usage
+        if i in usages:
+            kwargs["usage_metadata"] = usages[i]
         msgs.append(
             AIMessage(
                 content=f"assistant turn {i}",
@@ -161,15 +168,28 @@ def _tail(result):
     return kept[idx + 1:]
 
 
-def test_calibration_ratio_is_reported_over_estimated_at_that_message():
-    msgs = _convo(3, last_ai_usage=_usage(17_900))  # 18_000 reported over 6 messages
+# Calibration is affine: reported = fixed overhead (system prompt + tool
+# schemas, ~42k on rails_agent) + ratio * estimate. The estimate never sees the
+# overhead, so reported / estimated on a short thread is mostly overhead — it
+# pinned at 8x on every new thread and fired compaction on the FIRST message
+# (crm-4, 2026-09-21). The ratio is the GROWTH between two reports over the
+# growth of the estimate between them; the overhead cancels out.
+
+def test_calibration_ratio_is_growth_between_reports_over_estimate_growth():
+    # est 2000 at a0, 6000 at a2; reported grows 10_000 -> 22_000: ratio 3.
+    msgs = _convo(3, usages={0: _usage(9_900), 2: _usage(21_900)})
     assert calibration_ratio(msgs, _per_message_counter) == 3.0
 
 
+def test_one_report_is_mostly_fixed_overhead_so_calibrates_at_one():
+    """THE bug: 18_000 reported over a 6_000 estimate is overhead, not a 3x tokenizer."""
+    assert calibration_ratio(_convo(3, last_ai_usage=_usage(17_900)), _per_message_counter) == 1.0
+
+
 def test_calibration_never_shrinks_the_estimate_and_is_capped():
-    assert calibration_ratio(_convo(3, last_ai_usage=_usage(900)), _per_message_counter) == 1.0
+    assert calibration_ratio(_convo(3, usages={0: _usage(9_900), 2: _usage(9_950)}), _per_message_counter) == 1.0
     assert calibration_ratio(_convo(3), _per_message_counter) == 1.0
-    huge = _convo(3, last_ai_usage=_usage(6_000_000))
+    huge = _convo(3, usages={0: _usage(900), 2: _usage(6_000_000)})
     assert calibration_ratio(huge, _per_message_counter) == MAX_CALIBRATION_RATIO
 
 
@@ -180,14 +200,15 @@ def test_calibration_sizes_the_kept_tail_in_real_tokens():
     uncalibrated = _mw().before_model({"messages": _convo(6)}, None)  # 12 msgs, est 12k
     assert len(_tail(uncalibrated)) == 2
     calibrated = _mw().before_model(
-        {"messages": _convo(6, last_ai_usage=_usage(23_900))}, None  # ratio 2
+        # est 2000 at a0, 12_000 at a5; reported grows 5_000 -> 25_000: ratio 2.
+        {"messages": _convo(6, usages={0: _usage(4_900), 5: _usage(24_900)})}, None
     )
     assert len(_tail(calibrated)) == 1
 
 
 def test_a_pathological_ratio_still_compacts_and_keeps_the_summary():
     """A tiny estimate under a huge reported count must not wreck the summary."""
-    msgs = _convo(6, last_ai_usage=_usage(6_000_000))
+    msgs = _convo(6, usages={0: _usage(1_000), 5: _usage(6_000_000)})
     result = _mw().before_model({"messages": msgs}, None)
     assert result is not None
     kept = _kept(result)
@@ -196,3 +217,67 @@ def test_a_pathological_ratio_still_compacts_and_keeps_the_summary():
         if isinstance(m, HumanMessage) and (m.additional_kwargs or {}).get("lc_source") == "summarization"
     )
     assert "FIXED SUMMARY TEXT" in summary.content
+
+
+# --- first message, one big tool result (crm-4, 2026-09-21) --------------------
+
+def _chars_counter(messages):
+    """~4 chars a token, like tiktoken on English and code."""
+    return sum(len(str(m.content)) // 4 + 4 for m in messages)
+
+
+def _real_mw():
+    return RailsSummarizationMiddleware(
+        model=_FakeSummaryModel(),
+        trigger=("tokens", 150_000),
+        keep=("tokens", 30_000),
+        token_counter=_chars_counter,
+        trim_tokens_to_summarize=None,
+        summary_prompt="Summarize:\n{messages}",
+        keep_initial_human=1,
+    )
+
+
+def _read_schema_turn(input_tokens=42_000):
+    return [
+        HumanMessage(content="add Heitor as a new user", id="h0"),
+        AIMessage(
+            content="",
+            id="a0",
+            tool_calls=[{"name": "read_file", "args": {"path": "db/schema.rb"}, "id": "c0"}],
+            usage_metadata=_usage(input_tokens),
+        ),
+        ToolMessage(content="x" * 73_000, tool_call_id="c0", id="t0"),
+    ]
+
+
+def test_first_message_plus_a_big_tool_result_does_not_compact():
+    """42k of prompt overhead + ~18k of schema.rb is ~60k real tokens, far under
+    150k. It compacted because the one report calibrated at 8x and the schema was
+    then counted at 8x on top of the provider figure."""
+    assert _real_mw().before_model({"messages": _read_schema_turn()}, None) is None
+
+
+def test_the_reported_figure_counts_its_tail_raw_not_calibrated():
+    """The provider figure already covers everything up to its message; the
+    tail after it is plain text the estimate reads well. Scaling the tail by
+    the calibration ratio on top of the provider figure double-counts."""
+    from app.agents.leonardo.summarization import _CALIBRATION
+
+    msgs = _read_schema_turn()  # 42_100 reported + ~18k raw tail
+    mw = _real_mw()
+    token = _CALIBRATION.set(MAX_CALIBRATION_RATIO)
+    try:
+        # total_tokens=0 keeps the stock estimate path out of it: only the
+        # provider-reported figure can fire. At 8x the tail alone was ~146k.
+        assert mw._should_summarize(msgs, 0) is False
+    finally:
+        _CALIBRATION.reset(token)
+
+
+def test_a_long_thread_the_estimate_undercounts_still_compacts():
+    """The 2026-09-03 Muse fix must hold: provider 180k, estimate ~60k."""
+    msgs = _read_schema_turn(input_tokens=180_000)[:2]
+    msgs[1] = AIMessage(content="done", id="a0", usage_metadata=_usage(180_000))
+    msgs.insert(1, HumanMessage(content="y" * 240_000, id="h1"))
+    assert _real_mw().before_model({"messages": msgs}, None) is not None

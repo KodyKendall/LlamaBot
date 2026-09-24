@@ -605,7 +605,9 @@ class ChatApp {
     });
 
     safeInit('screenshot capture', () => {
-      this.screenshotAnnotator = new ScreenshotAnnotator();
+      this.screenshotAnnotator = new ScreenshotAnnotator({
+        getCaptureTarget: () => this.activePreviewIframe(),
+      });
       this.initScreenshotCapture();
     });
 
@@ -2820,6 +2822,17 @@ class ChatApp {
         }
       });
     }
+  }
+
+  /**
+   * The preview iframe currently on screen — what a screenshot should show,
+   * without the chat panel beside it.
+   * @returns {Element|null}
+   */
+  activePreviewIframe() {
+    return this.container.querySelector('.content-iframe.active')
+      || this.elements.liveSiteFrame
+      || null;
   }
 
   /**
