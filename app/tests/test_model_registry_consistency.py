@@ -147,10 +147,10 @@ def test_dropdown_model_builds_a_real_client(model, monkeypatch):
 
 
 # --------------------------------------------------------------------------
-# GPT-5.6 Luna
+# GPT-6 Luna
 # --------------------------------------------------------------------------
 
-LUNA = "gpt-5.6-luna"
+LUNA = "gpt-6-luna"
 
 
 def test_luna_is_offered_in_the_dropdown():
@@ -171,9 +171,9 @@ def test_luna_is_known_to_the_policy():
 
 
 def test_luna_builds_an_openai_client_with_the_exact_api_id(monkeypatch):
-    """The API id is `gpt-5.6-luna`.
+    """The API id is `gpt-6-luna`.
 
-    NOT the bare `gpt-5.6` alias — that routes to Sol, a different (pricier) tier.
+    NOT the bare `gpt-6` alias — that routes to Sol, a different (pricier) tier.
     """
     import inspect
 
@@ -181,8 +181,8 @@ def test_luna_builds_an_openai_client_with_the_exact_api_id(monkeypatch):
 
     src = _model_dispatch_source(llm_factory)
     branch = src.split(f'model_name == "{LUNA}"', 1)[1].split("if model_name ==", 1)[0]
-    assert 'model="gpt-5.6-luna"' in branch
-    assert 'model="gpt-5.6"' not in branch, "the bare gpt-5.6 alias routes to Sol, not Luna"
+    assert 'model="gpt-6-luna"' in branch
+    assert 'model="gpt-6"' not in branch, "the bare gpt-6 alias routes to Sol, not Luna"
 
 
 def test_luna_is_not_the_default_model():

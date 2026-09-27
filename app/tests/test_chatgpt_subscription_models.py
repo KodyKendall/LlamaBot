@@ -197,7 +197,7 @@ def _codex_client():
     from app.agents.leonardo.llm_factory import ChatOpenAICodexBackend
 
     return ChatOpenAICodexBackend(
-        model="gpt-5.6-luna",
+        model="gpt-6-luna",
         base_url="https://chatgpt.com/backend-api/codex",
         api_key="test-token",
         use_responses_api=True,
@@ -295,7 +295,7 @@ def test_subscription_client_uses_the_codex_backend_subclass(unlocked_models, mo
     )
     token = set_current_user_id(1)
     try:
-        llm = get_llm("gpt-5.6-luna-chatgpt")
+        llm = get_llm("gpt-6-luna-chatgpt")
     finally:
         reset_current_user_id(token)
 
@@ -328,7 +328,7 @@ def test_credential_is_scoped_per_user(unlocked_models, monkeypatch):
     for uid in (1, 2):
         token = set_current_user_id(uid)
         try:
-            llm = get_llm("gpt-5.6-luna-chatgpt")
+            llm = get_llm("gpt-6-luna-chatgpt")
             secret = getattr(llm, "openai_api_key", None)
             seen[uid] = (
                 secret.get_secret_value() if hasattr(secret, "get_secret_value") else secret

@@ -154,3 +154,66 @@ test('closing the modal drops full screen so the file list is back next time', (
   assert.ok(modal.classList.contains('hidden'));
   assert.ok(!modal.classList.contains('asset-modal--expanded'));
 });
+
+
+// ---- Delete from the asset library ----------------------------------------
+
+function managerWithAssets() {
+  const { manager } = makeAssetModal();
+  manager.assetModalFiles = [
+    { filename: 'a.csv', path: 'app/imports/a.csv', size: 3, folder: 'app/imports', uploaded_at: 2 },
+    { filename: 'b.csv', path: 'app/imports/b.csv', size: 3, folder: 'app/imports', uploaded_at: 1 },
+  ];
+  manager.assetModalSelectedPath = 'app/imports/a.csv';
+  return manager;
+}
+
+test('the preview pane offers a Delete button', () => {
+  const { manager } = makeAssetModal();
+  manager.renderAssetPreview({ path: 'app/imports/a.csv', filename: 'a.csv', size: '3', folder: 'app/imports' });
+  assert.match(manager.assetModalPreview.innerHTML, /data-llamabot="asset-delete-btn"/);
+});
+
+test('confirmed delete calls the API and drops the file from list and attachments', async () => {
+  const manager = managerWithAssets();
+  manager.attachments = [{ path: 'app/imports/a.csv' }, { path: 'app/imports/b.csv' }];
+  const calls = [];
+  globalThis.confirm = () => true;
+  globalThis.fetch = async (url, opts) => { calls.push({ url, method: opts?.method }); return { ok: true, json: async () => ({}) }; };
+
+  const ok = await manager.deleteAsset('app/imports/a.csv', 'a.csv');
+
+  assert.equal(ok, true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].method, 'DELETE');
+  assert.equal(calls[0].url, '/api/uploaded-files?path=app%2Fimports%2Fa.csv');
+  assert.deepEqual(manager.assetModalFiles.map(f => f.path), ['app/imports/b.csv']);
+  assert.deepEqual(manager.attachments.map(a => a.path), ['app/imports/b.csv']);
+  assert.equal(manager.assetModalSelectedPath, null);
+  assert.match(manager.assetModalPreview.innerHTML, /Select an asset to preview/);
+});
+
+test('cancelling the confirm deletes nothing', async () => {
+  const manager = managerWithAssets();
+  let fetched = 0;
+  globalThis.confirm = () => false;
+  globalThis.fetch = async () => { fetched += 1; return { ok: true }; };
+
+  const ok = await manager.deleteAsset('app/imports/a.csv', 'a.csv');
+
+  assert.equal(ok, false);
+  assert.equal(fetched, 0);
+  assert.equal(manager.assetModalFiles.length, 2);
+});
+
+test('a failed delete keeps the file in the list', async () => {
+  const manager = managerWithAssets();
+  globalThis.confirm = () => true;
+  globalThis.alert = () => {};
+  globalThis.fetch = async () => ({ ok: false, status: 404, json: async () => ({ detail: 'File not found' }) });
+
+  const ok = await manager.deleteAsset('app/imports/a.csv', 'a.csv');
+
+  assert.equal(ok, false);
+  assert.equal(manager.assetModalFiles.length, 2);
+});

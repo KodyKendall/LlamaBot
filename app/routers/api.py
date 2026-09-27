@@ -888,7 +888,7 @@ async def available_models(request: Request):
         "gpt-5-codex": "OPENAI_API_KEY",
         "gpt-5-nano": "OPENAI_API_KEY",
         "gpt-5.4-nano": "OPENAI_API_KEY",
-        "gpt-5.6-luna": "OPENAI_API_KEY",
+        "gpt-6-luna": "OPENAI_API_KEY",
         "gemini-3-flash": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
         "gemini-3-pro": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
         "gemini-3.1-flash-lite": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
@@ -989,6 +989,7 @@ async def available_models(request: Request):
             "value": model_value,
             "available": has_key and enabled,
             "reason": reason,
+            "disabled_by_policy": not enabled,
             "capabilities": get_model_capabilities(model_value),
         }
         # Registry models have no <option> in chat.html — they are config, so the
@@ -1015,14 +1016,21 @@ async def available_models(request: Request):
             "reason": reason,
             "capabilities": get_model_capabilities(model_value),
             "requires_chatgpt_login": True,
+            # The picker keeps a not-connected ChatGPT model selectable (that is
+            # how the user reaches the connect modal) ONLY when policy allows it.
+            "disabled_by_policy": not enabled,
         })
 
     # Coarse operator gates the frontend needs to shape the UI: hide the model
     # dropdown when switching is locked, and refuse image attachments (with a
     # support message) when vision is off. Both are re-enforced server-side
     # (get_llm / _build_message_content); these flags are UX only.
+    from app.agents.leonardo import zdr
+
     return {
         "models": models,
+        # Zero-data-retention box: the frontend hides the ChatGPT connect prompt.
+        "zdr": zdr.enforced(),
         "model_switching_allowed": model_switching_allowed(),
         "vision_allowed": vision_allowed(),
         # Which model the frontend resets to on a new thread and pins to under
@@ -2378,12 +2386,12 @@ PREVIEW_PATH_PREFIXES = {
 }
 
 
-def _resolve_uploaded_file(path: str) -> tuple[str, str]:
+def _resolve_uploaded_file(path: str, enforce_size_cap: bool = True) -> tuple[str, str]:
     """Map an "app/imports/foo.xlsx" style path onto a real file on disk.
 
     Returns (absolute_path, filename). Raises HTTPException for anything outside
     the two allowed upload roots, for traversal attempts, for missing files, and
-    for files above the preview size cap.
+    (unless enforce_size_cap is False) for files above the preview size cap.
     """
     base_dir = None
     filename = None
@@ -2407,10 +2415,19 @@ def _resolve_uploaded_file(path: str) -> tuple[str, str]:
         raise HTTPException(status_code=404, detail="File not found")
 
     size = os.path.getsize(real_full)
-    if size > MAX_PREVIEW_BYTES:
+    if enforce_size_cap and size > MAX_PREVIEW_BYTES:
         raise HTTPException(status_code=413, detail=f"File too large to preview ({size} bytes, max {MAX_PREVIEW_BYTES})")
 
     return real_full, filename
+
+
+@router.delete("/api/uploaded-files", response_class=JSONResponse)
+async def delete_uploaded_file(path: str, username: str = Depends(auth)):
+    """Delete one uploaded file (My Uploads modal). Same path rules as preview."""
+    real_full, _ = _resolve_uploaded_file(path, enforce_size_cap=False)
+    os.remove(real_full)
+    logger.info(f"Uploaded file deleted: {path} by {username}")
+    return {"deleted": path}
 
 
 @router.get("/api/uploaded-files/preview")

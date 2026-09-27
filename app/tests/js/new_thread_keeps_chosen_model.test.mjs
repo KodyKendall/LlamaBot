@@ -46,7 +46,7 @@ const INDEX_JS = readFileSync(resolve(APP_ROOT, 'frontend', 'chat', 'index.js'),
 // Read off rsb-dev on 2026-09-03. Luna has a static <option>; the box default did not
 // stay still — a tab opened before 01:58 UTC carried deepseek, one opened after
 // carried muse. Same defect, two values, which is why the test pins neither.
-const LUNA = 'gpt-5.6-luna-chatgpt';
+const LUNA = 'gpt-6-luna-chatgpt';
 const DEEPSEEK = 'deepseek-v4-flash';
 
 // --- 1. the decision itself -------------------------------------------------

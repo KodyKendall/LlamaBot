@@ -1,0 +1,15 @@
+0.7.11:
+[x] - ZDR workspaces only ever talk to their approved model vendor.
+[x] - Admin-disabled ChatGPT models are greyed out, not "Connect account".
+[x] - Per-task backups work again once ChatGPT is linked.
+[x] - ChatGPT tokens never get uploaded to backups.
+[x] - Delete uploaded files straight from the My Uploads modal.
+[x] - Out-of-messages users can keep going on their own ChatGPT.
+[x] - Base plan boxes never fall back to our AI keys.
+[x] - App icons Leo makes survive recreates (rescue now, mount next release).
+[x] - Element picker's purple banner never covers the navbar: hidden on desktop, bottom of the screen on mobile.
+[x] - GPT-6 Luna and Sol replace GPT-5.6 (API + ChatGPT plan); old picks and mothership lists still map over.
+[x] - Feedback bubble screenshot works on phones (drag, annotate, attach).
+[x] - iPhone: screenshot drag no longer triggers the back swipe; annotate modal fits the screen.
+[x] - Bigger feedback bubble buttons on phones.
+[x] - GPT-6 Astra available on the user's ChatGPT plan (Codex backend), next to Luna and Sol.

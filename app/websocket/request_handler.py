@@ -238,10 +238,15 @@ class RequestHandler:
             ).lower() == "true":
                 return
 
-            from app.agents.leonardo.model_policy import effective_model
+            from app.agents.leonardo.model_policy import (
+                canonical_model_name,
+                effective_model,
+            )
 
             actual = effective_model(requested)
-            if actual == requested:
+            # A renamed id (an old saved pick) running on its replacement is not
+            # a substitution the user needs warning about.
+            if actual in (requested, canonical_model_name(requested)):
                 return
             if not self._is_websocket_open(websocket):
                 return
@@ -798,6 +803,51 @@ class RequestHandler:
                     break
         return out
 
+    @staticmethod
+    def _chatgpt_is_a_way_out() -> bool:
+        """True when policy lets this box run any ChatGPT-plan model. Never raises."""
+        try:
+            from app.agents.leonardo import customer_paid
+            from app.agents.leonardo.model_policy import is_model_enabled
+
+            return any(is_model_enabled(m) for m in customer_paid.chatgpt_models())
+        except Exception as e:  # noqa: BLE001 - the card just loses one button
+            logger.warning(f"Could not resolve ChatGPT availability for the paywall card: {e}")
+            return False
+
+    def _paywall_exempts(self, incoming_message: dict) -> bool:
+        """A blocked customer may always keep going on their own ChatGPT plan.
+
+        Darren, 2026-09-23. Only when the cache already says blocked (otherwise the
+        gate lets the turn through anyway) and only for a ChatGPT model policy
+        allows. The turn is then pinned to the customer's plan, so it cannot fall
+        back to anything we pay for — see app/agents/leonardo/customer_paid.py.
+        """
+        if os.getenv("PAYWALL_ENABLED", "false").lower() != "true":
+            return False
+        credits = getattr(self.app.state, "paywall_credits", {}) or {}
+        if credits.get("allowed_next") is not False:
+            return False
+        try:
+            from app.agents.leonardo import customer_paid
+            from app.agents.leonardo.model_policy import is_model_enabled
+
+            requested = (incoming_message or {}).get("llm_model")
+            return customer_paid.is_chatgpt_model(requested) and is_model_enabled(requested)
+        except Exception as e:  # noqa: BLE001 - fall back to the normal gate
+            logger.warning(f"paywall gate: could not evaluate the ChatGPT exemption: {e}")
+            return False
+
+    async def _paywall_blocks_turn(self, incoming_message: dict, websocket: WebSocket) -> bool:
+        """The paywall gate for one turn, including the own-ChatGPT exemption."""
+        if self._paywall_exempts(incoming_message):
+            from app.agents.leonardo import customer_paid
+
+            customer_paid.start_customer_paid_turn()
+            logger.info("paywall gate: blocked, but the turn runs on the customer's own ChatGPT plan -> ALLOW")
+            return False
+        return await self._check_paywall_or_block(websocket)
+
     async def _check_paywall_or_block(self, websocket: WebSocket) -> bool:
         """
         Per-instance paywall gate. Returns True if the message should be blocked
@@ -858,9 +908,31 @@ class RequestHandler:
             await websocket.send_json({
                 "type": "paywall_hit",
                 "messages_remaining": messages_remaining,
+                # The card offers "Use your ChatGPT account" only when it would work.
+                "chatgpt_available": self._chatgpt_is_a_way_out(),
                 **context,
             })
         return True
+
+    @staticmethod
+    def _error_action(exc: BaseException) -> dict:
+        """A button the chat can offer beside an error. Empty for ordinary errors."""
+        from app.agents.leonardo.customer_paid import ChatGPTNotConnected
+
+        if isinstance(exc, ChatGPTNotConnected):
+            return {"action": "connect_chatgpt"}
+        return {}
+
+    @staticmethod
+    def _reported_user_model(incoming_message: dict):
+        """The model this user message will actually run on, or None. Never raises."""
+        try:
+            from app.agents.leonardo.model_policy import effective_model, enabled_default_model
+
+            requested = (incoming_message or {}).get("llm_model")
+            return effective_model(requested) if requested else enabled_default_model()
+        except Exception:  # noqa: BLE001 - reporting must never fail the turn
+            return None
 
     async def _handle_compact_command(self, message: dict, websocket: WebSocket) -> None:
         """Stream a context-window compaction through the same WS pipeline as a normal turn.
@@ -1026,8 +1098,9 @@ class RequestHandler:
             return
 
         # Paywall gate — must run before report_message so blocked messages
-        # don't get counted against the user's quota.
-        if await self._check_paywall_or_block(websocket):
+        # don't get counted against the user's quota. A blocked customer on their
+        # own ChatGPT plan gets through, pinned to that plan for this turn.
+        if await self._paywall_blocks_turn(incoming_message, websocket):
             return
 
         mothership = getattr(self.app.state, "mothership_client", None)
@@ -1038,6 +1111,9 @@ class RequestHandler:
                     role="user",
                     content=str(incoming_message.get("message", "")),
                     sent_at=datetime.now(timezone.utc).isoformat(),
+                    # So the mothership can leave customer-paid (own ChatGPT)
+                    # turns out of the daily message count.
+                    model=self._reported_user_model(incoming_message),
                 )
                 # Only role="user" responses carry paywall fields. plan/resets_at
                 # come back on ALLOWED turns too, so the card already knows which
@@ -1471,7 +1547,8 @@ class RequestHandler:
                         # failure (httpx.ReadError) has an EMPTY message, so this
                         # frame used to reach the browser as a dangling colon — and
                         # an expired ChatGPT link needs an explanation, not a 401.
-                        "content": chat_error_content("Error processing request", e)
+                        "content": chat_error_content("Error processing request", e),
+                        **self._error_action(e),
                     })
                 raise e
             finally:

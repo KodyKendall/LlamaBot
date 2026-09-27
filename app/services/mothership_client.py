@@ -29,6 +29,17 @@ TELEMETRY_DISABLED_ENV = "LLAMABOT_TELEMETRY_DISABLED"
 _TRUTHY = {"1", "true", "yes", "on"}
 
 
+def _zdr_report() -> dict:
+    """ZDR attestation for report_health. Never raises."""
+    try:
+        from app.agents.leonardo import zdr
+
+        return zdr.report()
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"Could not build the ZDR report: {e}")
+        return {"enforced": None, "error": "unavailable"}
+
+
 def telemetry_disabled() -> bool:
     """True when this process must not report anything to the mothership."""
     return os.environ.get(TELEMETRY_DISABLED_ENV, "").strip().lower() in _TRUTHY
@@ -182,6 +193,9 @@ class MothershipClient:
                         "rails_status": rails_status,
                         "rails_ms": rails_ms,
                         "checked_at": datetime.now(timezone.utc).isoformat(),
+                        # The box's own ZDR attestation, shown next to the
+                        # mothership's view by leo-zdr-check.sh.
+                        "zdr": _zdr_report(),
                     },
                     headers={"Authorization": f"Bearer {self.config['mothership_api_token']}"},
                 )

@@ -11,6 +11,7 @@ import { leoDiagnostics } from './utils/LeoDiagnostics.js';
 import { AppState } from './state/AppState.js';
 import { StreamingState } from './state/StreamingState.js';
 import { MessageRenderer } from './messages/MessageRenderer.js';
+import { pickChatgptModel } from './messages/paywallCopy.js';
 import { WebSocketManager } from './websocket/WebSocketManager.js';
 import { MessageHandler } from './websocket/MessageHandler.js';
 import { ScrollManager } from './ui/ScrollManager.js';
@@ -38,7 +39,7 @@ import { CheckpointManager } from './checkpoints/CheckpointManager.js';
 import { DiffViewer } from './checkpoints/DiffViewer.js';
 import { FaviconBadgeManager } from './ui/FaviconBadgeManager.js';
 import { StallMonitor } from './ui/StallMonitor.js';
-import { chooseInitialModel, resolveRememberedModel, resolveNewThreadModel } from './utils/modelDefaults.js';
+import { chooseInitialModel, resolveRememberedModel, resolveNewThreadModel, modelOptionState } from './utils/modelDefaults.js';
 import { safeInit, selectedElementsOf } from './utils/safeInit.js';
 
 // Image auto-switch: when a user attaches an image while on a text-only model,
@@ -643,6 +644,10 @@ class ChatApp {
     document.addEventListener('llamabot:chatgpt-connection-changed', () => {
       this.fetchAvailableModels();
     });
+
+    // "Use your ChatGPT account" (paywall card) and "Connect ChatGPT" (a
+    // customer-paid turn with nothing connected).
+    window.addEventListener('llamabot:use-chatgpt', (e) => this.useChatgptAccount(e.detail || {}));
 
     // Check for ?conversation= URL parameter and render pre-loaded messages
     this.checkConversationParam();
@@ -1437,6 +1442,32 @@ class ChatApp {
    * and froze that day's box default onto them permanently (0.7.8); the comment in
    * fetchAvailableModels() spells out why that must never happen.
    */
+  /**
+   * Switch the picker to the customer's own ChatGPT plan. Not connected: the
+   * picker's change handler (chat.html) opens the connect modal. Connected and
+   * `resend`: send the blocked message again, now on their plan.
+   */
+  async useChatgptAccount({ resend = false } = {}) {
+    const select = this.elements.modelSelect;
+    if (!select) return;
+    const model = pickChatgptModel(select.options);
+    if (!model) return;
+    select.value = model;
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+
+    if (!resend || !this.lastSentText) return;
+    let connected = false;
+    try {
+      const r = await fetch('/api/chatgpt-auth/status');
+      connected = r.ok && (await r.json()).connected === true;
+    } catch (_) {
+      connected = false;
+    }
+    if (!connected || !this.elements.messageInput) return;
+    this.elements.messageInput.value = this.lastSentText;
+    this.sendMessage();
+  }
+
   setModel(model, { persist = true } = {}) {
     if (!this.elements.modelSelect) return;
     const isValid = Array.from(this.elements.modelSelect.options)
@@ -1792,6 +1823,9 @@ class ChatApp {
     if (!input) return;
 
     let message = input.value.trim();
+    // What the user typed, before any quote/prompt/element decoration, so the
+    // paywall card can re-send it on their ChatGPT plan.
+    if (message) this.lastSentText = message;
     const agentMode = this.elements.agentModeSelect?.value;
     // Dropdown first, then the server's resolved default. `undefined` (rather
     // than a hardcoded id) when neither has landed, so the key drops out of the
@@ -2309,6 +2343,9 @@ class ChatApp {
           // makes the connect prompt unreachable: a disabled <option> fires no
           // change event, so the only path to the sign-in modal is dead.
           requiresChatGptLogin: m.requires_chatgpt_login === true,
+          // ...unless the operator disabled it (e.g. a ZDR box). Then it is
+          // greyed out like any other model; see modelOptionState.
+          disabledByPolicy: m.disabled_by_policy === true,
         }])
       );
 
@@ -2327,8 +2364,9 @@ class ChatApp {
       // Update each option in the dropdown
       Array.from(this.elements.modelSelect.options).forEach(option => {
         const modelInfo = modelAvailability.get(option.value);
+        const state = modelOptionState(modelInfo);
 
-        if (modelInfo && !modelInfo.available && modelInfo.requiresChatGptLogin) {
+        if (state === 'connect') {
           // Selectable on purpose — picking it is how you reach the sign-in
           // modal (see the change handler in chat.html). Marked, not disabled.
           option.disabled = false;
@@ -2339,7 +2377,7 @@ class ChatApp {
             option.setAttribute('data-original-label', originalLabel);
             option.textContent = `${originalLabel} (Connect account)`;
           }
-        } else if (modelInfo && !modelInfo.available) {
+        } else if (state === 'disabled') {
           // Disable unavailable models
           option.disabled = true;
           option.title = modelInfo.reason || 'API key not configured';

@@ -2102,6 +2102,11 @@ def internet_search(
     max_results: int = 5,
     include_raw_content: bool = False,
 ):
+    # ZDR: search queries carry customer context, and Tavily is not a ZDR vendor.
+    from app.agents.leonardo import zdr
+
+    if zdr.enforced():
+        return zdr.WEB_SEARCH_DISABLED_MESSAGE
     try:
         return get_tavily_client().search(
             query,

@@ -33,7 +33,7 @@ STRICT_MODELS = [
     "deepseek-v4-flash-fireworks",
     "deepseek-v4-flash-gmi",
     "deepseek-v4-flash",
-    "gpt-5.6-luna",
+    "gpt-6-luna",
     "gemini-3-flash",
     "qwen3.7-plus",
     "",

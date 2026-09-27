@@ -84,7 +84,7 @@ import logging
 import os
 from typing import Optional
 
-from app.agents.leonardo import model_health
+from app.agents.leonardo import model_health, zdr
 from app.agents.leonardo.llm_factory import (
     _CHATGPT_SUBSCRIPTION_MODELS,
     DEFAULT_LLM_MODEL,
@@ -262,7 +262,11 @@ def resolve_role(role: str) -> str:
     """
     disabled = _disabled_set()
     known = set(known_models())
+    zdr_state = zdr.zdr_state()
+    permitted = zdr.permitted_models(zdr_state) if zdr_state.enabled else None
     for name in role_chain(role):
+        if permitted is not None and name not in permitted:
+            continue
         if name not in known:
             logger.warning(
                 "Model policy: %s chain names %r, which this build does not know; "
@@ -295,9 +299,27 @@ _FAIL_OPEN_MODELS = frozenset({"muse-spark-1.2-contributor", "deepseek-v4-flash"
 # unreachable on every fleet box.
 # Overridden per box by instance.json `enabled_models` / ENABLED_MODELS.
 _DEFAULT_ENABLED_MODELS = _FAIL_OPEN_MODELS | {
-    "gpt-5.6-luna-chatgpt",
-    "gpt-5.6-sol-chatgpt",
+    "gpt-6-luna-chatgpt",
+    "gpt-6-sol-chatgpt",
+    "gpt-6-astra-chatgpt",
 }
+
+# Model ids that were renamed, old -> new. The old ids live on in places this
+# release cannot update: the mothership's pushed enabled/disabled lists and users'
+# 365-day llmModel cookie. A policy naming an old id covers its replacement, and a
+# request for an old id runs on the replacement rather than the box default.
+_RENAMED_MODELS = {
+    # 0.7.11: GPT-6 replaced GPT-5.6 on both the API and ChatGPT-plan entries.
+    "gpt-5.6-luna": "gpt-6-luna",
+    "gpt-5.6-luna-chatgpt": "gpt-6-luna-chatgpt",
+    "gpt-5.6-sol-chatgpt": "gpt-6-sol-chatgpt",
+}
+
+
+def canonical_model_name(model_name: str) -> str:
+    """The current id for ``model_name`` (itself unless it was renamed)."""
+    return _RENAMED_MODELS.get(model_name, model_name)
+
 
 # Known frontend model names in preference order. Used only to choose a concrete
 # fallback when the requested model is disabled; an allow-list may legitimately
@@ -315,12 +337,13 @@ _KNOWN_MODELS = [
     "gpt-5-mini",
     "gpt-5-nano",
     "gpt-5.4-nano",
-    "gpt-5.6-luna",
-    # Same two models on the signed-in user's ChatGPT plan (see llm_factory's
+    "gpt-6-luna",
+    # Models on the signed-in user's ChatGPT plan (see llm_factory's
     # _CHATGPT_SUBSCRIPTION_MODELS). Listed AFTER the API-key entries so
     # enabled_default_model() never picks a model that needs a user credential.
-    "gpt-5.6-luna-chatgpt",
-    "gpt-5.6-sol-chatgpt",
+    "gpt-6-luna-chatgpt",
+    "gpt-6-sol-chatgpt",
+    "gpt-6-astra-chatgpt",
     "gemini-3-flash",
     "gemini-3-pro",
     "gemini-3.1-flash-lite",
@@ -418,14 +441,33 @@ def _clean_role_chains(value) -> Optional[dict]:
     return clean or None
 
 
-def _clean_policy_document(raw: dict) -> dict:
+def _clean_policy_document(raw: dict, *, per_instance: bool = False) -> dict:
     """Validate one policy document — the fleet one, or a per-instance override.
 
     Factored out precisely so the two cannot drift: an override that skipped a
     check would be a validation hole reachable by exactly the payload that is
     hardest to test from the mothership side.
+
+    ``zdr`` is read only from the per-instance override: ZDR is a promise to one
+    customer, never a fleet setting. Enforcement lives in :mod:`zdr`; it is
+    carried here so :func:`remote_policy` shows what the box was told.
     """
     clean: dict = {}
+
+    if per_instance and raw.get("zdr") is not None:
+        block = zdr.clean_zdr(raw.get("zdr"))
+        if block:
+            clean["zdr"] = block
+
+    # Base plan: every turn on the customer's own ChatGPT plan. A real boolean
+    # only; anything else is dropped like every other malformed key.
+    customer_paid_only = raw.get("customer_paid_only")
+    if isinstance(customer_paid_only, bool):
+        clean["customer_paid_only"] = customer_paid_only
+    elif customer_paid_only is not None:
+        logger.warning(
+            "Remote model policy: ignoring non-boolean customer_paid_only %r", customer_paid_only
+        )
 
     default_model = raw.get("default_model")
     if isinstance(default_model, str) and default_model.strip():
@@ -504,7 +546,7 @@ def remote_policy() -> dict:
             "Remote model policy: ignoring malformed instance_overrides %r", override
         )
         return clean
-    return _apply_instance_override(clean, _clean_policy_document(override))
+    return _apply_instance_override(clean, _clean_policy_document(override, per_instance=True))
 
 
 def configured_default_model() -> Optional[str]:
@@ -643,7 +685,7 @@ def _allowlist() -> Optional[set]:
     for source in (_instance_list("enabled_models"), env_allow, remote_allow):
         if source is None:
             continue
-        source_set = set(source)
+        source_set = {canonical_model_name(m) for m in source}
         allow = source_set if allow is None else (allow & source_set)
     if allow is None:
         # No allow-list configured anywhere. A box told to run a specific model
@@ -673,7 +715,7 @@ def _disabled_set() -> set:
     # The mothership can disable too — same union rule as every other source, so
     # a remote ban cannot be broadened away by a stale local list.
     disabled.update(remote_policy().get("disabled_models") or [])
-    return disabled
+    return {canonical_model_name(m) for m in disabled}
 
 
 def _fail_open_models() -> frozenset:
@@ -694,6 +736,13 @@ def is_model_enabled(model_name: str) -> bool:
 
     See the module docstring for the full resolution order.
     """
+    model_name = canonical_model_name(model_name)
+    # ZDR outranks everything, the configured default included: on a ZDR box a
+    # model is enabled only if the mothership allows it AND this build marks it
+    # ZDR-compliant (see app.agents.leonardo.zdr).
+    zdr_state = zdr.zdr_state()
+    if zdr_state.enabled:
+        return model_name in zdr.permitted_models(zdr_state)
     # 0. The box's CONFIGURED default outranks even an explicit disable. An
     #    operator who names a default and then disables it has contradicted
     #    himself, and the alternative reading leaves the box with no model at all.
@@ -763,6 +812,18 @@ def enabled_default_model() -> str:
     (misconfiguration), returns the fallback text model anyway so the instance is
     never locked out of chat.
     """
+    # ZDR: the first permitted model, or the fallback name (which get_llm then
+    # refuses) when nothing is permitted. Never a silent move to another vendor.
+    zdr_state = zdr.zdr_state()
+    if zdr_state.enabled:
+        permitted = zdr.permitted_models(zdr_state)
+        return permitted[0] if permitted else fallback_text_model()
+
+    # Base plan: the customer's ChatGPT plan is the only thing this box may run.
+    from app.agents.leonardo import customer_paid
+    if customer_paid.policy_enabled():
+        return customer_paid.default_chatgpt_model()
+
     # A configured default wins outright, fail-open: the policy lists must not be
     # able to disable the box's own default out from under it and drop it back on
     # the compiled fallback. That is exactly the shape of the 2026-08-31 outage —
@@ -847,6 +908,15 @@ def fallback_model(
     """
     tried = {primary, *exclude}
 
+    # A customer-paid turn may only move to another ChatGPT-plan model; every
+    # other candidate below is paid for by us.
+    from app.agents.leonardo import customer_paid
+    if customer_paid.required():
+        for name in customer_paid.chatgpt_models():
+            if name not in tried and is_model_enabled(name):
+                return name
+        return None
+
     if needs_vision:
         if not vision_allowed():
             return None
@@ -919,6 +989,7 @@ def effective_model(model_name: str) -> str:
     # claim that the model still exists. Without this a box whose instance.json names
     # the retired model kept handing it back — and because the llmModel cookie lives
     # 365 days, this function is the only thing that reaches an already-pinned user.
+    model_name = canonical_model_name(model_name)
     if model_health.is_gone(model_name):
         return enabled_default_model()
     if is_model_enabled(model_name):

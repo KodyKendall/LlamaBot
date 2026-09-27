@@ -85,7 +85,7 @@ def test_only_the_two_blessed_models_are_enabled_by_default(monkeypatch):
     assert model_policy.is_model_enabled("deepseek-v4-flash") is True
 
 
-@pytest.mark.parametrize("model", ["gpt-5.6-luna-chatgpt", "gpt-5.6-sol-chatgpt"])
+@pytest.mark.parametrize("model", ["gpt-6-luna-chatgpt", "gpt-6-sol-chatgpt"])
 def test_the_chatgpt_subscription_models_stay_reachable(monkeypatch, model):
     """The one exception to the two-model default, and it is not an oversight.
 
@@ -99,7 +99,7 @@ def test_the_chatgpt_subscription_models_stay_reachable(monkeypatch, model):
     assert model_policy.is_model_enabled(model) is True
 
 
-@pytest.mark.parametrize("model", ["gpt-5.6-luna-chatgpt", "gpt-5.6-sol-chatgpt"])
+@pytest.mark.parametrize("model", ["gpt-6-luna-chatgpt", "gpt-6-sol-chatgpt"])
 def test_a_subscription_model_is_never_chosen_as_the_default(monkeypatch, model):
     """Enabled is not the same as default-able: resolving the box default onto a
     model that needs a per-user credential would leave a user who has connected
@@ -145,8 +145,9 @@ async def test_available_models_shows_exactly_the_two(async_client, monkeypatch)
         "deepseek-v4-flash",
         # Enabled but not usable until this user connects an account, which is
         # what the reason string says. No operator key is involved.
-        "gpt-5.6-luna-chatgpt",
-        "gpt-5.6-sol-chatgpt",
+        "gpt-6-luna-chatgpt",
+        "gpt-6-sol-chatgpt",
+        "gpt-6-astra-chatgpt",
     }
 
     # ...and of those, only the ones this box holds a key for are actually

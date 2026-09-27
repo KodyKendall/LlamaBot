@@ -127,3 +127,23 @@ export function paywallCardCopy(detail = {}, now = new Date()) {
       + 'to make them go further.',
   };
 }
+
+// A blocked customer can always keep going on their own ChatGPT account (Darren,
+// 2026-09-23). The box sends `chatgpt_available` when policy allows a ChatGPT
+// model; without it (or from an older box) the card is unchanged.
+export const USE_CHATGPT_LABEL = 'Use your ChatGPT account';
+
+export function paywallOffersChatgpt(detail) {
+  return detail?.chatgpt_available === true;
+}
+
+/**
+ * The first "my ChatGPT plan" model the picker will let the user choose.
+ * @param {Array<{value: string, disabled: boolean}>} options the <option>s.
+ */
+export function pickChatgptModel(options) {
+  const hit = Array.from(options || []).find(
+    (o) => String(o.value).endsWith('-chatgpt') && !o.disabled,
+  );
+  return hit ? hit.value : null;
+}

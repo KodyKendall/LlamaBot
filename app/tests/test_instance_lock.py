@@ -159,7 +159,9 @@ def test_websocket_refuses_turns_while_locked():
     assert "await self._check_instance_lock_or_block(websocket)" in REQUEST_HANDLER_PY
     # Must run before the paywall gate so a blocked turn never burns quota.
     lock_at = REQUEST_HANDLER_PY.index("await self._check_instance_lock_or_block(websocket)")
-    paywall_at = REQUEST_HANDLER_PY.index("await self._check_paywall_or_block(websocket)")
+    # The turn handler calls the paywall through _paywall_blocks_turn (0.7.11's
+    # own-ChatGPT exemption), which is defined above the handler in the file.
+    paywall_at = REQUEST_HANDLER_PY.index("await self._paywall_blocks_turn(incoming_message, websocket)")
     assert lock_at < paywall_at
 
 

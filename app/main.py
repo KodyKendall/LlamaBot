@@ -329,6 +329,11 @@ async def startup_event():
     except Exception as e:
         logger.warning(f"Startup system-prompt prefetch skipped: {e}")
 
+    # ZDR: read the persisted policy before anything runs, so tracing is off and
+    # the "ZDR enforced" line is logged before the first turn (never raises).
+    from app.agents.leonardo import zdr
+    zdr.zdr_state()
+
     # Compile all LangGraph workflows once at startup (singleton pattern)
     logger.info("Compiling LangGraph workflows...")
     try:

@@ -187,3 +187,19 @@ test('?llm_model= records intent instead of silently no-opping', () => {
     'the URL param is no longer stripped',
   );
 });
+
+// 0.7.11: GPT-5.6 Luna/Sol were replaced by GPT-6. A 365-day cookie still naming
+// the old id must land on its replacement, not fall back to the server default.
+test('a renamed model id resolves to its replacement', () => {
+  const options = [{ value: 'gpt-6-luna-chatgpt' }, { value: 'gpt-6-sol-chatgpt' }, { value: 'gpt-6-luna' }];
+  for (const [old, current] of [
+    ['gpt-5.6-luna-chatgpt', 'gpt-6-luna-chatgpt'],
+    ['gpt-5.6-sol-chatgpt', 'gpt-6-sol-chatgpt'],
+    ['gpt-5.6-luna', 'gpt-6-luna'],
+  ]) {
+    assert.deepEqual(
+      resolveRememberedModel({ options, remembered: old }),
+      { select: current, userChoseModel: true },
+    );
+  }
+});

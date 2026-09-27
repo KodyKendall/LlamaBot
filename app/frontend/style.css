@@ -7553,6 +7553,12 @@ body.instance-locked .lock-modal-overlay {
     color: #4ade80;
 }
 
+.asset-preview-action--danger:hover {
+    background: rgba(239, 68, 68, 0.18);
+    border-color: rgba(239, 68, 68, 0.5);
+    color: #f87171;
+}
+
 .asset-preview-pathbar {
     display: flex;
     align-items: center;

@@ -29,12 +29,13 @@ MODEL_CAPABILITIES = {
     'gpt-5-mini': {'images': True, 'video': False, 'pdf': False},
     'gpt-5-nano': {'images': True, 'video': False, 'pdf': False},
     'gpt-5.4-nano': {'images': True, 'video': False, 'pdf': False},
-    # GPT-5.6 family: text + image input (no video/pdf), per the OpenAI model card.
-    'gpt-5.6-luna': {'images': True, 'video': False, 'pdf': False},
+    # GPT-6 family: text + image input (no video/pdf), per the OpenAI model card.
+    'gpt-6-luna': {'images': True, 'video': False, 'pdf': False},
     # The ChatGPT-subscription variants are the same underlying models, so they
     # carry the same capabilities as their API-key twins.
-    'gpt-5.6-luna-chatgpt': {'images': True, 'video': False, 'pdf': False},
-    'gpt-5.6-sol-chatgpt': {'images': True, 'video': False, 'pdf': False},
+    'gpt-6-luna-chatgpt': {'images': True, 'video': False, 'pdf': False},
+    'gpt-6-sol-chatgpt': {'images': True, 'video': False, 'pdf': False},
+    'gpt-6-astra-chatgpt': {'images': True, 'video': False, 'pdf': False},
 
     # DeepSeek - primarily text focused
     'deepseek-v4-flash': {'images': False, 'video': False, 'pdf': False},
@@ -87,6 +88,49 @@ MODEL_CAPABILITIES = {
     # Same model on Fireworks' serverless tier — same weights, so same
     # (text-only) capabilities.
     'nemotron-lightning-30b-fireworks': {'images': False, 'video': False, 'pdf': False},
+}
+
+
+# Zero-data-retention verdict per compiled model: LlamaBot's own layer of ZDR,
+# independent of the mothership's allowed_models (see app.agents.leonardo.zdr).
+# A ZDR box may use a model only if BOTH say yes. Every model above must appear
+# here explicitly (test_zdr_mode enforces it), so a new model is never compliant
+# by omission. Flip one to True only with the vendor's retention terms in hand.
+ZDR_COMPLIANT = {
+    'gemini-3-flash': False,
+    'gemini-3-pro': False,
+    'gemini-3.1-flash-lite': False,
+    'gemini-2.5-flash': False,
+    'gemini-2.5-pro': False,
+    'claude-4.5-haiku': False,
+    'claude-4.5-sonnet': False,
+    'claude-sonnet-4': False,
+    'claude-opus-4': False,
+    'gpt-4o': False,
+    'gpt-4o-mini': False,
+    'gpt-5-codex': False,
+    'gpt-5-mini': False,
+    'gpt-5-nano': False,
+    'gpt-5.4-nano': False,
+    'gpt-6-luna': False,
+    'gpt-6-luna-chatgpt': False,
+    'gpt-6-sol-chatgpt': False,
+    'gpt-6-astra-chatgpt': False,
+    'deepseek-v4-flash': False,
+    'deepseek-v4-pro': False,
+    'deepseek-v4-flash-vision-exp': False,
+    'deepseek-v4-flash-gmi': False,
+    'deepseek-v4-flash-fireworks': False,
+    # Fireworks chat completions: no retention for open models, DPA in place.
+    'deepseek-v4.1-flash-fireworks': True,
+    'muse-spark-1.2-contributor': False,
+    'muse-spark-1.3-contributor': False,
+    'qwen3.7-plus': False,
+    'qwen3-8b-runpod': False,
+    'qwen3.8-27b-hetzner': False,
+    'muse-glimmer-30b-runpod': False,
+    'nemotron-lightning-30b-runpod': False,
+    'nemotron-lightning-30b-fireworks': False,
 }
 
 

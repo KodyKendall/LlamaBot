@@ -493,6 +493,18 @@ class RailsSummarizationMiddleware(SummarizationMiddleware):
                     "RailsSummarizationMiddleware: could not build the chat model %r "
                     "as summarizer (%s); using the fallback chain.", chat_model, e,
                 )
+        # ZDR: the chat model only. The fallback chain was built from env keys at
+        # compile time and reaches vendors a ZDR box may not use; a failure here
+        # takes the "Summary unavailable" path instead.
+        from app.agents.leonardo import zdr
+
+        if zdr.enforced():
+            return
+        # Customer-paid turns likewise: the chain is platform-paid.
+        from app.agents.leonardo import customer_paid
+
+        if customer_paid.required():
+            return
         yield "fallback chain", self.model
 
     def _summary_prompt_for(self, messages_to_summarize):

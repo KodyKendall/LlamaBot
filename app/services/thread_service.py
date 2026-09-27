@@ -62,6 +62,22 @@ async def generate_title_with_llm(message_content: str, timeout_seconds: float =
     Returns:
         Generated title string, or None if generation fails for any reason
     """
+    # ZDR: the first message never leaves the box just to name the thread.
+    try:
+        from app.agents.leonardo import zdr
+
+        if zdr.enforced():
+            return extract_title_from_message(message_content)
+
+        # Customer-paid turns: the title model runs on our key.
+        from app.agents.leonardo import customer_paid
+
+        if customer_paid.required():
+            return extract_title_from_message(message_content)
+    except Exception as e:  # noqa: BLE001 — fail closed: no model call
+        logger.warning(f"Could not read ZDR state for titles: {e}")
+        return None
+
     try:
         from langchain_openai import ChatOpenAI
     except ImportError as e:

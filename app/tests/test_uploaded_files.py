@@ -100,3 +100,54 @@ class TestDownloadAndPreview:
         monkeypatch.setitem(api.PREVIEW_PATH_PREFIXES, "app/imports", str(tmp_path))
         r = await async_client.get("/api/uploaded-files/preview?path=app/imports/../../etc/passwd&download=1")
         assert r.status_code == 400
+
+
+class TestDeleteUploadedFile:
+    """My Uploads modal → Delete. Same path rules as preview: only the two
+    upload roots, no traversal, no dotfiles."""
+
+    @pytest.mark.asyncio
+    async def test_delete_removes_file(self, async_client, tmp_path, monkeypatch):
+        monkeypatch.setitem(api.PREVIEW_PATH_PREFIXES, "app/imports", str(tmp_path))
+        _write(tmp_path, "old.csv", b"a,b")
+        r = await async_client.delete("/api/uploaded-files?path=app/imports/old.csv")
+        assert r.status_code == 200
+        assert r.json()["deleted"] == "app/imports/old.csv"
+        assert not (tmp_path / "old.csv").exists()
+
+    @pytest.mark.asyncio
+    async def test_delete_image(self, async_client, tmp_path, monkeypatch):
+        monkeypatch.setitem(api.PREVIEW_PATH_PREFIXES, "app/assets/images", str(tmp_path))
+        _write(tmp_path, "logo.png", b"\x89PNG")
+        r = await async_client.delete("/api/uploaded-files?path=app/assets/images/logo.png")
+        assert r.status_code == 200
+        assert not (tmp_path / "logo.png").exists()
+
+    @pytest.mark.asyncio
+    async def test_delete_missing_is_404(self, async_client, tmp_path, monkeypatch):
+        monkeypatch.setitem(api.PREVIEW_PATH_PREFIXES, "app/imports", str(tmp_path))
+        r = await async_client.delete("/api/uploaded-files?path=app/imports/nope.csv")
+        assert r.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_delete_file_over_preview_cap(self, async_client, tmp_path, monkeypatch):
+        # The 50MB cap is for previews; big files must still be deletable.
+        monkeypatch.setitem(api.PREVIEW_PATH_PREFIXES, "app/imports", str(tmp_path))
+        monkeypatch.setattr(api, "MAX_PREVIEW_BYTES", 2)
+        _write(tmp_path, "big.zip", b"PK\x03\x04")
+        r = await async_client.delete("/api/uploaded-files?path=app/imports/big.zip")
+        assert r.status_code == 200
+        assert not (tmp_path / "big.zip").exists()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("bad", [
+        "app/imports/../../config/master.key",
+        "app/imports/sub/x.csv",
+        "app/imports/.env",
+        "config/database.yml",
+        "app/models/user.rb",
+    ])
+    async def test_delete_outside_upload_roots_blocked(self, async_client, tmp_path, monkeypatch, bad):
+        monkeypatch.setitem(api.PREVIEW_PATH_PREFIXES, "app/imports", str(tmp_path))
+        r = await async_client.delete(f"/api/uploaded-files?path={bad}")
+        assert r.status_code == 400

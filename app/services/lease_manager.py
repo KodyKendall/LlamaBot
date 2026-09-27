@@ -193,6 +193,11 @@ class LeaseManager:
         from app.agents.leonardo.resilience import is_model_gone
 
         model = enabled_default_model()
+        # A ChatGPT-plan model runs on a user's own credential, and the probe has
+        # no user: it could only test (and spend) our fallback key.
+        from app.agents.leonardo import customer_paid
+        if customer_paid.is_chatgpt_model(model):
+            return
         try:
             llm = get_llm(model)
             await llm.ainvoke([{"role": "user", "content": "ping"}])
@@ -239,6 +244,10 @@ class LeaseManager:
                 # An explicit empty policy IS a clear — the mothership handing the
                 # box back to its own configuration.
                 model_policy_store.clear()
+            # Apply a ZDR change now (tracing off, log line), not on the next
+            # model call: a run that starts first would otherwise be traced.
+            from app.agents.leonardo import zdr
+            zdr.zdr_state()
         except Exception as e:
             logger.warning(f"LeaseManager: could not apply remote model policy: {e}")
 

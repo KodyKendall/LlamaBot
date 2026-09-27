@@ -47,7 +47,7 @@ SUPPORTED_BLOCK_TYPES = frozenset({
 
 #: Item types the OpenAI **Responses API** puts in an assistant ``content`` list.
 #:
-#: On that API (the ChatGPT/Codex-auth path — gpt-5.6-sol, gpt-5.6-luna, anything
+#: On that API (the ChatGPT/Codex-auth path — gpt-6-sol, gpt-6-luna, anything
 #: through codex_cli_auth/chatgpt_auth) ``content`` is not text: it is the raw
 #: provider item list, e.g. ``[reasoning, function_call]`` with no text block at
 #: all. These pass through **unchanged**.

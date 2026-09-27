@@ -6,7 +6,12 @@ import { MarkdownParser } from './MarkdownParser.js';
 import { ToolMessageRenderer } from './ToolMessageRenderer.js';
 
 import { leoDiagnostics } from '../utils/LeoDiagnostics.js';
-import { EFFICIENCY_WIKI_URL, paywallCardCopy } from './paywallCopy.js';
+import {
+  EFFICIENCY_WIKI_URL,
+  USE_CHATGPT_LABEL,
+  paywallCardCopy,
+  paywallOffersChatgpt,
+} from './paywallCopy.js';
 let _mintedKeySeq = 0;
 
 /**
@@ -698,6 +703,10 @@ export class MessageRenderer {
       <div class="paywall-card-body">
         <div class="paywall-card-title"></div>
         <div class="paywall-card-subtitle"></div>
+        <button type="button" class="paywall-card-cta" data-llamabot="paywall-use-chatgpt" hidden>
+          <i class="fa-solid fa-key"></i>
+          <span></span>
+        </button>
         <a href="${upgradeUrl}" target="_blank" rel="noopener noreferrer" class="paywall-card-cta">
           <i class="fa-solid fa-bolt"></i>
           <span>Upgrade to keep building</span>
@@ -712,7 +721,21 @@ export class MessageRenderer {
     messageDiv.querySelector('.paywall-card-title').textContent = title;
     messageDiv.querySelector('.paywall-card-subtitle').textContent = subtitle;
 
-    const cta = messageDiv.querySelector('.paywall-card-cta');
+    // The way out that needs no upgrade: the customer's own ChatGPT plan. Shown
+    // first, and only when the box's policy would actually run it.
+    const useChatgpt = messageDiv.querySelector('[data-llamabot="paywall-use-chatgpt"]');
+    if (useChatgpt && paywallOffersChatgpt(detail)) {
+      useChatgpt.querySelector('span').textContent = USE_CHATGPT_LABEL;
+      useChatgpt.hidden = false;
+      useChatgpt.addEventListener('click', () => {
+        window.dispatchEvent(new CustomEvent('llamabot:use-chatgpt', { detail: { resend: true } }));
+        if (window.posthog) {
+          window.posthog.capture('paywall_use_chatgpt_clicked', { plan: detail.plan });
+        }
+      });
+    }
+
+    const cta = messageDiv.querySelector('a.paywall-card-cta');
     if (cta) {
       cta.addEventListener('click', () => {
         if (window.posthog) {

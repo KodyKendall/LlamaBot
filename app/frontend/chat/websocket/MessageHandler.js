@@ -1533,7 +1533,20 @@ export class MessageHandler {
       if (data.type === 'paywall_hit') {
         this.messageRenderer.renderPaywallMessage(PAYWALL_UPGRADE_URL, data);
       } else if ((data.type === 'system_message' || data.type === 'error') && data.content) {
-        this.messageRenderer.addMessage(data.content, data.type, data.base_message);
+        const el = this.messageRenderer.addMessage(data.content, data.type, data.base_message);
+        // A customer-paid turn with no ChatGPT account connected: offer the fix
+        // right under the message rather than leaving the user to find the picker.
+        if (data.action === 'connect_chatgpt' && el && typeof el.appendChild === 'function') {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'paywall-card-cta';
+          btn.setAttribute('data-llamabot', 'connect-chatgpt-action');
+          btn.textContent = 'Connect ChatGPT';
+          btn.addEventListener('click', () => {
+            window.dispatchEvent(new CustomEvent('llamabot:use-chatgpt', { detail: { resend: false } }));
+          });
+          el.appendChild(btn);
+        }
       }
     } else {
       // In beginner/plan mode, hide sub-agent generic messages (tool results, etc.)
