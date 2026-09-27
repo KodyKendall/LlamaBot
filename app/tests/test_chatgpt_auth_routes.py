@@ -275,7 +275,11 @@ def test_subscription_models_are_never_disabled_in_the_dropdown():
         "index.js no longer distinguishes user-credential models, so they fall "
         "into the generic disable branch and become unclickable"
     )
-    branch = index_js.split("requiresChatGptLogin)", 1)[1].split("} else if", 1)[0]
+    # 0.7.11: the connect/disabled decision moved into modelOptionState (so a
+    # POLICY-disabled ChatGPT model is greyed out, see
+    # policy_disabled_chatgpt_option.test.mjs); the 'connect' branch is the one
+    # that must stay selectable.
+    branch = index_js.split("state === 'connect')", 1)[1].split("} else if", 1)[0]
     assert "option.disabled = false" in branch
     assert "(Connect account)" in branch
 

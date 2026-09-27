@@ -340,8 +340,10 @@ def has_provider_key(model_name: str) -> bool:
 # by our OPENAI_API_KEY. Maps the frontend name -> the id OpenAI expects.
 # See docs/dev/chatgpt_oauth_byo_subscription.md.
 _CHATGPT_SUBSCRIPTION_MODELS = {
-    "gpt-5.6-luna-chatgpt": "gpt-5.6-luna",
-    "gpt-5.6-sol-chatgpt": "gpt-5.6-sol",
+    "gpt-6-luna-chatgpt": "gpt-6-luna",
+    "gpt-6-sol-chatgpt": "gpt-6-sol",
+    # ChatGPT-plan only: no API-key twin is offered.
+    "gpt-6-astra-chatgpt": "gpt-6-astra",
 }
 
 
@@ -424,6 +426,13 @@ def _chatgpt_subscription_client(model_name: str):
     token or a revoked grant all read as None.
     """
     try:
+        from app.agents.leonardo import zdr
+
+        if zdr.enforced():
+            # The customer's own OpenAI account is not a ZDR vendor. Do not even
+            # read the stored credential.
+            return None
+
         from app.lib.request_context import current_user_id
         from app.services.chatgpt_auth import (
             CODEX_BASE_URL,
@@ -573,6 +582,19 @@ def get_llm(model_name: str):
             model_name, replacement,
         )
         model_name = replacement
+
+    # ZDR belt and braces: the remap above already lands on a permitted model,
+    # so this only fires when the box has none (or a policy bug let one through).
+    # Refuse rather than build a client for a vendor this box may not use.
+    # Customer-paid (Base plan box, or a turn the paywall let through on the
+    # customer's ChatGPT plan): a request for any platform model lands on the
+    # ChatGPT plan instead, so nothing below can spend our keys.
+    from app.agents.leonardo import customer_paid
+    if customer_paid.required() and model_name not in _CHATGPT_SUBSCRIPTION_MODELS:
+        model_name = customer_paid.default_chatgpt_model()
+
+    from app.agents.leonardo import zdr
+    zdr.check_model(model_name)
 
     # Construction lives in _build_client so the stall guard is applied in ONE
     # place. See _apply_stream_chunk_timeout: the alternative was editing eleven
@@ -937,12 +959,12 @@ def _build_client(model_name: str):
             output_version="responses/v1",
             max_retries=0,
         )
-    if model_name == "gpt-5.6-luna":
-        # `gpt-5.6-luna`, NOT the bare `gpt-5.6` alias — that alias routes to Sol,
+    if model_name == "gpt-6-luna":
+        # `gpt-6-luna`, NOT the bare `gpt-6` alias — that alias routes to Sol,
         # a different (and much pricier) tier of the same family. Luna is the
         # cost/latency tier, roughly where nano sat in the GPT-5 family.
         return ChatOpenAI(
-            model="gpt-5.6-luna",
+            model="gpt-6-luna",
             use_responses_api=True,
             reasoning={"effort": "low", "summary": "auto"},
             output_version="responses/v1",
@@ -951,7 +973,7 @@ def _build_client(model_name: str):
     if model_name in _CHATGPT_SUBSCRIPTION_MODELS:
         # Runs on the SIGNED-IN USER's ChatGPT plan, not our OPENAI_API_KEY.
         #
-        # Same model ids as the pay-per-token entries above (`gpt-5.6-luna`), but
+        # Same model ids as the pay-per-token entries above (`gpt-6-luna`), but
         # a different payer and a different endpoint — the ChatGPT Codex backend
         # rather than api.openai.com. They are deliberately separate dropdown
         # entries so it is always visible which credential a turn is spending.
@@ -962,6 +984,15 @@ def _build_client(model_name: str):
         client = _chatgpt_subscription_client(model_name)
         if client is not None:
             return client
+        # A customer-paid turn has no platform model to fall back to: that
+        # fallback is exactly the spend it was refused.
+        from app.agents.leonardo import customer_paid
+        if customer_paid.required():
+            logger.warning(
+                "No usable ChatGPT credential for %r on a customer-paid turn; "
+                "the user needs to connect their account.", model_name,
+            )
+            return customer_paid.NotConnectedChatModel()
         # Deferred, like the policy import in get_llm, for the same circular-
         # import reason (model_policy reads DEFAULT_LLM_MODEL from this module).
         from app.agents.leonardo.model_policy import enabled_default_model
@@ -1170,10 +1201,29 @@ def make_summarization_model():
     (no trim — let it see everything) and the text-only providers (tiktoken
     counter + explicit trim guard to stay inside their context windows).
     """
+    from app.agents.leonardo import zdr
     from app.agents.utils.token_counter import (
         gemini_multimodal_token_counter,
         tiktoken_token_counter,
     )
+
+    # 0) ZDR: the box's permitted model, never the key chain below (it starts at
+    #    DeepSeek direct, which does not contractually exclude training). Nothing
+    #    permitted -> a model that refuses every call, so graphs still compile.
+    if zdr.enforced():
+        from app.agents.leonardo.model_policy import enabled_default_model
+        try:
+            model = get_llm(enabled_default_model())
+        except zdr.ZDRRefused:
+            model = zdr.ZDRBlockedChatModel()
+        return model, tiktoken_token_counter, 60000
+
+    # Customer-paid: the ChatGPT plan only, same as the chat. The key chain below
+    # is all platform-paid.
+    from app.agents.leonardo import customer_paid
+    if customer_paid.required():
+        from app.agents.leonardo.model_policy import enabled_default_model
+        return get_llm(enabled_default_model()), tiktoken_token_counter, 60000
 
     # 1) DeepSeek — project default; text-only, tiktoken counter, explicit cap so
     #    the summarizer input stays inside DeepSeek's smaller context window.

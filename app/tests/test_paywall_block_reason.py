@@ -95,6 +95,8 @@ async def test_an_older_mothership_still_produces_todays_frame(monkeypatch):
     await handler._check_paywall_or_block(websocket)
 
     frame = websocket.send_json.await_args_list[-1].args[0]
+    # chatgpt_available (0.7.11) is the box's own fact, not a mothership field.
+    frame.pop("chatgpt_available", None)
     assert frame == {"type": "paywall_hit", "messages_remaining": 0}
 
 

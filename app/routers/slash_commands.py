@@ -445,6 +445,22 @@ def _log_backup_result(backup_id: str, status: str, error: str = None, stdout: s
         logger.warning(f"Failed to log backup result: {e}")
 
 
+def _backup_error_summary(stdout: str, stderr: str) -> str:
+    """The Backup History error line for a failed quick_backup.sh run.
+
+    Prefer the script's own summary (overall verdict + per-step lines) over stderr, which
+    is mostly aws "Skipping file ..." warnings that say nothing about what failed.
+    """
+    summary = [
+        line.strip() for line in (stdout or "").splitlines()
+        if "Backup FAILED" in line or "Backup complete" in line
+        or (line.strip().startswith("Step ") and " — " in line)
+    ]
+    if summary:
+        return "\n".join(summary)[:500]
+    return (stderr or "").strip()[:500] or "Unknown error"
+
+
 def _run_backup_in_background(backup_id: str):
     """Run master_backup_all.sh in a background thread."""
     instance_name = os.getenv("INSTANCE_NAME", "")
@@ -458,7 +474,7 @@ def _run_backup_in_background(backup_id: str):
             _backup_status[backup_id] = {"status": "completed", "error": None}
             _log_backup_result(backup_id, "completed", stdout=result.stdout)
         else:
-            error = result.stderr[:500] if result.stderr else "Unknown error"
+            error = _backup_error_summary(result.stdout, result.stderr)
             _backup_status[backup_id] = {"status": "failed", "error": error}
             _log_backup_result(backup_id, "failed", error=error, stdout=result.stdout)
     except Exception as e:

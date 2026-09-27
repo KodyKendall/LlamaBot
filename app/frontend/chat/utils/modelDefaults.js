@@ -52,9 +52,24 @@ export function chooseInitialModel({ options, defaultModel }) {
  *   put on the dropdown, or null to leave it alone. `userChoseModel` is false
  *   when the choice cannot be honoured, which lets the server default apply.
  */
+// Model ids that were renamed, old -> new. Mirrors _RENAMED_MODELS in
+// model_policy.py: the llmModel cookie lives 365 days, so an old id has to keep
+// landing on its replacement instead of on the server default.
+const RENAMED_MODELS = {
+  // 0.7.11: GPT-6 replaced GPT-5.6.
+  'gpt-5.6-luna': 'gpt-6-luna',
+  'gpt-5.6-luna-chatgpt': 'gpt-6-luna-chatgpt',
+  'gpt-5.6-sol-chatgpt': 'gpt-6-sol-chatgpt',
+};
+
+export function canonicalModelName(model) {
+  return RENAMED_MODELS[model] || model;
+}
+
 export function resolveRememberedModel({ options, remembered }) {
   const none = { select: null, userChoseModel: false };
   if (!remembered) return none;
+  remembered = canonicalModelName(remembered);
   // A DISABLED option still counts as chosen. Availability is applied after this
   // runs and the needsNewSelection repair already owns that case: it moves to the
   // first available model, leaves the llmModel cookie intact and raises
@@ -99,4 +114,25 @@ export function resolveNewThreadModel({ userChoseModel, defaultTextModel }) {
   // A choice the user made outlives the thread it was made in.
   if (userChoseModel) return { select: null, persist: false };
   return { select: defaultTextModel || null, persist: false };
+}
+
+/**
+ * How one dropdown option should look after /api/available-models lands.
+ *
+ * 'connect'  — a ChatGPT-plan model policy allows, but the user has not
+ *              connected an account. Kept SELECTABLE: picking it is how the
+ *              user reaches the sign-in modal (a disabled <option> fires no
+ *              change event).
+ * 'disabled' — anything else that is unavailable, including a ChatGPT model the
+ *              operator disabled (ZDR boxes). Re-enabling those let users link
+ *              an OpenAI account on a box that must never use one.
+ * 'enabled'  — usable, or not reported by the server at all.
+ *
+ * @param {?{available: boolean, requiresChatGptLogin?: boolean, disabledByPolicy?: boolean}} info
+ * @returns {'connect'|'disabled'|'enabled'}
+ */
+export function modelOptionState(info) {
+  if (!info || info.available) return 'enabled';
+  if (info.requiresChatGptLogin && !info.disabledByPolicy) return 'connect';
+  return 'disabled';
 }

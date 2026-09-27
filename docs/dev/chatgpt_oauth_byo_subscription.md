@@ -121,6 +121,8 @@ the CLI. Caveat: the env var is named `_INTERNAL_`, and only a live call proves 
 *backend* accepts an unknown originator — verify on first real request, and if it
 rejects us, that is the go/no-go decision, not a silent fallback to `codex_cli_rs`.
 
+> **0.7.11:** the entries are now GPT-6 (`gpt-6-luna-chatgpt` / `gpt-6-sol-chatgpt`, wire ids `gpt-6-luna` / `gpt-6-sol`). The `gpt-5.6-*` ids below are aliases for them — see `_RENAMED_MODELS` in `model_policy.py`.
+
 **S2 — models: Luna and Sol ARE available on a ChatGPT plan.** GPT-5.6 reached Codex
 GA on 2026-07-09 with `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna` selectable by
 plan tier; Plus reportedly reaches all three

@@ -368,6 +368,10 @@ async def edit_file(
 
 # Node
 def write_html_page_agent(state: LlamaPressState):
+    # This node calls a fixed vendor, not get_llm, so it cannot run on a ZDR box.
+    from app.agents.leonardo import zdr
+    zdr.refuse_if_enforced("the llamapress html agent")
+
     # Build context-aware system prompt
     selected_element = state.get("selected_element")
 

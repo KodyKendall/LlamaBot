@@ -510,6 +510,9 @@ export class FileAttachmentManager {
           <a class="asset-preview-action" href="${downloadUrl}" download="${filename}">
             <i class="fa-solid fa-download"></i> Download
           </a>
+          <button class="asset-preview-action asset-preview-action--danger" data-llamabot="asset-delete-btn" title="Delete this file">
+            <i class="fa-solid fa-trash"></i> Delete
+          </button>
         </div>
       </div>
       <div class="asset-preview-pathbar">
@@ -530,6 +533,16 @@ export class FileAttachmentManager {
         attachBtn.disabled = true;
         attachBtn.classList.add('asset-preview-action--done');
         attachBtn.innerHTML = '<i class="fa-solid fa-check"></i> Attached';
+      });
+    }
+
+    // Delete
+    const deleteBtn = this.assetModalPreview.querySelector('[data-llamabot="asset-delete-btn"]');
+    if (deleteBtn) {
+      deleteBtn.addEventListener('click', async () => {
+        deleteBtn.disabled = true;
+        const deleted = await this.deleteAsset(path, filename);
+        if (!deleted) deleteBtn.disabled = false;
       });
     }
 
@@ -556,6 +569,41 @@ export class FileAttachmentManager {
       const stage = this.assetModalPreview.querySelector('[data-llamabot="asset-text-stage"]');
       this.renderTextPreview(previewUrl, filename, stage);
     }
+  }
+
+  /**
+   * Delete an uploaded file after a confirm. On success the file leaves the
+   * list, any pending attachment of it is dropped, and the preview resets.
+   * Returns true if the file was deleted.
+   */
+  async deleteAsset(path, filename) {
+    if (!confirm(`Delete ${filename}? This can't be undone.`)) return false;
+
+    try {
+      const response = await fetch(`/api/uploaded-files?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.detail || `HTTP ${response.status}`);
+      }
+    } catch (err) {
+      console.error('Failed to delete asset:', err);
+      alert(`Couldn't delete ${filename}: ${err.message}`);
+      return false;
+    }
+
+    this.assetModalFiles = this.assetModalFiles.filter(f => f.path !== path);
+    const attachedIndex = this.attachments.findIndex(a => a.path === path);
+    if (attachedIndex !== -1) this.removeAttachment(attachedIndex);
+    if (this.assetModalSelectedPath === path) {
+      this.assetModalSelectedPath = null;
+      this.assetModalPreview.innerHTML = `
+        <div class="asset-modal-preview-empty">
+          <i class="fa-solid fa-arrow-left"></i>
+          <span>Select an asset to preview</span>
+        </div>`;
+    }
+    this.renderAssetModalList();
+    return true;
   }
 
   /**

@@ -37,7 +37,16 @@ sys_msg = "You are a helpful assistant. Your favorite animal is cyborg llama."
 # This eliminates duplicate httpx connection pools and reduces memory usage
 # LangChain chat models are thread-safe and designed for this pattern
 # ====================================================================================
-_llm_instance = ChatOpenAI(model="gpt-4.1")
+# Built on first use, not at import: a box with no OPENAI_API_KEY (a Base plan box)
+# used to abort the whole startup graph compile on "Missing credentials" here.
+_llm_instance = None
+
+
+def _llm():
+    global _llm_instance
+    if _llm_instance is None:
+        _llm_instance = ChatOpenAI(model="gpt-4.1")
+    return _llm_instance
 
 # Warning: Brittle - None type will break this when it's injected into the state for the tool call, and it silently fails. So if it doesn't map state types properly from the frontend, it will break. (must be exactly what's defined here).
 class LlamaPressState(AgentState):
@@ -50,9 +59,13 @@ class LlamaPressState(AgentState):
 
 # Node
 def leo(state: LlamaPressState):
+   # Calls a fixed vendor (gpt-4.1), not get_llm, so it cannot run on a ZDR box.
+   from app.agents.leonardo import zdr
+   zdr.refuse_if_enforced("the llamabot agent")
+
 #    read_rails_file("app/agents/llamabot/nodes.py") # Testing.
    # Reuse singleton LLM instance (memory efficient, thread-safe)
-   llm_with_tools = _llm_instance.bind_tools(tools)
+   llm_with_tools = _llm().bind_tools(tools)
 
    custom_prompt_instructions_from_llamapress_dev = state.get("agent_prompt")
    full_sys_msg = SystemMessage(content=f"""{sys_msg} Here are additional instructions provided by the developer: <DEVELOPER_INSTRUCTIONS> {custom_prompt_instructions_from_llamapress_dev} </DEVELOPER_INSTRUCTIONS>""")

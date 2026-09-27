@@ -51,9 +51,21 @@ def status(
     return chatgpt_auth.status_for_user(session, user.id)
 
 
+def _refuse_on_zdr_box() -> None:
+    """A ZDR workspace may not link an OpenAI account: it is not a ZDR vendor."""
+    from app.agents.leonardo import zdr
+
+    if zdr.enforced():
+        raise HTTPException(
+            status_code=403,
+            detail="ChatGPT accounts cannot be connected on this workspace (zero data retention).",
+        )
+
+
 @router.post("/start")
 async def start(user: User = Depends(get_current_user)):
     """Begin a device-code login. Returns the code the user types into OpenAI."""
+    _refuse_on_zdr_box()
     _sweep_pending()
 
     # Preferred path: OpenAI's own CLI. It is the only client that reliably gets
@@ -114,6 +126,7 @@ async def poll(
     session: Session = Depends(get_session),
 ):
     """One poll of a pending login. ``pending`` until the user approves."""
+    _refuse_on_zdr_box()
     _sweep_pending()
     entry = _PENDING.get(body.state)
     if entry is None:
@@ -188,6 +201,7 @@ def import_credential(
     (Cloudflare 403) while the inference host stays reachable — see
     ``chatgpt_auth.AuthHostBlocked``.
     """
+    _refuse_on_zdr_box()
     blob = body.auth_json or {
         "access_token": body.access_token,
         "refresh_token": body.refresh_token,

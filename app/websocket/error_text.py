@@ -94,6 +94,8 @@ def user_facing_error(exc: BaseException) -> str:
     """
     if is_chatgpt_token_expired(exc):
         return _CHATGPT_EXPIRED_MESSAGE
+    if _is_chatgpt_not_connected(exc):
+        return str(exc)
     return describe_exception(exc)
 
 
@@ -107,4 +109,12 @@ def chat_error_content(prefix: str, exc: BaseException) -> str:
     """
     if is_chatgpt_token_expired(exc):
         return _CHATGPT_EXPIRED_MESSAGE
+    if _is_chatgpt_not_connected(exc):
+        return str(exc)
     return f"{prefix}: {describe_exception(exc)}"
+
+
+def _is_chatgpt_not_connected(exc: BaseException) -> bool:
+    from app.agents.leonardo.customer_paid import ChatGPTNotConnected
+
+    return isinstance(exc, ChatGPTNotConnected)

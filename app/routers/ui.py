@@ -177,6 +177,15 @@ def load_custom_agent_modes(overlay_path, graphs):
     return out
 
 
+def _posthog_config() -> tuple[str, str]:
+    """(key, host) for the chat page's PostHog, or blanks on a ZDR box."""
+    from app.agents.leonardo import zdr
+
+    if zdr.enforced():
+        return "", ""
+    return os.getenv("LLAMABOT_POSTHOG_KEY", ""), os.getenv("LLAMABOT_POSTHOG_HOST", "")
+
+
 def _read_leonardo_value(filename: str) -> str | None:
     path = f".leonardo/{filename}"
     try:
@@ -301,8 +310,7 @@ async def root(request: Request):
         instance_lock = get_lock_state(session)
 
         # Inject user role, visible agents, and PostHog config as global variables for the frontend
-        posthog_key = os.getenv("LLAMABOT_POSTHOG_KEY", "")
-        posthog_host = os.getenv("LLAMABOT_POSTHOG_HOST", "")
+        posthog_key, posthog_host = _posthog_config()
         enable_github_button = os.getenv("ENABLE_GITHUB_BUTTON", "").lower() == "true"
         llamapress_user_id = _read_leonardo_value("LLAMAPRESS_USER_ID.txt")
         llamapress_email = _read_leonardo_value("LLAMAPRESS_EMAIL.txt")

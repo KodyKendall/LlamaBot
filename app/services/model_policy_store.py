@@ -68,6 +68,9 @@ _ALLOWED_KEYS = (
     # not address a first-party credential at a host of its choosing).
     "models",
     "instance_overrides",
+    # Base plan (0.7.11): run only on the customer's own ChatGPT plan, never on
+    # our keys. See app.agents.leonardo.customer_paid.
+    "customer_paid_only",
 )
 
 
@@ -170,6 +173,23 @@ def save(policy: dict) -> None:
             raise
 
     logger.info("Model policy updated from the mothership: %s", filtered)
+    _sync_zdr_lock(filtered)
+
+
+def _sync_zdr_lock(policy: dict) -> None:
+    """Arm or release the ZDR lock to match what the mothership just sent.
+
+    This is the ONLY place the lock is released: a pushed document that no
+    longer asks for ZDR. A missing or unreadable file never releases it.
+    """
+    from app.agents.leonardo import zdr
+
+    if zdr.requested_by(policy):
+        block = policy["instance_overrides"]["zdr"]
+        label = block.get("sensitivity")
+        zdr.write_lock(label if isinstance(label, str) else "")
+    else:
+        zdr.clear_lock()
 
 
 def clear() -> None:
@@ -179,3 +199,5 @@ def clear() -> None:
             path().unlink()
         except FileNotFoundError:
             pass
+    # An explicit empty policy from the mothership is a document without ZDR.
+    _sync_zdr_lock({})
