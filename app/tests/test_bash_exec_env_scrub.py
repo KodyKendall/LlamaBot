@@ -249,3 +249,12 @@ def test_unset_prefix_quotes_names(container_env):
     container_env(["WEIRD;NAME", "OPENAI_API_KEY"])
     prefix = tools.scrub_unset_prefix(tools.build_exec_env("c"))
     assert "'WEIRD;NAME'" in prefix
+
+
+@pytest.mark.parametrize("name", ["DISCORD_CLIENT_SECRET", "STRIPE_SECRET_KEY", "GITHUB_TOKEN"])
+def test_customer_secret_names_are_blanked_too(container_env, name):
+    """0.7.12 lets customers store secrets under their normal names; the agent's
+    shell must not see them any more than it sees a platform key."""
+    container_env([name, "PATH"])
+    entries = tools.build_exec_env("c")
+    assert name in _scrubbed(entries)

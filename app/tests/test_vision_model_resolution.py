@@ -47,6 +47,8 @@ def _model_dispatch_source(llm_factory) -> str:
 GLM = "glm-5.3-flash-zai"
 MUSE = "muse-spark-1.2-contributor"
 DS_VISION = "deepseek-v4-flash-vision-exp"
+# 0.7.12: DeepSeek's listed V4.1 id, now ahead of the -exp alias on the floor.
+DS_41 = "deepseek-v4.1-flash"
 
 
 @pytest.fixture(autouse=True)
@@ -98,6 +100,13 @@ def test_meta_keyed_box_still_resolves_to_muse(monkeypatch):
 def test_deepseek_only_box_resolves_to_the_deepseek_vision_model(monkeypatch):
     """The case this feature exists for: vision on the key the box already has."""
     monkeypatch.setenv("DEEPSEEK_API_KEY", "ds-test-key")
+    assert model_policy.vision_model() == DS_41
+
+
+def test_deepseek_box_falls_back_to_the_exp_alias_when_41_is_disabled(monkeypatch):
+    """`-exp` stays on the floor as the operator's way back from V4.1."""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "ds-test-key")
+    monkeypatch.setenv("DISABLED_MODELS", DS_41)
     assert model_policy.vision_model() == DS_VISION
 
 
@@ -143,7 +152,7 @@ def test_deepseek_vision_is_enabled_on_a_stock_box_when_vision_is_on(monkeypatch
     box before a single image upload worked."""
     monkeypatch.setenv("DEEPSEEK_API_KEY", "ds-test-key")
     monkeypatch.setenv("VISION_MODEL_ALLOWED", "true")
-    assert model_policy.is_model_enabled(DS_VISION) is True
+    assert model_policy.is_model_enabled(DS_41) is True
 
 
 def test_glm_vision_is_enabled_on_an_openrouter_box_when_vision_is_on(monkeypatch):
@@ -159,7 +168,7 @@ def test_deepseek_vision_is_disabled_when_vision_is_off(monkeypatch):
     close the model too, not just hide the upload button."""
     monkeypatch.setenv("DEEPSEEK_API_KEY", "ds-test-key")
     monkeypatch.setenv("VISION_MODEL_ALLOWED", "false")
-    assert model_policy.is_model_enabled(DS_VISION) is False
+    assert model_policy.is_model_enabled(DS_41) is False
 
 
 def test_vision_defaults_off_so_the_new_model_stays_closed(monkeypatch):
@@ -167,15 +176,15 @@ def test_vision_defaults_off_so_the_new_model_stays_closed(monkeypatch):
     understanding on across the fleet by itself."""
     monkeypatch.setenv("DEEPSEEK_API_KEY", "ds-test-key")
     assert model_policy.vision_allowed() is False
-    assert model_policy.is_model_enabled(DS_VISION) is False
+    assert model_policy.is_model_enabled(DS_41) is False
 
 
 def test_explicit_disable_beats_the_vision_fail_open(monkeypatch):
     """Step 1 still wins over step 2a — an operator can close it even with vision on."""
     monkeypatch.setenv("DEEPSEEK_API_KEY", "ds-test-key")
     monkeypatch.setenv("VISION_MODEL_ALLOWED", "true")
-    monkeypatch.setenv("DISABLED_MODELS", DS_VISION)
-    assert model_policy.is_model_enabled(DS_VISION) is False
+    monkeypatch.setenv("DISABLED_MODELS", DS_41)
+    assert model_policy.is_model_enabled(DS_41) is False
 
 
 def test_vision_fail_open_does_not_open_other_models(monkeypatch):

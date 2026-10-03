@@ -101,3 +101,10 @@ def test_unknown_keys_are_kept_but_values_are_bounded():
 
     assert "some_new_flag" in params
     assert len(str(params["some_new_flag"])) <= 512
+
+
+def test_customer_secret_names_are_redacted():
+    from app.agents.leonardo.message_invariants import redact_request_params
+
+    out = redact_request_params({"DISCORD_CLIENT_SECRET": "x", "STRIPE_SECRET_KEY": "y"})
+    assert out == {"DISCORD_CLIENT_SECRET": "[redacted]", "STRIPE_SECRET_KEY": "[redacted]"}

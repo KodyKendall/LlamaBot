@@ -176,6 +176,7 @@ DEEPSEEK_DIRECT_MODELS = frozenset({
     "deepseek-v4-flash",
     "deepseek-v4-pro",
     "deepseek-v4-flash-vision-exp",
+    "deepseek-v4.1-flash",
 })
 
 
@@ -301,6 +302,7 @@ DEFAULT_MODEL_KEY_ENVS = {
     "muse-spark-1.2-contributor": ("META_API_KEY", "MODEL_API_KEY"),
     "deepseek-v4-flash": ("DEEPSEEK_API_KEY",),
     "deepseek-v4-flash-vision-exp": ("DEEPSEEK_API_KEY",),
+    "deepseek-v4.1-flash": ("DEEPSEEK_API_KEY",),
 }
 
 
@@ -696,6 +698,21 @@ def _build_client(model_name: str):
         # rather than a bug on our side — vision_model() falls back on its own.
         return ChatDeepSeekWithReasoning(
             model="deepseek-v4-flash-vision-exp",
+            timeout=180,
+            max_retries=0,
+        )
+    if model_name == "deepseek-v4.1-flash":
+        # DeepSeek V4.1 Flash on DeepSeek's own API. `deepseek-flash` is the id
+        # api.deepseek.com/models actually lists (2026-10-01: it lists only that
+        # and `deepseek-v4-pro`); `deepseek-v4-flash` and `-vision-exp` still
+        # work, but only as aliases DeepSeek resolves to this same model and can
+        # withdraw without notice. Natively multimodal (text + image).
+        #
+        # A sibling of `deepseek-v4-flash`, not a rename: that id is the fleet's
+        # FALLBACK_TEXT_MODEL, a fail-open model, and sits in users' llmModel
+        # cookies. Effort is left at DeepSeek's default ("high").
+        return ChatDeepSeekWithReasoning(
+            model="deepseek-flash",
             timeout=180,
             max_retries=0,
         )

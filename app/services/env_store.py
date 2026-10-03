@@ -98,14 +98,16 @@ def upsert_custom_var(
     collisions regardless — this check exists so the user is told at save time
     instead of silently getting an inactive row.
 
-    Every rejection uses the SAME message, whether the name is reserved by the
-    platform or merely already present in this instance's file. A per-case message
-    would turn this endpoint into an oracle for probing what is configured on the
-    box, which is exactly what the rest of this surface refuses to disclose.
+    A platform-rule rejection names the rule: the rules are the same on every
+    box, so that reveals nothing. A collision with a key only this box's file
+    has gets the generic RESERVED_MESSAGE, so the endpoint cannot be used as an
+    oracle for what is configured here.
     """
     name = svc.validate_name(name)
     value = svc.validate_value(value)
 
+    if svc.is_static_reserved(name):
+        raise svc.EnvValidationError(svc.static_reserved_message(name))
     if svc.is_reserved(name):
         raise svc.EnvValidationError(svc.RESERVED_MESSAGE)
 
@@ -130,7 +132,7 @@ def upsert_custom_var(
 
     svc.sync_managed_block(custom_var_map(session))
     # Rails reads the merged file at container start, so this is always pending.
-    mark_pending(session, name, value)
+    mark_pending(session, name, value, target=APP)
     return {"name": name, "shadowed": False}
 
 
@@ -142,7 +144,7 @@ def delete_custom_var(session: Session, name: str) -> bool:
     session.delete(row)
     session.commit()
     svc.sync_managed_block(custom_var_map(session))
-    mark_pending(session, name, "")
+    mark_pending(session, name, "", target=APP)
     return True
 
 
@@ -177,15 +179,25 @@ def _write_pending(session: Session, entries: list) -> None:
     session.commit()
 
 
-def mark_pending(session: Session, key: str, new_value: str, username: str = "") -> None:
+#: Pending-entry target for a custom variable: live once the RAILS container has
+#: it. Entries without a target are LlamaBot's own settings (the toggles).
+APP = "app"
+
+
+def mark_pending(
+    session: Session, key: str, new_value: str, username: str = "", target: str = ""
+) -> None:
     """Record that ``key`` was written to the file but isn't live yet."""
     entries = [e for e in _read_pending(session) if e.get("k") != key]
-    entries.append({
+    entry = {
         "k": key,
         "f": fingerprint(new_value),
         "t": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "u": username[:40],
-    })
+    }
+    if target:
+        entry["s"] = target
+    entries.append(entry)
     try:
         _write_pending(session, entries)
     except Exception as e:
@@ -206,10 +218,21 @@ def reconcile_pending(session: Session) -> list:
     if not entries:
         return []
 
-    still_pending = [
-        e for e in entries
-        if fingerprint(os.environ.get(e.get("k", ""), "")) != e.get("f")
-    ]
+    # Custom variables are live when RAILS has them, not LlamaBot: both load the
+    # same env_file but are recreated separately, so LlamaBot's environment used
+    # to clear the banner while the app still lacked the key. Unreachable Rails
+    # means "still pending", never "live".
+    rails_env = None
+    if any(e.get("s") == APP for e in entries):
+        from app.services import rails_container
+        rails_env = rails_container.live_env()
+
+    def is_live(e: dict) -> bool:
+        if e.get("s") == APP:
+            return rails_env is not None and fingerprint(rails_env.get(e.get("k", ""), "")) == e.get("f")
+        return fingerprint(os.environ.get(e.get("k", ""), "")) == e.get("f")
+
+    still_pending = [e for e in entries if not is_live(e)]
 
     if len(still_pending) != len(entries):
         try:
@@ -221,10 +244,12 @@ def reconcile_pending(session: Session) -> list:
 
 
 def pending_summary(session: Session) -> dict:
-    """``{"count": n, "keys": [...], "restart_required": bool}`` for the UI banner."""
+    """``{"count": n, "keys": [...], "app_keys": [...], "restart_required": bool}``
+    for the UI banner. ``app_keys`` are the ones the "Apply now" recreate fixes."""
     pending = reconcile_pending(session)
     return {
         "count": len(pending),
         "keys": [e.get("k") for e in pending],
+        "app_keys": [e.get("k") for e in pending if e.get("s") == APP],
         "restart_required": bool(pending),
     }

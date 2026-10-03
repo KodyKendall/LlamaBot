@@ -1,0 +1,6 @@
+0.7.12:
+[x] - New apps can offer Sign in with Google / Microsoft.
+[x] - DeepSeek V4.1 Flash on DeepSeek's own API, reads images.
+[x] - Customers can save secrets under normal names like STRIPE_SECRET_KEY.
+[x] - Environment screen applies saved variables with one click.
+[x] - A second Update click no longer takes the box down.

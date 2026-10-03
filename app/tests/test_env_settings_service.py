@@ -9,6 +9,8 @@ override anything already in the file.
 """
 
 import os
+import re
+from pathlib import Path
 
 import pytest
 
@@ -131,8 +133,7 @@ def test_toggle_preserves_comments_and_ordering(env_file):
 # --------------------------------------------------------------------------
 
 @pytest.mark.parametrize("name", [
-    "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "STRIPE_SECRET", "MY_PASSWORD",
-    "SOME_TOKEN", "VSCODE_PASSWORD", "DB_URI", "DATABASE_URL", "AWS_KEY",
+    "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "VSCODE_PASSWORD", "DB_URI", "DATABASE_URL", "AWS_KEY",
     "SESSION_SECRET", "RAILS_MASTER_KEY", "LLAMABOT_VERSION", "POSTGRES_PASSWORD",
     "MODEL_SWITCHING_ALLOWED", "PAYWALL_ENABLED", "SCHEDULER_TOKEN",
     "CHATGPT_CREDENTIAL_KEY", "LLAMAPRESS_AI_LOGIN_SECRET", "PATH", "REDIS_URL",
@@ -368,3 +369,81 @@ def test_missing_env_file_degrades_to_read_only(tmp_path, monkeypatch):
     assert svc.base_keys() == set()
     with pytest.raises(svc.EnvValidationError, match="No writable .env"):
         svc.set_toggle("MODEL_SWITCHING_ALLOWED", True)
+
+
+# --------------------------------------------------------------------------
+# 0.7.12: names are judged by a static platform list, not by their shape
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize("name", [
+    "DISCORD_CLIENT_SECRET", "STRIPE_SECRET_KEY", "KP_DISCORD_OAUTH_KEY",
+    "KING_PROXIES_DISCORD_CLIENT_SECRET", "SENDGRID_API_KEY", "TWILIO_AUTH_TOKEN",
+    # LlamaBot reads only GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET, so the rest of
+    # the GITHUB_ namespace belongs to the customer.
+    "GITHUB_TOKEN",
+])
+def test_secret_shaped_customer_names_are_allowed(env_file, name):
+    assert svc.is_reserved(name) is False
+
+
+@pytest.mark.parametrize("name", [
+    "FIREWORKS_API_KEY", "OPENROUTER_API_KEY", "GEMINI_API_KEY", "META_API_KEY",
+    "GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET", "MOTHERSHIP_API_TOKEN",
+    "SES_SMTP_PASSWORD", "SECRET_KEY_BASE", "ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY",
+])
+def test_platform_keys_are_reserved_on_every_box(env_file, name):
+    assert svc.is_reserved(name) is True
+
+
+def test_platform_key_is_reserved_even_when_this_file_lacks_it(tmp_path, monkeypatch):
+    """Static list, not file contents — otherwise a rejection reveals the file."""
+    path = tmp_path / ".env"
+    path.write_text("MODEL_SWITCHING_ALLOWED=false\n")
+    monkeypatch.setenv("LEONARDO_ENV_FILE", str(path))
+    assert svc.is_reserved("OPENAI_API_KEY") is True
+    assert svc.is_static_reserved("OPENAI_API_KEY") is True
+
+
+def test_static_rejection_names_the_rule_but_not_the_box():
+    msg = svc.static_reserved_message("OPENAI_API_KEY")
+    assert "OPENAI_API_KEY" in msg
+    assert "platform" in msg
+    assert msg != svc.RESERVED_MESSAGE
+
+
+# --------------------------------------------------------------------------
+# Completeness guard: every secret-shaped name LlamaBot reads is a platform key
+# --------------------------------------------------------------------------
+
+#: Names that match the scan but are not platform settings a customer could
+#: collide with. Each needs a reason.
+NOT_PLATFORM = frozenset()
+
+_ENV_NAME_SHAPE = re.compile(
+    r"""["']([A-Z][A-Z0-9_]*(?:_API_KEY|_KEY|_SECRET|_TOKEN|_PASSWORD|_URI|_BASE_URL))["']"""
+)
+_ENV_READ = re.compile(
+    r"""os\.(?:getenv|environ\.get|environ\.setdefault|environ\[)\(?\s*["']([A-Z][A-Z0-9_]+)["']"""
+)
+
+
+def _names_llamabot_reads():
+    app_dir = Path(svc.__file__).resolve().parents[1]
+    names = set()
+    for path in app_dir.rglob("*.py"):
+        if "tests" in path.parts:
+            continue
+        text = path.read_text(errors="ignore")
+        names.update(_ENV_READ.findall(text))
+        names.update(_ENV_NAME_SHAPE.findall(text))
+    return names
+
+
+def test_every_env_name_llamabot_reads_is_reserved():
+    """Replaces the suffix rule's fail-closed property: a new
+    os.getenv("FOO_API_KEY") fails CI here instead of being claimable."""
+    missing = sorted(
+        n for n in _names_llamabot_reads()
+        if n not in NOT_PLATFORM and not svc.is_static_reserved(n)
+    )
+    assert missing == [], f"add these to PLATFORM_KEYS (or NOT_PLATFORM with a reason): {missing}"
