@@ -897,6 +897,7 @@ async def available_models(request: Request):
         # DeepSeek's vision sibling — same key as the text models, which is the
         # whole point of it (vision with no extra credential to provision).
         "deepseek-v4-flash-vision-exp": "DEEPSEEK_API_KEY",
+        "deepseek-v4.1-flash": "DEEPSEEK_API_KEY",
         "deepseek-v4-flash-gmi": "GMI_DEEPSEEK_API_KEY",
         "deepseek-v4-flash-fireworks": "FIREWORKS_DEEPSEEK_API_KEY",
         # V4.1 on the same Fireworks account; the account-wide key name is
@@ -2011,6 +2012,27 @@ async def api_pending_env_changes(
     """Edits written to the file but not yet live. Self-clears after a restart."""
     from app.services import env_store
     return env_store.pending_summary(session)
+
+
+@router.post("/api/env-vars/apply", response_class=JSONResponse)
+async def api_apply_env_changes(
+    admin: User = Depends(admin_required),
+    session: Session = Depends(get_db_session),
+):
+    """Recreate the Rails app so it loads saved custom variables.
+
+    A recreate, not a restart: ``docker restart`` keeps the old environment. The
+    app is down for the ~30s it takes to boot; LlamaBot keeps running.
+    """
+    import asyncio
+
+    from app.services import env_store, rails_container
+
+    result = await asyncio.to_thread(rails_container.recreate)
+    logger.info("Env apply (Rails recreate) by admin '%s': ok=%s", admin.username, result["ok"])
+    if not result["ok"]:
+        raise HTTPException(status_code=502, detail="Could not restart your app. Try again, or ask Leo to recreate the Rails container.")
+    return {"ok": True, "pending": env_store.pending_summary(session)}
 
 
 @router.put("/api/env-toggles/{key}", response_class=JSONResponse)

@@ -1206,3 +1206,69 @@ def test_deepseek_41_fireworks_is_not_the_default_model():
 
     assert DS_41_FW != DEFAULT_LLM_MODEL
     assert DS_41_FW != FALLBACK_TEXT_MODEL
+
+
+# --------------------------------------------------------------------------
+# DeepSeek V4.1 Flash on DeepSeek's own API — 0.7.12
+# --------------------------------------------------------------------------
+
+DS_41 = "deepseek-v4.1-flash"
+
+
+def test_deepseek_41_is_offered_in_the_dropdown():
+    assert DS_41 in _dropdown_models()
+
+
+def test_deepseek_41_supports_images_but_not_video_or_pdf():
+    """DeepSeek lists `deepseek-flash` with input_modalities text+image
+    (2026-10-01). PDFs only go through DeepSeek's separate Files API."""
+    assert MODEL_CAPABILITIES[DS_41] == {"images": True, "video": False, "pdf": False}
+
+
+def test_deepseek_41_uses_the_deepseek_key():
+    assert _api_key_map()[DS_41] is True
+
+
+def test_deepseek_41_is_known_to_the_policy():
+    assert DS_41 in _KNOWN_MODELS
+
+
+def test_deepseek_41_builds_a_reasoning_client_with_the_listed_api_id():
+    """`deepseek-flash` is the id DeepSeek's /models actually lists; the V4 ids
+    only work today as aliases DeepSeek can withdraw."""
+    from app.agents.leonardo import llm_factory
+
+    src = _model_dispatch_source(llm_factory)
+    branch = src.split(f'model_name == "{DS_41}"', 1)[1].split("if model_name ==", 1)[0]
+    assert "ChatDeepSeekWithReasoning(" in branch
+    assert 'model="deepseek-flash"' in branch
+    assert "api_base" not in branch
+
+
+def test_deepseek_41_is_covered_by_the_deepseek_reasoning_middleware():
+    """DeepSeek direct 400s multi-turn chats whose assistant messages lack
+    reasoning_content; this set is what turns the middleware on."""
+    from app.agents.leonardo.llm_factory import DEEPSEEK_DIRECT_MODELS
+
+    assert DS_41 in DEEPSEEK_DIRECT_MODELS
+
+
+def test_deepseek_41_can_be_a_default_model():
+    """Same key every box already has, so the policy may resolve to it."""
+    from app.agents.leonardo.llm_factory import DEFAULT_MODEL_KEY_ENVS
+
+    assert DEFAULT_MODEL_KEY_ENVS[DS_41] == ("DEEPSEEK_API_KEY",)
+
+
+def test_deepseek_41_is_not_zdr_compliant():
+    """DeepSeek direct is the jurisdiction we route ZDR boxes away from."""
+    from app.agents.leonardo.model_capabilities import ZDR_COMPLIANT
+
+    assert ZDR_COMPLIANT[DS_41] is False
+
+
+def test_deepseek_41_does_not_change_what_the_fleet_runs():
+    from app.agents.leonardo.llm_factory import DEFAULT_LLM_MODEL, FALLBACK_TEXT_MODEL
+
+    assert DS_41 != DEFAULT_LLM_MODEL
+    assert FALLBACK_TEXT_MODEL == "deepseek-v4-flash"

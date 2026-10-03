@@ -44,6 +44,9 @@ MODEL_CAPABILITIES = {
     # and PDFs are not ingested natively (DeepSeek's Files API is a separate
     # upload path we don't use), so both stay off.
     'deepseek-v4-flash-vision-exp': {'images': True, 'video': False, 'pdf': False},
+    # DeepSeek V4.1 Flash on DeepSeek's own API (`deepseek-flash`): listed with
+    # input_modalities text + image. PDFs stay off for the same reason as above.
+    'deepseek-v4.1-flash': {'images': True, 'video': False, 'pdf': False},
     # Same model as deepseek-v4-flash, served by GMI Cloud rather than
     # DeepSeek's own API — same (text-only) capabilities.
     'deepseek-v4-flash-gmi': {'images': False, 'video': False, 'pdf': False},
@@ -119,6 +122,7 @@ ZDR_COMPLIANT = {
     'deepseek-v4-flash': False,
     'deepseek-v4-pro': False,
     'deepseek-v4-flash-vision-exp': False,
+    'deepseek-v4.1-flash': False,
     'deepseek-v4-flash-gmi': False,
     'deepseek-v4-flash-fireworks': False,
     # Fireworks chat completions: no retention for open models, DPA in place.

@@ -3959,6 +3959,7 @@ async def scheduled_jobs_page(user: User = Depends(engineer_or_admin_required)):
             'gpt-5-codex': 'GPT-5 Codex',
             'deepseek-v4-flash': 'DeepSeek V4 Flash',
             'deepseek-v4-flash-vision-exp': 'DeepSeek V4 Flash Vision',
+            'deepseek-v4.1-flash': 'DeepSeek V4.1 Flash',
             'deepseek-v4-flash-gmi': 'DeepSeek V4 Flash (GMI)',
             'deepseek-v4-flash-fireworks': 'DeepSeek V4 Flash (Fireworks)',
             'deepseek-v4.1-flash-fireworks': 'DeepSeek V4.1 Flash (Fireworks)',

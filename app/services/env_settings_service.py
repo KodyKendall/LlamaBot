@@ -113,17 +113,59 @@ TOGGLE_KEYS = frozenset(t.key for t in KNOWN_TOGGLES)
 #: Names a custom variable may never take, independent of what this box happens
 #: to have configured. Kept static so a rejection reveals a platform fact rather
 #: than the contents of this instance's file.
+#:
+#: These are NAMESPACES the platform owns. ``GITHUB_`` is deliberately absent
+#: (0.7.12): LlamaBot reads only GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET (the
+#: device-flow app, in PLATFORM_KEYS), so ``GITHUB_TOKEN`` belongs to the customer.
 RESERVED_PREFIXES = (
-    "LLAMABOT_", "LLAMAPRESS_", "LEONARDO_", "RAILS_", "POSTGRES_", "REDIS_",
-    "AWS_", "CHATGPT_", "WS_", "SESSION_", "SECRET_", "DB_", "AUTH_",
-    "CHECKPOINT", "SCHEDULER_", "VSCODE_", "GITHUB_", "CODEX_",
+    "LLAMABOT_", "LLAMAPRESS_", "LEONARDO_", "LLAMA_", "RAILS_", "POSTGRES_",
+    "REDIS_", "AWS_", "CHATGPT_", "WS_", "SESSION_", "SECRET_", "DB_", "AUTH_",
+    "CHECKPOINT", "SCHEDULER_", "VSCODE_", "CODEX_", "MOTHERSHIP_",
+    "ACTIVE_RECORD_ENCRYPTION_",
 )
-RESERVED_SUFFIXES = ("_API_KEY", "_SECRET", "_PASSWORD", "_TOKEN", "_KEY", "_URI")
+
+#: Every exact name the platform writes or reads, on any box. Replaces the old
+#: suffix rule (``_KEY``, ``_SECRET``, ``_TOKEN``...), which judged names by their
+#: SHAPE and so blocked nearly every normal name for a customer's own secret —
+#: STRIPE_SECRET_KEY, DISCORD_CLIENT_SECRET, SENDGRID_API_KEY. Customers routed
+#: around it with names like STRIPE_SK, which then broke every gem default.
+#:
+#: The list is the same on every box, so rejecting one of these reveals nothing
+#: about this box. test_every_env_name_llamabot_reads_is_reserved fails CI when
+#: LlamaBot starts reading a secret-shaped name that is not covered here.
+PLATFORM_KEYS = frozenset({
+    # Written into a box's .env by the mothership's provisioning.
+    "ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY", "FULL_HOSTED_DOMAIN", "GOOGLE_API_KEY",
+    "HOSTED_DOMAIN", "LXD_HOST_IP", "LXD_HOST_PORT", "LXD_HOST_USER", "META_API_KEY",
+    "OPENAI_API_KEY", "OPENROUTER_API_KEY", "REQUIRE_EMAIL_VERIFICATION",
+    "SES_SMTP_PASSWORD", "SES_SMTP_USERNAME", "TAVILY_API_KEY",
+    # Model providers and overrides LlamaBot reads.
+    "ALIBABA_API_KEY", "ALIBABA_BASE_URL", "BEDROCK_API_KEY", "DASHSCOPE_API_KEY",
+    "FIREWORKS_API_KEY", "FIREWORKS_BASE_URL", "FIREWORKS_DEEPSEEK_API_KEY",
+    "FIREWORKS_DEEPSEEK_MODEL", "FIREWORKS_DEEPSEEK_V4_1_MODEL",
+    "FIREWORKS_NEMOTRON_MODEL", "GEMINI_API_KEY", "GMI_API_KEY", "GMI_BASE_URL",
+    "GMI_DEEPSEEK_API_KEY", "GMI_DEEPSEEK_MODEL", "GROUND_ROUTE_SEARCH_API_KEY",
+    "HETZNER_API_KEY", "HETZNER_BASE_URL", "HETZNER_QWEN_MODEL", "META_BASE_URL",
+    "META_MUSE_1_3_MODEL", "META_MUSE_MODEL", "MODEL_API_KEY", "OPENROUTER_BASE_URL",
+    "OPENROUTER_MANAGEMENT_API_KEY", "RUNPOD_GLIMMER_API_KEY",
+    "RUNPOD_GLIMMER_BASE_URL", "RUNPOD_GLIMMER_MODEL", "RUNPOD_NEMOTRON_API_KEY",
+    "RUNPOD_NEMOTRON_BASE_URL", "RUNPOD_NEMOTRON_MODEL", "RUNPOD_QWEN_API_KEY",
+    "RUNPOD_QWEN_BASE_URL", "RUNPOD_QWEN_MODEL", "DEFAULT_LLM_MODEL",
+    "FALLBACK_TEXT_MODEL", "LLM_STREAM_USAGE",
+    # Other LlamaBot settings.
+    "ENABLE_GITHUB_BUTTON", "GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET",
+    "HOST_LEONARDO_PATH", "SSO_ORIGIN_HOSTS",
+    # Compose plumbing and the Rails app's own platform settings.
+    "PASSWORD", "PUID", "PGID", "TZ", "MALLOC_ARENA_MAX", "BOOTSNAP_CACHE_DIR",
+    "SECRET_KEY_BASE", "PORT", "PIDFILE", "BUNDLE_GEMFILE", "APP_VERSION",
+    "TWO_FACTOR_ENABLED", "TWO_FACTOR_ISSUER", "ENABLE_GOOGLE_CLOUD_LOGGING",
+})
+
 RESERVED_EXACT = frozenset({
     "DATABASE_URL", "ENABLED_MODELS", "DISABLED_MODELS", "PAYWALL_ENABLED",
     "INSTANCE_NAME", "LOG_LEVEL", "ENV", "PATH", "HOME", "USER", "SHELL",
     "COOKBOOK_URL", "S3_BUCKET_PATH",
-})
+}) | PLATFORM_KEYS
 
 
 class EnvValidationError(ValueError):
@@ -315,22 +357,36 @@ def validate_value(value: str) -> str:
     return text
 
 
+def is_static_reserved(name: str) -> bool:
+    """True when a platform rule reserves ``name`` — the same answer on every box."""
+    if name in RESERVED_EXACT or name in TOGGLE_KEYS:
+        return True
+    return name.startswith(RESERVED_PREFIXES)
+
+
 def is_reserved(name: str) -> bool:
     """True when ``name`` may not be used for a custom variable.
 
-    Covers the static platform namespace AND whatever this instance already has
+    Covers the static platform rules AND whatever this instance already has
     configured — the latter because a colliding custom variable would be silently
     dropped at render time, which is worse than being told no.
     """
-    if name in RESERVED_EXACT or name in TOGGLE_KEYS:
-        return True
-    if name.startswith(RESERVED_PREFIXES) or name.endswith(RESERVED_SUFFIXES):
-        return True
-    return name in base_keys()
+    return is_static_reserved(name) or name in base_keys()
 
 
-#: One message for every rejection, so it cannot be used to probe whether a
-#: particular variable is configured on this instance.
+def static_reserved_message(name: str) -> str:
+    """The message for a platform-rule rejection. Safe to be specific: the rules
+    are identical on every box, so it says nothing about this one."""
+    return (
+        f"{name} is a platform setting and cannot be used. Names starting with "
+        "LLAMABOT_, RAILS_, AWS_, POSTGRES_ and similar are reserved too. Try a "
+        "name for your own service, such as DISCORD_CLIENT_SECRET."
+    )
+
+
+#: The message for a collision with a key only THIS box has (an operator's
+#: hand-added line). Generic on purpose, so it cannot be used to probe what is
+#: configured here.
 RESERVED_MESSAGE = (
     "That name is reserved or already in use. Pick a different name — custom "
     "variables can never replace an existing setting."

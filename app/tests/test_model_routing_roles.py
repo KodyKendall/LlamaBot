@@ -30,6 +30,7 @@ GLM = "glm-5.3-flash-zai"
 MUSE = "muse-spark-1.2-contributor"
 DS = "deepseek-v4-flash"
 DS_VISION = "deepseek-v4-flash-vision-exp"
+DS_41 = "deepseek-v4.1-flash"
 
 
 @pytest.fixture(autouse=True)
@@ -221,7 +222,7 @@ def test_openrouter_box_resolves_vision_to_glm(monkeypatch):
 
 def test_stock_box_resolves_vision_to_the_deepseek_sibling(monkeypatch):
     monkeypatch.setenv("DEEPSEEK_API_KEY", "ds-test-key")
-    assert model_policy.vision_model() == DS_VISION
+    assert model_policy.vision_model() == DS_41
 
 
 def test_the_deepseek_sibling_is_still_enabled_on_a_stock_box(monkeypatch):
@@ -230,7 +231,7 @@ def test_the_deepseek_sibling_is_still_enabled_on_a_stock_box(monkeypatch):
     that auto-enable silently stopped covering it, and a stock box lost images."""
     monkeypatch.setenv("DEEPSEEK_API_KEY", "ds-test-key")
     monkeypatch.setenv("VISION_MODEL_ALLOWED", "true")
-    assert model_policy.is_model_enabled(DS_VISION) is True
+    assert model_policy.is_model_enabled(DS_41) is True
 
 
 def test_roles_vision_overrides_the_compiled_tuple(monkeypatch):
@@ -247,7 +248,7 @@ def test_a_disabled_vision_model_is_routed_around(monkeypatch):
     monkeypatch.setenv("META_API_KEY", "meta-test-key")
     monkeypatch.setenv("DEEPSEEK_API_KEY", "ds-test-key")
     monkeypatch.setenv("DISABLED_MODELS", MUSE)
-    assert model_policy.vision_model() == DS_VISION
+    assert model_policy.vision_model() == DS_41
 
 
 def test_vision_never_names_a_model_the_box_has_no_key_for(monkeypatch):

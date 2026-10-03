@@ -152,7 +152,8 @@
         <div class="banner-body">
             <strong id="pendingTitle">Restart required</strong>
             <span id="pendingKeys"></span>
-            <code>docker compose up -d --force-recreate</code>
+            <button class="action" id="applyBtn" type="button" style="display:none; margin-top: 8px;">Apply now — restarts your app (about 30 seconds)</button>
+            <code id="pendingCmd">docker compose up -d --force-recreate</code>
         </div>
     </div>
 
@@ -236,10 +237,32 @@ function renderPending(pending) {
     const n = pending.count;
     document.getElementById('pendingTitle').textContent =
         `${n} change${n === 1 ? '' : 's'} waiting for a restart`;
+    const appKeys = pending.app_keys || [];
+    // Custom variables are applied by recreating the Rails app, which this screen
+    // can do. Anything else (the toggles) still needs a full recreate by hand.
+    const onlyApp = appKeys.length === pending.keys.length;
     document.getElementById('pendingKeys').textContent =
         pending.keys.join(', ') + ' — saved, but the running app still has the old ' +
-        'values. Restart to apply:';
+        'values. ' + (onlyApp && IS_ADMIN ? 'Apply them now:' : 'Restart to apply:');
+    document.getElementById('applyBtn').style.display = appKeys.length && IS_ADMIN ? '' : 'none';
+    document.getElementById('pendingCmd').style.display = onlyApp && IS_ADMIN ? 'none' : '';
     banner.classList.add('visible');
+}
+
+async function applyPending() {
+    const btn = document.getElementById('applyBtn');
+    btn.disabled = true;
+    btn.textContent = 'Restarting your app…';
+    try {
+        const result = await api('/api/env-vars/apply', { method: 'POST' });
+        renderPending(result.pending);
+        await load();
+    } catch (e) {
+        alert(e.message);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Apply now — restarts your app (about 30 seconds)';
+    }
 }
 
 // ---------------------------------------------------------------- toggles
@@ -362,6 +385,12 @@ function renderCustomVars(customVars) {
         main.appendChild(nameLine);
 
         if (v.description) main.appendChild(el('div', 'row-desc', v.description));
+        const appPending = (state && state.pending && state.pending.app_keys) || [];
+        if (appPending.includes(v.name)) {
+            const note = el('div', 'row-desc', 'Saved. Your app loads it on the next restart.');
+            note.style.color = 'var(--warn)';
+            main.appendChild(note);
+        }
         main.appendChild(el('div', 'row-value', v.masked));
         row.appendChild(main);
 
@@ -428,6 +457,7 @@ async function load() {
 
     renderPending(state.pending);
     renderToggles(state.toggles);
+    document.getElementById('applyBtn').onclick = applyPending;
     renderCustomVars(state.custom_vars);
 
     const addBtn = document.getElementById('addToggleBtn');

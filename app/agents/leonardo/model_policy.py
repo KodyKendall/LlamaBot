@@ -144,12 +144,15 @@ _VISION_ALLOWED_DEFAULT = False
 #     that has no OpenRouter key. It was NOT retired — the 2026-08-31 404s were
 #     a 3h22m upstream blip that recovered — so demoting it is about following
 #     the default, not about routing around a dead model.
-#   * DeepSeek's vision sibling last (0.7.5), which runs on the DEEPSEEK_API_KEY
-#     every box already has. It is the floor under the floor: a box with no
-#     OpenRouter and no META key still gets images.
+#   * DeepSeek last, on the DEEPSEEK_API_KEY every box already has. It is the
+#     floor under the floor: a box with no OpenRouter and no META key still gets
+#     images. V4.1 Flash (0.7.12) first, because `deepseek-flash` is the id
+#     DeepSeek lists; `-vision-exp` is now only an alias for the same model and
+#     stays behind it as the operator's way back (DISABLED_MODELS=V4.1).
 _VISION_MODELS = (
     "glm-5.3-flash-zai",
     "muse-spark-1.2-contributor",
+    "deepseek-v4.1-flash",
     "deepseek-v4-flash-vision-exp",
 )
 
@@ -326,6 +329,7 @@ def canonical_model_name(model_name: str) -> str:
 # name models outside this set.
 _KNOWN_MODELS = [
     "deepseek-v4-flash",
+    "deepseek-v4.1-flash",
     "deepseek-v4-pro",
     "deepseek-v4-flash-vision-exp",
     "deepseek-v4-flash-gmi",

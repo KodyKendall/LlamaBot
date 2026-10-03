@@ -244,14 +244,46 @@ def test_reserved_names_are_refused(client, env_file, name):
     assert env_file.read_text() == original
 
 
-def test_every_rejection_uses_the_same_message(client):
-    """Otherwise the endpoint becomes an oracle for what this box has configured."""
+def test_a_box_only_collision_cannot_be_told_apart_from_a_free_name(client, env_file):
+    """The endpoint must not be an oracle for what this box has configured.
+
+    Static rules (platform keys, prefixes) are the same on every box, so naming
+    them reveals nothing. For a name on NO static list, the only thing that can
+    reject it is this box's file — and that rejection must look identical to
+    every other non-static rejection, and say nothing about the file.
+    """
+    name = "ACME_WEBHOOK_URL"
+    assert not svc.is_static_reserved(name)
+
+    env_file.write_text(env_file.read_text() + f'{name}="operator-set"\n')
+    collided = client.post("/api/custom-env-vars", json={"name": name, "value": "x"})
+
+    assert collided.status_code == 400
+    assert collided.json()["detail"] == svc.RESERVED_MESSAGE
+    assert name not in collided.json()["detail"]
+
+
+def test_a_platform_key_gets_the_specific_message_whether_or_not_it_is_set(client, env_file):
     configured = client.post("/api/custom-env-vars",
                              json={"name": "OPENAI_API_KEY", "value": "x"}).json()["detail"]
     not_configured = client.post("/api/custom-env-vars",
-                                 json={"name": "STRIPE_API_KEY", "value": "x"}).json()["detail"]
+                                 json={"name": "FIREWORKS_API_KEY", "value": "x"}).json()["detail"]
 
-    assert configured == not_configured == svc.RESERVED_MESSAGE
+    assert "OPENAI_API_KEY" in configured and "platform" in configured
+    assert "FIREWORKS_API_KEY" in not_configured
+    assert configured.replace("OPENAI_API_KEY", "N") == not_configured.replace("FIREWORKS_API_KEY", "N")
+
+
+def test_a_standard_third_party_secret_name_saves(client, env_file):
+    """STRIPE_SECRET_KEY is the name every Stripe tutorial and gem default uses."""
+    original = env_file.read_text()
+    resp = client.post("/api/custom-env-vars",
+                       json={"name": "STRIPE_SECRET_KEY", "value": "sk_test_123"})
+
+    assert resp.status_code == 200
+    text = env_file.read_text()
+    assert text.startswith(original)  # base section byte-identical
+    assert 'STRIPE_SECRET_KEY="sk_test_123"' in text[len(original):]
 
 
 def test_newline_injection_is_refused(client, env_file):
@@ -335,3 +367,103 @@ def test_environment_page_carries_no_secrets(env_file):
     assert "window.LLAMABOT_IS_ADMIN = true;" in body
     for secret in SECRETS:
         assert secret not in body
+
+
+# --------------------------------------------------------------------------
+# 0.7.12: custom vars are pending until the RAILS container has them, and the
+# screen can apply them (a recreate — a plain restart does not reload .env)
+# --------------------------------------------------------------------------
+
+@pytest.fixture(autouse=True)
+def rails_env(monkeypatch):
+    """Pretend the running Rails container has this environment (None = unreachable).
+    Autouse so no test here talks to a real Docker socket."""
+    from app.services import rails_container
+
+    state = {"env": {}}
+    monkeypatch.setattr(rails_container, "live_env", lambda: state["env"])
+    return state
+
+
+def test_custom_var_stays_pending_until_rails_has_it(client, db_session, rails_env, monkeypatch):
+    """LlamaBot loads the same env_file, so a LlamaBot-only recreate used to clear
+    the banner while the Rails app still lacked the key (leo-loepo, 2026-09-30)."""
+    from app.services import env_store
+
+    client.post("/api/custom-env-vars", json={"name": "DISCORD_CLIENT_ID", "value": "abc"})
+    monkeypatch.setenv("DISCORD_CLIENT_ID", "abc")  # LlamaBot has it...
+    assert env_store.pending_summary(db_session)["keys"] == ["DISCORD_CLIENT_ID"]
+
+    rails_env["env"] = {"DISCORD_CLIENT_ID": "abc"}  # ...now Rails does too
+    assert env_store.pending_summary(db_session)["restart_required"] is False
+
+
+def test_custom_var_stays_pending_when_rails_is_unreachable(client, db_session, rails_env, monkeypatch):
+    from app.services import env_store
+
+    client.post("/api/custom-env-vars", json={"name": "DISCORD_CLIENT_ID", "value": "abc"})
+    monkeypatch.setenv("DISCORD_CLIENT_ID", "abc")
+    rails_env["env"] = None
+    assert env_store.pending_summary(db_session)["restart_required"] is True
+
+
+def test_deleted_custom_var_clears_once_rails_drops_it(client, db_session, rails_env):
+    from app.services import env_store
+
+    rails_env["env"] = {"TEMP_VAR": "1"}
+    client.post("/api/custom-env-vars", json={"name": "TEMP_VAR", "value": "1"})
+    client.delete("/api/custom-env-vars/TEMP_VAR")
+    assert env_store.pending_summary(db_session)["keys"] == ["TEMP_VAR"]
+
+    rails_env["env"] = {}
+    assert env_store.pending_summary(db_session)["restart_required"] is False
+
+
+def test_pending_summary_says_which_keys_the_app_needs(client, db_session, rails_env):
+    from app.services import env_store
+
+    client.post("/api/custom-env-vars", json={"name": "DISCORD_CLIENT_ID", "value": "abc"})
+    assert env_store.pending_summary(db_session)["app_keys"] == ["DISCORD_CLIENT_ID"]
+
+
+def test_apply_recreates_the_rails_container(client, monkeypatch):
+    from app.services import rails_container
+
+    calls = []
+    monkeypatch.setattr(rails_container, "recreate",
+                        lambda: calls.append("recreate") or {"ok": True, "output": ""})
+    resp = client.post("/api/env-vars/apply")
+
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+    assert calls == ["recreate"]
+
+
+def test_apply_reports_a_failed_recreate(client, monkeypatch):
+    from app.services import rails_container
+
+    monkeypatch.setattr(rails_container, "recreate",
+                        lambda: {"ok": False, "output": "boom"})
+    resp = client.post("/api/env-vars/apply")
+    assert resp.status_code == 502
+
+
+def test_apply_is_admin_only(engineer_client, monkeypatch):
+    from app.services import rails_container
+
+    monkeypatch.setattr(rails_container, "recreate", lambda: pytest.fail("must not run"))
+    assert engineer_client.post("/api/env-vars/apply").status_code in (401, 403)
+
+
+def test_recreate_uses_force_recreate_not_restart(monkeypatch):
+    """`docker restart` keeps the old environment; only a recreate reads .env."""
+    from app.services import rails_container
+
+    ran = []
+    monkeypatch.setattr(rails_container, "_find_container",
+                        lambda: {"Names": ["/leonardo-llamapress-1"], "Labels": {
+                            "com.docker.compose.service": "llamapress",
+                            "com.docker.compose.project.config_files": "/srv/Leonardo/docker-compose.yml"}})
+    monkeypatch.setattr(rails_container, "_run", lambda cmd, timeout: ran.append(cmd) or {"ok": True, "output": ""})
+    assert rails_container.recreate()["ok"] is True
+    assert ran == ["docker compose -f /srv/Leonardo/docker-compose.yml up -d --force-recreate --no-deps llamapress"]
