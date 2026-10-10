@@ -18,6 +18,7 @@ MODEL_CAPABILITIES = {
 
     # Claude models support images and PDFs only (no video)
     'claude-4.5-haiku': {'images': True, 'video': False, 'pdf': True},
+    'claude-haiku-5.5': {'images': True, 'video': False, 'pdf': True},
     'claude-4.5-sonnet': {'images': True, 'video': False, 'pdf': True},
     'claude-sonnet-4': {'images': True, 'video': False, 'pdf': True},
     'claude-opus-4': {'images': True, 'video': False, 'pdf': True},
@@ -106,6 +107,7 @@ ZDR_COMPLIANT = {
     'gemini-2.5-flash': False,
     'gemini-2.5-pro': False,
     'claude-4.5-haiku': False,
+    'claude-haiku-5.5': False,
     'claude-4.5-sonnet': False,
     'claude-sonnet-4': False,
     'claude-opus-4': False,

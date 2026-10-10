@@ -883,6 +883,7 @@ async def available_models(request: Request):
     # Values can be a single string or tuple of strings (checked in order, first found wins)
     model_api_keys = {
         "claude-4.5-haiku": "ANTHROPIC_API_KEY",
+        "claude-haiku-5.5": "ANTHROPIC_API_KEY",
         "claude-4.5-sonnet": "ANTHROPIC_API_KEY",
         "gpt-5-mini": "OPENAI_API_KEY",
         "gpt-5-codex": "OPENAI_API_KEY",

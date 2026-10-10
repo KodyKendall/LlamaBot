@@ -1039,6 +1039,15 @@ def _build_client(model_name: str):
             thinking={"type": "enabled", "budget_tokens": 3000},
             max_retries=0,
         )
+    if model_name == "claude-haiku-5.5":
+        # Haiku 5.5 is adaptive-thinking only: a thinking budget (Haiku 4.5's
+        # config above) is a 400 here. Effort stays at the model default.
+        return ChatAnthropic(
+            model="claude-haiku-5-5",
+            max_tokens=16384,
+            thinking={"type": "adaptive"},
+            max_retries=0,
+        )
     if model_name == "gemini-3-flash":
         return ChatGoogleGenerativeAI(
             model="gemini-3-flash-preview",

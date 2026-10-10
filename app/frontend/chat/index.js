@@ -137,6 +137,7 @@ class ChatApp {
       // /api/available-models resolves.
       ['deepseek-v4.1-flash-fireworks', { images: true }],
       ['deepseek-v4.1-flash', { images: true }],
+      ['claude-haiku-5.5', { images: true }],
       // Qwen3.7 Plus is image-capable — seed it so an image upload while it's
       // selected is NOT spuriously auto-switched to Gemini before the async
       // /api/available-models fetch resolves (the unknown-model default is
