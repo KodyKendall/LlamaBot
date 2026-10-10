@@ -3954,6 +3954,7 @@ async def scheduled_jobs_page(user: User = Depends(engineer_or_admin_required)):
             'gemini-3-flash': 'Gemini 3 Flash',
             'gemini-3-pro': 'Gemini 3 Pro',
             'claude-4.5-haiku': 'Claude 4.5 Haiku',
+            'claude-haiku-5.5': 'Claude Haiku 5.5',
             'claude-4.5-sonnet': 'Claude 4.5 Sonnet',
             'gpt-5-mini': 'GPT-5 Mini',
             'gpt-5-codex': 'GPT-5 Codex',

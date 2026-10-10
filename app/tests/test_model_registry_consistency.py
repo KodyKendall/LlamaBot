@@ -1272,3 +1272,51 @@ def test_deepseek_41_does_not_change_what_the_fleet_runs():
 
     assert DS_41 != DEFAULT_LLM_MODEL
     assert FALLBACK_TEXT_MODEL == "deepseek-v4-flash"
+
+
+# --------------------------------------------------------------------------
+# Claude Haiku 5.5 — 0.7.13
+# --------------------------------------------------------------------------
+
+HAIKU_55 = "claude-haiku-5.5"
+
+
+def test_haiku_55_is_offered_in_the_dropdown():
+    assert HAIKU_55 in _dropdown_models()
+
+
+def test_haiku_55_supports_images_and_pdf_but_not_video():
+    assert MODEL_CAPABILITIES[HAIKU_55] == {"images": True, "video": False, "pdf": True}
+
+
+def test_haiku_55_uses_the_anthropic_key():
+    assert _api_key_map()[HAIKU_55] is True
+
+
+def test_haiku_55_is_known_to_the_policy():
+    assert HAIKU_55 in _KNOWN_MODELS
+
+
+def test_haiku_55_builds_an_anthropic_client_with_adaptive_thinking():
+    """Haiku 5.5 rejects `budget_tokens` with a 400 (Haiku 4.5's config), so the
+    branch must not copy its sibling's thinking block."""
+    from app.agents.leonardo import llm_factory
+
+    src = _model_dispatch_source(llm_factory)
+    branch = src.split(f'model_name == "{HAIKU_55}"', 1)[1].split("if model_name ==", 1)[0]
+    assert "ChatAnthropic(" in branch
+    assert 'model="claude-haiku-5-5"' in branch
+    assert '"adaptive"' in branch
+    assert "budget_tokens" not in branch
+
+
+def test_haiku_55_is_not_zdr_compliant():
+    from app.agents.leonardo.model_capabilities import ZDR_COMPLIANT
+
+    assert ZDR_COMPLIANT[HAIKU_55] is False
+
+
+def test_haiku_55_does_not_change_what_the_fleet_runs():
+    from app.agents.leonardo.llm_factory import DEFAULT_LLM_MODEL
+
+    assert HAIKU_55 != DEFAULT_LLM_MODEL

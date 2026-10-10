@@ -337,6 +337,7 @@ _KNOWN_MODELS = [
     "deepseek-v4.1-flash-fireworks",
     "claude-4.5-sonnet",
     "claude-4.5-haiku",
+    "claude-haiku-5.5",
     "gpt-5-codex",
     "gpt-5-mini",
     "gpt-5-nano",
