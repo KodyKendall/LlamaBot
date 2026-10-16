@@ -110,6 +110,16 @@ export function paywallCardCopy(detail = {}, now = new Date()) {
     };
   }
 
+  // Base runs on the customer's own ChatGPT once its few daily messages on our
+  // models are used (Kody, 2026-10-12), so that is the way forward, not Upgrade.
+  if (plan === 'base') {
+    return {
+      title: 'Connect your ChatGPT account to keep going',
+      subtitle: 'Leo runs on your own ChatGPT account, even a free one. '
+        + `Or come back ${phrase || 'tomorrow'}.`,
+    };
+  }
+
   const resetSentence = phrase
     ? `Your messages reset ${phrase}.`
     : 'Your messages come back tomorrow.';

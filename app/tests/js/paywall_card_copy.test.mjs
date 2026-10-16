@@ -157,3 +157,33 @@ test('the efficiency wiki page is the one the mothership published', () => {
   assert.equal(EFFICIENCY_WIKI_URL,
     'https://llamapress.ai/wiki/using-your-messages-efficiently');
 });
+
+// ── Base plan: the way forward is the customer's own ChatGPT, not Upgrade ───
+// Base gets a few unadvertised messages a day on our models, then runs on the
+// customer's own ChatGPT account (Kody, 2026-10-12).
+
+test('a base customer out of messages is told to connect ChatGPT', () => {
+  const { title, subtitle } = paywallCardCopy(
+    { block_reason: 'message_limit', plan: 'base', resets_at: AT_MIDNIGHT },
+  );
+  assert.equal(title, 'Connect your ChatGPT account to keep going');
+  assert.match(subtitle, /your own ChatGPT account, even a free one/);
+  assert.match(subtitle, /Or come back at 12:00 AM\./);
+  assert.ok(!/upgrade/i.test(title + subtitle), `base card pushes Upgrade: ${subtitle}`);
+  assert.ok(!/\d+ messages?/i.test(title + subtitle), 'base card prints a message count');
+});
+
+test('a base card with no resets_at says come back tomorrow', () => {
+  const { subtitle } = paywallCardCopy({ block_reason: 'message_limit', plan: 'base' });
+  assert.match(subtitle, /Or come back tomorrow\./);
+});
+
+test('a base customer on a spend-limit block keeps the spend-limit card', () => {
+  const { title } = paywallCardCopy({ block_reason: 'spend_limit', plan: 'base' });
+  assert.equal(title, "This app has hit today's usage limit");
+});
+
+test('a starter customer still gets the paid card', () => {
+  const { title } = paywallCardCopy({ block_reason: 'message_limit', plan: 'starter' });
+  assert.equal(title, "You've used today's messages for this app");
+});
