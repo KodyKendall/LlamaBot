@@ -352,6 +352,42 @@ class ChatApp {
       this.setAgentRunning(false);
     });
 
+    // Sign-in recovery (see WebSocketManager.handleAuthError). A rejected
+    // token used to be console-only, and the chat spun until a manual reload.
+    window.addEventListener('websocketReauthenticating', () => {
+      const line = this.elements.thinkingArea?.querySelector('.typing-indicator');
+      if (line) {
+        this.loadingVerbs?.stopCycling();
+        line.textContent = '🦙 Reconnecting to Leo…';
+      }
+    });
+
+    window.addEventListener('websocketAuthFailed', (e) => {
+      this.errorReporter?.report('FrontendWsAuthFailed', `WebSocket sign-in failed: ${e?.detail?.reason || 'n/a'}`);
+      this.stopDurationTimerDisplay();
+      this.setAgentRunning(false);
+      this.renderErrorCard('Leo could not sign you in. Refresh the page to continue.', 'Refresh', () => {
+        window.location.reload();
+      });
+    });
+
+    // The server never confirmed a message (no `ack`). Stop the spinner and let
+    // the user re-send it. Same client_message_id, so the server de-dupes if
+    // the first copy did land.
+    window.addEventListener('websocketMessageUndelivered', (e) => {
+      const data = e?.detail?.data;
+      if (!data) return;
+      this.stopDurationTimerDisplay();
+      this.setAgentRunning(false);
+      this.renderErrorCard('Your message was not delivered.', 'Retry', (card) => {
+        card.remove();
+        this.webSocketManager?.retryMessage(data);
+        this.showThinkingIndicator();
+        this.startDurationTimerDisplay();
+        this.setAgentRunning(true);
+      });
+    });
+
     // On (re)connect, if a run is in progress, ATTACH to the background run for
     // the active thread and replay anything we missed while disconnected — we do
     // NOT re-send the user message (that's what caused the duplicate-restart
@@ -2718,6 +2754,19 @@ class ChatApp {
     hint.className = 'stall-hint';
     hint.textContent = "Taking longer than usual — you can cancel and say ‘continue’ to retry.";
     this.elements.thinkingArea.appendChild(hint);
+  }
+
+  /** An error bubble with one action button (Refresh, Retry). */
+  renderErrorCard(text, actionLabel, onAction) {
+    const card = this.messageRenderer?.renderErrorMessage(text);
+    if (!card) return null;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'error-card-action';
+    button.textContent = actionLabel;
+    button.addEventListener('click', () => onAction(card), { once: true });
+    card.appendChild(button);
+    return card;
   }
 
   clearStallHint() {

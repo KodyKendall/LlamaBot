@@ -3082,6 +3082,22 @@ body.instance-locked .lock-modal-overlay {
     color: #ff6b6b;
 }
 
+.error-card-action {
+    display: block;
+    margin-top: 0.5rem;
+    padding: 0.3rem 0.8rem;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 99, 71, 0.6);
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+}
+
+.error-card-action:hover {
+    background-color: rgba(255, 99, 71, 0.15);
+}
+
 [data-llamabot="queued-message"] {
     background-color: rgba(76, 175, 80, 0.2);
     border: 1px solid rgba(76, 175, 80, 0.5);

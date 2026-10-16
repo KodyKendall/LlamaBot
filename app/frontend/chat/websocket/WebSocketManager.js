@@ -17,6 +17,14 @@ import { shouldResumeAfterReconnect, fetchAuthoritativeMessage, nextResumeGenera
 //    (re)connect, and replaying a stale one would mis-replay the run.
 const NON_QUEUEABLE_TYPES = new Set(['auth', 'cancel', 'attach']);
 
+// Frames a native socket may carry before `auth_success`. Anything else waits
+// in the outbox: the server ignores a rejected socket, so a message sent into
+// it is lost while the spinner keeps going.
+const PRE_AUTH_TYPES = new Set(['auth', 'ping', 'cancel', 'attach']);
+
+// Server close code for "sign-in failed" (WS_CLOSE_AUTH_FAILED).
+const AUTH_FAILED_CLOSE_CODE = 4401;
+
 export class WebSocketManager {
   constructor(messageHandler, config = {}, elements = {}) {
     this.messageHandler = messageHandler;
@@ -33,6 +41,14 @@ export class WebSocketManager {
     // without limit.
     this.outbox = [];
     this.maxQueueSize = config.maxQueueSize ?? 25;
+    // Sign-in recovery: one fresh-token reconnect, then a visible error.
+    this.authFailures = 0;
+    this.authRecovering = false;
+    this.authGaveUp = false;
+    // client_message_id -> timer. A message the server never acks is reported
+    // instead of leaving "thinking" up forever.
+    this.ackTimeoutMs = config.ackTimeoutMs ?? 25000;
+    this.pendingAcks = new Map();
   }
 
   /**
@@ -102,6 +118,7 @@ export class WebSocketManager {
    * Handle WebSocket open event
    */
   handleOpen() {
+    this.isAuthenticated = false;
     this.updateConnectionStatus(true);
     leoDiagnostics.noteOpen(this.socket ? this.socket.readyState : null);
     this.reconnectAttempts = 0;
@@ -159,11 +176,13 @@ export class WebSocketManager {
         console.warn('No auth token available - WebSocket may be unauthenticated');
         // A box with WS_AUTH_REQUIRED=false has no token and never will; don't
         // strand the resume path waiting for a handshake that isn't coming.
-        this.announceReady();
+        // If auth IS required the server answers with auth_error, which
+        // starts the recovery path.
+        this.markSignedIn();
       }
     } catch (error) {
       console.error('Failed to send auth message:', error);
-      this.announceReady();
+      this.markSignedIn();
     }
   }
 
@@ -193,6 +212,7 @@ export class WebSocketManager {
       readyState: this.socket ? this.socket.readyState : null,
     });
 
+    this.isAuthenticated = false;
     this.updateConnectionStatus(false);
 
     // Remember whether Leo was mid-answer when the pipe died. The thinking indicator is
@@ -207,8 +227,82 @@ export class WebSocketManager {
     // Emit custom event with close info
     window.dispatchEvent(new CustomEvent('websocketDisconnected', { detail: closeInfo }));
 
+    // Sign-in failures reconnect on their own path, right away, with a fresh token.
+    if (this.authGaveUp || this.authRecovering) return;
+    if (event && event.code === AUTH_FAILED_CLOSE_CODE) {
+      this.handleAuthError('Socket closed: sign-in failed');
+      return;
+    }
+
     // Attempt to reconnect after delay
     this.scheduleReconnect();
+  }
+
+  /**
+   * The socket may now carry user traffic: deliver what was held back.
+   */
+  markSignedIn() {
+    this.isAuthenticated = true;
+    this.flushOutbox();
+    this.announceReady();
+  }
+
+  /**
+   * The server rejected our token (`auth_error` or a 4401 close).
+   *
+   * Get a fresh token and reconnect at once — that fixes a stale cached token
+   * (key rotation, expiry). If that also fails, or there is no token to get
+   * (the browser session itself is gone), stop and say so: retrying a token
+   * that will never work just leaves the chat spinning.
+   */
+  async handleAuthError(reason) {
+    this.isAuthenticated = false;
+    TokenManager.clearToken();
+    if (this.authGaveUp || this.authRecovering) return;
+
+    this.authFailures += 1;
+    if (this.authFailures > 1) {
+      this.giveUpOnAuth(reason);
+      return;
+    }
+
+    this.authRecovering = true;
+    window.dispatchEvent(new CustomEvent('websocketReauthenticating', { detail: { reason } }));
+    const token = await TokenManager.fetchNewToken();
+    if (!token) {
+      this.authRecovering = false;
+      this.giveUpOnAuth('No sign-in token (browser session ended)');
+      return;
+    }
+
+    this.dropSocket();
+    this.authRecovering = false;
+    this.connect();
+  }
+
+  giveUpOnAuth(reason) {
+    console.error('WebSocket sign-in failed; not retrying:', reason);
+    this.authGaveUp = true;
+    this.dropSocket();
+    this.updateConnectionStatus(false);
+    // handleClose may have disabled Send while we were recovering. Keep it
+    // usable: a new message gets "not delivered" + Retry (a fresh sign-in).
+    if (this.elements.sendButton) {
+      this.elements.sendButton.disabled = false;
+    }
+    window.dispatchEvent(new CustomEvent('websocketAuthFailed', { detail: { reason } }));
+  }
+
+  /** Close the current socket without triggering the normal reconnect path. */
+  dropSocket() {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    const socket = this.socket;
+    if (!socket) return;
+    socket.onopen = socket.onclose = socket.onerror = socket.onmessage = null;
+    try { socket.close(); } catch (_) { /* already closed */ }
   }
 
   /**
@@ -248,20 +342,17 @@ export class WebSocketManager {
 
     // Handle authentication responses
     if (data.type === 'auth_success') {
-      this.isAuthenticated = true;
       console.log('WebSocket authenticated as:', data.user);
+      this.authFailures = 0;
       // Now that we're live & authenticated, deliver anything that was queued
-      // while the connection was down.
-      this.flushOutbox();
-      this.announceReady();
+      // while the connection was down or signing in.
+      this.markSignedIn();
       return;
     }
 
     if (data.type === 'auth_error') {
-      this.isAuthenticated = false;
       console.error('WebSocket auth failed:', data.content);
-      // Clear cached token so we fetch a fresh one on reconnect
-      TokenManager.clearToken();
+      this.handleAuthError(data.content);
       return;
     }
 
@@ -276,10 +367,19 @@ export class WebSocketManager {
     // client_message_id so the resume-on-reconnect logic knows the server
     // already has it and must not re-send it (which would duplicate the turn).
     if (data.type === 'ack') {
+      this.clearAckTimer(data.client_message_id);
       window.dispatchEvent(new CustomEvent('websocketMessageAcked', {
         detail: { client_message_id: data.client_message_id, status: data.status }
       }));
       return;
+    }
+
+    // The server answered with an error instead of an ack (e.g. a mode the
+    // user may not run). That error is already on screen; don't stack a
+    // "not delivered" card on top of it.
+    if (data.type === 'error') {
+      this.pendingAcks.forEach((timer) => clearTimeout(timer));
+      this.pendingAcks.clear();
     }
 
     // Delegate to message handler
@@ -298,8 +398,28 @@ export class WebSocketManager {
    * (auth/cancel) are dropped instead — replaying them after reconnect is wrong.
    */
   send(data) {
-    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+    // Sign-in already failed for good: say so now rather than spinning until
+    // the ack timeout. Retry (retryMessage) gets a fresh sign-in attempt.
+    // Next tick: the caller marks the agent running right after send()
+    // returns, and the event has to land after that to undo it.
+    if (this.authGaveUp && data?.client_message_id) {
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('websocketMessageUndelivered', { detail: { data } }));
+      }, 0);
+      return false;
+    }
+
+    this.armAckTimer(data);
+
+    const open = this.socket && this.socket.readyState === WebSocket.OPEN;
+    const signedIn = this.isActionCable || this.isAuthenticated || PRE_AUTH_TYPES.has(data?.type);
+    if (open && signedIn) {
       this.socket.send(JSON.stringify(data));
+      return true;
+    }
+    if (open) {
+      // Live socket, sign-in still pending: hold it for auth_success.
+      this.queueMessage(data);
       return true;
     }
 
@@ -311,6 +431,49 @@ export class WebSocketManager {
     this.queueMessage(data);
     this.ensureConnecting();
     return true; // accepted — will be delivered on reconnect
+  }
+
+  /**
+   * Re-send a message the server never acked (the Retry button). Same payload,
+   * same client_message_id, so the server de-dupes if the first one did land.
+   */
+  retryMessage(data) {
+    this.clearAckTimer(data?.client_message_id);
+    if (this.authGaveUp) {
+      // An explicit retry gets one more full sign-in attempt.
+      this.authGaveUp = false;
+      this.authFailures = 0;
+      this.queueMessage(data);
+      this.armAckTimer(data);
+      this.reconnectAttempts = 0;
+      this.connect();
+      return true;
+    }
+    return this.send(data);
+  }
+
+  /**
+   * Start the "was it delivered?" clock for a user message. Starts at send
+   * time — not when a run starts — because a message that never reaches the
+   * server never starts a run, and nothing else would stop the spinner.
+   */
+  armAckTimer(data) {
+    const id = data?.client_message_id;
+    // The Rails relay (ActionCable) does not pass acks back to the browser.
+    if (!id || this.isActionCable || this.pendingAcks.has(id)) return;
+    this.pendingAcks.set(id, setTimeout(() => {
+      this.pendingAcks.delete(id);
+      // Pull it out of the outbox: Retry owns it now, and a late flush would
+      // deliver it behind the user's back.
+      this.outbox = this.outbox.filter((m) => m !== data);
+      window.dispatchEvent(new CustomEvent('websocketMessageUndelivered', { detail: { data } }));
+    }, this.ackTimeoutMs));
+  }
+
+  clearAckTimer(id) {
+    if (!id || !this.pendingAcks.has(id)) return;
+    clearTimeout(this.pendingAcks.get(id));
+    this.pendingAcks.delete(id);
   }
 
   /**
@@ -352,7 +515,7 @@ export class WebSocketManager {
    * the Rails gem, so we leave its reconnection alone.
    */
   ensureConnecting() {
-    if (this.isActionCable) return;
+    if (this.isActionCable || this.authGaveUp || this.authRecovering) return;
 
     const state = this.socket ? this.socket.readyState : WebSocket.CLOSED;
     if (state === WebSocket.OPEN || state === WebSocket.CONNECTING || this.reconnectTimer) {
@@ -536,6 +699,8 @@ export class WebSocketManager {
    */
   disconnect() {
     this.clearQueue();
+    this.pendingAcks.forEach((timer) => clearTimeout(timer));
+    this.pendingAcks.clear();
 
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
