@@ -391,10 +391,14 @@ export class ThreadManager {
     const messages = threadData[0]?.messages || [];
 
     if (messages.length === 0) {
-      // Show default message
+      // A listed chat with no saved state lost its history (e.g. a backup that
+      // truncated the checkpoint tables, 2026-10-14) — say so, don't greet.
       const defaultMessage = document.createElement('div');
       defaultMessage.className = 'message ai-message';
-      defaultMessage.textContent = "Hi! What are we building today?";
+      defaultMessage.textContent = threadData[0]?.history_missing
+        ? 'The saved messages for this chat are no longer on this server. '
+          + 'You can start a new chat and paste in what you need.'
+        : "Hi! What are we building today?";
 
       const messageHistory = this.messageRenderer.getMessageHistory();
       const scrollButton = document.querySelector('[data-llamabot="scroll-to-bottom"]');

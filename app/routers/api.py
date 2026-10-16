@@ -859,8 +859,37 @@ async def chat_history(thread_id: str, request: Request, username: str = Depends
 
     config = {"configurable": {"thread_id": thread_id}}
     state_history = await graph.aget_state(config=config)
-    print(state_history)
+
+    values = state_history.values or {}
+    if not values.get("messages"):
+        missing = _missing_history_marker(thread_id)
+        if missing:
+            # Same array shape as a normal snapshot, so StreamResume and the mobile
+            # app keep working; only values (index 0) gains the marker.
+            return [{**values, "messages": [], **missing}, *list(state_history)[1:]]
     return state_history
+
+
+def _missing_history_marker(thread_id: str) -> Optional[dict]:
+    """The sidebar row for a thread whose checkpoint is gone, or None.
+
+    `threadmetadata` survived a backup that truncated the checkpoint tables (RSB,
+    2026-10-14), so a listed chat with messages but no state means its saved
+    history was lost — not that it is a new chat.
+    """
+    from app.db import engine
+
+    if engine is None:
+        return None
+    try:
+        with Session(engine) as session:
+            meta = session.get(ThreadMetadata, thread_id)
+    except Exception as e:
+        logger.warning(f"/chat-history could not read thread metadata: {e}")
+        return None
+    if not meta or not meta.message_count:
+        return None
+    return {"history_missing": True, "title": meta.title, "message_count": meta.message_count}
 
 
 # ============== Other API Endpoints ==============
