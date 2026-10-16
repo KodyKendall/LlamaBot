@@ -1,0 +1,4 @@
+0.7.14:
+[x] - Base plan paywall card leads with connecting ChatGPT.
+[x] - Chats with lost history say so instead of opening blank.
+[x] - Rails container no longer sees shared AWS and DeepSeek keys.
