@@ -561,6 +561,26 @@ export class MessageRenderer {
   }
 
   /**
+   * Fold a finished turn's thinking rows into one, kept right above the answer
+   * The surviving row holds every step's text, so nothing is lost on expand
+   * @param {string[]} thinkingIds - IDs of the thinking messages from this turn
+   */
+  mergeThinkingMessages(thinkingIds) {
+    const divs = thinkingIds.map((id) => document.getElementById(id)).filter(Boolean);
+    if (divs.length < 2) return;
+
+    const keep = divs[divs.length - 1];
+    const text = divs
+      .map((d) => d.querySelector('.thinking-message-text')?.textContent || '')
+      .filter(Boolean)
+      .join('\n\n');
+    divs.slice(0, -1).forEach((d) => d.remove());
+
+    const textEl = keep.querySelector('.thinking-message-text');
+    if (textEl) textEl.textContent = text;
+  }
+
+  /**
    * Escape HTML to prevent XSS
    */
   escapeHtml(text) {

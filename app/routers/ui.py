@@ -177,6 +177,38 @@ def load_custom_agent_modes(overlay_path, graphs):
     return out
 
 
+def voice_dictation_setting_row(*, enabled: bool, key_configured: bool) -> str:
+    """The Settings row for the chat mic button.
+
+    Greyed out and locked off while the box has no AssemblyAI key — the PUT
+    refuses "true" then too, so this is the visible half of the same rule.
+    """
+    on = enabled and key_configured
+    lock = "" if key_configured else " disabled"
+    note = (
+        "Adds a microphone button next to Send. Your speech streams into the chat box"
+        " so you can edit it before sending."
+        if key_configured else
+        "Needs an AssemblyAI API key. Add ASSEMBLY_AI_API_KEY to this instance&#39;s .env"
+        " and restart to turn this on."
+    )
+    return f"""
+            <div class="menu-item" style="cursor: default;{'' if key_configured else ' opacity: 0.45;'}">
+                <i class="fa-solid fa-microphone"></i>
+                <span>Voice Dictation</span>
+                <label style="position: relative; display: inline-block; width: 44px; height: 24px;">
+                    <input type="checkbox" id="voiceDictationToggle" style="opacity: 0; width: 0; height: 0;"
+                        onchange="toggleVoiceDictation(this)"{' checked' if on else ''}{lock}>
+                    <span style="position: absolute; cursor: {'pointer' if key_configured else 'not-allowed'}; top: 0; left: 0; right: 0; bottom: 0; background-color: {'#8b5cf6' if on else '#555'}; border-radius: 24px; transition: 0.3s;"></span>
+                    <span id="voiceDictationSlider" style="position: absolute; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; border-radius: 50%; transition: 0.3s; transform: translateX({'20px' if on else '0'});"></span>
+                </label>
+            </div>
+            <div id="voiceDictationNote" style="padding: 4px 0 0 36px; font-size: 0.75rem; color: rgba(255,255,255,0.35);">
+                {note}
+            </div>
+"""
+
+
 def _posthog_config() -> tuple[str, str]:
     """(key, host) for the chat page's PostHog, or blanks on a ZDR box."""
     from app.agents.leonardo import zdr
@@ -302,6 +334,8 @@ async def root(request: Request):
         show_token_wheel = get_site_setting(session, "show_token_wheel", "false") == "true"
         proactive_build = get_site_setting(session, "proactive_build_after_ticket", "false") == "true"
         visible_tabs = resolve_visible_tabs(session)
+        from app.services.voice_dictation import dictation_available
+        voice_dictation = dictation_available(session)
 
         # Sleep lock, injected so a locked instance paints the modal on the FIRST
         # frame — the /api/instance-lock poll is what catches a lock that lands
@@ -326,6 +360,7 @@ window.LLAMAPRESS_USER_ID = {json.dumps(llamapress_user_id) if llamapress_user_i
 window.LLAMAPRESS_EMAIL = {json.dumps(llamapress_email) if llamapress_email else "null"};
 window.ENABLE_GITHUB_BUTTON = {"true" if enable_github_button else "false"};
 window.LLAMABOT_PROACTIVE_BUILD = {"true" if proactive_build else "false"};
+window.LLAMABOT_VOICE_DICTATION = {"true" if voice_dictation else "false"};
 window.LLAMABOT_CUSTOM_AGENT_MODES = {json.dumps(custom_agent_modes)};
 window.LLAMABOT_INSTANCE_LOCK = {json.dumps(instance_lock)};
 </script>'''
@@ -1576,6 +1611,11 @@ async def settings_page(
     vscode_on = get_site_setting(session, "enable_vscode", "false") == "true"
     browser_inspect_on = get_site_setting(session, "enable_browser_inspect", "false") == "true"
     live_browser_tools_on = get_site_setting(session, "enable_live_browser_tools", "false") == "true"
+    from app.services import voice_dictation
+    voice_dictation_row = voice_dictation_setting_row(
+        enabled=voice_dictation.dictation_enabled(session),
+        key_configured=voice_dictation.key_configured(),
+    )
     is_engineer_or_admin = current_user.role == "engineer" or current_user.is_admin
 
     # Browser-tab rows. Built here rather than inside the page f-string because
@@ -1875,6 +1915,11 @@ async def settings_page(
         </div>'''}
 
         {"" if not is_engineer_or_admin else f'''<div class="card">
+            <div class="card-header">Voice Dictation</div>
+            {voice_dictation_row}
+        </div>'''}
+
+        {"" if not is_engineer_or_admin else f'''<div class="card">
             <div class="card-header">Code Editor</div>
             <div style="padding: 0 0 12px 0; font-size: 0.75rem; color: rgba(255,255,255,0.35);">
                 The VS Code editor runs in its own container. It is off by default.
@@ -2062,6 +2107,29 @@ async def settings_page(
                 headers: {{ 'Content-Type': 'application/json' }},
                 body: JSON.stringify({{ value: enabled ? 'true' : 'false' }})
             }});
+        }}
+
+        // Voice dictation. The server refuses "on" without an AssemblyAI key, so
+        // a failed PUT puts the switch back rather than showing a lie.
+        function toggleVoiceDictation(toggle) {{
+            const enabled = toggle.checked;
+            setVoiceDictationSlider(enabled);
+            fetch('/api/site-settings/enable_voice_dictation', {{
+                method: 'PUT',
+                headers: {{ 'Content-Type': 'application/json' }},
+                body: JSON.stringify({{ value: enabled ? 'true' : 'false' }})
+            }}).then((r) => {{
+                if (r.ok) return;
+                toggle.checked = !enabled;
+                setVoiceDictationSlider(!enabled);
+            }});
+        }}
+
+        function setVoiceDictationSlider(enabled) {{
+            const slider = document.getElementById('voiceDictationSlider');
+            if (!slider) return;
+            slider.previousElementSibling.style.backgroundColor = enabled ? '#8b5cf6' : '#555';
+            slider.style.transform = enabled ? 'translateX(20px)' : 'translateX(0)';
         }}
 
         // Code editor. One request both writes the setting and starts or stops

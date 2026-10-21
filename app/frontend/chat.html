@@ -362,6 +362,12 @@
                             </div>
                         </div>
                     </div>
+                    <!-- Voice dictation (ui/VoiceDictation.js). Hidden unless the server
+                         turned it on: AssemblyAI key present AND the Settings toggle on. -->
+                    <button data-llamabot="mic-button" class="tools-toggle-btn mic-button hidden" type="button"
+                            data-tooltip="Dictate — click again to stop" aria-label="Start dictation" aria-pressed="false">
+                        <i class="fa-solid fa-microphone"></i>
+                    </button>
                     <button data-llamabot="send-button" class="send-icon-button" disabled data-tooltip="Send message (Enter)" aria-label="Send message">
                         <i class="fa-solid fa-arrow-up"></i>
                     </button>

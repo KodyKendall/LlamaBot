@@ -31,6 +31,7 @@ import { FileAttachmentManager } from './ui/FileAttachmentManager.js';
 import { ScreenRecorder } from './ui/ScreenRecorder.js';
 import { ScreenshotAnnotator } from './ui/ScreenshotAnnotator.js';
 import { SlashCommandManager } from './ui/SlashCommandManager.js';
+import { VoiceDictation } from './ui/VoiceDictation.js';
 import { PanelResizeManager } from './ui/PanelResizeManager.js';
 import { ThreadManager } from './threads/ThreadManager.js';
 import { LoadingVerbs } from './utils/LoadingVerbs.js';
@@ -655,6 +656,16 @@ class ChatApp {
       this.slashCommandManager.init(this.elements.messageInput, this);
     });
 
+    safeInit('voice dictation', () => {
+      // Server-decided: AssemblyAI key present AND the Settings toggle on.
+      // Otherwise the mic button stays hidden.
+      if (window.LLAMABOT_VOICE_DICTATION !== true) return;
+      this.voiceDictation = new VoiceDictation({
+        notify: (message) => this.slashCommandManager?.showToast(message, 'error'),
+      });
+      this.voiceDictation.init(this.elements.micButton, this.elements.messageInput);
+    });
+
     // Load threads
     safeInit('thread list', () => this.threadManager.fetchThreads());
 
@@ -744,7 +755,8 @@ class ChatApp {
       executionModeTrigger: this.container.querySelector('[data-llamabot="execution-mode-trigger"]'),
       executionModeLabel: this.container.querySelector('[data-llamabot="execution-mode-label"]'),
       executionModeMenu: this.container.querySelector('[data-llamabot="execution-mode-menu"]'),
-      stopRecordingBtn: this.container.querySelector('[data-llamabot="stop-recording-btn"]')
+      stopRecordingBtn: this.container.querySelector('[data-llamabot="stop-recording-btn"]'),
+      micButton: this.container.querySelector('[data-llamabot="mic-button"]')
     };
   }
 
@@ -2065,6 +2077,9 @@ class ChatApp {
     // Clear input
     input.value = '';
     input.style.height = 'auto';
+
+    // Sent mid-dictation: late words must not refill the box we just cleared
+    this.voiceDictation?.cancel();
 
     // Clear selected element badge
     if (this.elementSelector) {
