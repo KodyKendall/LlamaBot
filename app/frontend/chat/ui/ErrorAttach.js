@@ -231,8 +231,7 @@ export class ErrorAttach {
     // also the only place it means anything.
     this.banner.classList.remove('hidden');
     this.banner.innerHTML = `
-      <span class="js-error-dot"></span>
-      <span class="js-error-count">${this._countLabel()}</span>
+      <span class="js-error-count" title="${this._countLabel()}"><span class="js-error-dot"></span>${this._countLabel()}</span>
       <button type="button" class="js-error-more" data-act="details">Read more</button>
       <label class="js-error-show">
         <input type="checkbox" data-act="show" ${this.showLeo ? 'checked' : ''} />

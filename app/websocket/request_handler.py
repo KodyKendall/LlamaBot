@@ -530,6 +530,52 @@ class RequestHandler:
             return True
         return self._snapshot_has_pending_interrupt(state_snapshot)
 
+    async def _replace_stale_question_answer(self, app, config, answer) -> None:
+        """Make sure a question card is resumed with THIS answer, not an old one.
+
+        When `interrupt()` takes an answer, LangGraph saves it against the paused
+        task at once. If the run is then cancelled before the tool step is saved
+        (RunManager cancels the running turn when a new message arrives), the
+        thread stays paused on the same card with the old answer attached, and
+        every later `Command(resume=...)` gets the OLD answer back — a resume keyed
+        by interrupt id doesn't help, LangGraph appends it after the saved one.
+        Seen on leo-lanupa (0.7.12): one card answered three times with the same
+        stale text, the last in reply to a different message typed minutes later.
+
+        So overwrite the saved answer on every paused question task before
+        resuming. Never raises — on failure the resume goes ahead as before.
+        """
+        from langgraph._internal._constants import NULL_TASK_ID, RESUME
+
+        try:
+            state_snapshot = await app.aget_state(config)
+            question_task_ids = {
+                task.id
+                for task in state_snapshot.tasks or []
+                for intr in task.interrupts or []
+                if isinstance(intr.value, dict)
+                and intr.value.get("type") in self._QUESTION_INTERRUPT_TYPES
+            }
+            if not question_task_ids:
+                return
+            checkpoint = await app.checkpointer.aget_tuple(state_snapshot.config)
+            stale_task_ids = {
+                task_id
+                for task_id, channel, _ in (checkpoint.pending_writes or [])
+                if channel == RESUME and task_id != NULL_TASK_ID
+            } & question_task_ids
+            for task_id in stale_task_ids:
+                logger.warning(
+                    "Question on thread %s still holds an answer from a cancelled run; "
+                    "replacing it with the new answer before resuming.",
+                    config["configurable"].get("thread_id"),
+                )
+                await app.checkpointer.aput_writes(
+                    state_snapshot.config, [(RESUME, [answer])], task_id,
+                )
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"Could not check for a stale question answer: {e}")
+
     @staticmethod
     def _normalize_messages(raw):
         """Return a plain message list from a possibly DeltaChannel-wrapped value.
@@ -1228,6 +1274,7 @@ class RequestHandler:
                         f"Main-chat message received while '{pending_question.get('type')}' interrupt "
                         f"pending on thread {incoming_message.get('thread_id')}; routing it as the tool answer."
                     )
+                    await self._replace_stale_question_answer(app, config, resume_value)
                     stream_input = Command(resume=resume_value)
                 else:
                     # Auto-repair corrupted thread state (dangling tool_calls without ToolMessages)
@@ -1855,6 +1902,7 @@ class RequestHandler:
 
                 # Resume the graph — interrupt() returns this answer string
                 answer = response_message.get("answer", "")
+                await self._replace_stale_question_answer(app, config, answer)
 
                 async for chunk in app.astream(Command(resume=answer), config=config, stream_mode=["updates", "messages", "custom"], subgraphs=True):
                     if await self._forward_custom_stream_chunk(chunk, websocket):

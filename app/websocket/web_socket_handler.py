@@ -24,6 +24,10 @@ logger = logging.getLogger(__name__)
 # can still set it to false explicitly.
 WS_AUTH_REQUIRED = os.getenv("WS_AUTH_REQUIRED", "true").lower() == "true"
 
+# Close code for "sign-in failed": the browser fetches a fresh token and
+# reconnects, instead of treating it as the server going away.
+WS_CLOSE_AUTH_FAILED = 4401
+
 # Frames that act on an already-running turn rather than starting one. They are
 # refused without authentication like anything else, but refusing one drops the
 # frame instead of closing the socket — see handle_websocket.
@@ -131,6 +135,20 @@ class WebSocketHandler:
     def _is_websocket_open(self, websocket: WebSocket) -> bool:
         """Check if the WebSocket connection is still open"""
         return websocket.client_state == WebSocketState.CONNECTED
+
+    async def _close_for_auth_failure(self) -> None:
+        """Close the socket after an auth_error.
+
+        Returning from the endpoint does NOT close an accepted socket under
+        uvicorn — the browser never gets `onclose`, never reconnects, and the
+        chat shows "thinking" until a manual reload (crm-4, 2026-10-04).
+        """
+        if not self._is_websocket_open(self.websocket):
+            return
+        try:
+            await self.websocket.close(code=WS_CLOSE_AUTH_FAILED)
+        except Exception as e:
+            logger.info(f"{self._log_ctx()} Close after auth failure failed: {e}")
 
     async def _handle_auth_message(self, data: dict) -> bool:
         """
@@ -372,6 +390,7 @@ class WebSocketHandler:
                         if not success and WS_AUTH_REQUIRED:
                             # Auth failed and required - close connection
                             logger.warning(f"{self._log_ctx()} WebSocket auth failed, closing connection from {self.websocket.client}")
+                            await self._close_for_auth_failure()
                             break
                         continue
 
@@ -404,6 +423,7 @@ class WebSocketHandler:
                                 # token asynchronously); closing here would
                                 # turn that race into a reconnect loop.
                                 continue
+                            await self._close_for_auth_failure()
                             break
                         elif not auth_warning_sent:
                             # Auth not required but not authenticated - warn once (for migration)

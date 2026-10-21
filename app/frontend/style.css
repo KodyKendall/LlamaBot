@@ -1536,10 +1536,14 @@ button.brand-logo-thumb:hover .brand-logo-zoom {
 /* Deliberately understated. This sits under the composer for as long as the app
    is broken, so it reads as a footnote — a dim row and a small amber dot, no
    panel, no red fill. The error text itself lives in the row's tooltip. */
+/* Wraps on a narrow panel: the controls drop to a second line rather than
+   squeezing into each other or spilling past the panel edge. */
 .js-error-banner {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: 8px;
+    column-gap: 8px;
+    row-gap: 4px;
     padding: 2px 2px 6px;
     font-size: 0.7rem;
     color: rgba(255, 255, 255, 0.42);
@@ -1548,7 +1552,11 @@ button.brand-logo-thumb:hover .brand-logo-zoom {
 
 .js-error-banner.hidden { display: none; }
 
+/* Inside the summary text, so a wrapping row can't strand it on its own line. */
 .js-error-dot {
+    display: inline-block;
+    vertical-align: middle;
+    margin-right: 8px;
     width: 5px;
     height: 5px;
     border-radius: 50%;
@@ -1557,8 +1565,13 @@ button.brand-logo-thumb:hover .brand-logo-zoom {
     opacity: 0.75;
 }
 
+/* The one item allowed to give way — it truncates (full text in its tooltip)
+   when even a line of its own is too narrow. */
 .js-error-count {
     white-space: nowrap;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 /* Pushed to the right so the row reads "N errors detected ......... Show Leo ×" */
@@ -1569,6 +1582,7 @@ button.brand-logo-thumb:hover .brand-logo-zoom {
     gap: 4px;
     cursor: pointer;
     white-space: nowrap;
+    flex-shrink: 0;
 }
 
 .js-error-show input {
@@ -1598,6 +1612,7 @@ button.brand-logo-thumb:hover .brand-logo-zoom {
     height: auto;
     min-width: 0;
     min-height: 0;
+    flex-shrink: 0;
 }
 
 .js-error-banner .js-error-x:hover {
@@ -1620,6 +1635,8 @@ button.brand-logo-thumb:hover .brand-logo-zoom {
     width: auto;
     height: auto;
     min-width: 0;
+    flex-shrink: 0;   /* min-width: 0 alone let it collapse under "Show Leo" */
+    white-space: nowrap;
     font-size: 0.63rem;
     font-weight: 400;
     color: rgba(255, 255, 255, 0.34);
@@ -3080,6 +3097,22 @@ body.instance-locked .lock-modal-overlay {
     background-color: rgba(255, 99, 71, 0.2);
     border: 1px solid rgba(255, 99, 71, 0.5);
     color: #ff6b6b;
+}
+
+.error-card-action {
+    display: block;
+    margin-top: 0.5rem;
+    padding: 0.3rem 0.8rem;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 99, 71, 0.6);
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+}
+
+.error-card-action:hover {
+    background-color: rgba(255, 99, 71, 0.15);
 }
 
 [data-llamabot="queued-message"] {
@@ -10868,4 +10901,33 @@ body.instance-locked .lock-modal-overlay {
 .chatgpt-status .chatgpt-status-link:hover {
     background: none;
     opacity: 0.85;
+}
+
+/* ===== Voice dictation mic button (ui/VoiceDictation.js) ===== */
+/* Red while live, with a pulsing dot, so it is obvious the mic is open. */
+.send-controls .mic-button.recording,
+.send-controls .mic-button.recording:hover {
+    color: #ef4444;
+    position: relative;
+}
+
+.send-controls .mic-button.starting {
+    opacity: 0.6;
+}
+
+.send-controls .mic-button.recording::after {
+    content: '';
+    position: absolute;
+    top: 3px;
+    right: 3px;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #ef4444;
+    animation: mic-recording-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes mic-recording-pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.35; transform: scale(0.75); }
 }

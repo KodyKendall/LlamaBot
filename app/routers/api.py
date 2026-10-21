@@ -859,8 +859,37 @@ async def chat_history(thread_id: str, request: Request, username: str = Depends
 
     config = {"configurable": {"thread_id": thread_id}}
     state_history = await graph.aget_state(config=config)
-    print(state_history)
+
+    values = state_history.values or {}
+    if not values.get("messages"):
+        missing = _missing_history_marker(thread_id)
+        if missing:
+            # Same array shape as a normal snapshot, so StreamResume and the mobile
+            # app keep working; only values (index 0) gains the marker.
+            return [{**values, "messages": [], **missing}, *list(state_history)[1:]]
     return state_history
+
+
+def _missing_history_marker(thread_id: str) -> Optional[dict]:
+    """The sidebar row for a thread whose checkpoint is gone, or None.
+
+    `threadmetadata` survived a backup that truncated the checkpoint tables (RSB,
+    2026-10-14), so a listed chat with messages but no state means its saved
+    history was lost — not that it is a new chat.
+    """
+    from app.db import engine
+
+    if engine is None:
+        return None
+    try:
+        with Session(engine) as session:
+            meta = session.get(ThreadMetadata, thread_id)
+    except Exception as e:
+        logger.warning(f"/chat-history could not read thread metadata: {e}")
+        return None
+    if not meta or not meta.message_count:
+        return None
+    return {"history_missing": True, "title": meta.title, "message_count": meta.message_count}
 
 
 # ============== Other API Endpoints ==============
@@ -1666,6 +1695,9 @@ VALID_SITE_SETTINGS = {
     # name it doesn't recognize, so a bad write degrades to fewer tabs rather
     # than to a broken pane.
     "visible_tabs",
+    # Mic button in the chat box. Refused as "true" while the box has no
+    # AssemblyAI key — see app/services/voice_dictation.py.
+    "enable_voice_dictation",
 }
 
 
@@ -1792,6 +1824,13 @@ async def api_set_site_setting(
     body = await request.json()
     value = str(body.get("value", "false"))
 
+    from app.services import voice_dictation
+    if key == voice_dictation.SETTING_KEY and value == "true" and not voice_dictation.key_configured():
+        raise HTTPException(
+            status_code=400,
+            detail="Voice dictation needs an AssemblyAI API key (ASSEMBLY_AI_API_KEY) in this instance's .env",
+        )
+
     setting = session.get(SiteSetting, key)
     if setting:
         setting.value = value
@@ -1803,6 +1842,43 @@ async def api_set_site_setting(
 
     logger.info(f"Site setting '{key}' set to '{value}' by {current_user.username}")
     return {"key": key, "value": value}
+
+
+# ============== Voice dictation (AssemblyAI) ==============
+
+
+@router.get("/api/voice-dictation/status", response_class=JSONResponse)
+async def api_voice_dictation_status(
+    username: str = Depends(auth),
+    session: Session = Depends(get_db_session),
+):
+    """Whether the key is present and the toggle is on. Never the key itself."""
+    from app.services import voice_dictation
+
+    key_configured = voice_dictation.key_configured()
+    enabled = voice_dictation.dictation_enabled(session)
+    return {"key_configured": key_configured, "enabled": enabled, "available": key_configured and enabled}
+
+
+@router.post("/api/voice-dictation/token", response_class=JSONResponse)
+async def api_voice_dictation_token(
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_db_session),
+):
+    """A 60-second AssemblyAI streaming token for the browser.
+
+    The master key stays on the server; only the temporary token goes out.
+    """
+    from app.services import voice_dictation
+
+    if not voice_dictation.dictation_available(session):
+        raise HTTPException(status_code=403, detail="Voice dictation is turned off")
+    try:
+        body = await voice_dictation.mint_token()
+    except voice_dictation.DictationUnavailable as e:
+        logger.warning(f"Voice dictation token failed for {current_user.username}: {e}")
+        raise HTTPException(status_code=502, detail="Voice dictation is unavailable right now")
+    return JSONResponse(body, headers={"Cache-Control": "no-store"})
 
 
 # ============== Code editor (VS Code / code-server) ==============

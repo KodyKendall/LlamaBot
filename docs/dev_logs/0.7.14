@@ -1,0 +1,10 @@
+0.7.14:
+[x] - Base plan paywall card leads with connecting ChatGPT.
+[x] - Chats with lost history say so instead of opening blank.
+[x] - Rails container no longer sees shared AWS and DeepSeek keys.
+[x] - Chat recovers or shows an error when sign-in fails.
+[x] - Question cards take your latest answer, not a stale one.
+[x] - Finished turns keep one thinking row, not one per step.
+[x] - Error row's Read more and Show Leo never overlap when narrow.
+[x] - Mic button dictates into the chat box via AssemblyAI.
+[x] - Voice dictation toggle in Settings, off by default.

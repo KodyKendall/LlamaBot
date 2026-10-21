@@ -31,6 +31,7 @@ import { FileAttachmentManager } from './ui/FileAttachmentManager.js';
 import { ScreenRecorder } from './ui/ScreenRecorder.js';
 import { ScreenshotAnnotator } from './ui/ScreenshotAnnotator.js';
 import { SlashCommandManager } from './ui/SlashCommandManager.js';
+import { VoiceDictation } from './ui/VoiceDictation.js';
 import { PanelResizeManager } from './ui/PanelResizeManager.js';
 import { ThreadManager } from './threads/ThreadManager.js';
 import { LoadingVerbs } from './utils/LoadingVerbs.js';
@@ -352,6 +353,42 @@ class ChatApp {
       this.setAgentRunning(false);
     });
 
+    // Sign-in recovery (see WebSocketManager.handleAuthError). A rejected
+    // token used to be console-only, and the chat spun until a manual reload.
+    window.addEventListener('websocketReauthenticating', () => {
+      const line = this.elements.thinkingArea?.querySelector('.typing-indicator');
+      if (line) {
+        this.loadingVerbs?.stopCycling();
+        line.textContent = '🦙 Reconnecting to Leo…';
+      }
+    });
+
+    window.addEventListener('websocketAuthFailed', (e) => {
+      this.errorReporter?.report('FrontendWsAuthFailed', `WebSocket sign-in failed: ${e?.detail?.reason || 'n/a'}`);
+      this.stopDurationTimerDisplay();
+      this.setAgentRunning(false);
+      this.renderErrorCard('Leo could not sign you in. Refresh the page to continue.', 'Refresh', () => {
+        window.location.reload();
+      });
+    });
+
+    // The server never confirmed a message (no `ack`). Stop the spinner and let
+    // the user re-send it. Same client_message_id, so the server de-dupes if
+    // the first copy did land.
+    window.addEventListener('websocketMessageUndelivered', (e) => {
+      const data = e?.detail?.data;
+      if (!data) return;
+      this.stopDurationTimerDisplay();
+      this.setAgentRunning(false);
+      this.renderErrorCard('Your message was not delivered.', 'Retry', (card) => {
+        card.remove();
+        this.webSocketManager?.retryMessage(data);
+        this.showThinkingIndicator();
+        this.startDurationTimerDisplay();
+        this.setAgentRunning(true);
+      });
+    });
+
     // On (re)connect, if a run is in progress, ATTACH to the background run for
     // the active thread and replay anything we missed while disconnected — we do
     // NOT re-send the user message (that's what caused the duplicate-restart
@@ -619,6 +656,16 @@ class ChatApp {
       this.slashCommandManager.init(this.elements.messageInput, this);
     });
 
+    safeInit('voice dictation', () => {
+      // Server-decided: AssemblyAI key present AND the Settings toggle on.
+      // Otherwise the mic button stays hidden.
+      if (window.LLAMABOT_VOICE_DICTATION !== true) return;
+      this.voiceDictation = new VoiceDictation({
+        notify: (message) => this.slashCommandManager?.showToast(message, 'error'),
+      });
+      this.voiceDictation.init(this.elements.micButton, this.elements.messageInput);
+    });
+
     // Load threads
     safeInit('thread list', () => this.threadManager.fetchThreads());
 
@@ -708,7 +755,8 @@ class ChatApp {
       executionModeTrigger: this.container.querySelector('[data-llamabot="execution-mode-trigger"]'),
       executionModeLabel: this.container.querySelector('[data-llamabot="execution-mode-label"]'),
       executionModeMenu: this.container.querySelector('[data-llamabot="execution-mode-menu"]'),
-      stopRecordingBtn: this.container.querySelector('[data-llamabot="stop-recording-btn"]')
+      stopRecordingBtn: this.container.querySelector('[data-llamabot="stop-recording-btn"]'),
+      micButton: this.container.querySelector('[data-llamabot="mic-button"]')
     };
   }
 
@@ -2030,6 +2078,9 @@ class ChatApp {
     input.value = '';
     input.style.height = 'auto';
 
+    // Sent mid-dictation: late words must not refill the box we just cleared
+    this.voiceDictation?.cancel();
+
     // Clear selected element badge
     if (this.elementSelector) {
       this.elementSelector.clearSelection();
@@ -2718,6 +2769,19 @@ class ChatApp {
     hint.className = 'stall-hint';
     hint.textContent = "Taking longer than usual — you can cancel and say ‘continue’ to retry.";
     this.elements.thinkingArea.appendChild(hint);
+  }
+
+  /** An error bubble with one action button (Refresh, Retry). */
+  renderErrorCard(text, actionLabel, onAction) {
+    const card = this.messageRenderer?.renderErrorMessage(text);
+    if (!card) return null;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'error-card-action';
+    button.textContent = actionLabel;
+    button.addEventListener('click', () => onAction(card), { once: true });
+    card.appendChild(button);
+    return card;
   }
 
   clearStallHint() {

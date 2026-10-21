@@ -18,7 +18,12 @@ const index = readFileSync(join(appRoot, 'frontend/chat/index.js'), 'utf8');
 
 test('auth_success announces readiness', () => {
   const block = manager.slice(manager.indexOf("data.type === 'auth_success'"));
-  assert.match(block.slice(0, 400), /this\.announceReady\(\)/);
+  assert.match(block.slice(0, 400), /this\.markSignedIn\(\)/);
+});
+
+test('markSignedIn announces readiness', () => {
+  const block = manager.slice(manager.indexOf('  markSignedIn() {'));
+  assert.match(block.slice(0, 200), /this\.announceReady\(\)/);
 });
 
 test('ActionCable is ready as soon as it connects', () => {
@@ -30,7 +35,7 @@ test('a box with no token still becomes ready', () => {
   // WS_AUTH_REQUIRED=false: no token is ever coming, so waiting would strand
   // the resume path forever.
   const block = manager.slice(manager.indexOf('No auth token available'));
-  assert.match(block.slice(0, 300), /this\.announceReady\(\)/);
+  assert.match(block.slice(0, 400), /this\.markSignedIn\(\)/);
 });
 
 test('announceReady dispatches websocketReady', () => {

@@ -38,6 +38,8 @@ export class MessageHandler {
     // Track if a non-thinking message was added since last thinking
     // Used to determine if we need a new thinking bubble or can append to existing
     this.hasNonThinkingMessageSinceLastThinking = false;
+    // Every thinking row opened this turn, so the end frame can fold them into one
+    this.turnThinkingIds = [];
   }
 
   /**
@@ -285,6 +287,7 @@ export class MessageHandler {
     // 2. A non-thinking message was added since the last thinking content
     if (!this.currentThinkingId || this.hasNonThinkingMessageSinceLastThinking) {
       this.currentThinkingId = `thinking-${Date.now()}`;
+      this.turnThinkingIds.push(this.currentThinkingId);
       this.currentThinkingBuffer = '';
       this.hasNonThinkingMessageSinceLastThinking = false;
 
@@ -1519,6 +1522,9 @@ export class MessageHandler {
       this.planStepMapping.clear();
       // Finalize any remaining thinking message and reset all tracking
       this.finalizeCurrentThinking();
+      // One "thinking..." row per step is fine mid-run; once done, keep just one
+      this.messageRenderer.mergeThinkingMessages(this.turnThinkingIds);
+      this.turnThinkingIds = [];
       this.currentThinkingId = null;
       this.currentThinkingBuffer = '';
       this.hasNonThinkingMessageSinceLastThinking = false;
