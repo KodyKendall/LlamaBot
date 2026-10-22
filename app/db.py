@@ -38,6 +38,16 @@ def init_db():
             if count > 0:
                 logger.info(f"✅ Seeded {count} default prompts")
 
+        # Chats saved before 0.7.15 have no owner; give them to the only user.
+        from app.services.thread_service import backfill_thread_owners
+        try:
+            with Session(engine) as session:
+                assigned = backfill_thread_owners(session)
+                if assigned:
+                    logger.info(f"✅ Assigned {assigned} unowned chats to the box's only user")
+        except Exception as e:
+            logger.error(f"❌ Could not backfill chat owners: {e}")
+
     except Exception as e:
         logger.error(f"❌ Failed to initialize auth database: {e}")
         raise

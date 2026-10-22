@@ -2,6 +2,8 @@
  * Thread/conversation management - fetch, load, switch threads
  */
 
+import { recallThread } from './lastThread.js';
+
 export class ThreadManager {
   constructor(messageRenderer, menuManager, scrollManager) {
     this.messageRenderer = messageRenderer;
@@ -10,6 +12,10 @@ export class ThreadManager {
     // Pagination state
     this.nextCursor = null;
     this.hasMore = false;
+    // Bumped by every first-page fetch, so a slower response (an older list, or
+    // a Load more page for the old cursor) never lands on top of a newer one.
+    this.listVersion = 0;
+    this.hasList = false;
 
     // Expose on window for inline onclick handlers
     window.threadManager = this;
@@ -62,8 +68,10 @@ export class ThreadManager {
    * @param {string|null} cursor - Optional cursor for pagination
    */
   async fetchThreads(cursor = null) {
+    const version = ++this.listVersion;
     try {
-      this.showThreadsLoading();
+      // Re-fetched on every menu open and turn end: keep the list on screen.
+      if (!this.hasList) this.showThreadsLoading();
 
       let url = '/threads?limit=5';
       if (cursor) {
@@ -71,6 +79,7 @@ export class ThreadManager {
       }
 
       const response = await fetch(url);
+      if (version !== this.listVersion) return;
 
       // Check if response is OK
       if (!response.ok) {
@@ -88,6 +97,7 @@ export class ThreadManager {
       }
 
       const data = await response.json();
+      if (version !== this.listVersion) return;
       const { threads, next_cursor, has_more } = data;
 
       // Store pagination state
@@ -96,9 +106,10 @@ export class ThreadManager {
 
       // Populate menu (threads already sorted by backend)
       this.populateMenuWithThreads(threads, has_more);
+      this.hasList = true;
     } catch (error) {
       console.error('Error fetching threads:', error);
-      this.showThreadsError(error.message);
+      if (version === this.listVersion) this.showThreadsError(error.message);
     }
   }
 
@@ -129,6 +140,19 @@ export class ThreadManager {
   showThreadsError(errorMsg = 'Failed to load') {
     const menuItems = document.querySelector('.menu-items');
     if (!menuItems) return;
+
+    if (this.hasList) {
+      // A refresh failed: keep the list, add one small row on top.
+      menuItems.querySelector('.threads-refresh-error')?.remove();
+      const row = document.createElement('div');
+      row.className = 'menu-item threads-refresh-error';
+      row.style.opacity = '0.6';
+      row.style.cursor = 'default';
+      row.style.color = '#ff6b6b';
+      row.innerHTML = '<small>⚠️ Could not refresh conversations</small>';
+      menuItems.insertBefore(row, menuItems.children?.[0] || menuItems.firstChild || null);
+      return;
+    }
 
     menuItems.innerHTML = `
       <div class="menu-item" style="opacity: 0.6; cursor: default; color: #ff6b6b;">
@@ -223,10 +247,13 @@ export class ThreadManager {
       loadMoreBtn.innerHTML = '<div class="typing-indicator">Loading...</div>';
     }
 
+    const version = this.listVersion;
     try {
       const url = `/threads?limit=5&before=${encodeURIComponent(this.nextCursor)}`;
       const response = await fetch(url);
       const data = await response.json();
+      // The list was refreshed meanwhile: this page is for the old cursor.
+      if (version !== this.listVersion) return;
       const { threads, next_cursor, has_more } = data;
 
       // Update pagination state
@@ -342,33 +369,7 @@ export class ThreadManager {
       const response = await fetch(`/chat-history/${threadId}`);
       const threadData = await response.json();
 
-      // Load messages
-      this.loadThreadMessages(threadData);
-
-      // Show an immediate rough estimate (chars/4) so the wheel isn't stuck at
-      // 0% during the server round-trip, then replace it with the accurate
-      // tiktoken count (includes tool calls, tool results, reasoning blocks, etc.)
-      // once the backend responds.
-      const messages = threadData[0]?.messages || [];
-      const roughChars = messages.reduce((sum, msg) => {
-        return sum + this.normalizeHistoricalMessageContent(msg.content).length;
-      }, 0);
-      window.dispatchEvent(new CustomEvent('threadTokensEstimated', {
-        detail: { tokens: Math.round(roughChars / 4) }
-      }));
-
-      // Fetch the accurate count from the backend (same counter the middleware uses)
-      const agentName = window.chatApp?.appState?.agentConfig?.name || 'rails_agent';
-      fetch(`/api/thread-tokens/${threadId}?agent_name=${encodeURIComponent(agentName)}`)
-        .then(r => r.ok ? r.json() : null)
-        .then(data => {
-          if (data && data.token_count != null) {
-            window.dispatchEvent(new CustomEvent('threadTokensEstimated', {
-              detail: { tokens: data.token_count }
-            }));
-          }
-        })
-        .catch(() => {}); // non-fatal — rough estimate already showing
+      this.showThread(threadId, threadData);
 
       // Close menu
       if (this.menuManager) {
@@ -378,6 +379,68 @@ export class ThreadManager {
       console.error('Error loading thread:', error);
       alert('Failed to load conversation. Please try again.');
     }
+  }
+
+  /**
+   * Re-open the chat the user was last in (page load). Returns true if it did.
+   * A remembered chat with no saved messages (never sent, deleted, or someone
+   * else's) quietly falls back to the blank chat.
+   *
+   * @param {Object} [options]
+   * @param {Function} [options.shouldApply] - checked once the history arrives;
+   *   false (the user already started typing into a new chat) leaves it alone.
+   */
+  async restoreLastThread({ shouldApply = () => true } = {}) {
+    const threadId = recallThread();
+    if (!threadId) return false;
+    try {
+      const response = await fetch(`/chat-history/${encodeURIComponent(threadId)}`);
+      if (!response.ok) return false;
+      const threadData = await response.json();
+      if (!threadData?.[0]?.messages?.length || !shouldApply()) return false;
+
+      window.dispatchEvent(new CustomEvent('threadChanged', {
+        detail: { threadId }
+      }));
+      this.showThread(threadId, threadData);
+      return true;
+    } catch (error) {
+      console.warn('Could not re-open the last chat:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Render a fetched thread and its token estimate.
+   */
+  showThread(threadId, threadData) {
+    // Load messages
+    this.loadThreadMessages(threadData);
+
+    // Show an immediate rough estimate (chars/4) so the wheel isn't stuck at
+    // 0% during the server round-trip, then replace it with the accurate
+    // tiktoken count (includes tool calls, tool results, reasoning blocks, etc.)
+    // once the backend responds.
+    const messages = threadData[0]?.messages || [];
+    const roughChars = messages.reduce((sum, msg) => {
+      return sum + this.normalizeHistoricalMessageContent(msg.content).length;
+    }, 0);
+    window.dispatchEvent(new CustomEvent('threadTokensEstimated', {
+      detail: { tokens: Math.round(roughChars / 4) }
+    }));
+
+    // Fetch the accurate count from the backend (same counter the middleware uses)
+    const agentName = window.chatApp?.appState?.agentConfig?.name || 'rails_agent';
+    fetch(`/api/thread-tokens/${threadId}?agent_name=${encodeURIComponent(agentName)}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data && data.token_count != null) {
+          window.dispatchEvent(new CustomEvent('threadTokensEstimated', {
+            detail: { tokens: data.token_count }
+          }));
+        }
+      })
+      .catch(() => {}); // non-fatal — rough estimate already showing
   }
 
   /**

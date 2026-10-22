@@ -183,6 +183,19 @@ def _restore_ubuntu_ownership() -> int:
 
 
 DISCARD_BACKUP_REF_PREFIX = "refs/llamabot/discards"
+# One ref per discard the user has not yet undone or dismissed, named like its
+# backup. It keeps the chat's Undo card up across reloads. Discards from before
+# 0.7.15 never got one, so an old snapshot (perhaps already applied by hand)
+# never raises a card.
+DISCARD_PENDING_REF_PREFIX = "refs/llamabot/discard-pending"
+
+RAILS_CONTROLLERS_DIR = "rails/app/controllers/"
+RAILS_MODELS_DIR = "rails/app/models/"
+RAILS_VIEWS_DIR = "rails/app/views/"
+
+
+def _pending_ref(backup_ref: str) -> str:
+    return DISCARD_PENDING_REF_PREFIX + backup_ref[len(DISCARD_BACKUP_REF_PREFIX):]
 
 
 def _snapshot_working_tree(label: str) -> Dict[str, str]:
@@ -620,6 +633,9 @@ Timestamp: {timestamp}
                 - has_changes: bool
                 - changed_files: list of changed file paths
                 - untracked_files: list of new untracked files
+                - total_count, controller_count, model_count, view_count
+                - untracked_controllers / untracked_models: True if any of them
+                  was never committed, i.e. discarding deletes it outright
         """
         try:
             # Get modified/deleted files (staged and unstaged)
@@ -641,12 +657,22 @@ Timestamp: {timestamp}
             untracked_files = [f.strip() for f in untracked_result.stdout.split("\n") if f.strip()]
 
             has_changes = len(changed_files) > 0 or len(untracked_files) > 0
+            all_files = changed_files + untracked_files
+
+            def under(files, prefix):
+                return [f for f in files if f.startswith(prefix)]
 
             return {
                 "has_changes": has_changes,
                 "changed_files": changed_files,
                 "untracked_files": untracked_files,
-                "total_count": len(changed_files) + len(untracked_files)
+                "total_count": len(all_files),
+                # How much of the app a discard takes, for the UI's warning.
+                "controller_count": len(under(all_files, RAILS_CONTROLLERS_DIR)),
+                "model_count": len(under(all_files, RAILS_MODELS_DIR)),
+                "view_count": len(under(all_files, RAILS_VIEWS_DIR)),
+                "untracked_controllers": bool(under(untracked_files, RAILS_CONTROLLERS_DIR)),
+                "untracked_models": bool(under(untracked_files, RAILS_MODELS_DIR)),
             }
 
         except subprocess.TimeoutExpired:
@@ -693,6 +719,16 @@ Timestamp: {timestamp}
                 raise Exception(
                     f"Refusing to discard: could not back up your changes first ({e})"
                 )
+
+            # Keep the chat's Undo card up until the user undoes or dismisses it.
+            # Not fatal: the snapshot is what matters, the card is the way back to it.
+            mark = subprocess.run(
+                ["git", "-C", str(LEONARDO_PATH), "update-ref",
+                 _pending_ref(backup["ref"]), backup["sha"]],
+                capture_output=True, text=True, timeout=5,
+            )
+            if mark.returncode != 0:
+                logger.warning(f"Could not mark discard {backup['ref']} pending: {mark.stderr.strip()}")
 
             # Discard modified files (checkout to HEAD)
             checkout_result = subprocess.run(
@@ -743,7 +779,8 @@ Timestamp: {timestamp}
         """The snapshots taken by past discards, newest first.
 
         Returns:
-            List of dicts with ref, sha, created_at and file_count.
+            List of dicts with ref, sha, created_at, file_count, and pending (the
+            user has neither undone nor dismissed it yet).
         """
         result = subprocess.run(
             [
@@ -763,6 +800,13 @@ Timestamp: {timestamp}
             logger.error(f"Failed to list discard backups: {result.stderr}")
             return []
 
+        pending = subprocess.run(
+            ["git", "-C", str(LEONARDO_PATH), "for-each-ref",
+             "--format=%(refname)", DISCARD_PENDING_REF_PREFIX],
+            capture_output=True, text=True, timeout=10,
+        )
+        pending_refs = set(pending.stdout.split()) if pending.returncode == 0 else set()
+
         backups = []
         for line in result.stdout.splitlines():
             if not line.strip():
@@ -773,8 +817,20 @@ Timestamp: {timestamp}
                 "sha": sha,
                 "created_at": created_at,
                 "file_count": len(CheckpointService._backup_files(sha)),
+                "pending": _pending_ref(ref) in pending_refs,
             })
         return backups
+
+    @staticmethod
+    def dismiss_discard_backup(backup_ref: str) -> dict:
+        """Take down the chat's Undo card for one discard. The snapshot is kept."""
+        if not backup_ref.startswith(DISCARD_BACKUP_REF_PREFIX + "/"):
+            return {"success": False, "message": f"Not a discard backup: {backup_ref}"}
+        subprocess.run(
+            ["git", "-C", str(LEONARDO_PATH), "update-ref", "-d", _pending_ref(backup_ref)],
+            capture_output=True, text=True, timeout=5,
+        )
+        return {"success": True, "backup_ref": backup_ref}
 
     @staticmethod
     def _backup_files(sha: str) -> List[str]:
@@ -852,6 +908,9 @@ Timestamp: {timestamp}
             fixed = _restore_ubuntu_ownership()
             if fixed:
                 logger.info(f"Restored agent ownership on {fixed} path(s) after undo")
+
+            if backup_ref.startswith(DISCARD_BACKUP_REF_PREFIX + "/"):
+                CheckpointService.dismiss_discard_backup(backup_ref)
 
             logger.info(f"Restored {len(files)} discarded file(s) from {backup_ref}")
             return {

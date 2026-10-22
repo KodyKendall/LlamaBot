@@ -280,6 +280,53 @@ class WebSocketHandler:
             }, self.websocket)
         return False
 
+    async def _authorize_thread(self, json_data: dict) -> bool:
+        """Refuse any frame naming a thread that belongs to another LlamaBot user.
+
+        Covers chat messages, attach, cancel and approval/question resumes — any
+        frame with a ``thread_id``. Sockets with no LlamaBot account (the
+        llama_bot_rails gem, or a box with WS_AUTH_REQUIRED=false) own nothing
+        and are not checked; the gem already holds engineer-level access to the
+        whole box.
+        """
+        thread_id = json_data.get("thread_id")
+        user_id = (self.auth_user or {}).get("user_id")
+        if not thread_id or user_id is None:
+            return True
+
+        from sqlmodel import Session
+
+        from app.db import engine
+        from app.services.thread_service import can_access_thread
+
+        if engine is None:
+            return True
+        try:
+            with Session(engine) as session:
+                allowed = can_access_thread(
+                    session, str(thread_id), user_id, bool(self.auth_user.get("is_admin"))
+                )
+        except Exception as e:
+            logger.error(f"Thread ownership check failed for '{thread_id}', denying: {e}")
+            allowed = False
+        if allowed:
+            return True
+
+        logger.warning(
+            f"Denied thread '{thread_id}' to user '{self.auth_user.get('sub')}' "
+            f"from {self.websocket.client}"
+        )
+        frame_type = json_data.get("type")
+        if frame_type == "cancel":
+            return False
+        if frame_type == "attach":
+            reply = {"type": "no_active_run", "thread_id": thread_id}
+        else:
+            reply = {"type": "error", "content": "Chat not found.", "thread_id": thread_id}
+        if self._is_websocket_open(self.websocket):
+            await self.manager.send_personal_message(reply, self.websocket)
+        return False
+
     async def _check_auth_from_message(self, json_data: dict) -> bool:
         """
         Check for authentication token in regular message (Rails gem pattern).
@@ -435,6 +482,11 @@ class WebSocketHandler:
                     # — chat, approval_response, question_response, and anything
                     # added later. Frames without an agent_name pass through.
                     if isinstance(json_data, dict) and not await self._authorize_agent_mode(json_data):
+                        continue
+
+                    # Same idea for the thread: one check before dispatch, so
+                    # every frame that names a thread_id is owner-gated.
+                    if isinstance(json_data, dict) and not await self._authorize_thread(json_data):
                         continue
 
                     # Handle cancel (always allowed) — stop the background run(s)

@@ -9539,6 +9539,89 @@ body.instance-locked .lock-modal-overlay {
     color: #052e21;
 }
 
+/* LP-7 (0.7.15): the way back from a discard, above the chat input */
+.discard-undo-card {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    /* left gap clears the token wheel, which floats just above the input */
+    margin: 8px 16px 0 56px;
+    padding: 10px 12px;
+    border: 1px solid rgba(245, 158, 11, 0.5);
+    border-radius: 10px;
+    background: rgba(245, 158, 11, 0.12);
+    color: #fbbf24;
+    font-size: 0.85rem;
+}
+
+.discard-undo-card-text {
+    flex: 1;
+    min-width: 0;
+}
+
+.discard-undo-card-undo {
+    flex-shrink: 0;
+    padding: 6px 12px;
+    border: none;
+    border-radius: 6px;
+    background: #f59e0b;
+    color: #1a1406;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.discard-undo-card-undo:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
+.discard-undo-card-dismiss {
+    flex-shrink: 0;
+    border: none;
+    background: none;
+    color: inherit;
+    font-size: 1.1rem;
+    cursor: pointer;
+    opacity: 0.7;
+}
+
+/* LP-7: strong discard warning (uses the update modal's card) */
+.discard-warning-text {
+    font-weight: 600;
+    margin: 0 0 8px;
+}
+
+.discard-warning-hint {
+    font-size: 0.85rem;
+    opacity: 0.75;
+    margin: 0 0 18px;
+}
+
+.discard-warning-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.discard-warning-checkpoint {
+    padding: 10px 14px;
+    border: none;
+    border-radius: 8px;
+    background: #8b5cf6;
+    color: #fff;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.discard-warning-discard {
+    padding: 8px 14px;
+    border: 1px solid rgba(239, 68, 68, 0.6);
+    border-radius: 8px;
+    background: transparent;
+    color: #f87171;
+    cursor: pointer;
+}
+
 .uncommitted-changes-info {
     cursor: pointer;
 }

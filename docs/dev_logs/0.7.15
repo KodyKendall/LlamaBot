@@ -1,0 +1,5 @@
+0.7.15:
+[x] - Chats are private to whoever started them on shared boxes.
+[x] - New chats show in history; reload re-opens your last chat.
+[x] - Discarding a whole app warns first; Undo stays in chat.
+[x] - Signed-out feedback bubble can pick elements and attach images.

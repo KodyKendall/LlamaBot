@@ -8,6 +8,8 @@ export class MenuManager {
     this.hamburger = null;
     this.drawer = null;
     this.newThreadBtn = null;
+    // Called each time the drawer opens (index.js refreshes the chat list here).
+    this.onOpen = null;
     this.init();
   }
 
@@ -74,8 +76,11 @@ export class MenuManager {
   toggleMenu() {
     if (!this.hamburger || !this.drawer) return;
 
-    this.hamburger.classList.toggle('active');
-    this.drawer.classList.toggle('open');
+    if (this.isOpen()) {
+      this.closeMenu();
+    } else {
+      this.openMenu();
+    }
   }
 
   /**
@@ -96,6 +101,7 @@ export class MenuManager {
 
     this.hamburger.classList.add('active');
     this.drawer.classList.add('open');
+    this.onOpen?.();
   }
 
   /**

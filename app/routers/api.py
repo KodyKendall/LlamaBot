@@ -12,9 +12,11 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlmodel import Session
 
+from langgraph.types import StateSnapshot
+
 from app.models import User, ThreadMetadata
 from app.dependencies import get_db_session, auth, admin_required, engineer_or_admin_required, get_current_user
-from app.services.thread_service import get_thread_list
+from app.services.thread_service import can_access_thread, get_thread_list
 from app.services.user_service import (
     get_all_users, get_user_by_username, update_user, delete_user
 )
@@ -667,8 +669,16 @@ async def threads(
             except ValueError:
                 logger.warning(f"Invalid cursor timestamp: {before}")
 
+        # Only the signed-in user's chats (plus unowned ones for admins).
+        user = get_user_by_username(session, username)
+        if user is None:
+            return {"threads": [], "next_cursor": None, "has_more": False}
+
         # Query lightweight metadata (no checkpoint loading!)
-        threads = get_thread_list(session, before=before_dt, limit=limit + 1)
+        threads = get_thread_list(
+            session, user_id=user.id, include_unowned=user.is_admin,
+            before=before_dt, limit=limit + 1,
+        )
 
         # Check if there are more results
         has_more = len(threads) > limit
@@ -730,6 +740,9 @@ async def compact_thread(request_data: CompactThreadRequest, request: Request, u
                 detail="No compiled graph available — the server may still be starting up. Try again in a moment."
             )
         logger.info(f"/compact: agent '{agent_name}' not in compiled_graphs, using fallback graph")
+
+    if not _user_can_access_thread(username, request_data.thread_id):
+        raise HTTPException(status_code=404, detail="Thread not found or has no messages")
 
     config = {"configurable": {"thread_id": request_data.thread_id}}
     state_snapshot = await graph.aget_state(config=config)
@@ -826,7 +839,7 @@ async def thread_token_count(
         or app.state.compiled_graphs.get("rails_agent")
         or app.state.compiled_graphs.get("llamabot")
     )
-    if not graph:
+    if not graph or not _user_can_access_thread(username, thread_id):
         return {"token_count": 0, "message_count": 0}
 
     config = {"configurable": {"thread_id": thread_id}}
@@ -857,6 +870,14 @@ async def chat_history(thread_id: str, request: Request, username: str = Depends
         graph = build_workflow(checkpointer=checkpointer)
         logger.warning("/chat-history endpoint using fallback graph compilation")
 
+    if not _user_can_access_thread(username, thread_id):
+        # Answer exactly like a thread with no checkpoint, so the response never
+        # confirms that another user's chat exists.
+        return StateSnapshot(
+            values={}, next=(), config={"configurable": {"thread_id": thread_id}},
+            metadata=None, created_at=None, parent_config=None, tasks=(), interrupts=(),
+        )
+
     config = {"configurable": {"thread_id": thread_id}}
     state_history = await graph.aget_state(config=config)
 
@@ -868,6 +889,23 @@ async def chat_history(thread_id: str, request: Request, username: str = Depends
             # app keep working; only values (index 0) gains the marker.
             return [{**values, "messages": [], **missing}, *list(state_history)[1:]]
     return state_history
+
+
+def _user_can_access_thread(username: str, thread_id: str) -> bool:
+    """Whether the signed-in user may read or change this thread (fails closed)."""
+    from app.db import engine
+
+    if engine is None:
+        return True  # no auth DB: no owners recorded, nothing to check against
+    try:
+        with Session(engine) as session:
+            user = get_user_by_username(session, username)
+            if user is None:
+                return False
+            return can_access_thread(session, thread_id, user.id, user.is_admin)
+    except Exception as e:
+        logger.warning(f"Could not check thread ownership, denying: {e}")
+        return False
 
 
 def _missing_history_marker(thread_id: str) -> Optional[dict]:

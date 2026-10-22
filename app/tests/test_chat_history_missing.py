@@ -14,7 +14,7 @@ from langgraph.types import StateSnapshot
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
 
-from app.models import ThreadMetadata
+from app.models import ThreadMetadata, User
 from app.routers import api
 
 
@@ -52,14 +52,17 @@ def engine():
     eng = create_engine(
         "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool,
     )
-    SQLModel.metadata.create_all(eng, tables=[ThreadMetadata.__table__])
+    SQLModel.metadata.create_all(eng, tables=[User.__table__, ThreadMetadata.__table__])
+    with Session(eng) as session:  # the reader owns the chats (0.7.15 ownership check)
+        session.add(User(id=1, username="u", password_hash="x"))
+        session.commit()
     with patch("app.db.engine", eng):
         yield eng
 
 
 def _add_thread(engine, thread_id, message_count, title="Quarterly analysis"):
     with Session(engine) as session:
-        session.add(ThreadMetadata(thread_id=thread_id, title=title, message_count=message_count))
+        session.add(ThreadMetadata(thread_id=thread_id, title=title, message_count=message_count, user_id=1))
         session.commit()
 
 

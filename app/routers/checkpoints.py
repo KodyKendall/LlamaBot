@@ -300,6 +300,26 @@ def undo_discard(request: UndoDiscardRequest = UndoDiscardRequest()):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class DismissDiscardRequest(BaseModel):
+    backup_ref: str
+
+
+@router.post("/api/checkpoints/discard/dismiss")
+def dismiss_discard(request: DismissDiscardRequest):
+    """Hide the chat's Undo card for a discard. The snapshot itself is kept.
+
+    Returns:
+        Success status and the backup ref
+    """
+    try:
+        result = checkpoint_service.dismiss_discard_backup(request.backup_ref)
+        return JSONResponse(content=result)
+
+    except Exception as e:
+        logger.error(f"Failed to dismiss discard: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/api/git/push")
 def git_push():
     """Push commits to GitHub.
