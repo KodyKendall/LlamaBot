@@ -3,9 +3,10 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Optional, List
+from sqlalchemy import or_, update
 from sqlmodel import Session, select
 
-from app.models import ThreadMetadata
+from app.models import ThreadMetadata, User
 
 logger = logging.getLogger(__name__)
 
@@ -262,7 +263,8 @@ def get_thread_list(
     session: Session,
     user_id: Optional[int] = None,
     before: Optional[datetime] = None,
-    limit: int = 10
+    limit: int = 10,
+    include_unowned: bool = False
 ) -> List[ThreadMetadata]:
     """Get thread metadata list with cursor-based pagination.
 
@@ -271,6 +273,8 @@ def get_thread_list(
         user_id: Optional filter by user ID
         before: Optional cursor - return threads older than this timestamp
         limit: Maximum number of threads to return
+        include_unowned: With user_id, also return threads that have no owner
+            (see can_access_thread for who gets these)
 
     Returns:
         List of ThreadMetadata sorted by updated_at descending
@@ -278,7 +282,10 @@ def get_thread_list(
     stmt = select(ThreadMetadata).order_by(ThreadMetadata.updated_at.desc())
 
     if user_id is not None:
-        stmt = stmt.where(ThreadMetadata.user_id == user_id)
+        owned = ThreadMetadata.user_id == user_id
+        if include_unowned:
+            owned = or_(owned, ThreadMetadata.user_id.is_(None))
+        stmt = stmt.where(owned)
 
     if before is not None:
         stmt = stmt.where(ThreadMetadata.updated_at < before)
@@ -304,3 +311,42 @@ def delete_thread_metadata(session: Session, thread_id: str) -> bool:
         session.commit()
         return True
     return False
+
+
+def can_access_thread(
+    session: Session,
+    thread_id: str,
+    user_id: Optional[int],
+    is_admin: bool = False
+) -> bool:
+    """Whether this LlamaBot user may open, continue or resume a thread.
+
+    A thread with no metadata row is a brand-new chat, so it is nobody's yet.
+    A thread with no owner predates 0.7.15 on a box with several users (the
+    backfill could not tell whose it is), so only admins see it.
+    """
+    metadata = session.get(ThreadMetadata, thread_id)
+    if metadata is None:
+        return True
+    if metadata.user_id is None:
+        return is_admin
+    return metadata.user_id == user_id
+
+
+def backfill_thread_owners(session: Session) -> int:
+    """Give unowned threads to the box's only user, if it has exactly one.
+
+    Threads saved before 0.7.15 never recorded an owner. On a one-user box the
+    owner is certain; on a box with several users it is not, so those rows stay
+    unowned. Safe to run on every boot. Returns the number of rows assigned.
+    """
+    user_ids = session.exec(select(User.id).limit(2)).all()
+    if len(user_ids) != 1:
+        return 0
+    result = session.execute(
+        update(ThreadMetadata)
+        .where(ThreadMetadata.user_id.is_(None))
+        .values(user_id=user_ids[0])
+    )
+    session.commit()
+    return result.rowcount or 0

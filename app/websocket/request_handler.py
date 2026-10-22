@@ -2095,10 +2095,13 @@ class RequestHandler:
                     logger.debug(f"Updated thread metadata for {thread_id}")
                 else:
                     # New thread: create metadata entry with truncated title as placeholder
+                    # Owner comes from the authenticated socket, never the frame.
+                    from app.lib.request_context import current_user_id
                     get_or_create_thread_metadata(
                         db_session,
                         thread_id=thread_id,
                         first_message_content=first_message,
+                        user_id=current_user_id(),
                         agent_name=agent_name
                     )
                     logger.info(f"Created thread metadata for {thread_id}")

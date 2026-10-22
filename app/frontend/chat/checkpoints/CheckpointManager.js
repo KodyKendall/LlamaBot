@@ -11,6 +11,8 @@
 import { DiffViewer } from './DiffViewer.js';
 import { GitGraphRenderer } from './GitGraphRenderer.js';
 import { GitHubAuthModal } from './GitHubAuthModal.js';
+import { DiscardUndoCard } from './DiscardUndoCard.js';
+import { confirmLargeDiscard, needsStrongWarning } from './discardWarning.js';
 
 export class CheckpointManager {
   constructor(chatApp) {
@@ -25,6 +27,11 @@ export class CheckpointManager {
     this.gitHubAuthModal = new GitHubAuthModal();
     this.selectedCommit = null;
     this.graphData = null;
+    // The way back from a discard, in the chat itself (see DiscardUndoCard.js).
+    this.undoCard = new DiscardUndoCard({
+      onUndo: (backupRef) => this.undoDiscard(backupRef),
+      onDismiss: (backupRef) => this.dismissDiscard(backupRef),
+    });
 
     this.initializeUI();
   }
@@ -44,6 +51,11 @@ export class CheckpointManager {
 
     // Create checkpoint panel (hidden by default)
     this.checkpointPanel = this.createCheckpointPanel();
+
+    // A discard still waiting for its undo shows in the chat after a reload.
+    // Must run after this.checkpointPanel is set (it used to run inside
+    // createCheckpointPanel and silently returned early).
+    this.refreshDiscardUndo();
 
     // Attach to DOM
     const chatSection = document.querySelector('.chat-section');
@@ -253,7 +265,6 @@ export class CheckpointManager {
     // Undo the last discard — a discard now snapshots first, so it is recoverable
     const undoDiscardBtn = panel.querySelector('.btn-undo-discard');
     undoDiscardBtn.onclick = () => this.undoDiscard();
-    this.refreshDiscardUndo();
 
     // Add uncommitted changes info click handler for expand/collapse
     const uncommittedInfo = panel.querySelector('.uncommitted-changes-info');
@@ -469,9 +480,29 @@ export class CheckpointManager {
    * Discard all uncommitted changes
    */
   async discardUncommittedChanges() {
-    // Confirm with user. The backend snapshots everything first, so this is
-    // recoverable — say so rather than scaring people with the old "cannot be undone".
-    if (!confirm('Discard all uncommitted changes?\n\nA backup is saved first, so you can undo this.')) {
+    // Ask for the size first: one edit gets the light confirm, a whole
+    // never-committed app gets a modal that says so (LP-7, 0.7.15).
+    let changes;
+    try {
+      const response = await fetch('/api/checkpoints/uncommitted', { credentials: 'same-origin' });
+      if (!response.ok) throw new Error(response.statusText);
+      changes = await response.json();
+    } catch (error) {
+      this.showError('Could not check what would be discarded: ' + error.message);
+      return;
+    }
+
+    if (needsStrongWarning(changes)) {
+      const choice = await this.confirmLargeDiscard(changes);
+      if (choice === 'checkpoint') {
+        if (!this.isVisible) this.togglePanel();
+        this.showSaveCheckpointForm();
+        return;
+      }
+      if (choice !== 'discard') return;
+    } else if (!confirm('Discard all uncommitted changes?\n\nA backup is saved first, so you can undo this.')) {
+      // The backend snapshots everything first, so this is recoverable — say so
+      // rather than scaring people with the old "cannot be undone".
       return;
     }
 
@@ -507,11 +538,18 @@ export class CheckpointManager {
   }
 
   /**
-   * Show or hide the "Undo discard" banner based on whether a snapshot exists.
+   * The strong discard warning (a modal). Its own method so tests can stub it.
+   */
+  confirmLargeDiscard(changes) {
+    return confirmLargeDiscard(changes);
+  }
+
+  /**
+   * Show or hide the "Undo discard" banner based on whether a snapshot exists,
+   * and the chat's Undo card based on whether a discard is still pending.
    */
   async refreshDiscardUndo() {
     const banner = this.checkpointPanel?.querySelector('.discard-undo-banner');
-    if (!banner) return;
 
     try {
       const response = await fetch('/api/checkpoints/discard/backups', {
@@ -520,6 +558,8 @@ export class CheckpointManager {
       if (!response.ok) throw new Error(response.statusText);
 
       const data = await response.json();
+      this.undoCard.render(data.backups);
+      if (!banner) return;
       banner.classList.toggle('hidden', !data.has_backups);
 
       if (data.has_backups) {
@@ -530,20 +570,20 @@ export class CheckpointManager {
     } catch (error) {
       // Never block the panel on this — worst case the undo button stays hidden.
       console.error('Error checking discard backups:', error);
-      banner.classList.add('hidden');
+      banner?.classList.add('hidden');
     }
   }
 
   /**
-   * Restore the changes the last discard threw away.
+   * Restore the changes a discard threw away (the latest one, by default).
    */
-  async undoDiscard() {
+  async undoDiscard(backupRef = null) {
     try {
       const response = await fetch('/api/checkpoints/discard/undo', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
-        body: JSON.stringify({})
+        body: JSON.stringify(backupRef ? { backup_ref: backupRef } : {})
       });
 
       if (!response.ok) {
@@ -565,12 +605,32 @@ export class CheckpointManager {
       this.showSuccess(data.message);
       this.checkUncommittedChanges();
       this.updateUnsavedBadge();
-      this.refreshDiscardUndo();
 
     } catch (error) {
       console.error('Error undoing discard:', error);
       this.showError('Failed to undo discard: ' + error.message);
+    } finally {
+      // Success clears the card; a failure re-enables its button.
+      this.refreshDiscardUndo();
     }
+  }
+
+  /**
+   * Take down the chat's Undo card for a discard. The backup is kept, so the
+   * panel's "Undo discard" still works.
+   */
+  async dismissDiscard(backupRef) {
+    try {
+      await fetch('/api/checkpoints/discard/dismiss', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ backup_ref: backupRef })
+      });
+    } catch (error) {
+      console.error('Error dismissing discard:', error);
+    }
+    this.refreshDiscardUndo();
   }
 
   /**

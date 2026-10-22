@@ -42,6 +42,7 @@ import { FaviconBadgeManager } from './ui/FaviconBadgeManager.js';
 import { StallMonitor } from './ui/StallMonitor.js';
 import { chooseInitialModel, resolveRememberedModel, resolveNewThreadModel, modelOptionState } from './utils/modelDefaults.js';
 import { safeInit, selectedElementsOf } from './utils/safeInit.js';
+import { rememberThread, startsFreshChat } from './threads/lastThread.js';
 
 // Image auto-switch: when a user attaches an image while on a text-only model,
 // we move them onto an image-capable model so the image is actually seen.
@@ -443,6 +444,8 @@ class ChatApp {
       // is a bad moment to ask right after an error/paywall anyway).
       if (event.detail?.type === 'end') {
         this.maybeShowSessionFeedback();
+        // The server saved the chat before 'end'; list it (new chat, new order).
+        this.threadManager.fetchThreads();
       }
     });
 
@@ -666,8 +669,20 @@ class ChatApp {
       this.voiceDictation.init(this.elements.micButton, this.elements.messageInput);
     });
 
-    // Load threads
-    safeInit('thread list', () => this.threadManager.fetchThreads());
+    // Load threads, and again each time the menu opens so a chat started
+    // since page load is listed.
+    safeInit('thread list', () => {
+      this.menuManager.onOpen = () => this.threadManager.fetchThreads();
+      this.threadManager.fetchThreads();
+    });
+
+    // Re-open the chat the user was last in, unless the URL starts its own
+    // (?prompt=, ?welcome_prompt=, ?conversation= — read before they are stripped
+    // below) or the user has already started a new one by the time it loads.
+    safeInit('last chat', () => {
+      if (startsFreshChat(new URLSearchParams(window.location.search))) return;
+      this.threadManager.restoreLastThread({ shouldApply: () => !this.appState.getThreadId() });
+    });
 
     // Setup activity tracking for lease management
     safeInit('activity tracking', () => this.setupActivityTracking());
@@ -1069,6 +1084,7 @@ class ChatApp {
     // Listen for thread change
     window.addEventListener('threadChanged', (e) => {
       this.appState.setThreadId(e.detail.threadId);
+      rememberThread(e.detail.threadId);
       // Reset token indicator when switching threads (we don't have historical token counts)
       if (this.tokenIndicator) {
         this.tokenIndicator.reset();
@@ -2113,6 +2129,7 @@ class ChatApp {
 
     // Ensure thread ID exists
     const threadId = this.appState.ensureThreadId();
+    rememberThread(threadId);
 
     // Force scroll to bottom for user messages
     this.scrollManager.scrollToBottom(true);
