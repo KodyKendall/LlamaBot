@@ -151,6 +151,12 @@ export class MessageHandler {
       window.dispatchEvent(new CustomEvent('websocketReplayUnavailable', { detail: data }));
       return;
     }
+    // Background research status — tracked for every thread (not just the one
+    // on screen) so the pill is right when the user switches chats.
+    if (data.type === 'background_task') {
+      window.chatApp?.handleBackgroundTask?.(data);
+      return;
+    }
 
     // A run frame for a thread the user isn't viewing: its cursor was advanced
     // above (so reconnect/replay stays correct), but it must NOT render into the
@@ -168,7 +174,14 @@ export class MessageHandler {
       this.tokenIndicator.update(data.token_usage);
     }
 
-    if (data.type === 'AIMessageChunk') {
+    if (data.type === 'run_started') {
+      // A turn the server started (a queued message, or research results
+      // arriving). The user's own sends already show "working"; this covers
+      // the rest. Always a fresh bubble: keeping the previous reply's text
+      // buffer seeded the new bubble with it ("…when it returns.There are two…").
+      this.appState.resetMessageState?.();
+      window.chatApp?.handleRunStarted?.();
+    } else if (data.type === 'AIMessageChunk') {
       this.handleAIMessageChunk(data);
     } else if (data.type === 'ai') {
       this.handleAIMessage(data);

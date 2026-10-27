@@ -9,6 +9,8 @@ from app.lib.token_usage import extract_token_usage
 from app.lib.turn_metrics import start_turn
 from app.lib.rails_error_watch import resume_error_watch, start_error_watch
 from app.lib.turn_notices import start_turn_notices
+from app.lib.turn_inbox import start_turn_inbox
+from app.lib.background_tasks import start_background_launcher, start_writer_gate
 from typing import Dict, Optional
 
 from langchain_core.messages import HumanMessage
@@ -168,6 +170,15 @@ def _prepend_request_shape(exc: Exception, traceback_str: str) -> str:
     except Exception:  # noqa: BLE001
         return traceback_str
     return f"[llamabot request shape]\n{rendered}\n\n{traceback_str}"
+
+
+def _is_human_message_chunk(chunk) -> bool:
+    """A user message re-emitted on the "messages" stream (added mid-turn by
+    QueuedMessagesMiddleware). The browser already shows it; don't send it back."""
+    try:
+        return getattr(chunk[2][0], "type", None) == "human"
+    except (IndexError, TypeError, KeyError):
+        return False
 
 
 class RequestHandler:
@@ -415,15 +426,139 @@ class RequestHandler:
         """Start a chat turn as a background run, decoupled from the live socket.
 
         The run is owned by the per-thread RunManager, not the connection, so it
-        survives a disconnect; the socket is attached as a live subscriber. A new
-        message for the same thread supersedes (cancels) the prior run.
+        survives a disconnect; the socket is attached as a live subscriber. A
+        message sent while the thread is mid-turn is QUEUED, never a cancel: the
+        running agent reads it before its next model call (QueuedMessagesMiddleware),
+        or it starts the next turn. Only Stop cancels.
         """
+        from app.websocket.run_manager import QueuedMessage
+
         thread_id = str(message.get("thread_id"))
+        status = await self._run_manager().submit(
+            thread_id, QueuedMessage(dict(message)), self._queued_run_factory, websocket,
+        )
+        if status == "queued":
+            logger.info(f"Queued mid-turn message on thread {thread_id} (run left running)")
+
+    def _queued_run_factory(self, items: list):
+        """Build the run for queued messages: one turn carrying all of them.
+
+        The newest frame supplies agent/model/settings; the texts are joined in
+        the order sent and attachments carried over. Research results queued
+        alone run as a notification turn (no paywall, not reported as typed).
+        """
+        frames = [item.frame for item in items]
+        message = dict(frames[-1])
+        if len(frames) > 1:
+            message["message"] = "\n\n".join(
+                str(f.get("message", "")) for f in frames if f.get("message")
+            )
+            attachments = [a for f in frames for a in (f.get("attachments") or [])]
+            if attachments:
+                message["attachments"] = attachments
+        task_notification = all(item.notification for item in items)
 
         async def factory(sink):
-            await self.handle_request(message, sink)
+            await self.handle_request(message, sink, task_notification=task_notification)
 
-        await self._run_manager().start(thread_id, factory, websocket)
+        return factory
+
+    def _install_turn_channels(self, frame: dict) -> None:
+        """Per-turn: the inbox (mid-turn messages), the background launcher, and
+        the writer gate (file edits wait for a running coding task)."""
+        thread_id = str(frame.get("thread_id", ""))
+        start_turn_inbox(lambda: self._drain_queued_messages(thread_id))
+        start_background_launcher(self._background_launcher(frame))
+        start_writer_gate(self._run_manager().wait_for_writers)
+
+    def _drain_queued_messages(self, thread_id: str) -> list:
+        """Turn the thread's queued frames into HumanMessages for the running agent."""
+        messages = []
+        for item in self._run_manager().drain(thread_id):
+            kwargs = {"task_notification": True} if item.notification else {}
+            messages.append(HumanMessage(
+                content=self._build_message_content(item.frame), additional_kwargs=kwargs,
+            ))
+            if not item.notification:
+                self._report_user_message(item.frame)
+        return messages
+
+    def _background_launcher(self, origin: dict):
+        """The launcher delegate_research / delegate_task use to run in the background.
+
+        ``work`` is ``async () -> str``. When it finishes, its text is pushed back
+        to the thread as a task-notification message — a new turn, or queued
+        behind the running one. Returns the task id, or None at the thread's cap
+        (the tool then runs inline).
+        """
+        from app.websocket.run_manager import QueuedMessage
+
+        thread_id = str(origin.get("thread_id"))
+        run_manager = self._run_manager()
+        # The turn that delivers results runs on the same agent/model/settings
+        # as the one that asked; the user's text and attachments do not carry.
+        base = {k: v for k, v in origin.items()
+                if k not in ("message", "attachments", "client_message_id", "debug_info")}
+
+        def launch(*, kind: str, label: str, work):
+            task_id = None
+
+            async def job():
+                try:
+                    findings = await work()
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:  # noqa: BLE001 - the agent still hears back
+                    logger.exception(f"Background {kind} {task_id} failed")
+                    findings = f"[{kind.upper()} FAILED]\n\nError: {describe_exception(e)}"
+                what = ("This is its report of what it changed — tell the user."
+                        if kind == "coding" else
+                        "These are its findings — use them to answer the user.")
+                note = (
+                    f"<task-notification>\n{label} {task_id} finished. {what}\n\n"
+                    f"{findings}\n</task-notification>"
+                )
+                await run_manager.submit(
+                    thread_id, QueuedMessage({**base, "message": note}, notification=True),
+                    self._queued_run_factory,
+                )
+
+            task_id = run_manager.start_background(thread_id, job, kind=kind, label=label)
+            return task_id
+
+        return launch
+
+    def _report_user_message(self, incoming_message: dict) -> None:
+        """Report a user message to the mothership (counts + history). Fire and forget."""
+        mothership = getattr(self.app.state, "mothership_client", None)
+        if mothership is None:
+            return
+
+        async def _report_user_and_cache_paywall():
+            result = await mothership.report_message(
+                thread_id=str(incoming_message.get("thread_id", "")),
+                role="user",
+                content=str(incoming_message.get("message", "")),
+                sent_at=datetime.now(timezone.utc).isoformat(),
+                # So the mothership can leave customer-paid (own ChatGPT)
+                # turns out of the daily message count.
+                model=self._reported_user_model(incoming_message),
+            )
+            # Only role="user" responses carry paywall fields. plan/resets_at
+            # come back on ALLOWED turns too, so the card already knows which
+            # plan it is talking to by the time the block lands.
+            if result and "allowed_next" in result:
+                self.app.state.paywall_credits = {
+                    "allowed_next": result.get("allowed_next"),
+                    "messages_remaining": result.get("messages_remaining"),
+                    **self._paywall_context(result),
+                }
+                logger.info(f"paywall cache updated: {self.app.state.paywall_credits}")
+
+        try:
+            asyncio.get_running_loop().create_task(_report_user_and_cache_paywall())
+        except RuntimeError:
+            logger.debug("No running loop; user message not reported")
 
     async def start_resume_run(self, response_message: dict, websocket: WebSocket, kind: str):
         """Resume after an approval/question answer as a background run."""
@@ -1130,7 +1265,7 @@ class RequestHandler:
             await _send({"type": "end"})
 
     # This is a the main function that handles incoming WebSocket requests. This will build the LangGraph workflow, and invoke it from a checkpointed state.
-    async def handle_request(self, incoming_message: dict, websocket: WebSocket):
+    async def handle_request(self, incoming_message: dict, websocket: WebSocket, task_notification: bool = False):
         """Handle incoming WebSocket requests with proper locking and cancellation"""
         ws_id = id(websocket)
         lock = self._get_lock(websocket)
@@ -1143,35 +1278,15 @@ class RequestHandler:
         if await self._check_instance_lock_or_block(websocket):
             return
 
-        # Paywall gate — must run before report_message so blocked messages
-        # don't get counted against the user's quota. A blocked customer on their
-        # own ChatGPT plan gets through, pinned to that plan for this turn.
-        if await self._paywall_blocks_turn(incoming_message, websocket):
-            return
-
-        mothership = getattr(self.app.state, "mothership_client", None)
-        if mothership is not None:
-            async def _report_user_and_cache_paywall():
-                result = await mothership.report_message(
-                    thread_id=str(incoming_message.get("thread_id", "")),
-                    role="user",
-                    content=str(incoming_message.get("message", "")),
-                    sent_at=datetime.now(timezone.utc).isoformat(),
-                    # So the mothership can leave customer-paid (own ChatGPT)
-                    # turns out of the daily message count.
-                    model=self._reported_user_model(incoming_message),
-                )
-                # Only role="user" responses carry paywall fields. plan/resets_at
-                # come back on ALLOWED turns too, so the card already knows which
-                # plan it is talking to by the time the block lands.
-                if result and "allowed_next" in result:
-                    self.app.state.paywall_credits = {
-                        "allowed_next": result.get("allowed_next"),
-                        "messages_remaining": result.get("messages_remaining"),
-                        **self._paywall_context(result),
-                    }
-                    logger.info(f"paywall cache updated: {self.app.state.paywall_credits}")
-            asyncio.create_task(_report_user_and_cache_paywall())
+        # Research results pushed back by the server are not something the user
+        # typed: no paywall check, not counted, not reported as a user message.
+        if not task_notification:
+            # Paywall gate — must run before report_message so blocked messages
+            # don't get counted against the user's quota. A blocked customer on their
+            # own ChatGPT plan gets through, pinned to that plan for this turn.
+            if await self._paywall_blocks_turn(incoming_message, websocket):
+                return
+            self._report_user_message(incoming_message)
 
         # /compact is a system operation — skip paywall and mothership reporting,
         # acquire the lock so it can't race with an active agent run.
@@ -1215,9 +1330,22 @@ class RequestHandler:
             # `websocket` here is the run's sink, so notices inherit thread_id
             # stamping and replay-on-reattach. See app/lib/turn_notices.py.
             start_turn_notices(websocket.send_json)
+
+            # Messages the user sends while this turn runs are queued on the
+            # thread; QueuedMessagesMiddleware drains them before each model
+            # call. delegate_research hands its work to the thread's RunManager
+            # through the launcher so this turn can end while research runs.
+            # Same ContextVar pattern as the three above.
+            self._install_turn_channels(incoming_message)
             turn_started_at = _time.monotonic()
             try:
                 app, state, agent_config = self.get_langgraph_app_and_state(incoming_message)
+                if task_notification and isinstance(state, dict):
+                    # Saved flagged so history shows "Research finished", not
+                    # the raw findings as if the user had typed them.
+                    for msg in state.get("messages") or []:
+                        if isinstance(msg, HumanMessage):
+                            msg.additional_kwargs["task_notification"] = True
 
                 if app is None:
                     # No agent_name on the frame (or a graph that did not build).
@@ -1268,6 +1396,17 @@ class RequestHandler:
                 # next model call. See SupportIncident #106.
                 from langgraph.types import Command
                 pending_question = await self._pending_question_interrupt(app, config)
+                if pending_question is not None and task_notification:
+                    # Research results are not the answer to the card Leo is
+                    # waiting on. Hold them; the turn that resumes after the
+                    # user answers drains them before its next model call.
+                    from app.websocket.run_manager import QueuedMessage
+                    self._run_manager().requeue(
+                        str(incoming_message.get("thread_id")),
+                        QueuedMessage(dict(incoming_message), notification=True),
+                    )
+                    await websocket.send_json({"type": "end"})
+                    return
                 if pending_question is not None:
                     resume_value = incoming_message.get('message', '')
                     logger.info(
@@ -1307,7 +1446,7 @@ class RequestHandler:
                     if await self._forward_custom_stream_chunk(chunk, websocket):
                         continue
 
-                    is_this_chunk_an_llm_message = isinstance(chunk, tuple) and len(chunk) == 3 and chunk[1] == 'messages'
+                    is_this_chunk_an_llm_message = isinstance(chunk, tuple) and len(chunk) == 3 and chunk[1] == 'messages' and not _is_human_message_chunk(chunk)
                     is_this_chunk_an_update_stream_type = isinstance(chunk, tuple) and len(chunk) == 3 and chunk[1] == 'updates'
                     if logger.isEnabledFor(logging.DEBUG):
                         logger.debug(f"🍅🍅🍅 Chunk: {chunk}")
@@ -1421,6 +1560,11 @@ class RequestHandler:
                                 # We can access state objects by using agent_data['key']. 
 
                                 messages = agent_data['messages'] #Question: is this ALL messages coming through, or just the latest AI message?
+                                # A user message added mid-turn (QueuedMessagesMiddleware) shows up
+                                # here as a state update. The browser already rendered it when it
+                                # was sent; echoing it back drew it again (3x, seen live 2026-10-22).
+                                if messages and getattr(messages[-1], 'type', None) == 'human':
+                                    continue
 
                                 # Safe check for tool calls with better error handling
                                 did_agent_evoke_a_tool = False
@@ -1634,6 +1778,8 @@ class RequestHandler:
                 # browser_command path — Leo navigating the preview to verify is
                 # exactly when a 500 shows up. No-op if the turn never armed one.
                 resume_error_watch(thread_id=str(response_message.get("thread_id", "")))
+                # A resumed turn picks up queued messages and can start research too.
+                self._install_turn_channels(response_message)
 
                 # Auto-repair corrupted thread state (defensive - less likely in HITL flow).
                 # No-ops while the graph is paused on the interrupt we are about to
@@ -1649,7 +1795,7 @@ class RequestHandler:
                     if await self._forward_custom_stream_chunk(chunk, websocket):
                         continue
 
-                    is_this_chunk_an_llm_message = isinstance(chunk, tuple) and len(chunk) == 3 and chunk[1] == 'messages'
+                    is_this_chunk_an_llm_message = isinstance(chunk, tuple) and len(chunk) == 3 and chunk[1] == 'messages' and not _is_human_message_chunk(chunk)
                     is_this_chunk_an_update_stream_type = isinstance(chunk, tuple) and len(chunk) == 3 and chunk[1] == 'updates'
 
                     subgraph_tuple = chunk[0] if isinstance(chunk, tuple) and len(chunk) >= 1 else ()
@@ -1693,6 +1839,11 @@ class RequestHandler:
                         for agent_key, agent_data in state_object.items():
                             if isinstance(agent_data, dict) and 'messages' in agent_data:
                                 messages = agent_data['messages']
+                                # A user message added mid-turn (QueuedMessagesMiddleware) shows up
+                                # here as a state update. The browser already rendered it when it
+                                # was sent; echoing it back drew it again (3x, seen live 2026-10-22).
+                                if messages and getattr(messages[-1], 'type', None) == 'human':
+                                    continue
                                 tool_calls = []
                                 if messages and len(messages) > 0:
                                     message = messages[-1]
@@ -1877,6 +2028,8 @@ class RequestHandler:
                 # browser_command path — Leo navigating the preview to verify is
                 # exactly when a 500 shows up. No-op if the turn never armed one.
                 resume_error_watch(thread_id=str(response_message.get("thread_id", "")))
+                # A resumed turn picks up queued messages and can start research too.
+                self._install_turn_channels(response_message)
 
                 # Auto-repair corrupted thread state. No-ops while the graph is
                 # paused on the question interrupt we are about to resume —
@@ -1908,7 +2061,7 @@ class RequestHandler:
                     if await self._forward_custom_stream_chunk(chunk, websocket):
                         continue
 
-                    is_this_chunk_an_llm_message = isinstance(chunk, tuple) and len(chunk) == 3 and chunk[1] == 'messages'
+                    is_this_chunk_an_llm_message = isinstance(chunk, tuple) and len(chunk) == 3 and chunk[1] == 'messages' and not _is_human_message_chunk(chunk)
                     is_this_chunk_an_update_stream_type = isinstance(chunk, tuple) and len(chunk) == 3 and chunk[1] == 'updates'
 
                     subgraph_tuple = chunk[0] if isinstance(chunk, tuple) and len(chunk) >= 1 else ()
@@ -1952,6 +2105,11 @@ class RequestHandler:
                         for agent_key, agent_data in state_object.items():
                             if isinstance(agent_data, dict) and 'messages' in agent_data:
                                 messages = agent_data['messages']
+                                # A user message added mid-turn (QueuedMessagesMiddleware) shows up
+                                # here as a state update. The browser already rendered it when it
+                                # was sent; echoing it back drew it again (3x, seen live 2026-10-22).
+                                if messages and getattr(messages[-1], 'type', None) == 'human':
+                                    continue
                                 tool_calls = []
                                 if messages and len(messages) > 0:
                                     message = messages[-1]

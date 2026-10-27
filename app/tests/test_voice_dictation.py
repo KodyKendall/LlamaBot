@@ -4,9 +4,10 @@ The browser streams audio straight to AssemblyAI, so it needs a credential — b
 never the master key. POST /api/voice-dictation/token trades the server-held key
 for a 60-second streaming token and returns only that token.
 
-The feature is opt-in twice over: the `enable_voice_dictation` setting defaults
-off, and it cannot be switched on at all while the box has no AssemblyAI key
-(the Settings toggle is greyed out, and the PUT refuses it server-side too).
+Since 0.7.16 (LP-18) a box that never saved `enable_voice_dictation` gets the mic
+button — except a ZDR/FERPA box, where the unsaved default stays off. An explicit
+save of "false" always wins. Nothing works without an AssemblyAI key (the Settings
+toggle is greyed out, and the PUT refuses "true" server-side too).
 
 Run with: pytest app/tests/test_voice_dictation.py -v
 """
@@ -27,6 +28,21 @@ def _no_key(monkeypatch):
     """Every test starts on a box with no AssemblyAI key, whatever the container has."""
     for name in (KEY_NAME, "ASSEMBLYAI_API_KEY", "ASSEMBLY_AI_API"):
         monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _not_zdr(monkeypatch):
+    """Every test starts on a normal (non-ZDR) box, whatever policy the container holds."""
+    from app.agents.leonardo import zdr
+
+    monkeypatch.setattr(zdr, "enforced", lambda: False)
+
+
+@pytest.fixture
+def zdr_box(monkeypatch):
+    from app.agents.leonardo import zdr
+
+    monkeypatch.setattr(zdr, "enforced", lambda: True)
 
 
 def _build_client(role="engineer", is_admin=False):
@@ -65,12 +81,16 @@ def client():
     return _build_client()
 
 
-def _enable(client):
+def _save(client, value):
     from app.models import SiteSetting
 
     with Session(client._engine) as s:
-        s.add(SiteSetting(key="enable_voice_dictation", value="true"))
+        s.add(SiteSetting(key="enable_voice_dictation", value=value))
         s.commit()
+
+
+def _enable(client):
+    _save(client, "true")
 
 
 def _upstream(status=200, body=None):
@@ -114,11 +134,51 @@ def test_blank_key_counts_as_missing(monkeypatch):
 
 # --- status ----------------------------------------------------------------
 
-def test_status_off_by_default_even_with_a_key(client, monkeypatch):
+def test_status_on_by_default_with_a_key(client, monkeypatch):
+    """LP-18 scenario 1: key present, setting never saved → mic button."""
+    monkeypatch.setenv(KEY_NAME, MASTER_KEY)
+    body = client.get("/api/voice-dictation/status").json()
+
+    assert body == {"key_configured": True, "enabled": True, "available": True}
+
+
+def test_status_explicit_false_wins_over_the_default(client, monkeypatch):
+    """LP-18 scenario 2: an admin who switched it off keeps it off."""
+    monkeypatch.setenv(KEY_NAME, MASTER_KEY)
+    _save(client, "false")
+    body = client.get("/api/voice-dictation/status").json()
+
+    assert body["enabled"] is False
+    assert body["available"] is False
+
+
+def test_status_off_by_default_without_a_key(client):
+    """LP-18 scenario 3: no key, setting never saved → no mic button."""
+    body = client.get("/api/voice-dictation/status").json()
+
+    assert body["key_configured"] is False
+    assert body["available"] is False
+
+
+def test_status_off_by_default_on_a_zdr_box(client, monkeypatch, zdr_box):
+    """LP-18 scenario 4: FERPA/ZDR box with a key and no saved setting stays off."""
     monkeypatch.setenv(KEY_NAME, MASTER_KEY)
     body = client.get("/api/voice-dictation/status").json()
 
     assert body == {"key_configured": True, "enabled": False, "available": False}
+
+
+def test_token_refused_by_default_on_a_zdr_box(client, monkeypatch, zdr_box):
+    monkeypatch.setenv(KEY_NAME, MASTER_KEY)
+    assert client.post("/api/voice-dictation/token").status_code == 403
+
+
+def test_unreadable_setting_fails_closed(monkeypatch):
+    from app.services import voice_dictation
+
+    monkeypatch.setenv(KEY_NAME, MASTER_KEY)
+    with patch("app.routers.api.get_site_setting", side_effect=RuntimeError("db down")):
+        assert voice_dictation.dictation_available(MagicMock()) is False
 
 
 def test_status_reports_a_missing_key(client):
@@ -153,7 +213,7 @@ def test_setting_cannot_be_switched_on_without_a_key(client):
     r = client.put("/api/site-settings/enable_voice_dictation", json={"value": "true"})
 
     assert r.status_code == 400
-    assert client.get("/api/voice-dictation/status").json()["enabled"] is False
+    assert client.get("/api/voice-dictation/status").json()["available"] is False
 
 
 def test_setting_can_always_be_switched_off(client):
@@ -202,6 +262,7 @@ def test_token_request_uses_the_v3_endpoint_with_a_60s_lifetime(client, monkeypa
 
 def test_token_refused_while_the_toggle_is_off(client, monkeypatch):
     monkeypatch.setenv(KEY_NAME, MASTER_KEY)
+    _save(client, "false")
     http = _upstream()
 
     with patch("app.services.voice_dictation.httpx.AsyncClient", return_value=http):

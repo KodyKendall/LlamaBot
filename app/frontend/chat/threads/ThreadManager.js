@@ -477,6 +477,12 @@ export class ThreadManager {
 
     // Render all messages
     messages.forEach(message => {
+      // Background task results are delivered to Leo as a message; the user
+      // sees Leo's answer, so show a one-line marker, not the raw report.
+      if (isTaskNotification(message)) {
+        this.messageRenderer.addMessage(taskNotificationMarker(message), 'system_message');
+        return;
+      }
       // Extract text content from message.content
       const textContent = this.normalizeHistoricalMessageContent(message.content);
       this.messageRenderer.addMessage(textContent, message.type, message);
@@ -589,4 +595,16 @@ export class ThreadManager {
   generateThreadId() {
     return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   }
+}
+
+/** A server-made message carrying background task results (delegate_research / delegate_task). */
+export function isTaskNotification(message) {
+  return message?.type === 'human' && message?.additional_kwargs?.task_notification === true;
+}
+
+/** "Coding task finished" / "Research finished", read off the notification's first line. */
+export function taskNotificationMarker(message) {
+  const text = typeof message?.content === 'string' ? message.content : '';
+  const match = text.match(/<task-notification>\s*(.+?) \S+ finished\./);
+  return match ? `${match[1]} finished` : 'Background task finished';
 }

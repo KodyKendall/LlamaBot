@@ -353,6 +353,7 @@ class RedeemRailsGrantRequest(BaseModel):
     token: str = ""
 
 
+# No session auth by design: the single-use grant is the credential, verified by the mothership below.
 @router.post("/internal/redeem_rails_grant")
 async def redeem_rails_grant(body: RedeemRailsGrantRequest):
     """Redeem a login grant on behalf of the Rails app (Phase 3, Option 1).

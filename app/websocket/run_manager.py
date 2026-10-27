@@ -28,11 +28,31 @@ a later step; see the design doc.
 import asyncio
 from asyncio import CancelledError
 from collections import deque, OrderedDict
+import contextvars
+from dataclasses import dataclass
 import logging
+import time
+import uuid
 
+from langchain_core.runnables.config import var_child_runnable_config
 from starlette.websockets import WebSocketState
 
 logger = logging.getLogger(__name__)
+
+
+def _top_level_context() -> contextvars.Context:
+    """The current context, minus any enclosing LangChain/LangGraph run.
+
+    Research is launched from inside a tool call, and the results turn from
+    inside the research task. A task inherits its creator's context, including
+    LangChain's parent-run config, so without this a new turn runs as if nested
+    in that old, finished graph run: the model answers, but not one checkpoint
+    lands on the thread (seen live 2026-10-22). The user identity in the context
+    (who the turn is for, whose ChatGPT plan pays) must still carry over.
+    """
+    ctx = contextvars.copy_context()
+    ctx.run(var_child_runnable_config.set, None)
+    return ctx
 
 
 class ThreadOutputLog:
@@ -81,6 +101,20 @@ class ThreadOutputLog:
         return self.min_seq > last_seq + 1
 
 
+@dataclass
+class QueuedMessage:
+    """A chat frame waiting for the thread's running turn to pick it up.
+
+    ``notification`` marks a server-made message (background research results),
+    so it skips the paywall and is not reported as something the user typed. It
+    is a field here rather than a frame key so a client can never set it.
+    """
+    frame: dict
+    notification: bool = False
+    # Held for the next model call only (never starts a turn by itself) — see requeue().
+    held: bool = False
+
+
 class RunHandle:
     """One thread's run: its task, its output log, and the live socket (if any)."""
 
@@ -89,6 +123,12 @@ class RunHandle:
         self.log = log
         self.task = None          # asyncio.Task running the graph
         self.attached_ws = None   # the currently-live subscriber socket, or None
+        self.pending = []         # QueuedMessages sent while a turn was running
+        self.factory_for = None   # builds the run that picks up leftover pending
+        self.background = {}      # task_id -> {"task", "kind", "label", "started_at"}
+
+    def is_running(self) -> bool:
+        return self.task is not None and not self.task.done()
 
 
 class RunSink:
@@ -155,41 +195,95 @@ class RunManager:
             self._start_locks[thread_id] = asyncio.Lock()
         return self._start_locks[thread_id]
 
+    def _handle_for(self, thread_id: str) -> RunHandle:
+        handle = self._runs.get(thread_id)
+        if handle is None:
+            handle = RunHandle(thread_id, ThreadOutputLog(maxlen=self._log_maxlen))
+            handle.log.status = "done"
+            self._runs[thread_id] = handle
+        return handle
+
     async def start(self, thread_id, run_factory, websocket=None) -> RunHandle:
         """Start a background run for ``thread_id``, superseding any active one.
 
         ``run_factory`` is ``async (sink) -> None`` — typically a closure over a
-        RequestHandler streaming method. A run already active for this thread is
-        cancelled first (a genuinely new message supersedes the old turn). The
-        output log is REUSED across turns so ``seq`` stays monotonic and a client
-        can attach with a single ``last_seq``.
+        RequestHandler streaming method. Used for resumes (approval / question
+        answers), where the thread is paused, not running. Chat messages go
+        through :meth:`submit`, which queues instead of cancelling. The output
+        log is REUSED across turns so ``seq`` stays monotonic and a client can
+        attach with a single ``last_seq``.
         """
         thread_id = str(thread_id)
         async with self._lock_for(thread_id):
             existing = self._runs.get(thread_id)
-            if existing and existing.task and not existing.task.done():
+            if existing and existing.is_running():
                 existing.task.cancel()
                 try:
                     await existing.task
                 except (CancelledError, Exception):
                     pass
+            return self._start_locked(thread_id, run_factory, websocket)
 
-            log = existing.log if existing else ThreadOutputLog(maxlen=self._log_maxlen)
-            log.status = "running"
-            handle = existing or RunHandle(thread_id, log)
-            handle.log = log
+    async def submit(self, thread_id, item: QueuedMessage, factory_for, websocket=None) -> str:
+        """Run a chat message now, or queue it if the thread is mid-turn.
+
+        A new message NEVER cancels the running turn — only Stop does. Queued
+        messages reach the agent one of two ways: QueuedMessagesMiddleware drains
+        them before the next model call, or, if the turn ends first, they start
+        the next turn together. ``factory_for(items)`` builds that run.
+
+        Returns ``"started"`` or ``"queued"``.
+        """
+        thread_id = str(thread_id)
+        async with self._lock_for(thread_id):
+            handle = self._runs.get(thread_id)
+            if handle is not None and handle.is_running():
+                handle.pending.append(item)
+                handle.factory_for = factory_for
+                if websocket is not None:
+                    handle.attached_ws = websocket
+                return "queued"
+            handle = self._start_locked(thread_id, factory_for([item]), websocket)
+            handle.factory_for = factory_for
+            return "started"
+
+    def drain(self, thread_id) -> list:
+        """Take every queued message for the thread (the running turn consumes them)."""
+        handle = self._runs.get(str(thread_id))
+        if handle is None or not handle.pending:
+            return []
+        items, handle.pending = handle.pending, []
+        return items
+
+    def requeue(self, thread_id, item: QueuedMessage) -> None:
+        """Hold a message for the thread's next model call, without starting a turn.
+
+        Used when the thread is paused on a question card: the message must not
+        resume it, so it waits until the user's answer runs the agent again.
+        """
+        item.held = True
+        self._handle_for(str(thread_id)).pending.append(item)
+
+    def _start_locked(self, thread_id: str, run_factory, websocket) -> RunHandle:
+        handle = self._handle_for(thread_id)
+        handle.log.status = "running"
+        if websocket is not None:
             handle.attached_ws = websocket
 
-            sink = RunSink(handle)
-            handle.task = asyncio.create_task(self._wrap(handle, run_factory, sink))
+        sink = RunSink(handle)
+        handle.task = asyncio.create_task(
+            self._wrap(handle, run_factory, sink), context=_top_level_context(),
+        )
 
-            self._runs[thread_id] = handle
-            self._runs.move_to_end(thread_id)
-            self._evict_finished_if_needed()
-            return handle
+        self._runs.move_to_end(thread_id)
+        self._evict_finished_if_needed()
+        return handle
 
     async def _wrap(self, handle: RunHandle, run_factory, sink: RunSink) -> None:
         try:
+            # Lets the client show "working" for a turn it did not start itself
+            # (a queued follow-up, or research results arriving).
+            await sink.send_json({"type": "run_started"})
             await run_factory(sink)
             handle.log.status = "done"
         except CancelledError:
@@ -201,6 +295,88 @@ class RunManager:
             # Swallow: the error message was already streamed to the sink by the
             # run body's own except handler. Re-raising would only produce an
             # unretrieved-task-exception warning.
+        finally:
+            # Messages that arrived after the turn's last model call: they start
+            # the next turn. Not after Stop — cancel() already dropped them.
+            if any(not i.held for i in handle.pending) and handle.log.status != "cancelled":
+                asyncio.create_task(self._run_pending(handle.thread_id))
+
+    async def _run_pending(self, thread_id: str) -> None:
+        async with self._lock_for(thread_id):
+            handle = self._runs.get(thread_id)
+            # A turn that is already running will drain the queue itself.
+            if handle is None or handle.is_running():
+                return
+            items = [i for i in handle.pending if not i.held]
+            if not items:
+                return
+            handle.pending = [i for i in handle.pending if i.held]
+            self._start_locked(thread_id, handle.factory_for(items), None)
+
+    # ------------------------------------------------------- background tasks
+
+    def start_background(self, thread_id, work, *, kind: str, label: str,
+                         max_per_thread: int = 3):
+        """Run ``work()`` on the thread, outside any turn. Returns a task id.
+
+        The task belongs to the RunManager, not to the turn that launched it, so
+        the turn can end (and the user can keep chatting) while it runs. The
+        client gets ``background_task`` frames (running / finished) for the
+        status pill. Returns None when the thread is at ``max_per_thread``.
+        In memory only: a process restart loses in-flight tasks.
+        """
+        thread_id = str(thread_id)
+        handle = self._handle_for(thread_id)
+        if len(handle.background) >= max_per_thread:
+            return None
+        task_id = uuid.uuid4().hex[:8]
+        info = {"kind": kind, "label": label, "started_at": time.time()}
+        handle.background[task_id] = info
+        sink = RunSink(handle)
+
+        async def frame(status: str) -> None:
+            await sink.send_json({
+                "type": "background_task", "status": status, "task_id": task_id,
+                "kind": kind, "label": label, "started_at": info["started_at"],
+            })
+
+        async def run() -> None:
+            await frame("running")
+            try:
+                await work()
+            except CancelledError:
+                raise
+            except Exception:
+                logger.exception(f"Background {kind} {task_id} failed on thread {thread_id}")
+            finally:
+                handle.background.pop(task_id, None)
+                await frame("finished")
+
+        info["task"] = asyncio.create_task(run(), context=_top_level_context())
+        return task_id
+
+    def _writer_tasks(self) -> list:
+        """Running coding tasks on ANY thread — they all edit the same files."""
+        return [i["task"] for h in self._runs.values()
+                for i in h.background.values() if i["kind"] == "coding"]
+
+    def writers_busy(self) -> bool:
+        return bool(self._writer_tasks())
+
+    async def wait_for_writers(self) -> None:
+        """Return once no coding task is editing files (the writer gate)."""
+        while tasks := self._writer_tasks():
+            await asyncio.wait(tasks)
+
+    def background_tasks(self, thread_id) -> list:
+        """The thread's running background tasks, as plain dicts (for the client)."""
+        handle = self._runs.get(str(thread_id))
+        if handle is None:
+            return []
+        return [
+            {"task_id": tid, "kind": i["kind"], "label": i["label"], "started_at": i["started_at"]}
+            for tid, i in handle.background.items()
+        ]
 
     def attach(self, thread_id, websocket) -> RunHandle:
         """Mark ``websocket`` as the live subscriber for the thread's run.
@@ -221,20 +397,34 @@ class RunManager:
             handle.attached_ws = None
 
     async def cancel(self, thread_id) -> bool:
-        """Explicitly cancel a thread's run (user pressed stop)."""
+        """Explicitly cancel a thread's work (user pressed stop).
+
+        Stop means stop: the running turn, anything queued behind it, and any
+        background research on the thread.
+        """
         handle = self._runs.get(str(thread_id))
-        if handle is None or handle.task is None or handle.task.done():
+        if handle is None:
             return False
-        handle.task.cancel()
-        try:
-            await handle.task
-        except (CancelledError, Exception):
-            pass
+        handle.pending = []
+        tasks = [i["task"] for i in handle.background.values()]
+        if handle.is_running():
+            tasks.insert(0, handle.task)
+        if not tasks:
+            return False
+        for task in tasks:
+            task.cancel()
+        for task in tasks:
+            try:
+                await task
+            except (CancelledError, Exception):
+                pass
         return True
 
     def active_tasks(self) -> list:
         """All not-yet-finished run tasks (used for graceful shutdown / tests)."""
-        return [h.task for h in self._runs.values() if h.task and not h.task.done()]
+        tasks = [h.task for h in self._runs.values() if h.is_running()]
+        tasks += [i["task"] for h in self._runs.values() for i in h.background.values()]
+        return tasks
 
     def _evict_finished_if_needed(self) -> None:
         """Bound memory: drop oldest FINISHED runs once we exceed max_threads.
@@ -245,9 +435,20 @@ class RunManager:
         """
         while len(self._runs) > self._max_threads:
             for tid, handle in list(self._runs.items()):
-                if handle.task is None or handle.task.done():
+                if not handle.is_running() and not handle.background and not handle.pending:
                     del self._runs[tid]
                     self._start_locks.pop(tid, None)
                     break
             else:
                 break  # nothing finished to evict; let it grow rather than kill a live run
+
+
+_shared_run_manager = None
+
+
+def shared_run_manager() -> RunManager:
+    """The process-wide RunManager (main.py runs twice: as ``main`` and ``app.main``)."""
+    global _shared_run_manager
+    if _shared_run_manager is None:
+        _shared_run_manager = RunManager()
+    return _shared_run_manager

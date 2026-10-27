@@ -154,7 +154,8 @@ async def test_run_continues_after_socket_detaches():
 
     handle = await rm.start("t1", factory, websocket=ws)
     await started.wait()
-    assert ws.sent[0]["content"] == "chunk-1"
+    assert ws.sent[0]["type"] == "run_started"  # every run announces itself
+    assert ws.sent[1]["content"] == "chunk-1"
 
     # Browser drops mid-run.
     ws.close()
@@ -167,7 +168,7 @@ async def test_run_continues_after_socket_detaches():
     assert handle.log.status == "done"
     # All three messages are in the log even though the socket was gone for 2 of them.
     assert [e.get("content", e.get("type")) for e in handle.log.since(0)] == [
-        "chunk-1", "chunk-2", "end",
+        "run_started", "chunk-1", "chunk-2", "end",
     ]
 
 
@@ -189,12 +190,13 @@ async def test_reconnect_replays_missed_messages():
     ws1.close()
     rm.detach("t1", ws1)
 
-    # Reconnect: new socket attaches, replays everything after last_seq=1.
+    # Reconnect: new socket attaches, replays everything after last_seq=2
+    # (seq 1 is run_started, seq 2 is c1).
     ws2 = FakeWS()
     h = rm.attach("t1", ws2)
     assert h is handle
-    missed = handle.log.since(1)
-    assert missed == []  # nothing emitted after seq 1 yet
+    missed = handle.log.since(2)
+    assert missed == []  # nothing emitted after seq 2 yet
 
     # Now the run emits c2 — it live-tails to ws2.
     release.set()

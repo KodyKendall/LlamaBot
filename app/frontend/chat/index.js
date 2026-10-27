@@ -40,6 +40,8 @@ import { CheckpointManager } from './checkpoints/CheckpointManager.js';
 import { DiffViewer } from './checkpoints/DiffViewer.js';
 import { FaviconBadgeManager } from './ui/FaviconBadgeManager.js';
 import { StallMonitor } from './ui/StallMonitor.js';
+import { BackgroundTaskPill } from './ui/BackgroundTaskPill.js';
+import { sendButtonAction } from './utils/sendButtonMode.js';
 import { chooseInitialModel, resolveRememberedModel, resolveNewThreadModel, modelOptionState } from './utils/modelDefaults.js';
 import { safeInit, selectedElementsOf } from './utils/safeInit.js';
 import { rememberThread, startsFreshChat } from './threads/lastThread.js';
@@ -920,16 +922,18 @@ class ChatApp {
         this.updateImageSwitchBanner();
       });
 
-    // Send button (doubles as stop button when agent is running)
+    // Send button (doubles as stop button when agent is running and the box
+    // is empty — typed text is queued for the running turn, like Enter)
     if (this.elements.sendButton) {
       this.elements.sendButton.addEventListener('click', () => {
-        if (this.isAgentRunning) {
+        if (this.currentSendButtonAction() === 'stop') {
           this.handleStopClick();
         } else {
           this.sendMessageWithDebugInfo();
         }
       });
     }
+    this.elements.messageInput?.addEventListener('input', () => this.updateSendButtonMode());
 
     // Message input
     if (this.elements.messageInput) {
@@ -939,7 +943,7 @@ class ChatApp {
           const hasText = this.elements.messageInput.value.trim().length > 0;
           if (hasText) {
             this.sendMessageWithDebugInfo();
-          } else if (this.isAgentRunning) {
+          } else if (this.currentSendButtonAction() === 'stop') {
             this.handleStopClick();
           }
         }
@@ -1085,6 +1089,8 @@ class ChatApp {
     window.addEventListener('threadChanged', (e) => {
       this.appState.setThreadId(e.detail.threadId);
       rememberThread(e.detail.threadId);
+      // The research pill shows the tasks of the chat on screen.
+      this.backgroundTaskPill?.render();
       // Reset token indicator when switching threads (we don't have historical token counts)
       if (this.tokenIndicator) {
         this.tokenIndicator.reset();
@@ -1267,10 +1273,24 @@ class ChatApp {
     if (!running) {
       this.cancelPressCount = 0;
     }
+    this.updateSendButtonMode();
+  }
+
+  currentSendButtonAction() {
+    const hasText = (this.elements.messageInput?.value || '').trim().length > 0;
+    return sendButtonAction({
+      running: this.isAgentRunning,
+      backgroundRunning: this.backgroundTaskPill?.hasTasks() || false,
+      hasText,
+    });
+  }
+
+  /** Stop icon only while Leo (or his research) runs AND the box is empty; otherwise send. */
+  updateSendButtonMode() {
     const btn = this.elements.sendButton;
     if (!btn) return;
     const icon = btn.querySelector('i');
-    if (running) {
+    if (this.currentSendButtonAction() === 'stop') {
       btn.classList.add('stop-mode');
       btn.disabled = false;
       if (icon) {
@@ -2029,15 +2049,21 @@ class ChatApp {
     }
     // --- end auto-switch ---
 
-    // Reset state
+    // Sent while Leo is still working: the backend queues it for the running
+    // turn (it no longer cancels). Leo's next words go in a new bubble below
+    // this message; the running turn's indicator, timer and overlay stay as is.
+    const queuedMidTurn = this.isAgentRunning;
     this.appState.resetMessageState();
-    this.streamingState.reset();
-    this.iframeManager.removeStreamingOverlay();
 
-    // Show building overlay for beginner, engineer, and plan modes
-    const executionModeForOverlay = this.appState.getExecutionMode();
-    if (agentMode === 'beginner' || agentMode === 'engineer' || executionModeForOverlay === 'plan') {
-      this.iframeManager.createStreamingOverlay({ showCloseButton: true, text: 'Your App is Building!' });
+    if (!queuedMidTurn) {
+      this.streamingState.reset();
+      this.iframeManager.removeStreamingOverlay();
+
+      // Show building overlay for beginner, engineer, and plan modes
+      const executionModeForOverlay = this.appState.getExecutionMode();
+      if (agentMode === 'beginner' || agentMode === 'engineer' || executionModeForOverlay === 'plan') {
+        this.iframeManager.createStreamingOverlay({ showCloseButton: true, text: 'Your App is Building!' });
+      }
     }
 
     // Extract attachment metadata for display (without large base64 data)
@@ -2050,38 +2076,40 @@ class ChatApp {
     // Add user message with attachment badges
     this.messageRenderer.addMessage(input.value.trim(), 'human', null, attachmentMeta);
 
-    // Show thinking indicator in the dedicated thinking area
-    if (this.elements.thinkingArea) {
-      // Check if we have large attachments (>10MB) that will take time to upload
-      const hasLargeAttachment = attachments.some(a => a.size > 10 * 1024 * 1024);
+    if (!queuedMidTurn) {
+      // Show thinking indicator in the dedicated thinking area
+      if (this.elements.thinkingArea) {
+        // Check if we have large attachments (>10MB) that will take time to upload
+        const hasLargeAttachment = attachments.some(a => a.size > 10 * 1024 * 1024);
 
-      if (hasLargeAttachment) {
-        // Show upload indicator for large files
-        const totalSize = attachments.reduce((sum, a) => sum + (a.size || 0), 0);
-        const sizeStr = (totalSize / 1024 / 1024).toFixed(1);
-        this.elements.thinkingArea.innerHTML = `<div class="typing-indicator">📤 Uploading ${sizeStr}MB...</div>`;
-      } else {
-        const verb = this.loadingVerbs.getRandomVerb();
-        this.elements.thinkingArea.innerHTML = `<div class="typing-indicator">🦙 ${verb}...</div>`;
-      }
-      this.elements.thinkingArea.classList.remove('hidden');
+        if (hasLargeAttachment) {
+          // Show upload indicator for large files
+          const totalSize = attachments.reduce((sum, a) => sum + (a.size || 0), 0);
+          const sizeStr = (totalSize / 1024 / 1024).toFixed(1);
+          this.elements.thinkingArea.innerHTML = `<div class="typing-indicator">📤 Uploading ${sizeStr}MB...</div>`;
+        } else {
+          const verb = this.loadingVerbs.getRandomVerb();
+          this.elements.thinkingArea.innerHTML = `<div class="typing-indicator">🦙 ${verb}...</div>`;
+        }
+        this.elements.thinkingArea.classList.remove('hidden');
 
-      // Start cycling the verb in the thinking area (only for non-upload states)
-      if (!hasLargeAttachment) {
-        const thinkingDiv = this.elements.thinkingArea.querySelector('.typing-indicator');
-        if (thinkingDiv) {
-          this.loadingVerbs.startCycling(thinkingDiv);
+        // Start cycling the verb in the thinking area (only for non-upload states)
+        if (!hasLargeAttachment) {
+          const thinkingDiv = this.elements.thinkingArea.querySelector('.typing-indicator');
+          if (thinkingDiv) {
+            this.loadingVerbs.startCycling(thinkingDiv);
+          }
         }
       }
-    }
 
-    // Start favicon thinking indicator
-    if (this.faviconBadgeManager) {
-      this.faviconBadgeManager.startThinking();
-    }
+      // Start favicon thinking indicator
+      if (this.faviconBadgeManager) {
+        this.faviconBadgeManager.startThinking();
+      }
 
-    // Start the duration timer
-    this.startDurationTimerDisplay();
+      // Start the duration timer
+      this.startDurationTimerDisplay();
+    }
 
     // Change placeholder text while thinking
     input.placeholder = 'Queue another message...';
@@ -2767,6 +2795,37 @@ class ChatApp {
       this.updateTimerInThinkingArea();
       this.updateStallHint();
     }, 1000);
+  }
+
+  /**
+   * Status pill for background research ("Research running · 1:40"). Created on
+   * first use, just above the thinking area, so it stays visible between turns.
+   */
+  handleBackgroundTask(data) {
+    if (!this.backgroundTaskPill) {
+      const element = document.createElement('div');
+      element.className = 'background-task-pill hidden';
+      element.setAttribute('data-llamabot', 'background-task-pill');
+      this.elements.thinkingArea?.parentNode?.insertBefore(element, this.elements.thinkingArea);
+      this.backgroundTaskPill = new BackgroundTaskPill({
+        element,
+        getThreadId: () => this.appState.getThreadId?.(),
+        // Research outlives Leo's turn, so the Stop button follows it too.
+        onChange: () => this.updateSendButtonMode(),
+      });
+    }
+    this.backgroundTaskPill.handleFrame(data);
+  }
+
+  /**
+   * The server started a turn on the visible chat without a send from this tab
+   * (a message queued mid-turn, or research results arriving). Show it working.
+   */
+  handleRunStarted() {
+    if (this.isAgentRunning) return;
+    this.showThinkingIndicator();
+    this.startDurationTimerDisplay();
+    this.setAgentRunning(true);
   }
 
   handleDelegationProgress(data) {

@@ -153,6 +153,17 @@ def test_nothing_to_discard_takes_no_snapshot(leonardo_repo):
 
 
 # ---------------- API surface ----------------
+@pytest.fixture(autouse=True)
+def signed_in():
+    """The checkpoint/git routes require a signed-in user."""
+    from main import app
+    from app.dependencies import get_current_user
+    from app.models import User
+
+    app.dependency_overrides[get_current_user] = lambda: User(id=1, username="owner")
+    yield
+    app.dependency_overrides.pop(get_current_user, None)
+
 
 def _client():
     from fastapi.testclient import TestClient

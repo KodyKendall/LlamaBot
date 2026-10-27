@@ -11014,3 +11014,34 @@ body.instance-locked .lock-modal-overlay {
     0%, 100% { opacity: 1; transform: scale(1); }
     50% { opacity: 0.35; transform: scale(0.75); }
 }
+
+/* Background research status ("Research running · 1:40"); see ui/BackgroundTaskPill.js */
+.background-task-pill {
+    align-self: flex-start;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0.25rem 0.7rem;
+    margin-bottom: 0.5rem;
+    border-radius: 999px;
+    background-color: rgba(139, 92, 246, 0.12);
+    border: 1px solid rgba(139, 92, 246, 0.35);
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 0.8rem;
+    font-variant-numeric: tabular-nums;
+}
+.background-task-pill::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background-color: rgb(139, 92, 246);
+    animation: background-task-pulse 1.5s ease-in-out infinite;
+}
+@keyframes background-task-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+}
+.background-task-pill.hidden {
+    display: none;
+}

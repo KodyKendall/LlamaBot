@@ -7,6 +7,14 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+from app.lib.background_tasks import (
+    restore_background_launcher,
+    restore_writer_gate,
+    suspend_background_launcher,
+    suspend_writer_gate,
+)
+from app.lib.turn_inbox import restore_turn_inbox, suspend_turn_inbox
+
 
 logger = logging.getLogger(__name__)
 
@@ -149,6 +157,13 @@ async def run_delegation(
 
     emit("started", f"{label} started")
     heartbeat_task = asyncio.create_task(heartbeat())
+    # The sub-agent inherits the turn's context. Hide the user's mid-turn
+    # messages (they belong to the main agent) and the background launcher
+    # (a sub-agent needs its own research results inline, not as a new turn).
+    # The writer gate too: a coding sub-agent is the writer it guards against.
+    inbox_token = suspend_turn_inbox()
+    launcher_token = suspend_background_launcher()
+    gate_token = suspend_writer_gate()
 
     # Streamed rather than ainvoke'd purely so a timeout can say what happened.
     # `values` yields the whole state after each step, so whatever the last
@@ -177,6 +192,9 @@ async def run_delegation(
         emit("failed", f"{label} failed")
         raise
     finally:
+        restore_turn_inbox(inbox_token)
+        restore_background_launcher(launcher_token)
+        restore_writer_gate(gate_token)
         heartbeat_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await heartbeat_task

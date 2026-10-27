@@ -5,8 +5,10 @@ so it needs a credential — but never the master key. :func:`mint_token` trades
 the server-held key for a short-lived streaming token, and that token is the
 only thing the browser ever sees.
 
-Opt-in twice over: the ``enable_voice_dictation`` site setting defaults off, and
-it means nothing (and cannot be switched on) while the box has no AssemblyAI key.
+On by default since 0.7.16 (LP-18): a box that never saved ``enable_voice_dictation``
+gets the mic button — except a ZDR/FERPA box, where sending audio to AssemblyAI
+needs founder sign-off, so the unsaved default stays off there. An explicit save
+always wins. None of it means anything (or can be switched on) without a key.
 """
 
 import logging
@@ -40,11 +42,19 @@ def key_configured() -> bool:
     return api_key() is not None
 
 
+def default_enabled() -> bool:
+    """What an unsaved setting means: on, unless this is a ZDR/FERPA box."""
+    from app.agents.leonardo import zdr
+
+    return not zdr.enforced()
+
+
 def dictation_enabled(session) -> bool:
     from app.routers.api import get_site_setting
 
     try:
-        return get_site_setting(session, SETTING_KEY, "false") == "true"
+        default = "true" if default_enabled() else "false"
+        return get_site_setting(session, SETTING_KEY, default) == "true"
     except Exception as e:
         logger.warning("Could not read %s; dictation off: %s", SETTING_KEY, e)
         return False

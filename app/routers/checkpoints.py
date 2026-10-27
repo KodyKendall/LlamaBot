@@ -5,15 +5,18 @@ import logging
 import subprocess
 from pathlib import Path
 from typing import Optional
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from app.dependencies import get_current_user
 from app.services.checkpoint_service import checkpoint_service
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+# Every route here reads source or mutates the workspace/git, so all of them
+# require a signed-in user.
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 # Path to the Leonardo repo mounted into the llamabot container. The Rails app
 # code (rails/app, routes.rb, db/) is bind-mounted from this same checkout into
@@ -50,7 +53,8 @@ class UndoDiscardRequest(BaseModel):
 
 @router.post("/api/checkpoints")
 def create_checkpoint(
-    request: CreateCheckpointRequest
+    request: CreateCheckpointRequest,
+    http_request: Request,
 ):
     """Create a new git checkpoint before AI agent makes changes.
 
@@ -61,6 +65,15 @@ def create_checkpoint(
     Returns:
         Checkpoint information including commit SHA
     """
+    # A background coding task (delegate_task) may be half-way through its
+    # edits; a checkpoint now would save a broken in-between state.
+    run_manager = getattr(http_request.app.state, "run_manager", None)
+    if run_manager is not None and run_manager.writers_busy():
+        raise HTTPException(
+            status_code=409,
+            detail="A coding task is still editing files. Save a checkpoint when it finishes.",
+        )
+
     try:
         checkpoint = checkpoint_service.create_checkpoint(
             thread_id=request.thread_id,

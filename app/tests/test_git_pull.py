@@ -9,9 +9,12 @@ import json
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
 from fastapi.testclient import TestClient
 
 from main import app
+from app.dependencies import get_current_user
+from app.models import User
 import app.routers.checkpoints as checkpoints
 
 
@@ -20,6 +23,14 @@ def _completed(returncode=0, stdout="", stderr=""):
 
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def signed_in():
+    """The git routes require a signed-in user."""
+    app.dependency_overrides[get_current_user] = lambda: User(id=1, username="owner")
+    yield
+    app.dependency_overrides.pop(get_current_user, None)
 
 
 # ---------------- /api/git/remote-status ----------------
