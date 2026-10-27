@@ -41,6 +41,7 @@ from app.agents.leonardo.llm_factory import get_llm, system_message_for_model
 # where it does not) — never a hardcoded id, or a turn that arrives without
 # an explicit llm_model silently ignores the fleet default.
 from app.agents.leonardo.model_policy import enabled_default_model
+from app.lib.background_tasks import get_background_launcher
 from app.agents.leonardo.delegation import (
     DELEGATION_TIMEOUT_SECONDS,
     summarize_partial_work,
@@ -301,7 +302,11 @@ async def delegate_task(
             outcome since the sub-agent doesn't have your conversation history.
 
     Returns:
-        A Command with the sub-agent's completion message and summary of work done.
+        In a chat, "Task started (id X)" right away: the sub-agent edits files
+        in the background and its report arrives later as a new message (a
+        <task-notification>). Tell the user it is running and end your turn —
+        your own file edits wait until it finishes. Elsewhere, the sub-agent's
+        completion message directly.
 
     Example:
         delegate_task(
@@ -315,6 +320,49 @@ async def delegate_task(
     tool_call_id = runtime.tool_call_id
     # Get the llm_model from the main agent's state so sub-agent uses the same model
     llm_model = runtime.state.get('llm_model')
+
+    # Same as delegate_research: in a chat turn the sub-agent runs in the
+    # background so the turn ends and the user can keep chatting. Without a
+    # launcher (scheduled jobs, API callers) or at the per-thread cap, inline.
+    launcher = get_background_launcher()
+    if launcher is not None:
+        # Detached from this turn: its callbacks and stream end with the turn.
+        parent = runtime.config or {}
+        config = {"configurable": dict(parent.get("configurable") or {})}
+        if parent.get("recursion_limit"):
+            config["recursion_limit"] = parent["recursion_limit"]
+
+        async def work() -> str:
+            content, _failed = await _run_task(task_description, llm_model, config, None)
+            return content
+
+        task_id = launcher(kind="coding", label="Coding task", work=work)
+        if task_id:
+            logger.info(f"Coding task {task_id} started in the background: {task_description[:100]}...")
+            return Command(update={
+                "messages": [
+                    ToolMessage(
+                        content=(
+                            f"Task started (id {task_id}). Its report will arrive as a new message. "
+                            "Do not wait for it, redo its work, or edit the same files: "
+                            "tell the user it is running and end your turn."
+                        ),
+                        tool_call_id=tool_call_id
+                    )
+                ]
+            })
+
+    content, failed = await _run_task(
+        task_description, llm_model, runtime.config, runtime.stream_writer
+    )
+    update = {"messages": [ToolMessage(content=content, tool_call_id=tool_call_id)]}
+    if failed:
+        update["failed_tool_calls_count"] = 1  # Increment failure counter
+    return Command(update=update)
+
+
+async def _run_task(task_description, llm_model, config, stream_writer):
+    """Run the implementation sub-agent. Returns ``(content, failed)``."""
     logger.info(f"Delegating task to sub-agent (model: {llm_model}): {task_description[:100]}...")
 
     try:
@@ -324,8 +372,8 @@ async def delegate_task(
         result = await run_delegation(
             sub_agent,
             {"messages": [{"role": "user", "content": task_description}]},
-            config=runtime.config,
-            stream_writer=runtime.stream_writer,
+            config=config,
+            stream_writer=stream_writer,
             label="Implementation sub-agent",
         )
 
@@ -333,47 +381,23 @@ async def delegate_task(
         final_message = result["messages"][-1].content if result["messages"] else "No response from sub-agent"
 
         logger.info("Sub-agent completed task successfully")
-
-        return Command(update={
-            "messages": [
-                ToolMessage(
-                    content=f"[DELEGATED TASK COMPLETED]\n\n{final_message}",
-                    tool_call_id=tool_call_id
-                )
-            ]
-        })
+        return f"[DELEGATED TASK COMPLETED]\n\n{final_message}", False
 
     except DelegationTimedOut as timeout:
         logger.warning("Sub-agent delegation timed out")
         # Report what it got done. The sub-agent has usually already edited
         # files; without this the parent must re-read the tree, or retry and
         # edit them twice. A partial report is recoverable, nothing is not.
-        return Command(update={
-            "messages": [
-                ToolMessage(
-                    content=(
-                        "[DELEGATED TASK TIMED OUT]\n\n"
-                        f"It ran out of time after {DELEGATION_TIMEOUT_SECONDS}s. "
-                        "Anything listed below was already done — do NOT redo it. Pick "
-                        "up from here yourself, or delegate only what is left.\n\n"
-                        + summarize_partial_work(timeout.partial_messages)
-                    ),
-                    tool_call_id=tool_call_id
-                )
-            ],
-            "failed_tool_calls_count": 1
-        })
+        return (
+            "[DELEGATED TASK TIMED OUT]\n\n"
+            f"It ran out of time after {DELEGATION_TIMEOUT_SECONDS}s. "
+            "Anything listed below was already done — do NOT redo it. Pick "
+            "up from here yourself, or delegate only what is left.\n\n"
+            + summarize_partial_work(timeout.partial_messages)
+        ), True
     except Exception as e:
         logger.error(f"Sub-agent failed: {str(e)}")
-        return Command(update={
-            "messages": [
-                ToolMessage(
-                    content=f"[DELEGATED TASK FAILED]\n\nError: {str(e)}",
-                    tool_call_id=tool_call_id
-                )
-            ],
-            "failed_tool_calls_count": 1  # Increment failure counter
-        })
+        return f"[DELEGATED TASK FAILED]\n\nError: {str(e)}", True
 
 
 # =============================================================================
@@ -477,7 +501,10 @@ async def delegate_research(
             - Any file hints or starting points
 
     Returns:
-        Structured research findings with file locations and code references.
+        In a chat, "Research started (id X)" right away: the research runs in
+        the background and its findings arrive later as a new message (a
+        <task-notification>). Tell the user it is running and end your turn.
+        Elsewhere, the structured findings directly.
 
     Examples:
         delegate_research(
@@ -494,6 +521,50 @@ async def delegate_research(
     """
     tool_call_id = runtime.tool_call_id
     llm_model = runtime.state.get('llm_model')
+
+    # In a chat turn, research runs in the background so the turn can end and
+    # Leo stays free to talk; the findings come back as a new message. Without
+    # a launcher (scheduled jobs, API callers) or at the per-thread cap, it runs
+    # inline as before.
+    launcher = get_background_launcher()
+    if launcher is not None:
+        # Detached from this turn: its callbacks and stream end with the turn.
+        parent = runtime.config or {}
+        config = {"configurable": dict(parent.get("configurable") or {})}
+        if parent.get("recursion_limit"):
+            config["recursion_limit"] = parent["recursion_limit"]
+
+        async def work() -> str:
+            content, _failed = await _run_research(task_description, llm_model, config, None)
+            return content
+
+        task_id = launcher(kind="research", label="Research", work=work)
+        if task_id:
+            logger.info(f"Research {task_id} started in the background: {task_description[:100]}...")
+            return Command(update={
+                "messages": [
+                    ToolMessage(
+                        content=(
+                            f"Research started (id {task_id}). Results will arrive as a new message. "
+                            "Do not wait for it or call delegate_research again for the same question: "
+                            "tell the user it is running and end your turn."
+                        ),
+                        tool_call_id=tool_call_id
+                    )
+                ]
+            })
+
+    content, failed = await _run_research(
+        task_description, llm_model, runtime.config, runtime.stream_writer
+    )
+    update = {"messages": [ToolMessage(content=content, tool_call_id=tool_call_id)]}
+    if failed:
+        update["failed_tool_calls_count"] = 1  # Increment failure counter
+    return Command(update=update)
+
+
+async def _run_research(task_description, llm_model, config, stream_writer):
+    """Run the research sub-agent. Returns ``(content, failed)``."""
     logger.info(f"Delegating RESEARCH to sub-agent (model: {llm_model}): {task_description[:100]}...")
 
     try:
@@ -503,8 +574,8 @@ async def delegate_research(
         result = await run_delegation(
             sub_agent,
             {"messages": [{"role": "user", "content": task_description}]},
-            config=runtime.config,
-            stream_writer=runtime.stream_writer,
+            config=config,
+            stream_writer=stream_writer,
             label="Research sub-agent",
         )
 
@@ -512,40 +583,16 @@ async def delegate_research(
         final_message = result["messages"][-1].content if result["messages"] else "No response from research sub-agent"
 
         logger.info("Research sub-agent completed task successfully")
-
-        return Command(update={
-            "messages": [
-                ToolMessage(
-                    content=f"[RESEARCH COMPLETED]\n\n{final_message}",
-                    tool_call_id=tool_call_id
-                )
-            ]
-        })
+        return f"[RESEARCH COMPLETED]\n\n{final_message}", False
 
     except DelegationTimedOut as timeout:
         logger.warning("Research sub-agent delegation timed out")
-        return Command(update={
-            "messages": [
-                ToolMessage(
-                    content=(
-                        "[RESEARCH TIMED OUT]\n\n"
-                        f"It ran out of time after {DELEGATION_TIMEOUT_SECONDS}s. "
-                        "What it had looked at so far:\n\n"
-                        + summarize_partial_work(timeout.partial_messages)
-                    ),
-                    tool_call_id=tool_call_id
-                )
-            ],
-            "failed_tool_calls_count": 1
-        })
+        return (
+            "[RESEARCH TIMED OUT]\n\n"
+            f"It ran out of time after {DELEGATION_TIMEOUT_SECONDS}s. "
+            "What it had looked at so far:\n\n"
+            + summarize_partial_work(timeout.partial_messages)
+        ), True
     except Exception as e:
         logger.error(f"Research sub-agent failed: {str(e)}")
-        return Command(update={
-            "messages": [
-                ToolMessage(
-                    content=f"[RESEARCH FAILED]\n\nError: {str(e)}",
-                    tool_call_id=tool_call_id
-                )
-            ],
-            "failed_tool_calls_count": 1  # Increment failure counter
-        })
+        return f"[RESEARCH FAILED]\n\nError: {str(e)}", True

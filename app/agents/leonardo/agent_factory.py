@@ -32,6 +32,9 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from app.agents.leonardo.turn_metrics_middleware import TurnMetricsMiddleware
 from app.agents.leonardo.rails_error_watch_middleware import RailsErrorWatchMiddleware
 from app.agents.leonardo.tool_output_middleware import ToolResultSizeLimitMiddleware
+from app.lib.turn_inbox import drain_turn_inbox
+from app.lib.background_tasks import current_writer_gate
+from app.lib.turn_notices import anotify, thinking_frame
 import logging
 
 logger = logging.getLogger(__name__)
@@ -395,6 +398,43 @@ class BrandContextMiddleware(AgentMiddleware):
         return await handler(self._inject(request))
 
 
+class QueuedMessagesMiddleware(AgentMiddleware):
+    """Hand the model whatever the user sent while this turn was running.
+
+    A message sent mid-turn is queued on the thread instead of cancelling the
+    run (see app/websocket/run_manager.py). Before each model call we append the
+    queued messages to the conversation, so the agent reads them at its next
+    step — after the current tool result, which keeps the tool-call protocol
+    valid. Persisted to state, so they stay in the thread history.
+    """
+
+    def before_model(self, state, runtime):
+        queued = drain_turn_inbox()
+        return {"messages": queued} if queued else None
+
+    async def abefore_model(self, state, runtime):
+        return self.before_model(state, runtime)
+
+
+class WriterGateMiddleware(AgentMiddleware):
+    """Hold the main agent's file edits while a background coding task runs.
+
+    A coding task (delegate_task) edits the project while the user keeps
+    chatting. Two writers on the same files lose edits, so a file-writing tool
+    call waits here until the coding task finishes (see
+    app/lib/background_tasks.py). Reads and chat go straight through.
+    """
+
+    WRITE_TOOLS = frozenset({"write_file", "edit_file", "git_commit", "git_command"})
+
+    async def awrap_tool_call(self, request, handler):
+        gate = current_writer_gate()
+        if gate is not None and request.tool_call.get("name") in self.WRITE_TOOLS:
+            await anotify(thinking_frame("Waiting for the coding task to finish before editing files..."))
+            await gate()
+        return await handler(request)
+
+
 def build_leonardo_agent(*, middleware=None, **kwargs):
     """Wrap ``create_agent`` so EVERY Leonardo agent gets the cross-cutting
     middleware that must never be omitted.
@@ -413,6 +453,10 @@ def build_leonardo_agent(*, middleware=None, **kwargs):
       (same startup-caching reason as the skill catalog). It touches only the
       latest human message and is idempotent, so ordering is not critical; we
       insert it after the skill refresh.
+    - ``QueuedMessagesMiddleware`` — appends messages the user sent mid-turn
+      before the next model call (a new message queues; it no longer cancels).
+    - ``WriterGateMiddleware`` — file edits wait while a background coding
+      task (delegate_task) is editing files.
     - ``TurnMetricsMiddleware`` — times every model and tool call. APPENDED so
       it sits OUTERMOST at the model-call boundary and therefore measures what
       the user actually waits for, including whatever the inner middleware
@@ -437,6 +481,10 @@ def build_leonardo_agent(*, middleware=None, **kwargs):
         mw.insert(1, RefreshSkillCatalogMiddleware())
     if not any(isinstance(m, BrandContextMiddleware) for m in mw):
         mw.insert(2, BrandContextMiddleware())
+    if not any(isinstance(m, QueuedMessagesMiddleware) for m in mw):
+        mw.append(QueuedMessagesMiddleware())
+    if not any(isinstance(m, WriterGateMiddleware) for m in mw):
+        mw.append(WriterGateMiddleware())
     if not any(isinstance(m, TurnMetricsMiddleware) for m in mw):
         mw.append(TurnMetricsMiddleware())
     if not any(isinstance(m, RailsErrorWatchMiddleware) for m in mw):

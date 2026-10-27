@@ -72,7 +72,8 @@ async def test_restart_orphans_the_inflight_run():
     handle = old_process.attach("thread-1", ws)
     assert handle is not None
     assert handle.log.status == "running"
-    assert [e["content"] for e in handle.log.since(0)] == ["half an answer"]
+    # (every run opens with a run_started frame)
+    assert [e.get("content", e["type"]) for e in handle.log.since(0)] == ["run_started", "half an answer"]
 
     # SIGTERM: the event loop and every task on it go away with the process.
     for task in old_process.active_tasks():
@@ -113,7 +114,7 @@ async def test_partial_output_is_all_the_client_ever_sees():
     await rm.cancel("thread-1")
 
     types = [m["type"] for m in ws.sent]
-    assert types == ["ai"], f"expected only the pre-kill frame, got {types}"
+    assert types == ["run_started", "ai"], f"expected only the pre-kill frames, got {types}"
     assert "end" not in types and "error" not in types
 
 

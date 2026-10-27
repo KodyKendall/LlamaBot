@@ -136,8 +136,11 @@ app.state.compiled_graphs = {}  # Cache for pre-compiled LangGraph workflows
 # Layer 2: background LangGraph runs survive socket drops; the live socket is a
 # subscriber that replays on reconnect. Shared across all connections. See
 # app/websocket/run_manager.py and docs/dev/websocket_background_runs.md.
-from app.websocket.run_manager import RunManager
-app.state.run_manager = RunManager()
+# One per PROCESS, not per module: main.py also loads a second time as
+# `app.main` (the /ws route imports it), and HTTP routes must see the same runs
+# and background tasks as the chat socket.
+from app.websocket.run_manager import shared_run_manager
+app.state.run_manager = shared_run_manager()
 
 # Mothership integration for lease management
 app.state.mothership_client = MothershipClient()

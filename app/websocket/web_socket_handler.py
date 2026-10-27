@@ -535,8 +535,8 @@ class WebSocketHandler:
                     # Idempotency guard (Layer 1 seatbelt): a dropped socket can
                     # make the browser re-send a message it already delivered
                     # (see resend-on-reconnect in frontend/chat/index.js). Without
-                    # this guard the re-send would cancel the in-flight run and
-                    # restart the agent from scratch. Recognize the duplicate by
+                    # this guard the re-send would be queued as a second copy of
+                    # the same message. Recognize the duplicate by
                     # (thread_id, client_message_id), ACK it, and ignore it.
                     # Clients that don't send client_message_id (Rails gem, older
                     # browsers) are always treated as new.
@@ -563,9 +563,9 @@ class WebSocketHandler:
                     logger.info(f"Received message: {_redact_frame(message)}")
                     # Start the turn as a background run owned by the per-thread
                     # RunManager (decoupled from this socket, which is attached as
-                    # a live subscriber). A new message supersedes any in-flight
-                    # run for the thread; that cancellation + thread-state repair
-                    # is handled inside RunManager / _repair_thread_state_if_needed.
+                    # a live subscriber). A message sent while the thread is
+                    # mid-turn is queued for the running agent, never a cancel —
+                    # only a `cancel` frame (the Stop button) stops a run.
                     await self.request_handler.start_chat_run(message, self.websocket)
                 except WebSocketDisconnect as e:
                     if e.code == 1000:
@@ -600,7 +600,7 @@ class WebSocketHandler:
             # DO NOT cancel them. A dropped browser must not kill an in-progress
             # build; the run keeps going and the client replays it on reconnect
             # via `attach`. Explicit cancellation only happens on a `cancel`
-            # message or when a new message supersedes the run.
+            # message (the Stop button).
             run_manager = self.request_handler._run_manager()
             for tid in self._attached_threads:
                 run_manager.detach(tid, self.websocket)

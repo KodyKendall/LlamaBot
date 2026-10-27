@@ -1,0 +1,6 @@
+0.7.16:
+[x] - Messages sent mid-turn queue up instead of cancelling Leo.
+[x] - Research runs in the background; results arrive as a new message.
+[x] - Checkpoint and git routes now require sign-in.
+[x] - Coding tasks run in the background; edits wait their turn.
+[x] - Mic button on by default, except on ZDR/FERPA boxes.

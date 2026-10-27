@@ -13,7 +13,7 @@ user undoes or dismisses it.
 
 import pytest
 
-from tests.test_checkpoint_discard_backup import _client, _git, leonardo_repo  # noqa: F401
+from tests.test_checkpoint_discard_backup import _client, _git, leonardo_repo, signed_in  # noqa: F401
 
 
 def _write(repo, rel, text="x\n"):
