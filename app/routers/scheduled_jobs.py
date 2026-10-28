@@ -12,6 +12,7 @@ from sqlmodel import Session, select
 from app.db import engine
 from app.models import User, ScheduledJob, ScheduledJobRun, SchedulerInvocationLog
 from app.dependencies import get_db_session, admin_required, engineer_or_admin_required
+from app.services.rails_recurring_tasks import RailsRecurringTasksClient
 
 logger = logging.getLogger(__name__)
 
@@ -227,6 +228,15 @@ async def create_job(
 
     logger.info(f"Created scheduled job: {job.name} (id={job.id})")
     return _job_to_dict(job)
+
+
+@router.get("/rails-tasks", response_class=JSONResponse)
+async def list_rails_tasks(user: User = Depends(engineer_or_admin_required)):
+    """The Rails app's own recurring jobs (db/recurring.yml), read-only.
+
+    Declared before /{job_id} so "rails-tasks" is never parsed as a job id.
+    """
+    return await RailsRecurringTasksClient().fetch()
 
 
 @router.get("/{job_id}", response_class=JSONResponse)

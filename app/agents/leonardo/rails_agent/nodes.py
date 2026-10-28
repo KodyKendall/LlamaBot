@@ -34,7 +34,7 @@ from app.agents.leonardo.rails_agent.tools import (
     browser_inspect, browser_inspect_enabled,
     navigate_browser, get_browser_js_logs, execute_browser_js, live_browser_tools_enabled,
 )
-from app.agents.leonardo.rails_agent.prompts import RAILS_AGENT_PROMPT
+from app.agents.leonardo.rails_agent.prompts import RAILS_AGENT_PROMPT, SCHEDULED_RAILS_JOBS_DIRECTIVE
 from app.agents.leonardo.project_context import build_system_prompt_with_project_context
 from app.agents.leonardo.friction import report_friction, with_friction_section
 from app.agents.leonardo.rails_agent.middleware import (
@@ -63,7 +63,11 @@ def get_cached_system_prompt():
     Uses Anthropic's ephemeral cache control for cost reduction (~90% input token savings).
     """
     full_prompt = with_friction_section(
-        build_system_prompt_with_project_context(RAILS_AGENT_PROMPT, agent_mode="rails_agent")
+        build_system_prompt_with_project_context(
+            RAILS_AGENT_PROMPT,
+            suffix=SCHEDULED_RAILS_JOBS_DIRECTIVE,
+            agent_mode="rails_agent",
+        )
     )
     return SystemMessage(
         content=[

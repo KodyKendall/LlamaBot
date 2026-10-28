@@ -3691,6 +3691,7 @@ async def scheduled_jobs_page(user: User = Depends(engineer_or_admin_required)):
         }
         .message.success { background: rgba(34, 197, 94, 0.1); border: 1px solid rgba(34, 197, 94, 0.25); color: #22c55e; display: block; }
         .message.error { background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.25); color: #ef4444; display: block; }
+        .message.info { background: rgba(139, 92, 246, 0.1); border: 1px solid rgba(139, 92, 246, 0.25); color: #c4b5fd; display: block; }
         .actions { white-space: nowrap; }
         .modal {
             display: none;
@@ -3872,6 +3873,34 @@ async def scheduled_jobs_page(user: User = Depends(engineer_or_admin_required)):
                             <tr><td colspan="7">Loading...</td></tr>
                         </tbody>
                     </table>
+                </div>
+            </div>
+
+            <!-- LP-14: the Rails app's own recurring jobs (plain Ruby, no AI).
+                 Read-only: the schedule is db/recurring.yml in the app, which
+                 Leo edits like any other code. -->
+            <div class="card" id="railsTasks">
+                <div class="card-header">App Jobs (Rails, no AI)</div>
+                <p style="font-size: 12px; color: #888; margin-bottom: 16px;">
+                    Plain Ruby jobs your app runs on a schedule, defined in <code>db/recurring.yml</code>.
+                    Read-only here &mdash; ask Leo to add or change one.
+                </p>
+                <div id="railsTasksNotice"></div>
+                <div style="overflow-x: auto;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Task</th>
+                            <th>Runs</th>
+                            <th>Schedule</th>
+                            <th>Last Runs</th>
+                            <th>Next Run</th>
+                        </tr>
+                    </thead>
+                    <tbody id="railsTasksTable">
+                        <tr><td colspan="5">Loading...</td></tr>
+                    </tbody>
+                </table>
                 </div>
             </div>
         </div>
@@ -4150,6 +4179,61 @@ async def scheduled_jobs_page(user: User = Depends(engineer_or_admin_required)):
             `).join('');
         }
 
+        async function loadRailsTasks() {
+            try {
+                const response = await fetch('/api/scheduled-jobs/rails-tasks');
+                renderRailsTasks(await response.json());
+            } catch (e) {
+                renderRailsTasks({ available: false, reason: e.message, tasks: [], errors: [] });
+            }
+        }
+
+        function renderRailsTasks(data) {
+            const tbody = document.getElementById('railsTasksTable');
+            const notice = document.getElementById('railsTasksNotice');
+            const notes = [];
+            const tasks = data.tasks || [];
+
+            if (tasks.length > 0) {
+                notes.push('<div class="message info" style="display:block">These only run while the app is awake. A sleeping app runs nothing; use always-on for jobs that must never miss a run.</div>');
+            }
+            if (data.restart_needed) {
+                notes.push('<div class="message info" style="display:block"><code>db/recurring.yml</code> changed since the app started. Changes take effect after Rails restarts.</div>');
+            }
+            (data.errors || []).forEach(err => {
+                const label = err.key ? `<code>${escapeHtml(err.key)}</code> is not running: ` : '';
+                notes.push(`<div class="message error" style="display:block">${label}${escapeHtml(err.error)}</div>`);
+            });
+            notice.innerHTML = notes.join('');
+
+            if (!data.available) {
+                tbody.innerHTML = `<tr><td colspan="5"><small style="color:#888">${escapeHtml(data.reason || 'Not available.')}</small></td></tr>`;
+                return;
+            }
+            if (tasks.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5"><small style="color:#888">No app jobs scheduled. Ask Leo to schedule one in db/recurring.yml.</small></td></tr>';
+                return;
+            }
+            const badge = status => {
+                const cls = { finished: 'completed', failed: 'failed', running: 'running' }[status] || 'pending';
+                return `<span class="badge badge-${cls}">${escapeHtml(status)}</span>`;
+            };
+            tbody.innerHTML = tasks.map(task => {
+                const runs = task.last_runs || [];
+                const lastRuns = runs.length === 0 ? '-' : runs.map(run =>
+                    `<div title="${escapeHtml(run.error || '')}">${badge(run.status)} <small>${formatDate(run.run_at)}</small></div>`
+                ).join('');
+                return `
+                <tr>
+                    <td><strong>${escapeHtml(task.key)}</strong><br><small style="color:#888">${escapeHtml(task.description || '')}</small></td>
+                    <td><code>${escapeHtml(task.class_name || task.command || '')}</code></td>
+                    <td><code>${escapeHtml(task.schedule)}</code></td>
+                    <td>${lastRuns}</td>
+                    <td>${task.next_run_at ? formatDate(task.next_run_at) : '-'}</td>
+                </tr>`;
+            }).join('');
+        }
+
         function renderRuns() {
             const tbody = document.getElementById('runsTable');
             if (runs.length === 0) {
@@ -4369,6 +4453,11 @@ async def scheduled_jobs_page(user: User = Depends(engineer_or_admin_required)):
             const d = new Date(isoString);
             const now = new Date();
             const diff = now - d;
+            // Future times (Next Run) read "in 5m", not "just now".
+            if (diff < -60000 && diff > -3600000) return 'in ' + Math.round(-diff / 60000) + 'm';
+            if (diff <= -3600000 && diff > -86400000) return 'in ' + Math.round(-diff / 3600000) + 'h';
+            if (diff <= -86400000) return d.toLocaleDateString();
+            if (diff < 0) return 'in <1m';
             if (diff < 60000) return 'just now';
             if (diff < 3600000) return Math.floor(diff / 60000) + 'm ago';
             if (diff < 86400000) return Math.floor(diff / 3600000) + 'h ago';
@@ -4400,6 +4489,7 @@ async def scheduled_jobs_page(user: User = Depends(engineer_or_admin_required)):
 
         // Load data on page load
         loadJobs();
+        loadRailsTasks();
         loadAgents();
         loadModels();
     </script>
