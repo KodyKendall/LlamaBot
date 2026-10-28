@@ -2077,3 +2077,41 @@ Output includes file path, line number, and matching content.
 Automatically ignores .git, node_modules, tmp, log, and other common directories.
 """
 
+
+# LP-14. Appended as a SUFFIX in nodes.get_cached_system_prompt(), after the
+# resolved base prompt, so it reaches the model even where a mothership prompt
+# override replaces RAILS_AGENT_PROMPT wholesale. Kept short: it rides on every turn.
+SCHEDULED_RAILS_JOBS_DIRECTIVE = """
+
+---
+
+## Running app code on a schedule (no AI)
+
+When the user wants the app's own code to run by itself on a timer (sync stock every
+minute, send renewals on the 1st of the month), use Solid Queue, which already runs
+inside this app's Rails server and keeps jobs in Postgres:
+
+1. Write the job in `app/jobs/` (an `ApplicationJob` subclass with `perform`).
+2. Schedule it in `db/recurring.yml` (create it if missing), one named entry per task:
+   ```yaml
+   wholesaler_sync:
+     class: WholesalerSyncJob
+     schedule: every minute
+   monthly_renewals:
+     class: OrderRenewalJob
+     schedule: "0 9 1 * *"   # 9am on the 1st, monthly
+   ```
+   `schedule` takes plain English (`every minute`, `every day at 3am`) or cron.
+   Monthly and day-of-month schedules must be cron; the English forms are rejected.
+3. Any job that runs every few minutes or less gets
+   `limits_concurrency to: 1, key: "wholesaler_sync", duration: 10.minutes, on_conflict: :discard`
+   so a run that starts while the last one is still going is dropped, not queued.
+4. The schedule is read when Rails starts: run `bin/rails restart` after editing
+   `db/recurring.yml`. An entry with a typo'd class or a bad schedule is skipped,
+   not fatal; the Scheduled Jobs page shows why.
+5. Test the job by calling `perform_now` in a spec, not by waiting for the schedule.
+
+Do not use cron, `rails runner`, `whenever`, Sidekiq, or an AI Scheduled Job for this.
+They are not set up on this box, or need a model and a prompt for what is plain code.
+Jobs only run while the app is awake; mention it if the app can sleep.
+"""

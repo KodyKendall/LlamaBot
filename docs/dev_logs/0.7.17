@@ -1,0 +1,5 @@
+0.7.17:
+[x] - Rails 7.2.3.2 to close the Active Storage CVE (LlamaPress-Simple image; ready before 0.7.16 but held for 0.7.17).
+[x] - Scheduled Jobs page shows the app's own Rails jobs, read-only.
+[x] - Leo knows how to schedule plain Ruby jobs with Solid Queue.
+[x] - LP-15 research: Codex → GitHub → Leo round trip and gaps written up.
