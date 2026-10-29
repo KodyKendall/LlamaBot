@@ -8,6 +8,7 @@ from typing import List, Dict, Any, Optional
 from pathlib import Path
 
 from app.models import CheckpointInfo
+from app.services import git_setup
 from app.db import engine
 from sqlmodel import Session
 
@@ -286,12 +287,22 @@ Agent: Leonardo
 Timestamp: {timestamp}
 """
 
-            commit_result = subprocess.run(
-                ["git", "-C", str(LEONARDO_PATH), "commit", "-m", commit_message, "--allow-empty"],
-                capture_output=True,
-                text=True,
-                timeout=10
-            )
+            def commit():
+                return subprocess.run(
+                    ["git", "-C", str(LEONARDO_PATH), "commit", "-m", commit_message, "--allow-empty"],
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
+
+            commit_result = commit()
+
+            # A box where git doesn't know who is committing (LP-20): set the
+            # missing identity the way /git-config would, and retry once.
+            if commit_result.returncode != 0 and git_setup.is_missing_identity(commit_result.stderr):
+                logger.info("Checkpoint commit needs a git identity; setting it up and retrying")
+                git_setup.ensure_git_identity()
+                commit_result = commit()
 
             if commit_result.returncode != 0:
                 # Check if it's just "nothing to commit"

@@ -27,6 +27,8 @@ from app.agents.leonardo import model_health
 from app.agents.leonardo.personal_cookbook_context import personal_cookbook_section
 from app.agents.leonardo.model_policy import enabled_default_model, fallback_model
 from app.agents.leonardo.resilience import (
+    describe_failure,
+    is_dead_credential,
     is_midstream_stall,
     is_model_gone,
     is_transient_error,
@@ -489,7 +491,7 @@ def _request_carries_an_image(request) -> bool:
     return False
 
 
-def _announce_fallback(primary: str, fallback: str, *, sync: bool):
+def _announce_fallback(primary: str, fallback: str, *, sync: bool, exc=None):
     """Say in the UI that the step finished somewhere else.
 
     Reuses ``model_substituted``, which is already built end to end (raised in
@@ -497,6 +499,10 @@ def _announce_fallback(primary: str, fallback: str, *, sync: bool):
     the composer). It only ever fired for *policy* substitution before the run
     started; ``reason`` is what lets the same banner word a mid-turn failure
     fallback differently.
+
+    ``failure`` (LP-21) says WHY, as a code the banner words in plain language —
+    "stopped responding" was the only thing it could say before, including to a
+    user whose ChatGPT plan had simply hit its limit.
 
     Returns the coroutine to await on the async path, or None on the sync path
     (where it has already been queued).
@@ -507,6 +513,11 @@ def _announce_fallback(primary: str, fallback: str, *, sync: bool):
         "effective": fallback,
         "reason": "fallback",
     }
+    if exc is not None:
+        try:
+            frame["failure"] = describe_failure(exc)
+        except Exception as e:  # noqa: BLE001 - a notice never fails a turn
+            logger.debug("could not describe the model failure: %s", e)
     from app.lib import turn_notices
 
     if sync:
@@ -652,7 +663,7 @@ class DynamicModelMiddleware(AgentMiddleware):
                         f"{llm_model} reports itself retired; finishing this step "
                         f"on {fallback}"
                     )
-                    _announce_fallback(llm_model, fallback, sync=True)
+                    _announce_fallback(llm_model, fallback, sync=True, exc=e)
                     llm_model = fallback
                     tried.add(fallback)
                     fallbacks_used += 1
@@ -676,23 +687,31 @@ class DynamicModelMiddleware(AgentMiddleware):
                 # 15-minute fleet-wide ban on the box default over one bad stream
                 # would be a self-inflicted outage. A zero-chunk stall keeps its
                 # rung-1 retry — see is_midstream_stall.
-                if is_midstream_stall(e):
+                #
+                # A dead credential (401/403, a spent usage limit) takes the same
+                # branch (LP-21): retrying cannot help, moving is a full recovery,
+                # and the model itself is fine so it is not marked gone either.
+                if is_midstream_stall(e) or is_dead_credential(e):
                     stalled_after = getattr(e, "chunks_received", 0)
+                    what = (
+                        f"stalled after {stalled_after} chunks" if is_midstream_stall(e)
+                        else f"refused us ({describe_failure(e)['code']})"
+                    )
                     fallback = (
                         None if fallbacks_used >= _MODEL_FALLBACK_MAX_RUNGS
                         else self._next_rung(request, llm_model, tried)
                     )
                     if fallback is None:
                         logger.warning(
-                            f"{llm_model} stalled after {stalled_after} chunks and "
+                            f"{llm_model} {what} and "
                             f"there is no other model available on this box"
                         )
                         raise
                     logger.warning(
-                        f"{llm_model} stalled after {stalled_after} chunks; "
+                        f"{llm_model} {what}; "
                         f"finishing this step on {fallback}"
                     )
-                    _announce_fallback(llm_model, fallback, sync=True)
+                    _announce_fallback(llm_model, fallback, sync=True, exc=e)
                     llm_model = fallback
                     tried.add(fallback)
                     fallbacks_used += 1
@@ -719,7 +738,7 @@ class DynamicModelMiddleware(AgentMiddleware):
                         f"{llm_model} stalled for {elapsed:.0f}s over {attempt} "
                         f"attempts; finishing this step on {fallback}"
                     )
-                    _announce_fallback(llm_model, fallback, sync=True)
+                    _announce_fallback(llm_model, fallback, sync=True, exc=e)
                     llm_model = fallback
                     tried.add(fallback)
                     fallbacks_used += 1
@@ -783,7 +802,7 @@ class DynamicModelMiddleware(AgentMiddleware):
                         f"{llm_model} reports itself retired; finishing this step "
                         f"on {fallback}"
                     )
-                    await _announce_fallback(llm_model, fallback, sync=False)
+                    await _announce_fallback(llm_model, fallback, sync=False, exc=e)
                     llm_model = fallback
                     tried.add(fallback)
                     fallbacks_used += 1
@@ -807,23 +826,31 @@ class DynamicModelMiddleware(AgentMiddleware):
                 # 15-minute fleet-wide ban on the box default over one bad stream
                 # would be a self-inflicted outage. A zero-chunk stall keeps its
                 # rung-1 retry — see is_midstream_stall.
-                if is_midstream_stall(e):
+                #
+                # A dead credential (401/403, a spent usage limit) takes the same
+                # branch (LP-21): retrying cannot help, moving is a full recovery,
+                # and the model itself is fine so it is not marked gone either.
+                if is_midstream_stall(e) or is_dead_credential(e):
                     stalled_after = getattr(e, "chunks_received", 0)
+                    what = (
+                        f"stalled after {stalled_after} chunks" if is_midstream_stall(e)
+                        else f"refused us ({describe_failure(e)['code']})"
+                    )
                     fallback = (
                         None if fallbacks_used >= _MODEL_FALLBACK_MAX_RUNGS
                         else self._next_rung(request, llm_model, tried)
                     )
                     if fallback is None:
                         logger.warning(
-                            f"{llm_model} stalled after {stalled_after} chunks and "
+                            f"{llm_model} {what} and "
                             f"there is no other model available on this box"
                         )
                         raise
                     logger.warning(
-                        f"{llm_model} stalled after {stalled_after} chunks; "
+                        f"{llm_model} {what}; "
                         f"finishing this step on {fallback}"
                     )
-                    await _announce_fallback(llm_model, fallback, sync=False)
+                    await _announce_fallback(llm_model, fallback, sync=False, exc=e)
                     llm_model = fallback
                     tried.add(fallback)
                     fallbacks_used += 1
@@ -856,7 +883,7 @@ class DynamicModelMiddleware(AgentMiddleware):
                         f"{llm_model} stalled for {elapsed:.0f}s over {attempt} "
                         f"attempts; finishing this step on {fallback}"
                     )
-                    await _announce_fallback(llm_model, fallback, sync=False)
+                    await _announce_fallback(llm_model, fallback, sync=False, exc=e)
                     llm_model = fallback
                     tried.add(fallback)
                     fallbacks_used += 1

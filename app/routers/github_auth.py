@@ -140,15 +140,9 @@ def _install_gh_token(token: str) -> dict:
 
         # Step 3: Copy creds to containers (if on Linux host)
         if is_native_linux_host():
-            copy_cmd = (
-                "docker compose exec -T llamabot mkdir -p /root/.config/gh && "
-                "docker compose exec -T code mkdir -p /config/.config/gh && "
-                "docker compose cp /home/ubuntu/.config/gh/. llamabot:/root/.config/gh/ && "
-                "docker compose cp /home/ubuntu/.config/gh/. code:/config/.config/gh/ && "
-                "docker compose exec -T llamabot gh auth setup-git && "
-                "docker compose exec -T code gh auth setup-git"
-            )
-            copy_result = execute_command(copy_cmd, timeout=60)
+            from app.services.git_setup import GH_COPY_COMMAND
+
+            copy_result = execute_command(GH_COPY_COMMAND, timeout=60)
             if copy_result.returncode != 0:
                 logger.warning(f"gh credential copy had issues: {copy_result.stderr}")
                 return {

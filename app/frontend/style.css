@@ -1186,6 +1186,23 @@ body {
     border-color: rgba(139, 92, 246, 0.3);
 }
 
+/* LP-21: the "Backup model" picker beside the model dropdown. */
+.backup-model-picker {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.backup-model-picker .backup-model-label {
+    font-size: 0.75rem;
+    color: rgba(255, 255, 255, 0.55);
+}
+
+/* The toolbar's Model button while a backup model is answering. */
+.toolbar-model-btn.backup-in-use {
+    color: #f5c26b;
+}
+
 /* ===== Brand Guide (opened from the tools toolbar) ===== */
 .brand-guide-container {
     margin-bottom: 10px;

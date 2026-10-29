@@ -174,10 +174,11 @@
                 </div>
                 <button class="image-switch-banner-dismiss" data-llamabot="vision-disabled-dismiss" data-tooltip="Dismiss" aria-label="Dismiss">&times;</button>
             </div>
-            <!-- Model substitution notice: operator policy ran the turn on a model
-                 other than the one selected in the dropdown. Raised by the
-                 `model_substituted` websocket frame; see showModelSubstitutionNotice()
-                 in index.js. Auto-hides, and is dismissable. -->
+            <!-- Model substitution notice: the turn ran on a model other than the
+                 one selected in the dropdown (operator policy, or a mid-turn failure
+                 and the reason for it). Raised by the `model_substituted` websocket
+                 frame; see showModelSubstitutionNotice() in index.js. Stays until
+                 dismissed or a turn finishes cleanly (LP-21). -->
             <div class="image-switch-banner model-switch-banner hidden" data-llamabot="model-switch-banner">
                 <div class="warning-content">
                     <i class="fa-solid fa-triangle-exclamation"></i>
@@ -285,6 +286,18 @@
                         <option value="muse-spark-1.3-contributor" data-short-label="Muse 1.3" title="Meta's Muse Spark 1.3 (2026-09-02) — stronger agentic and coding work, ~20% fewer tool calls and ~25% fewer tokens than 1.2, 1M context. Contributor tier: Meta may use these prompts and completions to train future models. Needs META_API_KEY on this box.">Muse Spark 1.3 (Contributor)</option>
                     </select>
                 </div>
+                <!-- LP-21: what Leo moves to when the model above fails mid-turn.
+                     Automatic = the box's policy answer. Options are filled from
+                     /api/available-models by populateBackupModelOptions(), so only
+                     models this box can actually run are offered. -->
+                <label class="backup-model-picker" data-tooltip="Used if your model fails mid-turn">
+                    <span class="backup-model-label">Backup</span>
+                    <span class="custom-dropdown-container">
+                        <select data-llamabot="backup-model-select" class="custom-dropdown">
+                            <option value="" selected>Automatic</option>
+                        </select>
+                    </span>
+                </label>
                 <!-- Which ChatGPT account is in use, shown only while a "my ChatGPT
                      plan" model is selected. Without it there is no way to see the
                      account, or to reach the sign-in modal again, short of

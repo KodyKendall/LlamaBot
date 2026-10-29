@@ -9,6 +9,7 @@ from app.lib.token_usage import extract_token_usage
 from app.lib.turn_metrics import start_turn
 from app.lib.rails_error_watch import resume_error_watch, start_error_watch
 from app.lib.turn_notices import start_turn_notices
+from app.agents.leonardo.model_policy import start_turn_backup_model
 from app.lib.turn_inbox import start_turn_inbox
 from app.lib.background_tasks import start_background_launcher, start_writer_gate
 from typing import Dict, Optional
@@ -467,6 +468,8 @@ class RequestHandler:
         """Per-turn: the inbox (mid-turn messages), the background launcher, and
         the writer gate (file edits wait for a running coding task)."""
         thread_id = str(frame.get("thread_id", ""))
+        # The backup model picked in the chat (LP-21); absent = Automatic.
+        start_turn_backup_model(frame.get("backup_model"))
         start_turn_inbox(lambda: self._drain_queued_messages(thread_id))
         start_background_launcher(self._background_launcher(frame))
         start_writer_gate(self._run_manager().wait_for_writers)

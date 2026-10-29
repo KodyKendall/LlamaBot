@@ -45,7 +45,7 @@ test('the swap frame has its own branch, above the transcript fallback', () => {
   const branchAt = MESSAGE_HANDLER.indexOf("data.type === 'model_substituted'");
   const fallbackAt = MESSAGE_HANDLER.indexOf('this.handleGenericMessage(data)');
   assert.ok(branchAt < fallbackAt, 'the frame must be handled before the generic fallback');
-  assert.match(MESSAGE_HANDLER, /showModelSubstitutionNotice\(data\.requested, data\.effective, data\.reason\)/);
+  assert.match(MESSAGE_HANDLER, /showModelSubstitutionNotice\(data\.requested, data\.effective, data\.reason, data\.failure\)/);
 });
 
 test('the notice renders above the composer, not as a corner toast', () => {
@@ -56,23 +56,18 @@ test('the notice renders above the composer, not as a corner toast', () => {
   const bannerAt = CHAT_HTML.indexOf('data-llamabot="model-switch-banner"');
   const inputAt = CHAT_HTML.indexOf('data-llamabot="message-input"');
   assert.ok(bannerAt < inputAt, 'the banner must sit above the message input');
-  assert.match(INDEX_JS, /showModelSubstitutionNotice\(requested, effective, reason\)/);
+  assert.match(INDEX_JS, /showModelSubstitutionNotice\(requested, effective, reason, failure\)/);
 });
 
 test('the notice names both models, and says which one is answering', () => {
-  const start = INDEX_JS.indexOf('showModelSubstitutionNotice(requested, effective, reason)');
+  const start = INDEX_JS.indexOf('showModelSubstitutionNotice(requested, effective, reason, failure)');
   const body = INDEX_JS.slice(start, start + 1200);
   assert.match(body, /modelLabel\(requested\)/);
   assert.match(body, /modelLabel\(effective\)/);
 });
 
-test('the notice clears itself, and a second one restarts the clock', () => {
-  const start = INDEX_JS.indexOf('showModelSubstitutionNotice(requested, effective, reason)');
-  const body = INDEX_JS.slice(start, start + 1200);
-  assert.match(body, /clearTimeout\(this\.modelSwitchNoticeTimer\)/,
-    'a repeat notice must not be hidden early by the previous timer');
-  assert.match(body, /setTimeout\(/);
-});
+// LP-21 removed the 12s auto-hide: the notice now stays until dismissed or a
+// clean turn ends. Pinned in backup_model_picker.test.mjs.
 
 test('the notice is styled apart from the informational image banner', () => {
   // Same shape, different colour: this one reports that something the user
@@ -108,11 +103,12 @@ test('a manual pick is still persisted', () => {
 // explanation for a provider outage. `reason` is what keeps the two apart.
 
 test('a mid-turn fallback is worded as an outage, not as a policy block', () => {
-  const start = INDEX_JS.indexOf('showModelSubstitutionNotice(requested, effective, reason)');
+  const start = INDEX_JS.indexOf('showModelSubstitutionNotice(requested, effective, reason, failure)');
   const body = INDEX_JS.slice(start, start + 1600);
   assert.match(body, /reason === 'fallback'/,
     'both swaps would otherwise get the "not enabled on this instance" wording');
-  assert.match(body, /stopped responding/);
+  const reasons = INDEX_JS.slice(INDEX_JS.indexOf('modelFailureReason(requested, failure) {'));
+  assert.match(reasons, /stopped responding/);
   assert.match(body, /isn't enabled on this instance/,
     'the policy wording must survive — it is still the common case');
 });
@@ -121,7 +117,7 @@ test('a swap with no reason still renders (older backends, frontend repair)', ()
   // fetchAvailableModels' own repair calls this with two arguments, and a box
   // running an older image sends the frame without the field. Neither may throw
   // or render "undefined" at the user.
-  const start = INDEX_JS.indexOf('showModelSubstitutionNotice(requested, effective, reason)');
+  const start = INDEX_JS.indexOf('showModelSubstitutionNotice(requested, effective, reason, failure)');
   const body = INDEX_JS.slice(start, start + 1600);
   assert.match(body, /reason === 'fallback'\s*\n?\s*\?/,
     'must be a ternary defaulting to the policy wording, not an if/else on truthiness');

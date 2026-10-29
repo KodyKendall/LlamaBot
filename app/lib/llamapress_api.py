@@ -16,6 +16,9 @@ Custom agents need exactly two things:
 
     tools = [rails_api_request]          # 2. give the agent the tool
 
+    sys_msg + rails_auth_prompt(state)   # 3. optional: tells a signed-out user to
+                                         #    sign in before any tool call
+
 Why this exists: every other Rails-touching tool in this repo (`bash_command`,
 `rails_api_sh`) shells into the Rails container and gets unrestricted ActiveRecord.
 That's fine for `engineer`, but it means "let a low-privilege user ask Leo about
@@ -54,7 +57,7 @@ from typing_extensions import NotRequired
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["LlamaPressAPIState", "rails_api_request"]
+__all__ = ["LlamaPressAPIState", "rails_api_request", "rails_auth_prompt"]
 
 # The Rails service on the compose network (see Leonardo/docker-compose-dev.yml:
 # service `llamapress`, port 3000). Overridable for other deployments.
@@ -118,6 +121,36 @@ class LlamaPressAPIState(AgentState):
     """
 
     api_token: NotRequired[str]
+    # Why there is (or isn't) a token this turn: "signed_in", "signed_out" (the
+    # token fetch got 401), or "error" (network/CORS/5xx). Sent on every frame so
+    # it's never stale — unlike api_token, which a checkpoint can carry over from
+    # an earlier signed-in turn.
+    rails_auth: NotRequired[str]
+
+
+SIGN_IN_PATH = "/users/sign_in"
+
+SIGNED_OUT_MESSAGE = (
+    "The user is not signed in to the app, so I can't reach their data. Tell them "
+    f"to sign in at {SIGN_IN_PATH} in the app panel, then ask again. Signing in "
+    "is the whole fix — don't suggest waiting or trying again later."
+)
+
+
+def rails_auth_prompt(state) -> str:
+    """A system-prompt line for custom modes: tell a signed-out user to sign in
+    up front, before spending a tool call. Empty unless they're signed out, so
+    the prompt (and its cache) is unchanged for everyone else.
+
+        full_sys_msg = sys_msg + rails_auth_prompt(state)
+    """
+    if (state or {}).get("rails_auth") != "signed_out":
+        return ""
+    return (
+        "\n\nThe user is currently NOT signed in to the app. If they ask about "
+        f"their app data, first tell them to sign in at {SIGN_IN_PATH} in the app "
+        "panel and then ask again. Signing in is the whole fix."
+    )
 
 
 def _truncate(text: str, max_chars: int = RESPONSE_MAX_CHARS) -> str:
@@ -162,11 +195,22 @@ def rails_api_request(
     body: dict | None = None,
 ) -> str:
     """HTTP against the Rails app as the signed-in user. See module docstring."""
-    token = (runtime.state or {}).get("api_token")
+    state = runtime.state or {}
+    rails_auth = state.get("rails_auth")
+    # Checked before the token: a token checkpointed on an earlier turn can
+    # outlive the session, and rails_auth is this turn's answer.
+    if rails_auth == "signed_out":
+        return SIGNED_OUT_MESSAGE
+    token = state.get("api_token")
+    if not token and rails_auth == "error":
+        return (
+            "Couldn't get a sign-in token from the app this turn (the app didn't "
+            "answer the token request — it may be restarting). Tell the user that "
+            "plainly; if it keeps happening, reloading the page usually fixes it."
+        )
     if not token:
-        # Reached when the chat frame carried no api_token — e.g. the user isn't
-        # signed into the Rails app, or the agent's state schema forgot to declare
-        # the field (subclass LlamaPressAPIState). Fail loudly: silently proceeding
+        # No token and no rails_auth reason: the agent's state schema forgot to
+        # declare the fields (subclass LlamaPressAPIState), or an old frontend. Fail loudly: silently proceeding
         # unauthenticated would look like a permissions bug rather than a wiring one.
         return (
             "No API token available for this session, so I can't make authenticated "

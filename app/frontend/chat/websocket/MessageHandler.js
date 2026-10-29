@@ -205,7 +205,7 @@ export class MessageHandler {
       // before the run starts) and 'fallback' (the model stalled mid-turn and
       // the step finished elsewhere). Needs its own branch: without one it falls
       // through to handleGenericMessage and gets rendered as a chat message.
-      window.chatApp?.showModelSubstitutionNotice(data.requested, data.effective, data.reason);
+      window.chatApp?.showModelSubstitutionNotice(data.requested, data.effective, data.reason, data.failure);
     } else {
       this.handleGenericMessage(data);
     }
@@ -1527,6 +1527,9 @@ export class MessageHandler {
 
     if (data.type === 'end' || data.type === 'system_message' || data.type === 'error' || data.type === 'paywall_hit') {
       this.messageRenderer.handleEndMessage();
+      // LP-21: a turn that finished cleanly without a model swap means the
+      // picked model is answering again, so the sticky swap banner can go.
+      if (data.type === 'end') window.chatApp?.clearModelNoticeIfRecovered();
       // Remove beginner mode overlay when agent finishes
       this.iframeManager.removeStreamingOverlay();
 

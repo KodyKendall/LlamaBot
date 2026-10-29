@@ -38,8 +38,10 @@ class _Runtime:
         self.tool_call_id = "test-call"
 
 
-def _invoke(method="GET", path="/api/users", body=None, token="signed-token"):
+def _invoke(method="GET", path="/api/users", body=None, token="signed-token", rails_auth=None):
     state = {"api_token": token} if token is not None else {}
+    if rails_auth is not None:
+        state["rails_auth"] = rails_auth
     return rails_api_request.func(
         method=method, path=path, body=body, runtime=_Runtime(state)
     )
@@ -99,6 +101,37 @@ def test_missing_token_does_not_send_an_unauthenticated_request(captured):
     result = _invoke(token=None)
     assert "url" not in captured, "made a request despite having no token"
     assert "setup issue" in result
+
+
+# --- signed out is the user's fix, not a setup bug (LP-23) -----------------
+# Assert the routing (which message family comes back), never exact wording.
+
+def test_signed_out_user_is_told_to_sign_in(captured):
+    result = _invoke(token=None, rails_auth="signed_out")
+    assert "url" not in captured
+    assert "/users/sign_in" in result
+    assert "setup issue" not in result
+
+
+def test_signed_out_wins_over_a_stale_checkpointed_token(captured):
+    """api_token lives in the checkpoint, so a token from an earlier signed-in
+    turn can outlive the session. The frame's rails_auth is this turn's truth."""
+    result = _invoke(token="old-token", rails_auth="signed_out")
+    assert "url" not in captured, "sent a request with a stale token"
+    assert "/users/sign_in" in result
+
+
+def test_token_fetch_error_is_reported_as_such(captured):
+    result = _invoke(token=None, rails_auth="error")
+    assert "url" not in captured
+    assert "setup issue" not in result
+    assert "/users/sign_in" not in result
+
+
+def test_signed_out_prompt_line_only_when_signed_out():
+    assert "/users/sign_in" in llamapress_api.rails_auth_prompt({"rails_auth": "signed_out"})
+    assert llamapress_api.rails_auth_prompt({"rails_auth": "signed_in"}) == ""
+    assert llamapress_api.rails_auth_prompt({}) == ""
 
 
 # --- the token can't leak off-host (SSRF) ----------------------------------
@@ -239,6 +272,12 @@ def test_state_base_declares_api_token():
     dropped between the WS frame and the tool — the tool fails closed and looks
     like a permissions bug. Custom agents subclass this to stay wired."""
     assert "api_token" in LlamaPressAPIState.__annotations__
+
+
+def test_state_base_declares_rails_auth():
+    """Same filter, same failure: without the field a signed-out user falls
+    back to the misleading "setup issue" message (LP-23)."""
+    assert "rails_auth" in LlamaPressAPIState.__annotations__
 
 
 # --- the platform/client boundary -------------------------------------------

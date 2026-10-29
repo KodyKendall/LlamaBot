@@ -31,6 +31,7 @@ from app.agents.leonardo.model_policy import (
     is_model_enabled,
     model_switching_allowed,
     policy_report,
+    remote_policy,
     vision_allowed,
     vision_model,
 )
@@ -1114,6 +1115,10 @@ async def available_models(request: Request):
         # no vision model at all, which is what turns on the "no image-capable
         # model is configured" banner.
         "vision_model": vision_model(),
+        # The mothership's backup for users who leave the chat's "Backup model"
+        # picker on Automatic (LP-21), so the picker can name it. "" when the
+        # policy names none and rung 2 walks the fleet chain.
+        "fallback_model": remote_policy().get("fallback_model") or "",
         # The resolved routing AND which channel decided it (0.7.7). Not used by
         # the frontend — this is here so "what is this box actually running, and
         # who told it that" is answerable over HTTP instead of over SSH, which is

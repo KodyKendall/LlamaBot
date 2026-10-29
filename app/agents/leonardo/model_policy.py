@@ -82,6 +82,7 @@ bypassable; get_llm is the authoritative gate.
 import json
 import logging
 import os
+from contextvars import ContextVar
 from typing import Optional
 
 from app.agents.leonardo import model_health, zdr
@@ -102,6 +103,26 @@ from app.agents.leonardo.openrouter_models import (
 logger = logging.getLogger(__name__)
 
 _INSTANCE_CONFIG_PATH = ".leonardo/instance.json"
+
+# The backup model the user picked in the chat's model picker (LP-21), installed
+# per turn by the request handler from the frame's ``backup_model``. ``None`` is
+# "Automatic". A ContextVar for the same reason as customer_paid's turn mark: the
+# middleware that reads it runs inside LangGraph's node tasks, which inherit a copy
+# of the handler's context, and threading it through every agent's state schema
+# would mean touching every agent.
+_turn_backup_model: ContextVar[Optional[str]] = ContextVar(
+    "llamabot_turn_backup_model", default=None
+)
+
+
+def start_turn_backup_model(name: Optional[str]) -> object:
+    """Install this turn's user-chosen backup model (``None`` = Automatic)."""
+    name = canonical_model_name(name.strip()) if isinstance(name, str) and name.strip() else None
+    return _turn_backup_model.set(name)
+
+
+def turn_backup_model() -> Optional[str]:
+    return _turn_backup_model.get()
 
 # --- Coarse operator gates (env-only, no user write path) --------------------
 #
@@ -479,6 +500,13 @@ def _clean_policy_document(raw: dict, *, per_instance: bool = False) -> dict:
         clean["default_model"] = default_model.strip()
     elif default_model is not None:
         logger.warning("Remote model policy: ignoring non-string default_model %r", default_model)
+
+    # What rung 2 moves to when the user left the backup picker on Automatic (LP-21).
+    fallback = raw.get("fallback_model")
+    if isinstance(fallback, str) and fallback.strip():
+        clean["fallback_model"] = fallback.strip()
+    elif fallback is not None:
+        logger.warning("Remote model policy: ignoring non-string fallback_model %r", fallback)
 
     for key in ("disabled_models", "enabled_models"):
         value = raw.get(key)
@@ -922,6 +950,28 @@ def fallback_model(
                 return name
         return None
 
+    def usable(name):
+        return (
+            bool(name)
+            and name not in tried
+            and name in known_models()
+            and not model_health.is_gone(name)
+            and is_model_enabled(name)
+            and has_provider_key(name)
+        )
+
+    # The user's own backup pick outranks every fleet answer below (LP-21): the
+    # fallback used to be whatever this walk reached first, so it moved whenever
+    # the fleet chain did and the user could neither choose nor predict it. An
+    # image turn only takes it if it can see the image.
+    from app.agents.leonardo.model_capabilities import get_model_capabilities
+
+    backup = turn_backup_model()
+    if usable(backup) and (not needs_vision or (
+        vision_allowed() and get_model_capabilities(backup).get("images")
+    )):
+        return backup
+
     if needs_vision:
         if not vision_allowed():
             return None
@@ -936,6 +986,11 @@ def fallback_model(
             if has_provider_key(name) and is_model_enabled(name):
                 return name
         return None
+
+    # The mothership's answer for users who left the picker on Automatic.
+    policy_fallback = remote_policy().get("fallback_model")
+    if usable(policy_fallback):
+        return policy_fallback
 
     # An explicit chat chain outranks everything below, for the same reason it
     # outranks default_model in configured_default_model: it is the operator

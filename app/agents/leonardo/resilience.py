@@ -184,6 +184,96 @@ def is_transient_error(exc: BaseException) -> bool:
     return False
 
 
+#: What a provider says when the ACCOUNT is out of quota, as opposed to "slow down".
+#: ChatGPT's Codex backend answers ``usage_limit_reached`` with a reset time; OpenAI's
+#: API answers ``insufficient_quota``. Both are 429s that no amount of retrying fixes.
+_USAGE_LIMIT_MARKERS = ("usage_limit_reached", "insufficient_quota", "usage limit")
+
+
+def _error_body(exc: BaseException) -> dict:
+    """The provider's error object (``body["error"]`` when nested), or ``{}``."""
+    body = getattr(exc, "body", None)
+    if not isinstance(body, dict):
+        for arg in getattr(exc, "args", ()):
+            if isinstance(arg, dict):
+                body = arg
+                break
+    if not isinstance(body, dict):
+        return {}
+    inner = body.get("error")
+    return inner if isinstance(inner, dict) else body
+
+
+def is_usage_limit(exc: BaseException) -> bool:
+    """A 429 meaning the account's quota is spent, not that we sent too fast."""
+    if _status_code_of(exc) != 429:
+        return False
+    haystack = (str(exc) + " " + " ".join(str(v) for v in _error_body(exc).values())).lower()
+    return any(marker in haystack for marker in _USAGE_LIMIT_MARKERS)
+
+
+def is_dead_credential(exc: BaseException) -> bool:
+    """This provider will not answer us until a human acts (LP-21).
+
+    An expired/revoked key (401/403) or a spent usage limit. Like a retired model,
+    retrying is pointless and moving to another provider is a full recovery, so
+    the ladder skips rung 1 for these. Before LP-21 a 401 surfaced as the turn's
+    error and a usage-limit 429 burned rung 1's whole budget first.
+    """
+    return _status_code_of(exc) in (401, 403) or is_usage_limit(exc)
+
+
+def _resets_at(exc: BaseException):
+    """When a usage limit lifts, as ISO 8601 UTC, or None if the provider didn't say."""
+    from datetime import datetime, timedelta, timezone
+
+    body = _error_body(exc)
+    value = body.get("resets_at")
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return datetime.fromtimestamp(value, timezone.utc).isoformat()
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    seconds = body.get("resets_in_seconds")
+    if seconds is None:
+        headers = getattr(getattr(exc, "response", None), "headers", None) or {}
+        seconds = headers.get("retry-after")
+    try:
+        seconds = float(seconds)
+    except (TypeError, ValueError):
+        return None
+    return (datetime.now(timezone.utc) + timedelta(seconds=seconds)).isoformat()
+
+
+def describe_failure(exc: BaseException) -> dict:
+    """Why a model failed, as a code the chat banner can word in plain language.
+
+    LP-21: the fallback banner used to say "stopped responding" whatever happened,
+    so a user whose ChatGPT plan ran out read it as an outage. The browser owns the
+    wording; this owns the classification. Never includes the provider's message —
+    it can carry account ids and is not written for a user.
+    """
+    status = _status_code_of(exc)
+    if is_model_gone(exc):
+        code = "model_gone"
+    elif status in (401, 403):
+        code = "auth"
+    elif is_usage_limit(exc):
+        failure = {"code": "usage_limit", "status": 429}
+        resets_at = _resets_at(exc)
+        if resets_at:
+            failure["resets_at"] = resets_at
+        return failure
+    elif status == 429:
+        code = "rate_limited"
+    elif status == 408 or isinstance(exc, TimeoutError) or "Timeout" in type(exc).__name__:
+        code = "stall"
+    elif status is not None and 400 <= status < 500:
+        code = "bad_request"
+    else:
+        code = "unavailable"
+    return {"code": code, "status": status} if status is not None else {"code": code}
+
+
 def is_midstream_stall(exc: BaseException) -> bool:
     """A stream that produced content and then stopped.
 
