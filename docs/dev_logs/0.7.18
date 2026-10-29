@@ -1,0 +1,5 @@
+0.7.18:
+[x] - LP-21: pick your own backup model in the model picker.
+[x] - LP-21: model-switch banner says why and stays until dismissed.
+[x] - LP-20: Save and push set up git themselves instead of erroring.
+[x] - LP-23: signed-out users get told to sign in, not "setup issue".

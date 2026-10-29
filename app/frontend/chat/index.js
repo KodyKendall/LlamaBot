@@ -27,6 +27,7 @@ import { ColorAttach } from './ui/ColorAttach.js';
 import { ErrorAttach } from './ui/ErrorAttach.js';
 import { isCustomAgentMode } from './utils/agentModes.js';
 import { RailsErrorPoll } from './ui/RailsErrorPoll.js';
+import { fetchRailsApiToken } from './utils/railsApiToken.js';
 import { FileAttachmentManager } from './ui/FileAttachmentManager.js';
 import { ScreenRecorder } from './ui/ScreenRecorder.js';
 import { ScreenshotAnnotator } from './ui/ScreenshotAnnotator.js';
@@ -199,6 +200,12 @@ class ChatApp {
     // backend's resolved `vision_model`; empty string means this box has no
     // vision model at all, and the auto-switch refuses instead of switching.
     this.visionModel = null;
+
+    // LP-21. The mothership's backup for users on "Automatic" (from
+    // /api/available-models `fallback_model`; '' = none named), and whether the
+    // running turn raised a model notice — a turn that ends without one clears it.
+    this.policyFallbackModel = '';
+    this.modelNoticeThisTurn = false;
 
     // Set once an image attach has been refused, so the banner still explains
     // itself even though nothing ended up in the composer.
@@ -480,6 +487,7 @@ class ChatApp {
           // and if even that hasn't landed yet omit the key so the backend
           // applies its own default rather than us guessing wrong.
           llm_model: this.elements.modelSelect?.value || this.defaultTextModel || undefined,
+          backup_model: this.elements.backupModelSelect?.value || undefined,
           origin: window.location.host,
           ask_before_edits: true,
         });
@@ -738,6 +746,7 @@ class ChatApp {
       sendButton: this.container.querySelector('[data-llamabot="send-button"]'),
       agentModeSelect: this.container.querySelector('[data-llamabot="agent-mode-select"]'),
       modelSelect: this.container.querySelector('[data-llamabot="model-select"]'),
+      backupModelSelect: this.container.querySelector('[data-llamabot="backup-model-select"]'),
       modelToggleBtn: this.container.querySelector('[data-llamabot="model-toggle-btn"]'),
       modelSelectorContainer: this.container.querySelector('[data-llamabot="model-selector-container"]'),
       thinkingArea: this.container.querySelector('[data-llamabot="thinking-area"]'),
@@ -907,12 +916,12 @@ class ChatApp {
     // Dismiss (×) on the model-substitution notice.
     this.container
       .querySelector('[data-llamabot="model-switch-dismiss"]')
-      ?.addEventListener('click', () => {
-        clearTimeout(this.modelSwitchNoticeTimer);
-        this.container
-          .querySelector('[data-llamabot="model-switch-banner"]')
-          ?.classList.add('hidden');
-      });
+      ?.addEventListener('click', () => this.hideModelNotice());
+
+    // Backup model picker (LP-21). Remembered like the model itself.
+    this.elements.backupModelSelect?.addEventListener('change', (e) => {
+      setCookie('backupModel', e.target.value, this.config.cookieExpiryDays);
+    });
 
     // Dismiss (×) on the "Leo can't view images" banner — until the next refusal.
     this.container
@@ -1769,29 +1778,110 @@ class ChatApp {
    * and Leo finished somewhere else. Wording them the same would explain a
    * provider outage as a permissions problem.
    *
-   * Auto-hides like a flash — the notice is about the turn that just started,
-   * not a standing condition — but is dismissable for a user who reads faster.
+   * LP-21: stays up until dismissed or until a turn finishes without a swap
+   * (clearModelNoticeIfRecovered). It used to auto-hide after 12s, and a user
+   * who looked away lost track of which model was answering. `failure` is the
+   * backend's classification of why a fallback happened (resilience.describe_
+   * failure); older backends omit it and get the generic wording.
    */
-  showModelSubstitutionNotice(requested, effective, reason) {
+  showModelSubstitutionNotice(requested, effective, reason, failure) {
     const banner = this.container.querySelector('[data-llamabot="model-switch-banner"]');
     if (!banner) return;
 
     const text = banner.querySelector('[data-llamabot="model-switch-text"]');
     if (text) {
       text.textContent = reason === 'fallback'
-        ? `${this.modelLabel(requested)} stopped responding — `
-          + `finished this step on ${this.modelLabel(effective)}.`
+        ? `${this.modelFailureReason(requested, failure)} `
+          + `Finished this step on ${this.modelLabel(effective)}.`
         : `${this.modelLabel(requested)} isn't enabled on this instance — `
           + `answering with ${this.modelLabel(effective)} instead.`;
     }
     banner.classList.remove('hidden');
+    this.modelNoticeThisTurn = true;
+    if (reason === 'fallback') this.showBackupInUse(effective);
+  }
 
-    // Restart the clock on a repeat notice rather than letting the first
-    // timer hide a banner the second turn just raised.
-    clearTimeout(this.modelSwitchNoticeTimer);
-    this.modelSwitchNoticeTimer = setTimeout(() => {
-      banner.classList.add('hidden');
-    }, 12000);
+  /**
+   * One plain sentence for why `requested` failed, from the frame's `failure`
+   * code. Never the provider's own message — that is not written for a user.
+   */
+  modelFailureReason(requested, failure) {
+    const name = this.modelLabel(requested);
+    switch (failure?.code) {
+      case 'model_gone':
+        return `${name} isn't available from its provider right now (model not found).`;
+      case 'usage_limit': {
+        const resets = failure.resets_at ? new Date(failure.resets_at) : null;
+        const when = resets && !isNaN(resets)
+          ? ` It resets ${resets.toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })}.`
+          : '';
+        return `${name} hit its usage limit.${when}`;
+      }
+      case 'auth':
+        return /-chatgpt$/.test(requested || '')
+          ? `Your ChatGPT sign-in for ${name} expired — reconnect your account to use it again.`
+          : `${name} rejected this box's API key (expired or revoked).`;
+      case 'rate_limited':
+        return `${name} is rate-limiting requests right now.`;
+      case 'bad_request':
+        return `${name} rejected the request (something in it isn't supported by this model).`;
+      case 'stall':
+      default:
+        return `${name} stopped responding.`;
+    }
+  }
+
+  /** Mark the toolbar's Model button with the backup that is answering. */
+  showBackupInUse(model) {
+    const label = this.elements.modelToggleBtn?.querySelector('span');
+    if (!label) return;
+    label.textContent = `${this.modelLabel(model)} (backup)`;
+    this.elements.modelToggleBtn.classList.add('backup-in-use');
+  }
+
+  /** Hide the model notice and drop the "(backup)" marker. */
+  hideModelNotice() {
+    this.container
+      .querySelector('[data-llamabot="model-switch-banner"]')
+      ?.classList.add('hidden');
+    const label = this.elements.modelToggleBtn?.querySelector('span');
+    if (label) label.textContent = 'Model';
+    this.elements.modelToggleBtn?.classList.remove('backup-in-use');
+  }
+
+  /** On a turn's `end`: a turn that needed no swap means the picked model is back. */
+  clearModelNoticeIfRecovered() {
+    if (this.modelNoticeThisTurn) return;
+    this.hideModelNotice();
+  }
+
+  /**
+   * Fill the Backup picker with "Automatic" plus every model this box can run
+   * right now, keeping the user's pick when it is still runnable. Labels come
+   * from the main dropdown so both lists name models the same way.
+   */
+  populateBackupModelOptions(models) {
+    const select = this.elements.backupModelSelect;
+    if (!select || !this.elements.modelSelect) return;
+    const saved = select.value || getCookie('backupModel') || '';
+    const usable = new Set(models.filter(m => m.available).map(m => m.value));
+
+    select.innerHTML = '';
+    const automatic = document.createElement('option');
+    automatic.value = '';
+    automatic.textContent = this.policyFallbackModel
+      ? `Automatic (${this.modelLabel(this.policyFallbackModel)})`
+      : 'Automatic';
+    select.appendChild(automatic);
+
+    Array.from(this.elements.modelSelect.options).forEach(option => {
+      if (!usable.has(option.value)) return;
+      const entry = document.createElement('option');
+      entry.value = option.value;
+      entry.textContent = option.getAttribute('data-original-label') || option.textContent;
+      select.appendChild(entry);
+    });
+    select.value = usable.has(saved) ? saved : '';
   }
 
   /**
@@ -1855,7 +1945,8 @@ class ChatApp {
    * point: LlamaBot can't forge a token for someone else.
    *
    * Returns null when the user isn't signed into the Rails app. That's a normal
-   * state, not an error — agents needing the token report it themselves.
+   * state, not an error — the reason lands in this._railsAuth and rides the frame
+   * as `rails_auth`, so agents can tell the user to sign in.
    */
   async getRailsApiToken() {
     // Reuse while valid. Refresh a minute early so a token can't expire in flight
@@ -1869,30 +1960,12 @@ class ChatApp {
 
     this._railsApiTokenPromise = (async () => {
       try {
-        const resp = await fetch(`${getRailsUrl()}/llama_bot/agent/token`, {
-          // Sends the Rails session cookie. Both hosts sit under the same site, so
-          // the cookie rides along; Rails must allow this origin + credentials (see
-          // AgentTokenController#set_cors_headers) or the browser blocks the read.
-          credentials: 'include',
-          headers: { 'Accept': 'application/json' }
-        });
-        if (!resp.ok) {
-          // 401 = not signed into Rails. Expected; don't spam the console.
-          if (resp.status !== 401) {
-            console.warn(`[llamabot] token fetch failed: HTTP ${resp.status}`);
-          }
-          this._railsApiToken = null;
-          return null;
-        }
-        const data = await resp.json();
-        this._railsApiToken = data.api_token || null;
-        this._railsApiTokenExpiresAt = Date.now() + ((data.expires_in || 1800) * 1000);
-        return this._railsApiToken;
-      } catch (e) {
-        // Network/CORS failure. Never block sending a message over this.
-        console.warn('[llamabot] token fetch error:', e.message);
-        this._railsApiToken = null;
-        return null;
+        const { token, expiresIn, railsAuth } = await fetchRailsApiToken(getRailsUrl());
+        this._railsApiToken = token;
+        // Why there's no token, for the frame (see sendMessage).
+        this._railsAuth = railsAuth;
+        if (token) this._railsApiTokenExpiresAt = Date.now() + expiresIn * 1000;
+        return token;
       } finally {
         this._railsApiTokenPromise = null;
       }
@@ -2207,13 +2280,20 @@ class ChatApp {
       agent_name: agentName,
       agent_mode: agentMode,
       llm_model: effectiveLlmModel,
+      // The user's backup pick (LP-21); omitted = Automatic.
+      backup_model: this.elements.backupModelSelect?.value || undefined,
       attachments: attachments.filter(a => a.type !== 'uploaded_file'),
       ask_before_edits: executionMode === 'ask'
     };
     if (apiToken) messageData.api_token = apiToken;
+    // Sent every turn (never stale) so agents can say "sign in" instead of
+    // "setup issue" when there's no token (LP-23).
+    messageData.rails_auth = this._railsAuth || 'error';
 
     this.webSocketManager.send(messageData);
     this.lastSentMessageData = messageData;
+    // A new turn: any model notice still showing is from an earlier one.
+    this.modelNoticeThisTurn = false;
     this.setAgentRunning(true);
 
     // Call custom callback if provided
@@ -2549,6 +2629,9 @@ class ChatApp {
 
       // Update the dropdown label display
       this.updateDropdownLabel(this.elements.modelSelect);
+
+      this.policyFallbackModel = data.fallback_model || '';
+      this.populateBackupModelOptions(data.models || []);
 
     } catch (error) {
       console.warn('Error fetching available models:', error);

@@ -199,15 +199,23 @@ export class GitHubAuthModal {
     this.poller = null;
     this.deviceCode = null;
     this.aborted = false;
+    // Called once when a sign-in completes (LP-20: Push retries after it).
+    this.onAuthenticated = null;
     // Injection seam for tests; the browser gets the real globals.
     this.pollerOptions = options.pollerOptions || {};
   }
 
   /**
-   * Start the GitHub auth flow - creates modal & begins polling
+   * Start the GitHub auth flow - creates modal & begins polling.
+   *
+   * `onAuthenticated` runs after a NEW sign-in finishes (the backend has already
+   * copied the credentials into the containers by then). Not after "already
+   * authenticated": that box's credentials just failed, so retrying would only
+   * fail the same way.
    */
-  async start() {
+  async start({ onAuthenticated = null } = {}) {
     this.aborted = false;
+    this.onAuthenticated = onAuthenticated;
 
     // First check if already authenticated
     try {
@@ -424,6 +432,11 @@ export class GitHubAuthModal {
         switch (status) {
           case 'success':
             this.showSuccess(data.message || 'GitHub connected!');
+            if (this.onAuthenticated) {
+              const callback = this.onAuthenticated;
+              this.onAuthenticated = null;
+              callback();
+            }
             break;
           case 'expired':
             this.showError(data.message || 'Authorization code expired. Please try again.');

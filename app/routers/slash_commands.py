@@ -16,6 +16,7 @@ from sqlmodel import Session, select
 
 from app.dependencies import auth, get_db_session, engineer_or_admin_required
 from app.models import CommandHistory, User
+from app.services.git_setup import GH_COPY_COMMAND
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -132,7 +133,8 @@ SLASH_COMMANDS = {
     },
     "gh-copy": {
         "script": None,
-        "command": "docker compose exec llamabot mkdir -p /root/.config/gh && docker compose exec code mkdir -p /config/.config/gh && docker compose cp /home/ubuntu/.config/gh/. llamabot:/root/.config/gh/ && docker compose cp /home/ubuntu/.config/gh/. code:/config/.config/gh/ && docker compose exec llamabot gh auth setup-git && docker compose exec code gh auth setup-git && echo 'GitHub credentials copied and git configured in llamabot and vscode containers'",
+        # Shared with Save/Push's automatic setup and the GitHub sign-in flow (LP-20).
+        "command": GH_COPY_COMMAND + " && echo 'GitHub credentials copied and git configured in llamabot and vscode containers'",
         "description": "Copy GitHub credentials from host to containers (run after /gh)",
         "dangerous": False,
         "confirm_message": "This will copy GitHub credentials from host to llamabot and vscode containers. Make sure you completed the /gh authentication first. Continue?"

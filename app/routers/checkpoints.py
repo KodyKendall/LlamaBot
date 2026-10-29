@@ -2,6 +2,7 @@
 
 import json
 import logging
+import os
 import subprocess
 from pathlib import Path
 from typing import Optional
@@ -10,6 +11,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from app.dependencies import get_current_user
+from app.services import git_setup
 from app.services.checkpoint_service import checkpoint_service
 
 logger = logging.getLogger(__name__)
@@ -31,6 +33,18 @@ FF_BLOCKED_MESSAGE = (
     "Can't auto-update — you have file changes on this version that conflict "
     "with the updated version. Commit or discard them before pulling this update."
 )
+
+
+# LP-20: what the user sees when Save or Push still fails after setting git up.
+# Plain sentences only — git's stderr goes to the log, never to the screen.
+SAVE_FAILED_MESSAGE = "Couldn't save your progress right now. Please try again in a moment."
+PUSH_NEEDS_SIGN_IN_MESSAGE = "Sign in to GitHub to push your code."
+PUSH_NO_CREDENTIALS_MESSAGE = (
+    "Couldn't push because this app isn't connected to GitHub. "
+    "Ask your administrator to connect it."
+)
+PUSH_REJECTED_MESSAGE = "GitHub has newer changes than this app. Pull the latest updates, then push again."
+PUSH_FAILED_MESSAGE = "Couldn't push to GitHub right now. Please try again in a moment."
 
 
 # ============== Pydantic Models ==============
@@ -82,8 +96,9 @@ def create_checkpoint(
         return JSONResponse(content=checkpoint, status_code=201)
 
     except Exception as e:
+        # The raw text is git's stderr (LP-20): log it, never show it.
         logger.error(f"Failed to create checkpoint: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=SAVE_FAILED_MESSAGE)
 
 
 @router.get("/api/checkpoints")
@@ -335,42 +350,53 @@ def dismiss_discard(request: DismissDiscardRequest):
 
 @router.post("/api/git/push")
 def git_push():
-    """Push commits to GitHub.
+    """Push commits to GitHub, setting up credentials if that is what's missing.
 
-    Returns:
-        Success status and git output message
+    LP-20: an auth failure runs the /gh-copy sequence and retries ONCE. If that
+    still fails, the response says ``needs_github_auth`` when this box offers
+    GitHub sign-in (ENABLE_GITHUB_BUTTON), so the browser opens the modal and
+    retries after it. Every failure message is a plain sentence; git's stderr is
+    logged, never returned.
     """
-    import subprocess
-    from pathlib import Path
-
-    LEONARDO_PATH = Path("/app/leonardo")
-
-    try:
-        result = subprocess.run(
+    def push():
+        return subprocess.run(
             ["git", "-C", str(LEONARDO_PATH), "push"],
             capture_output=True,
             text=True,
             timeout=60
         )
 
-        success = result.returncode == 0
-        message = result.stdout.strip() if success else result.stderr.strip()
+    try:
+        result = push()
+        if result.returncode != 0 and git_setup.is_push_auth_failure(result.stderr):
+            logger.info("Push needs GitHub credentials; syncing them from the host and retrying")
+            git_setup.sync_gh_credentials()
+            result = push()
 
-        # Provide a friendlier message
-        if success:
-            message = "Successfully pushed to Github"
+        if result.returncode == 0:
+            return JSONResponse(content={"success": True, "message": "Successfully pushed to Github"})
 
+        logger.warning(f"Git push failed: {result.stderr.strip()}")
+        needs_auth = False
+        if git_setup.is_push_auth_failure(result.stderr):
+            needs_auth = os.getenv("ENABLE_GITHUB_BUTTON", "").lower() == "true"
+            message = PUSH_NEEDS_SIGN_IN_MESSAGE if needs_auth else PUSH_NO_CREDENTIALS_MESSAGE
+        elif "rejected" in result.stderr or "non-fast-forward" in result.stderr:
+            message = PUSH_REJECTED_MESSAGE
+        else:
+            message = PUSH_FAILED_MESSAGE
         return JSONResponse(content={
-            "success": success,
-            "message": message
+            "success": False,
+            "message": message,
+            "needs_github_auth": needs_auth,
         })
 
     except subprocess.TimeoutExpired:
         logger.error("Git push timed out")
-        raise HTTPException(status_code=500, detail="Git push timed out after 60 seconds")
+        raise HTTPException(status_code=500, detail="Pushing to GitHub took too long. Please try again.")
     except Exception as e:
         logger.error(f"Failed to push to GitHub: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=PUSH_FAILED_MESSAGE)
 
 
 # ============== Git Pull / Update Endpoints ==============

@@ -376,7 +376,8 @@ export class CheckpointManager {
 
     } catch (error) {
       console.error('Error saving checkpoint:', error);
-      this.showError('Failed to save checkpoint: ' + error.message);
+      // The server's detail is already one plain sentence (LP-20).
+      this.showError(error.message);
     }
   }
 
@@ -641,9 +642,18 @@ export class CheckpointManager {
     if (!confirm('Push all commits to GitHub? This will sync your local changes with the remote repository.')) {
       return;
     }
+    await this.pushToGitHub({ allowSignIn: true });
+  }
 
+  /**
+   * POST /api/git/push once. The server already syncs credentials and retries on
+   * an auth failure (LP-20); when it still can't push and this box offers GitHub
+   * sign-in it says `needs_github_auth`, and we open the sign-in modal and push
+   * once more after it completes. Never loops: the retry has allowSignIn false.
+   */
+  async pushToGitHub({ allowSignIn }) {
+    const syncBtn = this.checkpointPanel.querySelector('.sync-github-btn');
     try {
-      const syncBtn = this.checkpointPanel.querySelector('.sync-github-btn');
       syncBtn.disabled = true;
       syncBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
 
@@ -654,7 +664,7 @@ export class CheckpointManager {
 
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.detail || `Failed to push: ${response.statusText}`);
+        throw new Error(errorData.detail || "Couldn't push to GitHub right now. Please try again in a moment.");
       }
 
       const data = await response.json();
@@ -663,15 +673,18 @@ export class CheckpointManager {
         this.showSuccess(data.message);
         // Refresh the uncommitted changes banner to reflect current state
         await this.checkUncommittedChanges();
+      } else if (data.needs_github_auth && allowSignIn && window.ENABLE_GITHUB_BUTTON) {
+        this.gitHubAuthModal.start({
+          onAuthenticated: () => this.pushToGitHub({ allowSignIn: false }),
+        });
       } else {
-        this.showError(data.message || 'Failed to push to GitHub');
+        this.showError(data.message || "Couldn't push to GitHub right now. Please try again in a moment.");
       }
 
     } catch (error) {
       console.error('Error pushing to GitHub:', error);
-      this.showError('Failed to push to GitHub: ' + error.message);
+      this.showError(error.message);
     } finally {
-      const syncBtn = this.checkpointPanel.querySelector('.sync-github-btn');
       syncBtn.disabled = false;
       syncBtn.innerHTML = '<i class="fa-solid fa-cloud-arrow-up"></i>';
     }
