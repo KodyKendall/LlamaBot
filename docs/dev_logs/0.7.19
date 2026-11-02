@@ -3,6 +3,7 @@
 [x] - LP-22: custom modes can raise the 8k Rails API reply cap.
 [x] - LP-26: feedback bubble stays pinned bottom-right on iPhone/iPad.
 [x] - Ask-before-edits mode now also asks before sub-agents and restarts.
+[x] - Research helper reads uploaded spreadsheets without a shell.
 [x] - LP-12: project notes capped at 12k tokens so chats start lean.
 [x] - LP-12: Plan mode builds right after you approve, no extra question.
 [x] - LP-10: Inbox/Activity tabs reload after chat SSO, no sign-in loop.

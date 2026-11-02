@@ -78,6 +78,15 @@ def test_research_sub_agent_has_no_shell():
                         "delegate_task", "delegate_research"}
 
 
+def test_research_sub_agent_can_read_uploaded_files_without_a_shell():
+    # With no shell, read_uploaded_file is how research opens an uploaded xlsx/csv.
+    names = {t.name for t in sub_agents.RESEARCH_TOOLS}
+    assert "read_uploaded_file" in names
+    assert "bash_command" not in names
+    assert "cannot open spreadsheets" not in sub_agents.RESEARCH_ONLY_PROMPT
+    assert "read_uploaded_file" in sub_agents.RESEARCH_ONLY_PROMPT
+
+
 def test_research_prompt_and_docs_do_not_promise_a_shell():
     assert "bash_command" not in sub_agents.RESEARCH_ONLY_PROMPT
     assert "rails runner" not in (sub_agents.delegate_research.description or "")

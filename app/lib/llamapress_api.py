@@ -500,15 +500,17 @@ def read_uploaded_file(
 @tool("read_uploaded_file", description=READ_UPLOADED_FILE_DESCRIPTION)
 def box_read_uploaded_file(name: str, offset: int = 0, q: str | None = None) -> str:
     """rails_agent: same tool on the box-internal feed token, no per-user token
-    needed. Only for agents that already have the filesystem (bash) — it is not
-    narrower than what they hold, and it skips the gem's uploads_authorizer."""
+    needed. Only for agents that can already read app/imports (bash, or the research
+    helper's read_file) — it is not wider than what they hold, and it skips the gem's
+    uploads_authorizer."""
     from app.services.rails_error_feed import FEED_SCHEME, feed_token
 
     box = feed_token()
     if not box:
         return (
             "This box has no SECRET_KEY_BASE shared with Rails, so the uploads feed "
-            "isn't reachable. Read the file from app/imports with bash instead."
+            "isn't reachable. Read the file from app/imports with bash instead, or, if "
+            "you have no shell, report this back to the main agent."
         )
     return _fetch_upload(name, offset, q, f"{FEED_SCHEME} {box}")
 

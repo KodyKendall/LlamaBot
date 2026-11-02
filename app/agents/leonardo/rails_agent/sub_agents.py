@@ -42,6 +42,7 @@ from app.agents.leonardo.llm_factory import get_llm, system_message_for_model
 # an explicit llm_model silently ignores the fleet default.
 from app.agents.leonardo.model_policy import enabled_default_model
 from app.lib.background_tasks import get_background_launcher
+from app.lib.llamapress_api import box_read_uploaded_file
 from app.agents.leonardo.delegation import (
     DELEGATION_TIMEOUT_SECONDS,
     summarize_partial_work,
@@ -77,6 +78,7 @@ The main agent will use your findings to decide what changes to make.
 - `ls` - List directory contents
 - `write_todos` - Track your research progress
 - `internet_search` - Search the web for Rails documentation, gem usage, or solutions
+- `read_uploaded_file` - Read a file the user uploaded (PDF, DOCX, XLSX, CSV, text). Page with `offset`, filter with `q`.
 
 ## NO SHELL ACCESS
 You have no shell tool. If the answer needs a live command (a `rails runner` query,
@@ -102,9 +104,10 @@ command for the main agent to run.
 
 ## SPREADSHEET INSPECTION
 
-You cannot open spreadsheets yourself (that needs a shell). Report back which file needs
-inspecting and what to look for: sheets, column headers, row counts, data types,
-formulas, and relationships between sheets.
+Call `read_uploaded_file(name)`, then report the sheets, column headers, row counts,
+data types, formulas, and relationships between sheets. If the tool says the file type
+is unsupported or the uploads feed is unreachable, report that to the main agent. Do not
+ask for a shell.
 
 ## OUTPUT FORMAT
 
@@ -375,6 +378,7 @@ RESEARCH_TOOLS = [
     grep_files,   # Search file contents
     internet_search,  # Search the web for documentation/solutions
     report_friction,  # Telemetry about OUR tooling, not a write to the user's project
+    box_read_uploaded_file,  # read-only: text of chat uploads (LP-24)
     # NO bash_command - a shell can write files, so "read-only" would not hold
     # NO write_file - cannot write files
     # NO edit_file - cannot edit files
