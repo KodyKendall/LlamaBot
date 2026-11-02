@@ -8,16 +8,24 @@ client repo, library from the platform — is the product story, so keep it that
 
 Custom agents need exactly two things:
 
-    from app.lib.llamapress_api import LlamaPressAPIState, rails_api_request
+    from app.lib.llamapress_api import (
+        LlamaPressAPIState, standard_prompt_sections, standard_tools,
+    )
 
     class MyState(LlamaPressAPIState):   # 1. api_token must be on your state schema
         ...                              #    (LangGraph drops fields not in the schema,
-                                         #     which silently disables the tool)
+                                         #     which silently disables the tools)
 
-    tools = [rails_api_request]          # 2. give the agent the tool
+    tools = standard_tools()             # 2. rails_api_request + read_uploaded_file
 
-    sys_msg + rails_auth_prompt(state)   # 3. optional: tells a signed-out user to
-                                         #    sign in before any tool call
+    sys_msg + standard_prompt_sections(state)  # 3. tells the model how to use both,
+                                               #    plus the sign-in line when signed out
+
+`read_uploaded_file` (LP-24) reads files the user dropped into chat (PDF, DOCX,
+spreadsheets, text) through the gem's GET /llama_bot/uploads/:name, which does the
+extraction. Custom modes send the user's token; rails_agent gets
+`box_read_uploaded_file`, the same tool on the box-internal feed token, since it has
+no per-user token and already has the filesystem via bash.
 
 Why this exists: every other Rails-touching tool in this repo (`bash_command`,
 `rails_api_sh`) shells into the Rails container and gets unrestricted ActiveRecord.
@@ -57,7 +65,16 @@ from typing_extensions import NotRequired
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["LlamaPressAPIState", "rails_api_request", "rails_auth_prompt"]
+__all__ = [
+    "LlamaPressAPIState",
+    "box_read_uploaded_file",
+    "make_rails_api_request",
+    "rails_api_request",
+    "rails_auth_prompt",
+    "read_uploaded_file",
+    "standard_prompt_sections",
+    "standard_tools",
+]
 
 # The Rails service on the compose network (see Leonardo/docker-compose-dev.yml:
 # service `llamapress`, port 3000). Overridable for other deployments.
@@ -82,8 +99,23 @@ ALLOWED_METHODS = frozenset({"GET", "POST", "PATCH", "PUT", "DELETE"})
 # ungated too, unless the app enables authentication. See docs/dev/user_api_mode.md.
 ALLOWED_PATH_PREFIX = "/api/"
 
+DEFAULT_RESPONSE_MAX_CHARS = 8000
+
+
+def _env_max_chars(raw: str | None) -> int:
+    """LLAMAPRESS_API_RESPONSE_MAX_CHARS, or 8000 if unset/garbled/not positive.
+    A typo in .env must not turn the cap off."""
+    try:
+        value = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return DEFAULT_RESPONSE_MAX_CHARS
+    return value if value > 0 else DEFAULT_RESPONSE_MAX_CHARS
+
+
 # Rails errors are verbose (full HTML error pages in dev). Cap what re-enters context.
-RESPONSE_MAX_CHARS = 8000
+# The box-wide default stays 8k; one agent that reads long records raises its own
+# cap with make_rails_api_request(max_chars=...) instead (LP-22).
+RESPONSE_MAX_CHARS = _env_max_chars(os.getenv("LLAMAPRESS_API_RESPONSE_MAX_CHARS"))
 
 REQUEST_TIMEOUT_SECONDS = 30
 
@@ -153,6 +185,33 @@ def rails_auth_prompt(state) -> str:
     )
 
 
+def _user_token(runtime) -> tuple[str | None, str | None]:
+    """(token, None), or (None, a message for the model) when there is no usable one."""
+    state = getattr(runtime, "state", None) or {}
+    rails_auth = state.get("rails_auth")
+    # Checked before the token: a token checkpointed on an earlier turn can
+    # outlive the session, and rails_auth is this turn's answer.
+    if rails_auth == "signed_out":
+        return None, SIGNED_OUT_MESSAGE
+    token = state.get("api_token")
+    if not token and rails_auth == "error":
+        return None, (
+            "Couldn't get a sign-in token from the app this turn (the app didn't "
+            "answer the token request — it may be restarting). Tell the user that "
+            "plainly; if it keeps happening, reloading the page usually fixes it."
+        )
+    if not token:
+        # No token and no rails_auth reason: the agent's state schema forgot to
+        # declare the fields (subclass LlamaPressAPIState), or an old frontend. Fail loudly: silently proceeding
+        # unauthenticated would look like a permissions bug rather than a wiring one.
+        return None, (
+            "No API token available for this session, so I can't make authenticated "
+            "requests to your app right now. This is a setup issue, not a permissions "
+            "one — tell the user to report it."
+        )
+    return token, None
+
+
 def _truncate(text: str, max_chars: int = RESPONSE_MAX_CHARS) -> str:
     if len(text) <= max_chars:
         return text
@@ -187,36 +246,20 @@ def _reject_path(path: str) -> str | None:
     return None
 
 
-@tool(description=RAILS_API_REQUEST_DESCRIPTION)
-def rails_api_request(
-    method: str,
-    path: str,
-    runtime: ToolRuntime,
-    body: dict | None = None,
-) -> str:
+# Appended when a successful reply is cut, so the model fetches the rest instead
+# of answering from the first slice.
+PAGINATION_HINT = (
+    "The reply was too long and was cut. To get the rest, ask for less per request: "
+    "use the endpoint's pagination or filter params (e.g. ?page=2, ?per_page=, ?q=) or "
+    "request one record or section at a time. Don't answer as if this is everything."
+)
+
+
+def _rails_api_request(method, path, runtime, body, max_chars: int) -> str:
     """HTTP against the Rails app as the signed-in user. See module docstring."""
-    state = runtime.state or {}
-    rails_auth = state.get("rails_auth")
-    # Checked before the token: a token checkpointed on an earlier turn can
-    # outlive the session, and rails_auth is this turn's answer.
-    if rails_auth == "signed_out":
-        return SIGNED_OUT_MESSAGE
-    token = state.get("api_token")
-    if not token and rails_auth == "error":
-        return (
-            "Couldn't get a sign-in token from the app this turn (the app didn't "
-            "answer the token request — it may be restarting). Tell the user that "
-            "plainly; if it keeps happening, reloading the page usually fixes it."
-        )
-    if not token:
-        # No token and no rails_auth reason: the agent's state schema forgot to
-        # declare the fields (subclass LlamaPressAPIState), or an old frontend. Fail loudly: silently proceeding
-        # unauthenticated would look like a permissions bug rather than a wiring one.
-        return (
-            "No API token available for this session, so I can't make authenticated "
-            "requests to your app right now. This is a setup issue, not a permissions "
-            "one — tell the user to report it."
-        )
+    token, problem = _user_token(runtime)
+    if problem:
+        return problem
 
     method = (method or "").strip().upper()
     if method not in ALLOWED_METHODS:
@@ -262,4 +305,240 @@ def rails_api_request(
             "The request wasn't authenticated — the token may have expired (they last 30 minutes)."
         )
 
-    return f"HTTP {response.status_code}\n{_truncate(response.text)}"
+    if not response.is_success:
+        # The raised cap is for long records, not for Rails' HTML error pages.
+        return f"HTTP {response.status_code}\n{_truncate(response.text, min(max_chars, RESPONSE_MAX_CHARS))}"
+    text = response.text
+    if len(text) > max_chars:
+        return (
+            f"HTTP {response.status_code}\n{text[:max_chars]}\n\n"
+            f"[truncated {len(text) - max_chars} more chars of {len(text)}. {PAGINATION_HINT}]"
+        )
+    return f"HTTP {response.status_code}\n{text}"
+
+
+def make_rails_api_request(max_chars: int = 40000):
+    """rails_api_request with its own reply cap, for an agent that reads long
+    records (a report page, a big JSON list):
+
+        tools = [make_rails_api_request(max_chars=40000), read_uploaded_file]
+
+    Same name, description and guards; only the cap differs, and only for 2xx
+    replies. Error pages keep the box default. Every char returned re-enters the
+    model's context on every later turn, so raise it for the agent that needs it,
+    not box-wide.
+    """
+    if isinstance(max_chars, bool) or not isinstance(max_chars, int) or max_chars <= 0:
+        raise ValueError(f"max_chars must be a positive int, got {max_chars!r}")
+
+    @tool("rails_api_request", description=RAILS_API_REQUEST_DESCRIPTION)
+    def rails_api_request(
+        method: str,
+        path: str,
+        runtime: ToolRuntime,
+        body: dict | None = None,
+    ) -> str:
+        """HTTP against the Rails app as the signed-in user. See module docstring."""
+        return _rails_api_request(method, path, runtime, body, max_chars)
+
+    return rails_api_request
+
+
+# The shared, box-default tool (8k unless LLAMAPRESS_API_RESPONSE_MAX_CHARS says otherwise).
+rails_api_request = make_rails_api_request(max_chars=RESPONSE_MAX_CHARS)
+
+
+# --- read_uploaded_file (LP-24) ---------------------------------------------
+#
+# Files dropped into chat are saved to the Rails app's app/imports; the model only
+# gets their names in an <UPLOADED_FILES> block. The gem's UploadsController does
+# the extraction (PDF, DOCX, XLSX/XLS/XLSM, CSV, text) and pages the result, so
+# every mode reads files the same way instead of improvising a script per type.
+
+UPLOADS_PATH = "/llama_bot/uploads"
+
+# One gem page is 20k chars; leave room for the header lines around it.
+UPLOAD_RESPONSE_MAX_CHARS = 24000
+
+READ_UPLOADED_FILE_DESCRIPTION = """Read the text of a file the user uploaded into chat.
+
+Uploaded files are named in the <UPLOADED_FILES> block of the user's message. This
+returns their text: PDF (text layer), DOCX, XLSX/XLS/XLSM (every sheet, one row per
+line, tab-separated), CSV and plain text.
+
+Args:
+    name: The file name, e.g. "leads.xlsx" (a path like "app/imports/leads.xlsx" also works).
+    offset: Character offset to start from. Long files come back one page at a
+            time; the result tells you the offset of the next page.
+    q: Optional text to search for. Returns every matching line with its line
+       number instead of a page — use it to find rows in a big file.
+
+Returns:
+    A header (status, size, which part you are seeing) followed by the text.
+    If the name is wrong, the files that ARE there are listed.
+"""
+
+_STATUS_NOTES = {
+    "empty": "The file has no extractable text (a scanned PDF or image-only document has no text layer).",
+    "unsupported": "Text extraction isn't supported for this file type.",
+    "failed": "The file couldn't be parsed (it may be corrupt or password-protected).",
+}
+
+
+def _upload_name(name: str) -> str | None:
+    """The bare file name, or None if it can't name a file. The server only
+    matches names against a listing of app/imports, so this is about giving the
+    model a useful answer, not about containment."""
+    base = (name or "").replace("\\", "/").strip().rsplit("/", 1)[-1].strip()
+    if base in ("", ".", ".."):
+        return None
+    return base
+
+
+def _format_upload(payload: dict, offset: int) -> str:
+    name = payload.get("name", "?")
+    status = payload.get("status", "?")
+    total = payload.get("total_chars", 0) or 0
+    lines = [f"{name} — status: {status}, {total} characters of text."]
+    if status in _STATUS_NOTES:
+        lines.append(_STATUS_NOTES[status])
+
+    if "matches" in payload:
+        matches = payload.get("matches") or []
+        lines.append(f"{len(matches)} line(s) matching {payload.get('q', '')!r}:")
+        lines.extend(f"L{m.get('line')}: {m.get('text', '')}" for m in matches)
+        return _truncate("\n".join(lines), UPLOAD_RESPONSE_MAX_CHARS)
+
+    text = payload.get("text") or ""
+    start = payload.get("offset", offset) or 0
+    next_offset = payload.get("next_offset")
+    if total:
+        lines.append(f"Showing characters {start}–{start + len(text)}.")
+    body = "\n".join(lines) + ("\n\n" + text if text else "")
+    footer = (
+        f"\n\n[More text follows: call read_uploaded_file with offset={next_offset}.]"
+        if next_offset is not None
+        else ""
+    )
+    return _truncate(body, UPLOAD_RESPONSE_MAX_CHARS - len(footer)) + footer
+
+
+def _fetch_upload(name: str, offset: int, q: str | None, authorization: str) -> str:
+    """GET the page (or search) from Rails and render it for the model."""
+    from urllib.parse import quote
+
+    bare = _upload_name(name)
+    if bare is None:
+        return "Give the uploaded file's name, e.g. read_uploaded_file(name=\"leads.xlsx\")."
+
+    try:
+        offset = max(int(offset or 0), 0)
+    except (TypeError, ValueError):
+        offset = 0
+    params = {"offset": str(offset)}
+    if q:
+        params["q"] = str(q)
+
+    headers = {"Authorization": authorization, "Accept": "application/json"}
+    logger.info(f"[llamapress_api] GET {UPLOADS_PATH}/{bare}")
+
+    try:
+        with httpx.Client(timeout=REQUEST_TIMEOUT_SECONDS, follow_redirects=False) as client:
+            # quote(safe=""): the name stays one path segment ("/" and "?" can't
+            # reach the router as anything but part of the name).
+            response = client.get(
+                f"{RAILS_BASE_URL}{UPLOADS_PATH}/{quote(bare, safe='')}",
+                params=params,
+                headers=headers,
+            )
+            if response.status_code == 404:
+                listing = client.get(f"{RAILS_BASE_URL}{UPLOADS_PATH}", headers=headers)
+                names = []
+                if listing.status_code == 200:
+                    names = [f.get("name") for f in (listing.json().get("files") or []) if isinstance(f, dict)]
+                if names:
+                    return f"No uploaded file named {bare!r}. Uploaded files: " + ", ".join(names)
+                if listing.status_code == 404:
+                    # The index route itself is missing: a gem that predates LP-24.
+                    return (
+                        f"Couldn't read {bare!r}: this app's llama_bot_rails gem is too old "
+                        "to serve uploaded files. Tell the user it needs a platform update."
+                    )
+                return f"No uploaded file named {bare!r}, and no uploaded files were found."
+    except (httpx.RequestError, ValueError) as e:
+        logger.warning(f"[llamapress_api] uploads request failed: {e.__class__.__name__}")
+        return f"Could not reach the Rails app ({e.__class__.__name__}). It may be starting up or down."
+
+    if response.status_code == 401:
+        return "The app refused the request as unauthenticated (the sign-in token may have expired — they last 30 minutes)."
+    if response.status_code == 403:
+        return f"HTTP 403: the app doesn't allow this user to read {bare!r}. Report that plainly."
+    if response.status_code != 200:
+        return f"HTTP {response.status_code}\n{_truncate(response.text, 2000)}"
+
+    try:
+        payload = response.json()
+    except ValueError:
+        return f"HTTP 200 but the app sent something that isn't JSON:\n{_truncate(response.text, 2000)}"
+    return _format_upload(payload if isinstance(payload, dict) else {}, offset)
+
+
+@tool("read_uploaded_file", description=READ_UPLOADED_FILE_DESCRIPTION)
+def read_uploaded_file(
+    name: str,
+    runtime: ToolRuntime,
+    offset: int = 0,
+    q: str | None = None,
+) -> str:
+    """Custom modes: read an upload as the signed-in user (uploads_authorizer applies)."""
+    token, problem = _user_token(runtime)
+    if problem:
+        return problem
+    return _fetch_upload(name, offset, q, f"LlamaBot {token}")
+
+
+@tool("read_uploaded_file", description=READ_UPLOADED_FILE_DESCRIPTION)
+def box_read_uploaded_file(name: str, offset: int = 0, q: str | None = None) -> str:
+    """rails_agent: same tool on the box-internal feed token, no per-user token
+    needed. Only for agents that already have the filesystem (bash) — it is not
+    narrower than what they hold, and it skips the gem's uploads_authorizer."""
+    from app.services.rails_error_feed import FEED_SCHEME, feed_token
+
+    box = feed_token()
+    if not box:
+        return (
+            "This box has no SECRET_KEY_BASE shared with Rails, so the uploads feed "
+            "isn't reachable. Read the file from app/imports with bash instead."
+        )
+    return _fetch_upload(name, offset, q, f"{FEED_SCHEME} {box}")
+
+
+def standard_tools() -> list:
+    """The shared tools for a custom mode: `tools = standard_tools()`.
+
+    Both are bounded by the signed-in user's Rails permissions. A new list each
+    call, so a mode can append its own tools without touching anyone else's.
+    """
+    return [rails_api_request, read_uploaded_file]
+
+
+STANDARD_TOOLS_PROMPT = """
+
+## Your tools for this app
+
+- `rails_api_request` calls this app's JSON API as the signed-in user. Their
+  permissions apply: a 403 is the correct answer, report it plainly.
+- `read_uploaded_file` reads a file the user uploaded into chat (named in the
+  <UPLOADED_FILES> block): PDF, DOCX, spreadsheets, CSV and text. Read it before
+  answering questions about it. Long files come back in pages; use `offset` for the
+  next page, or `q` to find matching lines."""
+
+
+def standard_prompt_sections(state=None) -> str:
+    """The system-prompt text that goes with standard_tools():
+
+        full_sys_msg = sys_msg + standard_prompt_sections(state)
+
+    Includes rails_auth_prompt(state), so a signed-out user is told to sign in.
+    """
+    return STANDARD_TOOLS_PROMPT + rails_auth_prompt(state)

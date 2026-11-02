@@ -19,6 +19,21 @@ MAX_MEMORY_CONTENT_CHARS = 2000
 
 VALID_MEMORY_TYPES = ["user", "feedback", "project", "reference"]
 
+# Host user that owns the project checkout. The llamabot container runs as root, so
+# files it writes would otherwise be root-owned and uneditable from the host/VS Code.
+MEMORY_FILE_UID = 1000
+MEMORY_FILE_GID = 1000
+
+# LP-12: "what I did today" entries piled up as dated logs (session-2026-10-01.md,
+# session-2026-10-02.md, ...) and bloated MEMORY.md. Progress belongs in the chat or
+# a requirements file, not long-term memory.
+STATUS_ONLY_NAMES = {
+    "status", "status-update", "progress", "progress-update", "session",
+    "session-log", "session-summary", "session-notes", "work-log", "worklog",
+    "daily-log", "daily-summary", "today", "what-i-did", "changelog", "update",
+}
+_DATE_RE = re.compile(r"\d{4}[-_ ]?\d{2}[-_ ]?\d{2}")
+
 MEMORY_TYPE_LABELS = {
     "user": "User Preferences",
     "feedback": "Feedback & Corrections",
@@ -30,13 +45,24 @@ MEMORY_TYPE_LABELS = {
 def sanitize_memory_filename(name: str) -> str:
     """Convert a memory name to a safe filename."""
     # Lowercase, replace spaces/underscores with hyphens, strip non-alphanumeric
-    filename = name.lower().strip()
+    # Dates are stripped so "deploy-notes-2026-10-30" updates "deploy-notes" in
+    # place instead of starting a new dated copy of the same topic.
+    filename = _DATE_RE.sub("", name.lower().strip())
     filename = re.sub(r'[\s_]+', '-', filename)
     filename = re.sub(r'[^a-z0-9\-]', '', filename)
     filename = re.sub(r'-+', '-', filename).strip('-')
     if not filename:
         filename = "memory"
     return filename + ".md"
+
+
+def _own_by_host_user(path: Path) -> None:
+    """chown to uid 1000 when running as root; no-op (and never raises) otherwise."""
+    try:
+        if os.geteuid() == 0:
+            os.chown(path, MEMORY_FILE_UID, MEMORY_FILE_GID)
+    except Exception as e:
+        logger.warning(f"Could not chown {path}: {e}")
 
 
 def parse_memory_frontmatter(filepath: Path) -> Optional[dict]:
@@ -115,7 +141,10 @@ def rebuild_memory_index():
             grouped[t] = []
         grouped[t].append(mem)
 
-    lines = ["# Leonardo Memories\n"]
+    lines = [
+        "# Leonardo Memories\n",
+        "Index only. Run list_memories for the full text when one is relevant.",
+    ]
 
     for memory_type in VALID_MEMORY_TYPES:
         if memory_type not in grouped:
@@ -123,14 +152,13 @@ def rebuild_memory_index():
         label = MEMORY_TYPE_LABELS.get(memory_type, memory_type)
         lines.append(f"\n## {label}\n")
         for mem in grouped[memory_type]:
-            lines.append(f"### {mem['name']} ({mem['filename']})")
-            lines.append(f"_{mem['description']}_\n")
-            lines.append(mem['content'])
-            lines.append("")
+            # Metadata only — bodies stay in the topic files (list_memories).
+            lines.append(f"- **{mem['name']}** — {mem['description']} ({mem['filename']})")
 
     # Write index
     index_path = Path(MEMORY_MD_PATH)
     index_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    _own_by_host_user(index_path)
     logger.info(f"Rebuilt MEMORY.md with {len(memories)} memories")
 
 
@@ -145,6 +173,13 @@ def write_memory_file(name: str, description: str, memory_type: str, content: st
 
     if len(content) > MAX_MEMORY_CONTENT_CHARS:
         raise ValueError(f"Memory content too long ({len(content)} chars). Max is {MAX_MEMORY_CONTENT_CHARS}.")
+
+    if sanitize_memory_filename(name)[:-3] in STATUS_ONLY_NAMES:
+        raise ValueError(
+            f"'{name}' looks like a status-only memory. Don't save progress logs; save "
+            "lasting facts (preferences, decisions, how things work) under a topic name, "
+            "and update that topic instead of creating dated copies."
+        )
 
     # Check memory count limit
     existing = list_all_memories()
@@ -169,6 +204,7 @@ type: {memory_type}
 """
     filepath = memory_dir / filename
     filepath.write_text(file_content, encoding="utf-8")
+    _own_by_host_user(filepath)
     logger.info(f"Saved memory: {filename}")
 
     rebuild_memory_index()

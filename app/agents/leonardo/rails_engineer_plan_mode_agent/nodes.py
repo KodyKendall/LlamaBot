@@ -50,7 +50,10 @@ from app.agents.leonardo.rails_engineer_plan_mode_agent.middleware import (
 from app.agents.utils.token_counter import SUMMARIZATION_TOKEN_THRESHOLD
 from app.agents.leonardo.rails_agent.sub_agents import delegate_task, delegate_research
 # Reuse the plan-mode interaction tools + summarization prompt verbatim (DRY).
-from app.agents.leonardo.rails_plan_mode_agent.prompts import BATCHED_QUESTIONS_DIRECTIVE
+from app.agents.leonardo.rails_plan_mode_agent.prompts import (
+    BATCHED_QUESTIONS_DIRECTIVE,
+    BUILD_AFTER_APPROVAL_DIRECTIVE,
+)
 from app.agents.leonardo.rails_plan_mode_agent.nodes import (
     ask_user_question,
     ask_user_uiux_question,
@@ -67,7 +70,7 @@ def get_cached_system_prompt():
     date_suffix = f"\n\n---\n**Today's Date:** {current_date}"
     # Appended last so it also overrides a mothership-delivered prompt, which
     # still carries the old "one question per turn" rule.
-    date_suffix += BATCHED_QUESTIONS_DIRECTIVE
+    date_suffix += BATCHED_QUESTIONS_DIRECTIVE + BUILD_AFTER_APPROVAL_DIRECTIVE
     full_prompt = with_friction_section(build_beginner_system_prompt(
         ENGINEER_PLAN_PROMPT,
         suffix=date_suffix,

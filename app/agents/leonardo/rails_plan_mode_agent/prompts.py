@@ -295,3 +295,25 @@ The user answers them all at once and you get every answer back in one result.
 Asking one question per turn when you could have asked three is a bad experience: it
 costs the user two extra round-trips for nothing.
 """
+
+# LP-12: Plan mode sometimes answered "go" with yet another question card and ended
+# the turn without building. Appended last (like BATCHED_QUESTIONS_DIRECTIVE) so it
+# also overrides a mothership-delivered prompt.
+BUILD_AFTER_APPROVAL_DIRECTIVE = """
+
+---
+
+## After the user approves the plan (supersedes any instruction above)
+
+When the user approves — "go", "start", "yes", "build it", "looks good", or picks the
+approve option on your card — **start building in this same turn**:
+
+1. Do not call `ask_user_question` again unless you are truly blocked (missing
+   information the plan cannot proceed without). Small choices: pick the sensible
+   default and mention it.
+2. Your next tool calls are the build: `write_todos` from the plan's checklist, then
+   `edit_file` / `write_file` / `delegate_task`. Don't end the turn with only a summary
+   or a report.
+3. When done, reply with a short checklist of what you built — keep it within any
+   reply-length rule the user or project has set.
+"""

@@ -34,7 +34,12 @@ from app.agents.leonardo.rails_agent.tools import (
     browser_inspect, browser_inspect_enabled,
     navigate_browser, get_browser_js_logs, execute_browser_js, live_browser_tools_enabled,
 )
-from app.agents.leonardo.rails_agent.prompts import RAILS_AGENT_PROMPT, SCHEDULED_RAILS_JOBS_DIRECTIVE
+from app.agents.leonardo.rails_agent.prompts import (
+    RAILS_AGENT_PROMPT,
+    SCHEDULED_RAILS_JOBS_DIRECTIVE,
+    UPLOADED_FILES_DIRECTIVE,
+)
+from app.lib.llamapress_api import box_read_uploaded_file
 from app.agents.leonardo.project_context import build_system_prompt_with_project_context
 from app.agents.leonardo.friction import report_friction, with_friction_section
 from app.agents.leonardo.rails_agent.middleware import (
@@ -65,7 +70,7 @@ def get_cached_system_prompt():
     full_prompt = with_friction_section(
         build_system_prompt_with_project_context(
             RAILS_AGENT_PROMPT,
-            suffix=SCHEDULED_RAILS_JOBS_DIRECTIVE,
+            suffix=SCHEDULED_RAILS_JOBS_DIRECTIVE + UPLOADED_FILES_DIRECTIVE,
             agent_mode="rails_agent",
         )
     )
@@ -180,6 +185,7 @@ default_tools = [
     write_todos,
     ls, read_file, write_file, edit_file, check_page,
     glob_files, grep_files,
+    box_read_uploaded_file,  # read_uploaded_file: PDF/DOCX/XLSX/CSV text of chat uploads (LP-24)
     bash_command,
     tail_rails_logs,
     hard_restart_rails,
@@ -220,6 +226,29 @@ def agent_tools():
         tools.extend([navigate_browser, get_browser_js_logs, execute_browser_js])
         logger.info("live browser tools enabled via site setting")
     return tools
+
+# Tools that pause for the user's approval in ask-before-edits mode: anything that
+# writes files, runs commands, or restarts the app. delegate_task's sub-agent has full
+# write + shell access and never passes back through this list, so the delegation
+# itself is what gets approved. delegate_research is read-only but still spawns an
+# agent, so it is asked too.
+ASK_BEFORE_EDITS_TOOLS = [
+    'edit_file', 'write_file', 'bash_command',
+    'delegate_task', 'delegate_research',
+    'hard_restart_rails', 'fix_permissions',
+]
+
+
+def ask_before_edits_middleware():
+    return HumanInTheLoopMiddleware(
+        interrupt_on={t: {"allowed_decisions": ["approve", "reject"]} for t in ASK_BEFORE_EDITS_TOOLS}
+    )
+
+
+def approval_middleware(ask_before_edits: bool):
+    """Approval gate for this turn: only in ask mode. Auto mode delegates and edits freely."""
+    return [ask_before_edits_middleware()] if ask_before_edits else []
+
 
 def build_workflow(checkpointer=None, ask_before_edits=False):
     """Build the Rails agent workflow with create_agent.
@@ -274,11 +303,7 @@ def build_workflow(checkpointer=None, ask_before_edits=False):
     ]
 
     # Optional: Human-in-the-loop approval for destructive tools
-    if ask_before_edits:
-        DESTRUCTIVE_TOOLS = ['edit_file', 'write_file', 'bash_command']
-        middleware.append(HumanInTheLoopMiddleware(
-            interrupt_on={t: {"allowed_decisions": ["approve", "reject"]} for t in DESTRUCTIVE_TOOLS}
-        ))
+    middleware.extend(approval_middleware(ask_before_edits))
 
     # Create and return the agent
     return build_leonardo_agent(

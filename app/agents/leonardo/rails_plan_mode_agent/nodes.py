@@ -42,6 +42,7 @@ from app.agents.leonardo.rails_agent.tools import (
 from app.agents.leonardo.rails_plan_mode_agent.prompts import (
     PLAN_MODE_AGENT_PROMPT,
     BATCHED_QUESTIONS_DIRECTIVE,
+    BUILD_AFTER_APPROVAL_DIRECTIVE,
 )
 from app.agents.leonardo.project_context import build_beginner_system_prompt
 from app.agents.leonardo.friction import report_friction, with_friction_section
@@ -105,7 +106,7 @@ def get_cached_system_prompt():
     date_suffix = f"\n\n---\n**Today's Date:** {current_date}"
     # Appended last so it also overrides a mothership-delivered prompt, which
     # still carries the old "one question per turn" rule.
-    date_suffix += BATCHED_QUESTIONS_DIRECTIVE
+    date_suffix += BATCHED_QUESTIONS_DIRECTIVE + BUILD_AFTER_APPROVAL_DIRECTIVE
     full_prompt = with_friction_section(build_beginner_system_prompt(
         PLAN_MODE_AGENT_PROMPT,
         suffix=date_suffix,

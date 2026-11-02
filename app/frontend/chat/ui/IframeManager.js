@@ -235,6 +235,7 @@ export class IframeManager {
     // Set Rails iframe URL
     if (this.liveSiteFrame) {
       this.liveSiteFrame.src = this._railsSrcWithAuth();
+      if (this._ssoConsumePending) this._reloadSignedInFramesAfterConsume();
     }
 
     // Show the restored page in the URL bar right away. Without this the bar
@@ -292,6 +293,7 @@ export class IframeManager {
       const token = params.get('rails_token');
       if (!token) return base + savedPath;
 
+      this._ssoConsumePending = true;
       const src = base + '/llamapress_auth/consume?token=' +
         encodeURIComponent(token) + '&return_to=' + encodeURIComponent(savedPath || '/');
 
@@ -307,6 +309,24 @@ export class IframeManager {
       // Any parsing/replaceState failure must not break the iframe — fall back.
       return base + savedPath;
     }
+  }
+
+  /**
+   * LP-10: Inbox and Activity get their src at the same moment as the consume
+   * above, so they reach Rails before the session cookie exists and land on the
+   * engine sign-in page — where they stayed, because nothing reloaded them. The
+   * preview frame's first load means the consume redirect has landed (cookie
+   * set), so reload both then. Once only; later preview navigations don't count.
+   */
+  _reloadSignedInFramesAfterConsume() {
+    let done = false;
+    this.liveSiteFrame.addEventListener('load', () => {
+      if (done) return;
+      done = true;
+      this._ssoConsumePending = false;
+      if (this.inboxFrame) this.inboxFrame.src = getInboxUrl();
+      if (this.activityFrame) this.activityFrame.src = getActivityUrl();
+    });
   }
 
   // ============================================================================

@@ -31,6 +31,30 @@ BRAND_JSON_PATH = ".leonardo/brand.json"
 # ``brand-guidelines`` skill for the full guide (progressive disclosure).
 BRAND_INLINE_THRESHOLD = 1500
 
+# LP-12: LEONARDO.md + MEMORY.md together may cost at most this many tokens per
+# prompt. leo-lanupa's 191 KB + 86 KB overlay started every new chat at 84k tokens.
+# The files on disk are never touched — only what goes into the prompt is cut.
+PROJECT_OVERLAY_TOKEN_BUDGET = 12000
+# MEMORY.md is guaranteed up to this share; LEONARDO.md gets the rest (and any share
+# MEMORY.md doesn't need).
+MEMORY_OVERLAY_MIN_SHARE = 3000
+
+# read_file is confined to /rails and cannot open .leonardo/, so point at the
+# tools that can.
+OVERLAY_TRUNCATION_NOTE = (
+    "\n\n> Truncated: full file at {path}, read it with {tool} when needed."
+)
+
+# /rails is the app inside the Rails container; the git repo is the Leonardo
+# checkout, which only the git_* tools can reach (bash runs in the Rails container,
+# where /app/leonardo does not exist). Agents that ran `git` in /rails got "not a git
+# repository" and went off to `git init` a second repo there.
+RAILS_GIT_NOTE = (
+    "\n\n---\n\n**Git:** /rails has no .git by design; the project's git repo is "
+    "/app/leonardo. Use the git_status / git_commit / git_command tools (they run "
+    "there), and never `git init` in /rails."
+)
+
 
 def _load_md_file(path: str, label: str) -> Optional[str]:
     """Load a markdown file if it exists and is non-empty."""
@@ -46,6 +70,74 @@ def _load_md_file(path: str, label: str) -> Optional[str]:
     except Exception as e:
         logger.warning(f"Error reading {label}: {e}")
         return None
+
+
+def count_tokens(text: str) -> int:
+    """Token count with the same encoder the summarization trigger uses."""
+    try:
+        import tiktoken
+
+        return len(tiktoken.get_encoding("cl100k_base").encode(text, disallowed_special=()))
+    except Exception:
+        return len(text) // 4
+
+
+def _split_sections(text: str) -> list[str]:
+    """Split markdown into [preamble, "## a...", "## b...", ...] keeping every byte."""
+    chunks, current = [], []
+    for line in text.splitlines(keepends=True):
+        if line.startswith("## ") and current:
+            chunks.append("".join(current))
+            current = []
+        current.append(line)
+    if current:
+        chunks.append("".join(current))
+    return chunks
+
+
+def truncate_to_tokens(text: str, budget: int, path: str, tool: str) -> str:
+    """Keep whole sections from the top until ``budget``; the tail is dropped.
+
+    The top of the file is where the project summary and standing rules live, so
+    it wins. Returns ``text`` unchanged when it already fits.
+    """
+    if count_tokens(text) <= budget:
+        return text
+    note = OVERLAY_TRUNCATION_NOTE.format(path=path, tool=tool)
+    remaining = max(budget - count_tokens(note), 0)
+    kept = []
+    for section in _split_sections(text):
+        cost = count_tokens(section)
+        if cost > remaining:
+            if not kept:
+                # One section bigger than the whole budget: hard-cut it by tokens.
+                import tiktoken
+
+                enc = tiktoken.get_encoding("cl100k_base")
+                kept.append(enc.decode(enc.encode(section, disallowed_special=())[:remaining]))
+            break
+        kept.append(section)
+        remaining -= cost
+    return "".join(kept).rstrip() + note
+
+
+def capped_project_overlay(
+    leonardo_md: Optional[str], memory_md: Optional[str]
+) -> tuple[Optional[str], Optional[str]]:
+    """Budget LEONARDO.md + MEMORY.md to PROJECT_OVERLAY_TOKEN_BUDGET together."""
+    budget = PROJECT_OVERLAY_TOKEN_BUDGET
+    memory_tokens = count_tokens(memory_md) if memory_md else 0
+    reserve = min(memory_tokens, MEMORY_OVERLAY_MIN_SHARE)
+    if leonardo_md:
+        leonardo_md = truncate_to_tokens(
+            leonardo_md, budget - reserve, ".leonardo/LEONARDO.md", "read_leonardo_md"
+        )
+        budget -= count_tokens(leonardo_md)
+    if memory_md:
+        memory_md = truncate_to_tokens(
+            memory_md, max(budget, 0), ".leonardo/MEMORY.md", "list_memories"
+        )
+    return leonardo_md, memory_md
 
 
 def get_leonardo_md_content() -> Optional[str]:
@@ -208,6 +300,7 @@ def build_system_prompt_with_project_context(
     base_prompt = resolve_base_prompt(base_prompt, agent_mode)
     leonardo_md = get_leonardo_md_content()
     memory_md = get_memory_md_content()
+    leonardo_md, memory_md = capped_project_overlay(leonardo_md, memory_md)
 
     parts = [base_prompt]
 
@@ -218,6 +311,8 @@ def build_system_prompt_with_project_context(
     if memory_md:
         parts.append("\n\n---\n\n# Agent Memories (from MEMORY.md)\n\n")
         parts.append(memory_md)
+
+    parts.append(RAILS_GIT_NOTE)
 
     # The owner's own recipes. An ADDENDUM, not a prompt edit: resolve_base_prompt()
     # above may have just replaced the whole static prompt with a mothership body that
@@ -248,6 +343,7 @@ def build_beginner_system_prompt(
     user_md = get_user_md_content()
     leonardo_md = get_leonardo_md_content()
     memory_md = get_memory_md_content()
+    leonardo_md, memory_md = capped_project_overlay(leonardo_md, memory_md)
 
     parts = []
 
@@ -278,6 +374,8 @@ def build_beginner_system_prompt(
     if memory_md:
         parts.append("\n\n---\n\n# Agent Memories (from MEMORY.md)\n\n")
         parts.append(memory_md)
+
+    parts.append(RAILS_GIT_NOTE)
 
     # The owner's own recipes. An ADDENDUM, not a prompt edit: resolve_base_prompt()
     # above may have just replaced the whole static prompt with a mothership body that
