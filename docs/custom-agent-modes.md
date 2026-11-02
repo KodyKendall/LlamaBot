@@ -137,6 +137,12 @@ class MyState(LlamaPressAPIState):   # REQUIRED — puts api_token on the state
 tools = [rails_api_request]
 ```
 
+**Simpler, since 0.7.19 (LP-24):** `tools = standard_tools()` gives both shared
+tools — `rails_api_request` and `read_uploaded_file` (text of PDF/DOCX/XLSX/CSV
+files the user dropped into chat, served by the gem's `GET /llama_bot/uploads/:name`)
+— and `sys_msg + standard_prompt_sections(state)` adds the prompt text for both plus
+the signed-out sign-in line. Full recipe: `docs/cookbooks/register-custom-leo-mode.md`.
+
 The tool sends the frontend-minted, user-scoped token as
 `Authorization: LlamaBot <token>`; the Rails gem verifies it and signs that
 user in, so the app's own gates apply (`llama_bot_allow` allowlist, then

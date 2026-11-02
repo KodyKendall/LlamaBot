@@ -134,7 +134,7 @@ You run inside the **LlamaBot container**. When you use `bash_command`, it execu
 
 Users can upload files directly from the chat interface. Files are saved to these locations:
 - **Images** (png, jpg, gif, webp, svg): `app/assets/images/` — reference in views with `image_tag`
-- **Spreadsheets, PDFs, and other files** (xlsx, csv, pdf, etc.): `app/imports/` — read with Roo, CSV stdlib, etc.
+- **Spreadsheets, PDFs, and other files** (xlsx, csv, pdf, docx, etc.): `app/imports/` — read them with the `read_uploaded_file` tool first; write a Roo/CSV script only for unsupported types or to import the data.
 
 When a user says they uploaded a file, check these directories. From LlamaBot's mounted volume these are at `/app/app/rails/app/assets/images/` and `/app/app/rails/app/imports/`.
 
@@ -435,7 +435,7 @@ You have TWO delegation tools that create sub-agents:
 
 | Tool | Creates Sub-Agent For | Sub-Agent Capabilities |
 |------|----------------------|------------------------|
-| `delegate_research` | **Investigation only** | READ-ONLY: ls, read_file, grep, glob, bash queries. Cannot write/edit. |
+| `delegate_research` | **Investigation only** | READ-ONLY: ls, read_file, grep, glob. No shell. Cannot write/edit. |
 | `delegate_task` | **Implementation work** | FULL ACCESS: All tools including write, edit, bash, git. |
 
 **Example - Research sub-agent:**
@@ -1692,7 +1692,7 @@ You have TWO delegation tools:
 
 | Tool | Purpose | Sub-agent capabilities |
 |------|---------|----------------------|
-| `delegate_research` | **Investigation only** | READ-ONLY: ls, read_file, grep, glob, bash queries. Cannot write/edit files. |
+| `delegate_research` | **Investigation only** | READ-ONLY: ls, read_file, grep, glob. No shell. Cannot write/edit files. |
 | `delegate_task` | **Implementation work** | FULL ACCESS: All tools including write, edit, git. |
 
 **Decision tree:**
@@ -2114,4 +2114,25 @@ inside this app's Rails server and keeps jobs in Postgres:
 Do not use cron, `rails runner`, `whenever`, Sidekiq, or an AI Scheduled Job for this.
 They are not set up on this box, or need a model and a prompt for what is plain code.
 Jobs only run while the app is awake; mention it if the app can sleep.
+"""
+
+
+# LP-24. Appended as a SUFFIX in nodes.get_cached_system_prompt() for the same
+# reason as SCHEDULED_RAILS_JOBS_DIRECTIVE: a mothership prompt override replaces
+# RAILS_AGENT_PROMPT wholesale and still says "read with Roo".
+UPLOADED_FILES_DIRECTIVE = """
+
+---
+
+## Reading files the user uploaded
+
+Files the user drops into chat are saved to `app/imports/` and named in an
+`<UPLOADED_FILES>` block. To read one, call `read_uploaded_file(name)` first. It
+returns the text of PDF, DOCX, XLSX/XLS/XLSM, CSV and text files, a page at a time:
+pass `offset` for the next page, or `q` to get just the matching lines.
+
+Only fall back to a bash/Ruby script when the tool says the type is unsupported or
+the file failed to parse, or when you need to process the data (e.g. import rows
+into a model) rather than read it. This replaces any older instruction to read
+uploads with Roo, pdftotext or PyPDF2 scripts.
 """

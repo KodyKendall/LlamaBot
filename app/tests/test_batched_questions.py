@@ -285,3 +285,27 @@ class TestBatchingSurvivesMothershipPromptOverride:
 
         assert "Default to batching" in prompt
         assert "do not re-ask those" in prompt
+
+
+class TestBuildAfterApprovalDirective:
+    """LP-12: after the user approves the plan, Plan mode must start building in the
+    same turn — not end it with another question card. Appended after the resolved
+    base prompt so it also overrides a stale mothership copy."""
+
+    MODES = TestBatchingSurvivesMothershipPromptOverride.MODES
+
+    @pytest.mark.parametrize("module_path,agent_mode", MODES)
+    def test_directive_lands_after_a_mothership_prompt(self, module_path, agent_mode):
+        import importlib
+
+        module = importlib.import_module(module_path)
+        stale = "You are Leo. STALE-OVERRIDE.\n" + ("filler to clear the minimum-length guard. " * 200)
+        with patch(
+            "app.agents.leonardo.project_context.system_prompt_cache.get_cached",
+            return_value=stale,
+        ):
+            prompt = module.get_cached_system_prompt().content[0]["text"]
+
+        assert "STALE-OVERRIDE" in prompt
+        assert "## After the user approves the plan" in prompt
+        assert prompt.index("STALE-OVERRIDE") < prompt.index("## After the user approves the plan")

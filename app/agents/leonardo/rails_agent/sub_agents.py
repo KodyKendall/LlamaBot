@@ -9,7 +9,7 @@ This module provides TWO delegation tools:
    - Use for: implementing features, making changes in isolation
 
 2. `delegate_research` - Research-only sub-agent for investigation
-   - Read-only tools (ls, read_file, grep, glob, bash for queries)
+   - Read-only tools (ls, read_file, grep, glob). No shell.
    - Special research-focused prompt
    - Use for: exploring codebase, understanding patterns, root cause analysis
    - CANNOT write files, edit code, or make commits
@@ -42,6 +42,7 @@ from app.agents.leonardo.llm_factory import get_llm, system_message_for_model
 # an explicit llm_model silently ignores the fleet default.
 from app.agents.leonardo.model_policy import enabled_default_model
 from app.lib.background_tasks import get_background_launcher
+from app.lib.llamapress_api import box_read_uploaded_file
 from app.agents.leonardo.delegation import (
     DELEGATION_TIMEOUT_SECONDS,
     summarize_partial_work,
@@ -67,7 +68,7 @@ The main agent will use your findings to decide what changes to make.
 - **DO NOT write files** - You are READ-ONLY
 - **DO NOT edit files** - You cannot modify code
 - **DO NOT make commits** - You have no git write access
-- **DO NOT execute destructive commands** - Only read-only bash queries
+- **NO shell access** - You cannot run commands, Rails runner, or rake tasks
 - **RETURN findings** - The main agent uses your research to decide next steps
 
 ## RESEARCH TOOLS AVAILABLE
@@ -75,27 +76,14 @@ The main agent will use your findings to decide what changes to make.
 - `glob_files` - Find files by pattern (USE THIS, not `find`)
 - `grep_files` - Search file contents by regex (USE THIS, not `grep`)
 - `ls` - List directory contents
-- `bash_command` - Run read-only Rails commands (e.g., `rails runner "puts User.count"`)
 - `write_todos` - Track your research progress
 - `internet_search` - Search the web for Rails documentation, gem usage, or solutions
+- `read_uploaded_file` - Read a file the user uploaded (PDF, DOCX, XLSX, CSV, text). Page with `offset`, filter with `q`.
 
-## ⛔ FORBIDDEN BASH COMMANDS
-NEVER use these bash commands - use the dedicated tools instead:
-
-| ❌ NEVER USE | ✅ USE INSTEAD |
-|--------------|----------------|
-| `cat file.rb` | `read_file` tool |
-| `head -50 file.rb` | `read_file` with limit param |
-| `tail -20 file.rb` | `read_file` with offset param |
-| `grep "pattern" file` | `grep_files` tool |
-| `find . -name "*.rb"` | `glob_files` tool |
-
-**Exception:** Piping output through `head`/`tail` IS allowed to limit command output:
-```bash
-bundle exec rails runner "puts User.all" | tail -20   # ✅ OK
-```
-
-`bash_command` is ONLY for: Rails runner queries, rake tasks, and system queries.
+## NO SHELL ACCESS
+You have no shell tool. If the answer needs a live command (a `rails runner` query,
+a rake task, row counts from the database), say so in your findings and give the exact
+command for the main agent to run.
 
 ## RESEARCH METHODOLOGY
 
@@ -116,33 +104,10 @@ bundle exec rails runner "puts User.all" | tail -20   # ✅ OK
 
 ## SPREADSHEET INSPECTION
 
-When asked to inspect an Excel/CSV file, use the Roo gem via Rails runner:
-
-```bash
-bundle exec rails runner "
-  require 'roo'
-  xlsx = Roo::Spreadsheet.open('/tmp/import.xlsx')
-  xlsx.sheets.each do |sheet_name|
-    puts '=== Sheet: ' + sheet_name + ' ==='
-    sheet = xlsx.sheet(sheet_name)
-    puts 'Rows: ' + sheet.last_row.to_s
-    puts 'Columns: ' + sheet.last_column.to_s
-    puts 'Header row: ' + sheet.row(1).inspect
-    puts 'Sample row 2: ' + sheet.row(2).inspect
-    puts 'Sample row 3: ' + sheet.row(3).inspect
-    # Check for formulas
-    (1..sheet.last_column).each do |col|
-      formula = sheet.formula(2, col)
-      if formula
-        puts 'Formula in column ' + col.to_s + ': ' + formula.to_s
-      end
-    end
-    puts ''
-  end
-"
-```
-
-Report back: number of sheets, column headers, row counts, data types, any formulas/calculated columns, and relationships between sheets.
+Call `read_uploaded_file(name)`, then report the sheets, column headers, row counts,
+data types, formulas, and relationships between sheets. If the tool says the file type
+is unsupported or the uploads feed is unreachable, report that to the main agent. Do not
+ask for a shell.
 
 ## OUTPUT FORMAT
 
@@ -404,12 +369,30 @@ async def _run_task(task_description, llm_model, config, stream_writer):
 # Research-Only Sub-Agent Factory
 # =============================================================================
 
+# RESEARCH-ONLY tools - strictly read-only
+RESEARCH_TOOLS = [
+    write_todos,  # Track research progress
+    ls,           # List directories
+    read_file,    # Read file contents
+    glob_files,   # Find files by pattern
+    grep_files,   # Search file contents
+    internet_search,  # Search the web for documentation/solutions
+    report_friction,  # Telemetry about OUR tooling, not a write to the user's project
+    box_read_uploaded_file,  # read-only: text of chat uploads (LP-24)
+    # NO bash_command - a shell can write files, so "read-only" would not hold
+    # NO write_file - cannot write files
+    # NO edit_file - cannot edit files
+    # NO git tools - cannot make commits
+    # NO delegate_task/delegate_research - prevent recursion
+]
+
+
 def create_research_sub_agent(llm_model: str = None):
     """Create a RESEARCH-ONLY sub-agent instance.
 
     The research sub-agent uses:
     - Research-only system prompt (NOT the full Rails agent prompt)
-    - Read-only tools (no write_file, edit_file, git tools)
+    - Read-only tools (no write_file, edit_file, bash_command, git tools)
     - Same LLM model as the main agent (passed from state.llm_model)
 
     IMPORTANT: Research sub-agents CANNOT modify the codebase.
@@ -423,27 +406,12 @@ def create_research_sub_agent(llm_model: str = None):
         A compiled LangGraph research agent with read-only capabilities
     """
     # RESEARCH-ONLY tools - strictly read-only
-    research_tools = [
-        write_todos,  # Track research progress
-        ls,           # List directories
-        read_file,    # Read file contents
-        glob_files,   # Find files by pattern
-        grep_files,   # Search file contents
-        bash_command, # For read-only Rails queries (e.g., rails runner)
-        internet_search,  # Search the web for documentation/solutions
-        report_friction,  # Telemetry about OUR tooling, not a write to the user's project
-        # NO write_file - cannot write files
-        # NO edit_file - cannot edit files
-        # NO git tools - cannot make commits
-        # NO delegate_task/delegate_research - prevent recursion
-    ]
-
     # Use the same model as the main agent via the shared llm_factory
     model = get_llm(llm_model or enabled_default_model())
 
     return create_agent(
         model=model,
-        tools=research_tools,
+        tools=RESEARCH_TOOLS,
         system_prompt=system_message_for_model(
             get_research_system_prompt(), llm_model or enabled_default_model()
         ),  # Research-only prompt (block-list flattened for non-Anthropic)
@@ -469,12 +437,12 @@ async def delegate_research(
     IMPORTANT: The research sub-agent CANNOT:
     - Write or edit files
     - Make git commits
-    - Execute destructive commands
+    - Run shell commands, Rails runner queries, or rake tasks
 
     It CAN:
     - Read files and directories
     - Search with grep/glob
-    - Run read-only Rails queries (rails runner)
+    - Search the web
     - Return structured research findings
 
     When to use delegate_research:

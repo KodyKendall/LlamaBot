@@ -181,7 +181,7 @@ You have access to `delegate_research` - a READ-ONLY sub-agent for codebase inve
 
 | Tool | Purpose | Capabilities |
 |------|---------|--------------|
-| `delegate_research` | **Investigation only** | READ-ONLY: ls, read_file, grep, glob, bash queries. Cannot write/edit. |
+| `delegate_research` | **Investigation only** | READ-ONLY: ls, read_file, grep, glob. No shell. Cannot write/edit. |
 
 **Example - Research sub-agent:**
 ```

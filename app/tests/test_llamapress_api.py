@@ -297,3 +297,103 @@ def test_llamabot_ships_no_builtin_agent_or_mode_for_this_library():
 
     base = json.loads((Path(__file__).parent.parent / "langgraph.json").read_text())
     assert "user_api_agent" not in base["graphs"]
+
+
+# --- LP-22: the reply cap is raisable per agent -------------------------------
+# A client's 22 KB report page came back as 31,155 chars of JSON (Rails escapes
+# < > & to < etc.), and the 8k cap dropped 5 of its 6 sections.
+
+REPORT_31K = '{"html":"' + ("\\u003cp\\u003eSection\\u003c/p\\u003e" * 1000)[:31_140] + '"}'
+
+
+def _serving(monkeypatch, text, status=200):
+    class _FakeClient:
+        def __init__(self, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def request(self, method, url, headers=None, json=None):
+            return httpx.Response(status, text=text, request=httpx.Request(method, url))
+
+    monkeypatch.setattr(llamapress_api.httpx, "Client", _FakeClient)
+
+
+def _call(tool_obj):
+    return tool_obj.func(
+        method="GET", path="/api/reports/1", body=None,
+        runtime=_Runtime({"api_token": "signed-token"}),
+    )
+
+
+def test_default_tool_still_caps_a_31k_reply_at_8000(monkeypatch):
+    assert len(REPORT_31K) > 31_000
+    _serving(monkeypatch, REPORT_31K)
+
+    result = _call(rails_api_request)
+
+    assert llamapress_api.RESPONSE_MAX_CHARS == 8000
+    assert REPORT_31K[:8000] in result
+    assert REPORT_31K not in result
+    assert "truncated" in result
+
+
+def test_raised_tool_returns_the_whole_31k_reply(monkeypatch):
+    _serving(monkeypatch, REPORT_31K)
+
+    result = _call(llamapress_api.make_rails_api_request(max_chars=40_000))
+
+    assert REPORT_31K in result
+    assert "truncated" not in result
+
+
+def test_raised_tool_is_a_drop_in_replacement():
+    raised = llamapress_api.make_rails_api_request(max_chars=40_000)
+    assert raised.name == "rails_api_request"
+    assert raised.description == rails_api_request.description
+    assert raised is not rails_api_request
+
+
+def test_raised_tool_keeps_every_guard(monkeypatch, captured):
+    raised = llamapress_api.make_rails_api_request(max_chars=40_000)
+    result = raised.func(method="GET", path="//evil.com/x", body=None,
+                         runtime=_Runtime({"api_token": "signed-token"}))
+    assert "url" not in captured
+    assert "Invalid path" in result
+    result = raised.func(method="GET", path="/api/users", body=None,
+                         runtime=_Runtime({"rails_auth": "signed_out"}))
+    assert "/users/sign_in" in result
+
+
+def test_raised_cap_does_not_apply_to_error_pages(monkeypatch):
+    """The 8k default exists for Rails' huge HTML error pages; opting in to long
+    reports must not also let a 500 page flood the context."""
+    _serving(monkeypatch, "<html>" + "x" * 30_000, status=500)
+
+    result = _call(llamapress_api.make_rails_api_request(max_chars=40_000))
+
+    assert len(result) < 9_000
+
+
+def test_truncation_note_points_at_pagination(monkeypatch):
+    _serving(monkeypatch, REPORT_31K)
+    note = _call(rails_api_request)[8000:]
+    assert "page" in note.lower()
+
+
+@pytest.mark.parametrize("bad", [0, -1, "40000", 1.5, True])
+def test_factory_rejects_a_bad_cap(bad):
+    with pytest.raises(ValueError):
+        llamapress_api.make_rails_api_request(max_chars=bad)
+
+
+@pytest.mark.parametrize("raw, expected", [
+    (None, 8000), ("", 8000), ("20000", 20000), (" 12000 ", 12000),
+    ("lots", 8000), ("0", 8000), ("-5", 8000),
+])
+def test_env_cap_parsing_falls_back_to_8000(raw, expected):
+    assert llamapress_api._env_max_chars(raw) == expected

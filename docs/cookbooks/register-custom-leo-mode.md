@@ -75,20 +75,25 @@ from langgraph.prebuilt import ToolNode, tools_condition
 # ALWAYS get models via the factory — never hardcode ChatOpenAI/Gemini/etc.
 from app.agents.leonardo.llm_factory import get_llm
 
-# Authenticated HTTP into the Rails app AS THE SIGNED-IN USER. Rails verifies the
-# per-user token and applies its own permission gates; LlamaBot cannot forge one.
-from app.lib.llamapress_api import LlamaPressAPIState, rails_api_request
+# The shared tool bundle + the prompt text that goes with it. standard_tools() is
+# rails_api_request (the app's JSON API AS THE SIGNED-IN USER — Rails verifies the
+# per-user token and applies its own permission gates; LlamaBot cannot forge one)
+# and read_uploaded_file (the text of PDF/DOCX/XLSX/CSV files dropped into chat).
+from app.lib.llamapress_api import (
+    LlamaPressAPIState,
+    standard_prompt_sections,
+    standard_tools,
+)
 
-# Every tool here is bounded only by what it does itself. rails_api_request is
+# Every tool here is bounded only by what it does itself. standard_tools() is
 # bounded by the user's Rails permissions; a bash/exec tool would NOT be, and
-# would hand whoever can select this mode the Rails console. Add deliberately.
-tools = [rails_api_request]
+# would hand whoever can select this mode the Rails console. Add deliberately:
+# tools = standard_tools() + [my_tool]
+tools = standard_tools()
 
 SYS_MSG = """You are <persona / job description here>.
 
-You can call this app's JSON API with the `rails_api_request` tool. It runs as
-the signed-in user, with their permissions — a 403 is a correct answer: report
-it plainly rather than looking for another route. Only /api/ paths are reachable.
+Only /api/ paths are reachable with rails_api_request.
 
 Available endpoints:
   GET  /api/...
@@ -103,7 +108,9 @@ def assistant(state: AgentModeState):
     llm = get_llm("deepseek-v4-flash")   # or another key llm_factory supports
     llm_with_tools = llm.bind_tools(tools)
     extra = state.get("agent_prompt") or ""
-    sys = SystemMessage(content=f"{SYS_MSG}\n<DEVELOPER_INSTRUCTIONS>{extra}</DEVELOPER_INSTRUCTIONS>")
+    # standard_prompt_sections(state) explains both tools, and tells a signed-out
+    # user to sign in before any tool call. Append it, don't hand-write it.
+    sys = SystemMessage(content=f"{SYS_MSG}{standard_prompt_sections(state)}\n<DEVELOPER_INSTRUCTIONS>{extra}</DEVELOPER_INSTRUCTIONS>")
     return {"messages": [llm_with_tools.invoke([sys] + state["messages"])]}
 
 def build_workflow(checkpointer=None):
@@ -118,6 +125,32 @@ def build_workflow(checkpointer=None):
 
 The `app.lib.llamapress_api` import path is the stability contract — never import
 Rails-auth helpers from deeper platform paths.
+
+**Uploaded files.** Files the user drops into chat are saved to the Rails app's
+`app/imports/`; the model only sees their names in an `<UPLOADED_FILES>` block.
+`read_uploaded_file(name, offset=0, q=None)` returns their text, one 20k-char page
+at a time (`offset` for the next page, `q` for matching lines only). The extraction
+runs in Rails (`LlamaBotRails::FileTextExtractor`, served by `GET
+/llama_bot/uploads/:name`), so it needs llama_bot_rails 0.7.19+; on an older gem the
+tool says so. Any signed-in user can read any upload by default — set
+`config.llama_bot_rails.uploads_authorizer = ->(user, name) { ... }` in the Rails app
+to narrow that.
+
+**Long API replies.** `rails_api_request` cuts replies at 8,000 chars (JSON-escaped
+HTML grows fast: a 22 KB report page is ~31k chars). A mode that reads long records
+swaps in its own cap instead of raising it for the whole box:
+
+```python
+from app.lib.llamapress_api import make_rails_api_request, read_uploaded_file
+tools = [make_rails_api_request(max_chars=40000), read_uploaded_file]
+```
+
+Same name, description and guards; error pages stay capped at the default. The
+box-wide default can be changed with `LLAMAPRESS_API_RESPONSE_MAX_CHARS`, but every
+mode then pays for it in context.
+
+Want only one of the two tools? Import it directly (`rails_api_request` or
+`read_uploaded_file`) and keep `standard_prompt_sections` out — it describes both.
 
 ---
 
@@ -223,7 +256,19 @@ class R: state={'api_token': os.environ['T']}; tool_call_id='t'
 print(rails_api_request.func(method='GET', path='/api/users', runtime=R())[:200])"
 ```
 
-Expected `HTTP 200` + JSON. Decode table:
+Same token, uploaded files (drop a file into chat first, or put one in
+`rails/app/imports/`):
+
+```bash
+docker exec -e T="$TOKEN" <llamabot-container> python -c "
+import os
+from app.lib.llamapress_api import read_uploaded_file
+class R: state={'api_token': os.environ['T']}; tool_call_id='t'
+print(read_uploaded_file.func(name='<file name>', runtime=R())[:300])"
+```
+
+Expected a `<name> — status: extracted` header + the text. For `rails_api_request`,
+expected `HTTP 200` + JSON. Decode table:
 
 | Result | Meaning |
 |---|---|
@@ -334,7 +379,7 @@ from app.agents.leonardo.rails_agent.tools import (
 )
 
 def _build_tools():
-    t = [rails_api_request]
+    t = standard_tools()
     if live_browser_tools_enabled():   # honor the instance-wide gate — never bypass
         t.extend([navigate_browser, get_browser_js_logs])
         # execute_browser_js: add ONLY if this mode truly needs arbitrary JS —
@@ -401,7 +446,9 @@ In the instance's Rails app, under the `/api/` namespace:
 | Mode missing from dropdown | entry dropped by validation (Phase 5 step 2), or role's explicit `role_agent_modes` list excludes it |
 | First message errors "unknown agent" | `agent_name` mismatch between `agent_modes.json` and `langgraph.local.json`, or wrong `./user_agents/...` path |
 | Python edit "doesn't take" | no hot-reload — restart llamabot |
-| `rails_api_request` reports a setup issue | state class doesn't extend `LlamaPressAPIState`, so `api_token` was dropped from state |
+| `rails_api_request` / `read_uploaded_file` reports a setup issue | state class doesn't extend `LlamaPressAPIState`, so `api_token` was dropped from state |
+| `read_uploaded_file` says the gem is too old | the Rails app's llama_bot_rails predates 0.7.19 (no `/llama_bot/uploads`) |
+| `read_uploaded_file` status `empty` on a PDF | scanned PDF with no text layer — there is no OCR |
 | Broken/garbled ToolMessage | state schema mismatch with what the Rails AgentStateBuilder sends — use the template's state shape |
 | Overlay edits vanish after instance update | they were written inside the container instead of the mounted host files |
 | Browser tools missing from the agent | `enable_live_browser_tools` site setting is off, or it was flipped without restarting llamabot |
