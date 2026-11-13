@@ -10,6 +10,7 @@ from app.lib.turn_metrics import start_turn
 from app.lib.rails_error_watch import resume_error_watch, start_error_watch
 from app.lib.turn_notices import start_turn_notices
 from app.agents.leonardo.model_policy import start_turn_backup_model
+from app.agents.leonardo import tool_limits
 from app.lib.turn_inbox import start_turn_inbox
 from app.lib.background_tasks import start_background_launcher, start_writer_gate
 from typing import Dict, Optional
@@ -93,6 +94,7 @@ from app.agents.leonardo.model_capabilities import (
     get_file_category,
 )
 from app.agents.leonardo.model_policy import enabled_default_model, vision_allowed
+from app.lib import app_images
 # Byte caps for inbound frames. Without these, anything a client sends becomes
 # unbounded LangGraph state — and therefore unbounded checkpoints and an
 # uncompactable thread (SupportIncident #246).
@@ -118,6 +120,7 @@ QUESTION_ALREADY_ANSWERED_MESSAGE = (
 
 # Attachment categories that require a vision model; gated by VISION_MODEL_ALLOWED.
 _VISION_CATEGORIES = ("images", "video")
+_IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".gif", ".webp")
 
 async def _report_tool_messages(*, messages, mothership, thread_id: str, agent_depth: int) -> None:
     """Report ToolMessage observations to the mothership.
@@ -171,6 +174,20 @@ def _prepend_request_shape(exc: Exception, traceback_str: str) -> str:
     except Exception:  # noqa: BLE001
         return traceback_str
     return f"[llamabot request shape]\n{rendered}\n\n{traceback_str}"
+
+
+def _without_view_image_tail(messages):
+    """Drop the picture message view_image appends after its ToolMessage (LP-44).
+
+    The stream skips an update that ends in a human message (a queued user message,
+    already on screen). view_image's picture is a human message too, and without
+    this its tool row vanished from the live chat.
+    """
+    messages = list(messages or [])
+    while messages and getattr(messages[-1], "type", None) == "human" \
+            and (getattr(messages[-1], "additional_kwargs", None) or {}).get("view_image"):
+        messages.pop()
+    return messages
 
 
 def _is_human_message_chunk(chunk) -> bool:
@@ -1268,6 +1285,18 @@ class RequestHandler:
             await _send({"type": "end"})
 
     # This is a the main function that handles incoming WebSocket requests. This will build the LangGraph workflow, and invoke it from a checkpointed state.
+    async def _end_turn_for_safety(self, stop: Exception, websocket: WebSocket) -> None:
+        """A ZDR safety limit ended this turn. Tell the user plainly and finish normally."""
+        logger.warning("Turn stopped by a safety limit")
+        if self._is_websocket_open(websocket):
+            await websocket.send_json({"type": "system_message", "content": str(stop)})
+            await websocket.send_json({"type": "end"})
+
+    async def _notify_if_tool_cap_hit(self, websocket: WebSocket) -> None:
+        """A sub-agent can hit the cap and the parent still finish, so the turn never raises."""
+        if tool_limits.cap_was_hit() and self._is_websocket_open(websocket):
+            await websocket.send_json({"type": "system_message", "content": tool_limits.cap_message()})
+
     async def handle_request(self, incoming_message: dict, websocket: WebSocket, task_notification: bool = False):
         """Handle incoming WebSocket requests with proper locking and cancellation"""
         ws_id = id(websocket)
@@ -1298,6 +1327,7 @@ class RequestHandler:
                 await self._handle_compact_command(incoming_message, websocket)
             return
 
+        tool_limits.start_turn()  # one budget per user input (LP-33)
         async with lock:
             # Say so up front if policy is about to run this turn on a different
             # model than the one selected in the dropdown.
@@ -1562,7 +1592,7 @@ class RequestHandler:
                                 #agent_data is a just the state dictionary. 
                                 # We can access state objects by using agent_data['key']. 
 
-                                messages = agent_data['messages'] #Question: is this ALL messages coming through, or just the latest AI message?
+                                messages = _without_view_image_tail(agent_data['messages'])
                                 # A user message added mid-turn (QueuedMessagesMiddleware) shows up
                                 # here as a state update. The browser already rendered it when it
                                 # was sent; echoing it back drew it again (3x, seen live 2026-10-22).
@@ -1715,12 +1745,15 @@ class RequestHandler:
                     # the customer why their answers got thin, and there is no
                     # in-chat recovery except starting over (2026-08-13).
                     await self._warn_if_thread_is_wedged(turn, websocket)
+                    await self._notify_if_tool_cap_hit(websocket)
 
                     if self._is_websocket_open(websocket):
                         await websocket.send_json({
                             "type": "end"
                         })
 
+            except tool_limits.TurnSafetyStop as stop:
+                await self._end_turn_for_safety(stop, websocket)
             except CancelledError as e:
                 logger.info("handle_request was cancelled")
                 # Only send queued message if WebSocket is still open
@@ -1755,6 +1788,7 @@ class RequestHandler:
         ws_id = id(websocket)
         lock = self._get_lock(websocket)
 
+        tool_limits.start_turn()  # one budget per user input (LP-33)
         async with lock:
             try:
                 # Re-resolve the graph (same agent, with HITL)
@@ -1841,7 +1875,7 @@ class RequestHandler:
                         state_object = chunk[2]
                         for agent_key, agent_data in state_object.items():
                             if isinstance(agent_data, dict) and 'messages' in agent_data:
-                                messages = agent_data['messages']
+                                messages = _without_view_image_tail(agent_data['messages'])
                                 # A user message added mid-turn (QueuedMessagesMiddleware) shows up
                                 # here as a state update. The browser already rendered it when it
                                 # was sent; echoing it back drew it again (3x, seen live 2026-10-22).
@@ -1863,6 +1897,7 @@ class RequestHandler:
 
                                     token_usage = extract_token_usage(message)
 
+                                    await self._notify_if_tool_cap_hit(websocket)
                                     if self._is_websocket_open(websocket):
                                         ws_msg = {
                                             "type": message.type if hasattr(message, 'type') else "ai",
@@ -1882,6 +1917,8 @@ class RequestHandler:
                 if not interrupted and self._is_websocket_open(websocket):
                     await websocket.send_json({"type": "end"})
 
+            except tool_limits.TurnSafetyStop as stop:
+                await self._end_turn_for_safety(stop, websocket)
             except CancelledError as e:
                 logger.info("handle_approval_response was cancelled")
                 raise e
@@ -2006,6 +2043,7 @@ class RequestHandler:
         ws_id = id(websocket)
         lock = self._get_lock(websocket)
 
+        tool_limits.start_turn()  # one budget per user input (LP-33)
         async with lock:
             try:
                 # Re-resolve the graph (same agent, no HITL flag needed)
@@ -2107,7 +2145,7 @@ class RequestHandler:
                         state_object = chunk[2]
                         for agent_key, agent_data in state_object.items():
                             if isinstance(agent_data, dict) and 'messages' in agent_data:
-                                messages = agent_data['messages']
+                                messages = _without_view_image_tail(agent_data['messages'])
                                 # A user message added mid-turn (QueuedMessagesMiddleware) shows up
                                 # here as a state update. The browser already rendered it when it
                                 # was sent; echoing it back drew it again (3x, seen live 2026-10-22).
@@ -2129,6 +2167,7 @@ class RequestHandler:
 
                                     token_usage = extract_token_usage(message)
 
+                                    await self._notify_if_tool_cap_hit(websocket)
                                     if self._is_websocket_open(websocket):
                                         ws_msg = {
                                             "type": message.type if hasattr(message, 'type') else "ai",
@@ -2148,6 +2187,8 @@ class RequestHandler:
                 if not interrupted and self._is_websocket_open(websocket):
                     await websocket.send_json({"type": "end"})
 
+            except tool_limits.TurnSafetyStop as stop:
+                await self._end_turn_for_safety(stop, websocket)
             except CancelledError as e:
                 logger.info("handle_question_response was cancelled")
                 raise e
@@ -2398,6 +2439,8 @@ class RequestHandler:
         content = []
         unsupported_files = []
         vision_blocked_files = []
+        unseen_images = 0       # images the model can't see (text-only model): FR-4 note
+        zdr_blocked_images = 0  # images held back on a ZDR box for a non-ZDR model
 
         # Add text content first
         if text:
@@ -2408,6 +2451,30 @@ class RequestHandler:
             mime_type = attachment.get("mime_type")
             data = attachment.get("data")
             filename = attachment.get("filename", "unknown")
+            path = attachment.get("path")
+
+            # LP-44: an image from the Uploaded files browser arrives as a path with
+            # no data. Read it here, behind the same gates, instead of dropping it.
+            if not data and path and self._is_image_reference(mime_type, path):
+                reason = app_images.image_gate(llm_model)
+                if reason:
+                    app_images.log_skipped(path, llm_model, reason)
+                    if reason == "vision off":
+                        vision_blocked_files.append(f"{filename} (image)")
+                    elif reason == "zdr":
+                        zdr_blocked_images += 1
+                    else:
+                        unseen_images += 1
+                    continue
+                try:
+                    image = app_images.load_app_image(path, model=llm_model)
+                except app_images.ImageRefused:
+                    continue  # logged with the reason; the <UPLOADED_FILES> text stays
+                content.append({
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{image['mime_type']};base64,{image['data']}"},
+                })
+                continue
 
             if not mime_type or not data:
                 continue
@@ -2422,6 +2489,17 @@ class RequestHandler:
                     filename, mime_type,
                 )
                 continue
+
+            if file_category == "images":
+                reason = app_images.image_gate(llm_model)
+                if reason == "zdr":
+                    app_images.log_skipped(filename, llm_model, reason)
+                    zdr_blocked_images += 1
+                    continue
+                if reason == "text-only":
+                    app_images.log_skipped(filename, llm_model, reason)
+                    unseen_images += 1
+                    continue
 
             # Check if model supports this file type
             if capabilities.get(file_category, False):
@@ -2456,6 +2534,22 @@ class RequestHandler:
             else:
                 content.insert(0, {"type": "text", "text": note.strip()})
 
+        # Never drop an image silently (LP-44 FR-4).
+        notes = []
+        if unseen_images:
+            notes.append(app_images.cannot_see_note(llm_model))
+        if zdr_blocked_images:
+            notes.append(
+                f"[Note: {zdr_blocked_images} image(s) were not sent because {llm_model} is not "
+                "approved under this workspace's zero data retention rules. Tell the user to "
+                "pick an approved model to share images.]"
+            )
+        for note in notes:
+            if content and content[0].get("type") == "text":
+                content[0]["text"] += "\n\n" + note
+            else:
+                content.insert(0, {"type": "text", "text": note})
+
         # Vision disabled: tell the model (and, via it, the user) that image
         # understanding is gated behind an operator opt-in, so it responds with
         # the support hand-off instead of pretending it saw the image.
@@ -2472,6 +2566,11 @@ class RequestHandler:
                 content.insert(0, {"type": "text", "text": note.strip()})
 
         return content
+
+    @staticmethod
+    def _is_image_reference(mime_type, path) -> bool:
+        """An attachment that points at an image (the client's type is only a hint)."""
+        return (mime_type or "").startswith("image/") or str(path).lower().endswith(_IMAGE_EXTENSIONS)
 
     # Frame fields consumed by the transport itself; they never become state.
     _SYSTEM_ROUTING_FIELDS = frozenset({

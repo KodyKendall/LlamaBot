@@ -46,6 +46,22 @@ export class PanelResizeManager {
     this.loadSavedWidth();
     this.bindEvents();
     this.bindCollapsedToolbarEvents();
+    this.bindResizeKeys();
+  }
+
+  /** Arrow keys on the divider do what dragging it does. */
+  bindResizeKeys() {
+    const STEP = 40;
+    this.resizeHandle?.setAttribute('aria-valuenow', String(Math.round((this.chatSection.getBoundingClientRect().width / window.innerWidth) * 100)));
+    this.resizeHandle?.addEventListener('keydown', (e) => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      e.preventDefault();
+      const delta = e.key === 'ArrowRight' ? STEP : -STEP;
+      const width = this.chatSection.getBoundingClientRect().width + delta;
+      const maxWidth = window.innerWidth * this.MAX_WIDTH_PERCENT;
+      this.setWidth(Math.max(this.MIN_WIDTH, Math.min(maxWidth, width)));
+      this.saveWidth();
+    });
   }
 
   /**
@@ -224,6 +240,7 @@ export class PanelResizeManager {
     if (!this.chatSection || !this.iframeSection) return;
 
     this.currentWidth = width;
+    this.resizeHandle?.setAttribute('aria-valuenow', String(Math.round((width / window.innerWidth) * 100)));
 
     // Remove collapsed state if setting a width
     if (this.isCollapsed && width > this.COLLAPSED_WIDTH) {

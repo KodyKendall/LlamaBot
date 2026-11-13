@@ -19,7 +19,7 @@ from app.permissions import ROLE_MODES_SETTING_KEY
 @pytest.fixture
 def client():
     import app.models  # noqa: F401
-    from app.dependencies import admin_required, get_db_session
+    from app.dependencies import admin_required, get_db_session, system_admin_required
     from app.models import User
     from app.routers.api import router
 
@@ -40,9 +40,9 @@ def client():
             yield s
 
     app.dependency_overrides[get_db_session] = _session
-    app.dependency_overrides[admin_required] = lambda: User(
-        username="admin", password_hash="x", is_admin=True, role="engineer"
-    )
+    owner = lambda: User(username="admin", password_hash="x", is_admin=True, role="engineer")
+    app.dependency_overrides[admin_required] = owner
+    app.dependency_overrides[system_admin_required] = owner
 
     c = TestClient(app)
     c._engine = engine

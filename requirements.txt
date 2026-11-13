@@ -68,6 +68,10 @@ jsonschema_rs==0.29.1
 # langchain-core 1.4.8. Resolution verified clean in the llamabot container.
 langchain==1.3.2
 langchain-anthropic==1.4.0
+# LP-29 (0.7.20): AWS Bedrock provider. Adds only boto3/botocore/s3transfer/jmespath;
+# no langchain-core bump (resolver checked against this file in the llamabot image).
+langchain-aws==1.7.3
+boto3==1.43.123
 langchain-classic==1.0.0
 langchain-community==0.4.1
 langchain-core==1.4.8
@@ -159,3 +163,4 @@ websockets==15.0.1
 xxhash==3.5.0
 yarl==1.20.0
 zstandard==0.23.0
+Pillow==12.3.0

@@ -1,6 +1,8 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <link rel="stylesheet" href="/frontend/a11y.css">
+    <script src="/frontend/a11y.js" defer></script>
     <title>Settings &amp; Models — LlamaBot</title>
     <link rel="icon" type="image/png" href="/frontend/leonardo-icon.png">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
@@ -11,7 +13,7 @@
             --text-color: #e0e0e0;
             --border-color: rgba(139, 92, 246, 0.2);
             --accent-color: #8b5cf6;
-            --muted: rgba(255, 255, 255, 0.35);
+            --muted: rgba(255, 255, 255, 0.65);
             --warn: #f59e0b;
             --danger: #ef4444;
             --ok: #22c55e;
@@ -72,7 +74,7 @@
         .row-desc { font-size: 0.75rem; color: var(--muted); margin-top: 3px; line-height: 1.45; }
         .row-value {
             font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-            font-size: 0.78rem; color: rgba(255,255,255,0.4); margin-top: 4px;
+            font-size: 0.78rem; color: rgba(255, 255, 255, 0.65); margin-top: 4px;
         }
 
         .badge {
@@ -119,7 +121,7 @@
         }
         .group-title:first-child { margin-top: 0; }
         .model-row { display: flex; align-items: center; gap: 10px; padding: 7px 0; }
-        .model-row.off { opacity: 0.5; }
+        .model-row.off .model-name { color: var(--muted); }
         .model-name { flex: 1; font-size: 0.84rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
         .model-reason { font-size: 0.72rem; color: var(--muted); font-family: 'Inter', sans-serif; }
         .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
@@ -141,9 +143,10 @@
     </style>
 </head>
 <body>
-<div class="container">
+<a class="skip-link" href="#main-content">Skip to main content</a>
+<div class="container" id="main-content" tabindex="-1">
     <div class="header">
-        <a href="/settings" class="back-btn"><i class="fa-solid fa-arrow-left"></i></a>
+        <a href="/settings" class="back-btn" aria-label="Back to settings"><i class="fa-solid fa-arrow-left"></i></a>
         <h1>Settings &amp; Models</h1>
     </div>
 
@@ -280,6 +283,7 @@ function renderToggles(toggles) {
         const label = el('label', 'switch');
         const input = document.createElement('input');
         input.type = 'checkbox';
+        input.setAttribute('aria-label', t.label);
         input.checked = t.enabled;
         input.addEventListener('change', function () { flipToggle(t.key, input); });
         label.appendChild(input);

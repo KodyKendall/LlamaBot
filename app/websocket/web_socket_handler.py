@@ -181,8 +181,14 @@ class WebSocketHandler:
             # tokens carry no user_id — that leaves it None and the
             # subscription models fail open to the operator default, which is
             # the intended behavior. See app/lib/request_context.py.
-            from app.lib.request_context import set_current_user_id
+            from app.lib.request_context import set_current_principal, set_current_user_id
             set_current_user_id(payload.get("user_id"))
+            all_tools = bool(payload.get("is_admin") or payload.get("is_system_admin"))
+            set_current_principal(
+                payload.get("role"),
+                all_tools,
+                security_only=bool(payload.get("is_security_admin")) and not all_tools,
+            )
             # Stamp WHO this connection's turns belong to, so every mothership
             # report fired from inside the run (report_message, report_error,
             # report_turn_metrics) is attributable to a person rather than just
@@ -257,7 +263,8 @@ class WebSocketHandler:
         from app.permissions import can_run_agent, custom_modes
 
         role = self.auth_user.get("role")
-        is_admin = bool(self.auth_user.get("is_admin"))
+        # Every mode for an owner or system admin. A security admin has their role's modes.
+        is_admin = bool(self.auth_user.get("is_admin") or self.auth_user.get("is_system_admin"))
         try:
             with Session(engine) as session:
                 permitted = can_run_agent(session, role, is_admin, agent_name, custom_modes())

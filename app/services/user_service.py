@@ -74,9 +74,11 @@ def update_user(
     is_active: Optional[bool] = None,
     is_admin: Optional[bool] = None,
     new_password: Optional[str] = None,
-    role: Optional[str] = None
+    role: Optional[str] = None,
+    is_security_admin: Optional[bool] = None,
+    is_system_admin: Optional[bool] = None,
 ) -> Optional[User]:
-    """Update user attributes."""
+    """Update user attributes. Who may do this is checked by the caller (permissions.py)."""
     user = get_user_by_id(session, user_id)
     if not user:
         return None
@@ -85,6 +87,10 @@ def update_user(
         user.is_active = is_active
     if is_admin is not None:
         user.is_admin = is_admin
+    if is_security_admin is not None:
+        user.is_security_admin = is_security_admin
+    if is_system_admin is not None:
+        user.is_system_admin = is_system_admin
     if new_password is not None:
         user.password_hash = hash_password(new_password)
     if role is not None:

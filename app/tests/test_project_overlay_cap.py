@@ -42,7 +42,11 @@ def _big_memory_md(entries: int = 300) -> str:
 
 
 def _overlay(prompt: str, base: str) -> str:
-    return prompt[len(base):]
+    # The fixed LP-45 export rule is appended after the overlay; it is not part of
+    # the project overlay budget, so strip it before measuring.
+    from app.agents.leonardo.export_rules import NO_APP_EXPORT_RULES
+
+    return prompt[len(base):].replace(NO_APP_EXPORT_RULES, "")
 
 
 class TestOverlayBudget:
@@ -94,7 +98,7 @@ class TestOverlayBudget:
         (ctx._dir / "LEONARDO.md").write_text("# One blob\n\n" + ("word " * 60000))
         with patch.object(ctx.system_prompt_cache, "get_cached", return_value=None):
             prompt = ctx.build_system_prompt_with_project_context("BASE")
-        assert ctx.count_tokens(prompt) <= ctx.PROJECT_OVERLAY_TOKEN_BUDGET + 200
+        assert ctx.count_tokens(_overlay(prompt, "BASE")) <= ctx.PROJECT_OVERLAY_TOKEN_BUDGET + 200
         assert "Truncated: full file at .leonardo/LEONARDO.md" in prompt
 
 

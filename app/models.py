@@ -2,6 +2,7 @@
 from datetime import datetime, timezone
 from typing import Optional
 import sqlalchemy as sa
+from sqlalchemy import event as sqlalchemy_event
 from sqlmodel import SQLModel, Field
 
 from app.lib import ActiveRecordMixin, set_console_session  # noqa: F401
@@ -16,7 +17,11 @@ class User(ActiveRecordMixin, SQLModel, table=True):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: Optional[datetime] = Field(default=None)
     is_active: bool = Field(default=True)
+    # The account owner: holds both administrator roles below, and alone may give
+    # one person both. Existing admins keep everything they had. See app/permissions.py.
     is_admin: bool = Field(default=False)
+    is_security_admin: bool = Field(default=False)
+    is_system_admin: bool = Field(default=False)
     role: str = Field(default="engineer", max_length=20)  # engineer, user
     # JSON array of visible agent mode keys (e.g., '["ticket", "engineer", "testing"]')
     # If null, uses default: ["ticket", "engineer", "testing", "feedback", "user"]
@@ -311,3 +316,26 @@ class SchedulerInvocationLog(SQLModel, table=True):
 
     # Duration
     duration_ms: Optional[int] = Field(default=None)
+
+
+class AuditEvent(SQLModel, table=True):
+    """Security audit trail: role changes, user changes, refused access (LP-32).
+
+    Append-only for the application: updating or deleting a row raises. Someone with
+    direct database access can still change it, so this is not tamper-proof.
+    """
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), index=True)
+    event_type: str = Field(index=True, max_length=40)
+    actor: Optional[str] = Field(default=None, max_length=50)
+    subject: Optional[str] = Field(default=None, max_length=50)
+    detail: str = Field(default="", max_length=1000)
+
+
+def _audit_events_are_append_only(mapper, connection, target):
+    raise ValueError("Audit events cannot be changed or deleted")
+
+
+sqlalchemy_event.listen(AuditEvent, "before_update", _audit_events_are_append_only)
+sqlalchemy_event.listen(AuditEvent, "before_delete", _audit_events_are_append_only)

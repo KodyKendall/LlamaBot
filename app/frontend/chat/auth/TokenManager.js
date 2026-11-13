@@ -29,7 +29,41 @@ export class TokenManager {
   }
 
   /**
+   * What is known about the token last handed out, for the sign-in failure report
+   * (LP-30). Never the token itself.
+   * { source: 'network' | 'localStorage', iat, exp, status, error }
+   */
+  static lastToken = null;
+
+  /**
+   * The JWT's claims, or null if it can't be read. The payload is base64url, which
+   * atob does not accept until - and _ are mapped back and the padding restored.
+   */
+  static decodeClaims(token) {
+    try {
+      const part = String(token).split('.')[1];
+      if (!part) return null;
+      let b64 = part.replace(/-/g, '+').replace(/_/g, '/');
+      while (b64.length % 4) b64 += '=';
+      const claims = JSON.parse(atob(b64));
+      return claims && typeof claims === 'object' ? claims : null;
+    } catch (_e) {
+      return null;
+    }
+  }
+
+  static describe(token, source, extra = {}) {
+    const claims = token ? this.decodeClaims(token) : null;
+    const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+    return { source, iat: num(claims?.iat), exp: num(claims?.exp), ...extra };
+  }
+
+  /**
    * Get cached token if still valid.
+   *
+   * Judged by the token's own exp claim (minus the 5-minute buffer) as well as the
+   * stored expiry. A token that can't be decoded, or has no numeric exp, counts as
+   * expired (LP-30).
    *
    * @returns {string|null} Cached token or null if expired/missing
    */
@@ -42,15 +76,18 @@ export class TokenManager {
         return null;
       }
 
-      const expiryTime = parseInt(expiry, 10);
       const now = Date.now();
+      const storedExpiry = parseInt(expiry, 10);
+      const exp = this.decodeClaims(token)?.exp;
+      const expValid = typeof exp === 'number' && Number.isFinite(exp) &&
+        exp * 1000 - this.EXPIRY_BUFFER_MS > now;
 
-      // Check if token is still valid (with buffer)
-      if (now < expiryTime) {
+      if (expValid && now < storedExpiry) {
+        this.lastToken = this.describe(token, 'localStorage');
         return token;
       }
 
-      // Token expired, clear it
+      // Token expired or unreadable, clear it
       this.clearToken();
       return null;
     } catch (error) {
@@ -62,13 +99,21 @@ export class TokenManager {
   /**
    * Fetch a new token from the API.
    *
+   * Always from the server: cache 'no-store' keeps the browser from answering with a
+   * stored response. A tab restored after a discard loads like a history navigation,
+   * where Chrome serves stored responses without checking them, so the retry used to
+   * get the same expired token back (LP-30).
+   *
    * @returns {Promise<string|null>} New token or null if fetch fails
    */
   static async fetchNewToken() {
+    let failure = null;
     try {
-      const response = await fetch('/api/ws-token');
+      const response = await fetch('/api/ws-token', { cache: 'no-store' });
 
       if (!response.ok) {
+        failure = { source: 'network', iat: null, exp: null, status: response.status };
+        this.lastToken = failure;
         // 401 means not authenticated - user needs to log in
         if (response.status === 401) {
           console.warn('Not authenticated - cannot get WebSocket token');
@@ -80,6 +125,7 @@ export class TokenManager {
       const data = await response.json();
 
       if (!data.token) {
+        failure = { source: 'network', iat: null, exp: null, status: response.status, error: 'no token in response' };
         throw new Error('No token in response');
       }
 
@@ -90,11 +136,13 @@ export class TokenManager {
       // Cache the token
       localStorage.setItem(this.TOKEN_KEY, data.token);
       localStorage.setItem(this.TOKEN_EXPIRY_KEY, expiresAt.toString());
+      this.lastToken = this.describe(data.token, 'network', { status: response.status });
 
       console.log('WebSocket token fetched, expires in', Math.round((expiresAt - Date.now()) / 1000 / 60), 'minutes');
 
       return data.token;
     } catch (error) {
+      this.lastToken = failure || { source: 'network', iat: null, exp: null, error: 'request failed' };
       console.error('Failed to fetch WebSocket token:', error);
       return null;
     }

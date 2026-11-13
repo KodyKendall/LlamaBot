@@ -9,6 +9,7 @@ Auth supports two paths, in priority order:
    total failure is unchanged: 401 with `WWW-Authenticate: Basic`.
 """
 
+import logging
 from typing import Optional
 
 from fastapi import Depends, HTTPException, Request
@@ -16,7 +17,8 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from sqlmodel import Session
 
 from app.db import engine
-from app.models import User
+from app.models import AuditEvent, User
+from app.permissions import holds_security_admin, holds_system_admin, is_security_only, route_allowed
 from app.services.user_service import (
     authenticate_user,
     get_all_users,
@@ -26,6 +28,8 @@ from app.services.token_service import SESSION_COOKIE_NAME, verify_session_token
 
 # auto_error=False so the absence of a Basic header doesn't 401 — we want to
 # try the session cookie first.
+logger = logging.getLogger(__name__)
+
 security = HTTPBasic(auto_error=False)
 
 
@@ -85,6 +89,33 @@ def try_authenticate(request: Request, session: Session) -> Optional[User]:
     return None
 
 
+def record_audit(session, event_type: str, actor=None, subject=None, detail: str = "") -> None:
+    """Add to the security audit trail. Never takes the request down with it."""
+    try:
+        session.add(AuditEvent(event_type=event_type, actor=actor, subject=subject, detail=detail[:1000]))
+        session.commit()
+    except Exception as e:  # noqa: BLE001
+        logger.error("Could not write audit event %s: %s", event_type, e)
+        session.rollback()
+
+
+def _refuse(session, user: User, request: Optional[Request], message: str) -> HTTPException:
+    where = f"{request.method} {request.url.path}" if isinstance(request, Request) else "unknown route"
+    logger.warning("Refused %s for %s", where, user.username)
+    if isinstance(session, Session):
+        record_audit(session, "access_denied", actor=user.username, detail=where)
+    return HTTPException(status_code=403, detail=message)
+
+
+def _check_boundary(request: Request, user: User, session: Session) -> None:
+    """The separation-of-duties boundary (LP-32). Sits in the login check so that a
+    login-only route is covered too, including ones added later."""
+    from app.agents.leonardo import zdr
+
+    if not route_allowed(user, request.method, request.url.path, zdr.enforced()):
+        raise _refuse(session, user, request, "Your role does not include this")
+
+
 def auth(
     request: Request,
     credentials: Optional[HTTPBasicCredentials] = Depends(security),
@@ -100,6 +131,7 @@ def auth(
             detail="Invalid credentials",
             headers={"WWW-Authenticate": "Basic"},
         )
+    _check_boundary(request, user, session)
     return user.username
 
 
@@ -118,33 +150,60 @@ def get_current_user(
             detail="Invalid credentials",
             headers={"WWW-Authenticate": "Basic"},
         )
+    _check_boundary(request, user, session)
     return user
 
 
 def admin_required(
-    current_user: User = Depends(get_current_user)
+    request: Request = None,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_db_session),
 ) -> User:
-    """Require admin privileges."""
+    """The account owner only. Anything not classified below stays here, so it fails closed."""
     if not current_user.is_admin:
-        raise HTTPException(
-            status_code=403,
-            detail="Admin privileges required"
-        )
+        raise _refuse(session, current_user, request, "Admin privileges required")
+    return current_user
+
+
+def security_admin_required(
+    request: Request = None,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_db_session),
+) -> User:
+    """Users, role grants, security policy, audit log."""
+    if not holds_security_admin(current_user):
+        raise _refuse(session, current_user, request, "Security administrator required")
+    return current_user
+
+
+def system_admin_required(
+    request: Request = None,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_db_session),
+) -> User:
+    """Settings, deploys, agent modes, data."""
+    if not holds_system_admin(current_user):
+        raise _refuse(session, current_user, request, "System administrator required")
     return current_user
 
 
 def engineer_or_admin_required(
-    current_user: User = Depends(get_current_user)
+    request: Request = None,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_db_session),
 ) -> User:
-    """Require engineer or admin role for privileged operations."""
-    if current_user.is_admin:
+    """System work: a system admin, or an engineer on a box that is not institutional."""
+    from app.agents.leonardo import zdr
+
+    if holds_system_admin(current_user):
         return current_user
-    if getattr(current_user, 'role', 'user') == "engineer":
+    if (
+        not is_security_only(current_user)
+        and getattr(current_user, 'role', 'user') == "engineer"
+        and not zdr.enforced()
+    ):
         return current_user
-    raise HTTPException(
-        status_code=403,
-        detail="Engineer or admin privileges required"
-    )
+    raise _refuse(session, current_user, request, "Engineer or admin privileges required")
 
 
 def has_any_users() -> bool:

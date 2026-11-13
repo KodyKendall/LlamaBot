@@ -31,6 +31,7 @@ from collections import deque, OrderedDict
 import contextvars
 from dataclasses import dataclass
 import logging
+import os
 import time
 import uuid
 
@@ -126,6 +127,9 @@ class RunHandle:
         self.pending = []         # QueuedMessages sent while a turn was running
         self.factory_for = None   # builds the run that picks up leftover pending
         self.background = {}      # task_id -> {"task", "kind", "label", "started_at"}
+        # The user's words this turn answers — the auto-save's commit title (LP-46).
+        # A notification or resume turn keeps the request it belongs to.
+        self.turn_request = None
 
     def is_running(self) -> bool:
         return self.task is not None and not self.task.done()
@@ -181,8 +185,14 @@ class RunManager:
     run started by the previous connection.
     """
 
-    def __init__(self, log_maxlen: int = 2000, max_threads: int = 512):
+    def __init__(self, log_maxlen: int = 2000, max_threads: int = 512,
+                 after_turn=None, before_turn=None):
         self._runs: "OrderedDict[str, RunHandle]" = OrderedDict()
+        # LP-46: ``before_turn()`` and ``after_turn(request, thread_id)`` run in a
+        # worker thread around every turn, including ones that error or are stopped.
+        # Only the app's shared manager has them (the auto-save); tests build bare ones.
+        self._after_turn = after_turn
+        self._before_turn = before_turn
         self._start_locks: dict = {}
         self._log_maxlen = log_maxlen
         self._max_threads = max_threads
@@ -243,6 +253,7 @@ class RunManager:
                 if websocket is not None:
                     handle.attached_ws = websocket
                 return "queued"
+            _note_request(handle or self._handle_for(thread_id), [item])
             handle = self._start_locked(thread_id, factory_for([item]), websocket)
             handle.factory_for = factory_for
             return "started"
@@ -284,6 +295,7 @@ class RunManager:
             # Lets the client show "working" for a turn it did not start itself
             # (a queued follow-up, or research results arriving).
             await sink.send_json({"type": "run_started"})
+            await self._call_hook(self._before_turn)
             await run_factory(sink)
             handle.log.status = "done"
         except CancelledError:
@@ -296,10 +308,37 @@ class RunManager:
             # run body's own except handler. Re-raising would only produce an
             # unretrieved-task-exception warning.
         finally:
+            # After the reply is out: save the turn's file changes (LP-46).
+            await self._save_after_turn(handle, sink)
             # Messages that arrived after the turn's last model call: they start
             # the next turn. Not after Stop — cancel() already dropped them.
             if any(not i.held for i in handle.pending) and handle.log.status != "cancelled":
                 asyncio.create_task(self._run_pending(handle.thread_id))
+
+    async def _call_hook(self, hook, *args):
+        """Run a turn hook off the event loop. Never raises: a hook can't break a turn."""
+        if hook is None:
+            return None
+        try:
+            return await asyncio.to_thread(hook, *args)
+        except Exception:
+            logger.exception("Turn hook failed (turn unaffected)")
+            return None
+
+    async def _save_after_turn(self, handle: RunHandle, sink: "RunSink") -> None:
+        if self._after_turn is None:
+            return
+        result = await self._call_hook(self._after_turn, handle.turn_request, handle.thread_id)
+        try:
+            # Tells the History panel to re-read its status now, not on the next poll.
+            await sink.send_json({"type": "save_status",
+                                  "saved": bool(result and not result.get("skipped"))})
+        except Exception:
+            logger.debug("save_status frame not sent", exc_info=True)
+
+    def busy(self) -> bool:
+        """Is any turn or coding task running? (The History panel's "Leo working".)"""
+        return any(h.is_running() for h in self._runs.values()) or self.writers_busy()
 
     async def _run_pending(self, thread_id: str) -> None:
         async with self._lock_for(thread_id):
@@ -311,6 +350,7 @@ class RunManager:
             if not items:
                 return
             handle.pending = [i for i in handle.pending if i.held]
+            _note_request(handle, items)
             self._start_locked(thread_id, handle.factory_for(items), None)
 
     # ------------------------------------------------------- background tasks
@@ -450,5 +490,44 @@ def shared_run_manager() -> RunManager:
     """The process-wide RunManager (main.py runs twice: as ``main`` and ``app.main``)."""
     global _shared_run_manager
     if _shared_run_manager is None:
-        _shared_run_manager = RunManager()
+        _shared_run_manager = RunManager(after_turn=autosave_hook, before_turn=autosave_turn_start_hook)
     return _shared_run_manager
+
+
+def _note_request(handle: RunHandle, items: list) -> None:
+    """Remember the first thing the user typed in these items, for the save's title."""
+    for item in items:
+        if not item.notification and item.frame.get("message"):
+            handle.turn_request = str(item.frame["message"])
+            return
+
+
+def _autosave_off() -> bool:
+    """Read every turn (LP-49), so the Settings toggle applies without a restart.
+
+    LEO_AUTOSAVE_DISABLED=1 is checked first: the test suite sets it because in the
+    dev container /app/leonardo is the LIVE repo.
+    """
+    if os.getenv("LEO_AUTOSAVE_DISABLED") == "1":
+        return True
+    from app.services import checkpoint_service
+    return not checkpoint_service.autosave_enabled()
+
+
+def autosave_turn_start_hook() -> None:
+    if _autosave_off():
+        return
+    from app.services import checkpoint_service
+    checkpoint_service.note_turn_start()
+
+
+def autosave_hook(request, thread_id):
+    """End of turn: one commit of whatever the turn changed (LP-46)."""
+    if _autosave_off():
+        return None
+    # A coding task is mid-edit; its results arrive as a turn of their own, which saves.
+    if shared_run_manager().writers_busy():
+        logger.info(f"Auto-save skipped on thread {thread_id}: a coding task is still editing")
+        return None
+    from app.services import checkpoint_service
+    return checkpoint_service.autosave_after_turn(request, thread_id=thread_id)

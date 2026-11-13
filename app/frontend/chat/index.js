@@ -12,7 +12,7 @@ import { AppState } from './state/AppState.js';
 import { StreamingState } from './state/StreamingState.js';
 import { MessageRenderer } from './messages/MessageRenderer.js';
 import { pickChatgptModel } from './messages/paywallCopy.js';
-import { WebSocketManager } from './websocket/WebSocketManager.js';
+import { WebSocketManager, authFailureReport } from './websocket/WebSocketManager.js';
 import { MessageHandler } from './websocket/MessageHandler.js';
 import { ScrollManager } from './ui/ScrollManager.js';
 import { IframeManager } from './ui/IframeManager.js';
@@ -46,6 +46,7 @@ import { sendButtonAction } from './utils/sendButtonMode.js';
 import { chooseInitialModel, resolveRememberedModel, resolveNewThreadModel, modelOptionState } from './utils/modelDefaults.js';
 import { safeInit, selectedElementsOf } from './utils/safeInit.js';
 import { rememberThread, startsFreshChat } from './threads/lastThread.js';
+import { hasAnyImage, isImageAttachment, visionCapableModels, cannotSeeImagesNotice } from './utils/imageNotice.js';
 
 // Image auto-switch: when a user attaches an image while on a text-only model,
 // we move them onto an image-capable model so the image is actually seen.
@@ -143,6 +144,7 @@ class ChatApp {
       ['deepseek-v4.1-flash-fireworks', { images: true }],
       ['deepseek-v4.1-flash', { images: true }],
       ['claude-haiku-5.5', { images: true }],
+      ['claude-haiku-5.5-bedrock', { images: true }],
       // Qwen3.7 Plus is image-capable — seed it so an image upload while it's
       // selected is NOT spuriously auto-switched to Gemini before the async
       // /api/available-models fetch resolves (the unknown-model default is
@@ -374,7 +376,7 @@ class ChatApp {
     });
 
     window.addEventListener('websocketAuthFailed', (e) => {
-      this.errorReporter?.report('FrontendWsAuthFailed', `WebSocket sign-in failed: ${e?.detail?.reason || 'n/a'}`);
+      this.errorReporter?.report('FrontendWsAuthFailed', authFailureReport(e?.detail));
       this.stopDurationTimerDisplay();
       this.setAgentRunning(false);
       this.renderErrorCard('Leo could not sign you in. Refresh the page to continue.', 'Refresh', () => {
@@ -1278,6 +1280,7 @@ class ChatApp {
    * Update agent running state and toggle send/stop button appearance
    */
   setAgentRunning(running) {
+    if (running !== this.isAgentRunning) window.LeoA11y?.agentRunningChanged(running);
     this.isAgentRunning = running;
     if (!running) {
       this.cancelPressCount = 0;
@@ -1301,12 +1304,14 @@ class ChatApp {
     const icon = btn.querySelector('i');
     if (this.currentSendButtonAction() === 'stop') {
       btn.classList.add('stop-mode');
+      btn.setAttribute('aria-label', 'Stop Leo');
       btn.disabled = false;
       if (icon) {
         icon.className = 'fa-solid fa-stop';
       }
     } else {
       btn.classList.remove('stop-mode');
+      btn.setAttribute('aria-label', 'Send message');
       if (icon) {
         icon.className = 'fa-solid fa-arrow-up';
       }
@@ -1607,8 +1612,10 @@ class ChatApp {
   }
 
   /**
-   * Whether any pending attachment is an inline image (uploaded_file refs are
-   * sent as text, not image blocks, so they don't count).
+   * Whether any pending attachment is an inline image. Used by the vision-OFF gate
+   * only: an Uploaded-files image is not blocked there, because Leo still needs its
+   * path to use it in code (the server just holds the picture back). For "is any
+   * image attached" use hasAnyImage() from utils/imageNotice.js.
    */
   hasImageAttachment(attachments) {
     return (attachments || []).some(a =>
@@ -1715,13 +1722,12 @@ class ChatApp {
       noModelReason?.classList.toggle('hidden', !noModel);
     }
 
+    // Before sending: say now that this model won't see the picture (either button).
     const banner = this.container.querySelector('[data-llamabot="image-switch-banner"]');
     if (!banner) return;
-    const shouldShow =
-      !visionBlocked &&
-      hasImage &&
-      !this.modelSupportsImages(model) &&
-      this.conversationHasMessages();
+    const shouldShow = !visionBlocked && hasAnyImage(attachments) && !this.modelSupportsImages(model);
+    const label = banner.querySelector('[data-llamabot="image-switch-text"]');
+    if (shouldShow && label) label.textContent = this.cannotSeeImagesText(model);
     banner.classList.toggle('hidden', !shouldShow);
   }
 
@@ -1755,6 +1761,19 @@ class ChatApp {
    * never invents a name the user has not seen. Falls back to the raw value for
    * a model the dropdown doesn't carry (frontend/backend version skew).
    */
+  /** The "can't see images" text for this box: the model, and which ones can. */
+  cannotSeeImagesText(model) {
+    const capable = visionCapableModels(this.elements.modelSelect?.options, (m) => this.modelSupportsImages(m));
+    return cannotSeeImagesNotice(this.modelLabel(model), capable);
+  }
+
+  /** LP-44 FR-7: a visible notice in the chat at send time, announced to screen readers. */
+  showCannotSeeImagesNotice(model) {
+    const text = this.cannotSeeImagesText(model);
+    this.messageRenderer?.addMessage(text, 'system_message');
+    window.LeoA11y?.announce(text);
+  }
+
   modelLabel(value) {
     if (!value) return 'another model';
     const option = this.elements.modelSelect
@@ -2069,58 +2088,13 @@ class ChatApp {
     }
     // --- end vision gate ---
 
-    // --- Auto-switch model when an image is attached to a text-only model ---
-    // Cross-provider switches mid-thread are unsafe (provider-specific
-    // reasoning/thinking blocks in the checkpoint), so mid-conversation we move
-    // to a fresh thread and carry the prior conversation over as text. On a
-    // fresh thread we just switch silently for this send. This must run BEFORE
-    // the human bubble renders and BEFORE ensureThreadId() below.
-    if (this.hasImageAttachment(attachments) && !this.modelSupportsImages(llmModel)) {
-      const imageModel = this.visionModel ?? LEGACY_IMAGE_MODEL;
-      const imageOpt = imageModel
-        ? Array.from(this.elements.modelSelect?.options || [])
-            .find(o => o.value === imageModel)
-        : null;
-      const imageModelAvailable = imageOpt && !imageOpt.disabled;
-
-      if (imageModelAvailable) {
-        if (this.conversationHasMessages()) {
-          // Mid-conversation: switch model, start a new thread, carry transcript.
-          const transcript = this.buildConversationTranscript();
-          this.setModel(imageModel, { persist: false });
-          effectiveLlmModel = imageModel;
-          // Clears the message history and sets the new thread id synchronously.
-          this.threadManager.createNewThread({ isImageSwitch: true });
-          if (transcript) {
-            message = `Previous conversation:\n${transcript}\n\n---\n\n${message}`;
-          }
-          this.slashCommandManager?.showToast(
-            "You attached an image, but your current model can't see images. " +
-            `I switched to ${this.modelLabel(imageModel)} and started a new conversation, ` +
-            'carrying your previous messages over.',
-            'info'
-          );
-          this.updateImageSwitchBanner();
-        } else {
-          // Fresh/empty thread: silently switch this send to the vision model.
-          this.setModel(imageModel, { persist: false });
-          effectiveLlmModel = imageModel;
-        }
-      } else {
-        // Nowhere to switch to — this box has no vision-capable model it can
-        // run (no META key AND no DEEPSEEK_API_KEY, so neither vision model
-        // resolves; `vision_model` came back empty or its option is disabled).
-        // Sending anyway would put an image block in front of a text-only model
-        // and 400 mid-stream, which surfaces to the user as a stack trace. Stop
-        // and say so instead. Nothing destructive has happened yet — the input
-        // still holds their text.
-        this.visionModelAvailable = false;
-        this.applyVisionPolicy();
-        this.refuseImageAttachment();
-        return;
-      }
-    }
-    // --- end auto-switch ---
+    // --- Image on a text-only model: tell the user, don't switch behind their back ---
+    // LP-44 replaced the old automatic switch to a vision model (and new thread).
+    // The message still sends: the path in <UPLOADED_FILES> is useful on its own,
+    // and the server adds a note so Leo knows a picture was attached but not shown.
+    // Shown after the user's bubble is drawn and the composer is cleared, below.
+    const imageNotSeen = hasAnyImage(attachments) && !this.modelSupportsImages(llmModel);
+    // --- end image notice ---
 
     // Sent while Leo is still working: the backend queues it for the running
     // turn (it no longer cancels). Leo's next words go in a new bubble below
@@ -2217,6 +2191,8 @@ class ChatApp {
     if (this.fileAttachmentManager) {
       this.fileAttachmentManager.clearAttachments();
     }
+    if (imageNotSeen) this.showCannotSeeImagesNotice(llmModel);
+    this.updateImageSwitchBanner(); // the composer is empty now: drop the pre-send banner
 
     // Clear attached color chips
     if (this.colorAttach) {
@@ -2282,7 +2258,9 @@ class ChatApp {
       llm_model: effectiveLlmModel,
       // The user's backup pick (LP-21); omitted = Automatic.
       backup_model: this.elements.backupModelSelect?.value || undefined,
-      attachments: attachments.filter(a => a.type !== 'uploaded_file'),
+      // Uploaded-files IMAGES go too, as a path with no data: the server reads the
+      // file for the vision model (LP-44). Other uploads are named in <UPLOADED_FILES>.
+      attachments: attachments.filter(a => a.type !== 'uploaded_file' || isImageAttachment(a)),
       ask_before_edits: executionMode === 'ask'
     };
     if (apiToken) messageData.api_token = apiToken;

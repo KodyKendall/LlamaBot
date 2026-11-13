@@ -13,6 +13,8 @@ from sqlmodel import Session
 
 from app.db import engine
 from app.models import User
+from app.dependencies import security_admin_required
+from app.permissions import holds_security_admin, holds_system_admin, is_security_only
 from app.dependencies import (
     security, get_db_session, auth, get_current_user, admin_required, has_any_users,
     engineer_or_admin_required, try_authenticate
@@ -197,15 +199,72 @@ def voice_dictation_setting_row(*, enabled: bool, key_configured: bool) -> str:
                 <i class="fa-solid fa-microphone"></i>
                 <span>Voice Dictation</span>
                 <label style="position: relative; display: inline-block; width: 44px; height: 24px;">
-                    <input type="checkbox" id="voiceDictationToggle" style="opacity: 0; width: 0; height: 0;"
+                    <input type="checkbox" id="voiceDictationToggle" aria-label="Voice dictation" style="opacity: 0; width: 0; height: 0;"
                         onchange="toggleVoiceDictation(this)"{' checked' if on else ''}{lock}>
                     <span style="position: absolute; cursor: {'pointer' if key_configured else 'not-allowed'}; top: 0; left: 0; right: 0; bottom: 0; background-color: {'#8b5cf6' if on else '#555'}; border-radius: 24px; transition: 0.3s;"></span>
                     <span id="voiceDictationSlider" style="position: absolute; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; border-radius: 50%; transition: 0.3s; transform: translateX({'20px' if on else '0'});"></span>
                 </label>
             </div>
-            <div id="voiceDictationNote" style="padding: 4px 0 0 36px; font-size: 0.75rem; color: rgba(255,255,255,0.35);">
+            <div id="voiceDictationNote" style="padding: 4px 0 0 36px; font-size: 0.75rem; color: rgba(255, 255, 255, 0.65);">
                 {note}
             </div>
+"""
+
+
+def autosave_setting_row(*, enabled: bool) -> str:
+    """The Settings row for Leo's end-of-turn Git auto-save (LP-49). ON unless turned off.
+
+    Saves through the site-settings PUT, which refuses roles that can't save checkpoints;
+    a refused write flips the switch back and says so.
+    """
+    return f"""
+            <style>
+                .autosave-switch:focus-within {{ outline: 2px solid #c4b5fd; outline-offset: 2px; border-radius: 24px; }}
+            </style>
+            <div class="menu-item" style="cursor: default;">
+                <i class="fa-solid fa-floppy-disk" aria-hidden="true"></i>
+                <span id="autosaveLabel">Save Leo's changes automatically</span>
+                <label class="autosave-switch" style="position: relative; display: inline-block; width: 44px; height: 24px;">
+                    <input type="checkbox" id="autosaveToggle" role="switch" aria-labelledby="autosaveLabel"
+                        aria-describedby="autosaveNote" aria-checked="{'true' if enabled else 'false'}"
+                        style="opacity: 0; width: 0; height: 0;" onchange="toggleAutosave(this)"{' checked' if enabled else ''}>
+                    <span style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: {'#8b5cf6' if enabled else '#555'}; border-radius: 24px; transition: 0.3s;"></span>
+                    <span id="autosaveSlider" style="position: absolute; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; border-radius: 50%; transition: 0.3s; transform: translateX({'20px' if enabled else '0'});"></span>
+                </label>
+            </div>
+            <div id="autosaveNote" style="padding: 4px 0 0 36px; font-size: 0.75rem; color: rgba(255, 255, 255, 0.75);">
+                After each Leo turn, your code is saved as a Git commit. Turn this off if you manage your own Git commits.
+            </div>
+            <div id="autosaveError" role="alert" style="padding: 4px 0 0 36px; font-size: 0.75rem; color: #fca5a5;"></div>
+            <script>
+                function setAutosaveSwitch(toggle, on) {{
+                    toggle.checked = on;
+                    toggle.setAttribute('aria-checked', on ? 'true' : 'false');
+                    const slider = document.getElementById('autosaveSlider');
+                    slider.previousElementSibling.style.backgroundColor = on ? '#8b5cf6' : '#555';
+                    slider.style.transform = on ? 'translateX(20px)' : 'translateX(0)';
+                }}
+                function toggleAutosave(toggle) {{
+                    const on = toggle.checked;
+                    const error = document.getElementById('autosaveError');
+                    error.textContent = '';
+                    setAutosaveSwitch(toggle, on);
+                    fetch('/api/site-settings/leo_autosave_enabled', {{
+                        method: 'PUT',
+                        headers: {{ 'Content-Type': 'application/json' }},
+                        body: JSON.stringify({{ value: on ? 'true' : 'false' }})
+                    }}).then((r) => {{
+                        if (r.ok) return;
+                        setAutosaveSwitch(toggle, !on);
+                        error.textContent = r.status === 403
+                            ? "Your role can't change this setting."
+                            : "Couldn't save this setting. Try again.";
+                    }}).catch(() => {{
+                        setAutosaveSwitch(toggle, !on);
+                        error.textContent = "Couldn't save this setting. Try again.";
+                    }});
+                }}
+            </script>
 """
 
 
@@ -564,12 +623,14 @@ async def login_get(
 
 
 @router.get("/users", response_class=HTMLResponse)
-async def users_page(admin: User = Depends(admin_required)):
+async def users_page(admin: User = Depends(security_admin_required)):
     """Serve the admin user management page."""
     html = """
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <link rel="stylesheet" href="/frontend/a11y.css">
+    <script src="/frontend/a11y.js" defer></script>
     <title>LlamaBot User Management</title>
     <link rel="icon" type="image/png" href="/frontend/leonardo-icon.png">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
@@ -624,14 +685,14 @@ async def users_page(admin: User = Depends(admin_required)):
         }
         .card-header {
             font-size: 0.85rem;
-            color: rgba(255, 255, 255, 0.5);
+            color: rgba(255, 255, 255, 0.65);
             text-transform: uppercase;
             letter-spacing: 0.5px;
             margin-bottom: 16px;
         }
         table { width: 100%; border-collapse: collapse; }
         th, td { padding: 12px; text-align: left; border-bottom: 1px solid var(--border-color); }
-        th { color: rgba(255, 255, 255, 0.5); font-weight: 500; font-size: 0.85rem; }
+        th { color: rgba(255, 255, 255, 0.65); font-weight: 500; font-size: 0.85rem; }
         tr:last-child td { border-bottom: none; }
         .badge {
             padding: 4px 10px;
@@ -643,8 +704,8 @@ async def users_page(admin: User = Depends(admin_required)):
         .badge-engineer { background: rgba(139, 92, 246, 0.2); color: #a78bfa; }
         .badge-user { background: rgba(167, 139, 250, 0.15); color: #c4b5fd; }
         .badge-admin { background: rgba(139, 92, 246, 0.2); color: #a78bfa; }
-        .badge-active { background: rgba(34, 197, 94, 0.15); color: #22c55e; }
-        .badge-inactive { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
+        .badge-active { background: rgba(34, 197, 94, 0.15); color: #4ade80; }
+        .badge-inactive { background: rgba(239, 68, 68, 0.15); color: #fca5a5; }
         .btn {
             padding: 6px 12px;
             border: 1px solid var(--border-color);
@@ -657,11 +718,11 @@ async def users_page(admin: User = Depends(admin_required)):
             transition: all 0.2s;
         }
         .btn:hover { background: rgba(139, 92, 246, 0.15); }
-        .btn-danger { border-color: rgba(239, 68, 68, 0.25); color: #ef4444; }
+        .btn-danger { border-color: rgba(239, 68, 68, 0.25); color: #fca5a5; }
         .btn-danger:hover { background: rgba(239, 68, 68, 0.15); }
         .form-row { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
         .form-group { flex: 1; min-width: 120px; }
-        .form-group label { display: block; margin-bottom: 6px; font-size: 0.85rem; color: rgba(255, 255, 255, 0.5); }
+        .form-group label { display: block; margin-bottom: 6px; font-size: 0.85rem; color: rgba(255, 255, 255, 0.65); }
         .form-group input, .form-group select {
             width: 100%;
             padding: 10px;
@@ -689,8 +750,8 @@ async def users_page(admin: User = Depends(admin_required)):
             margin-bottom: 20px;
             display: none;
         }
-        .message.success { background: rgba(34, 197, 94, 0.1); border: 1px solid rgba(34, 197, 94, 0.25); color: #22c55e; display: block; }
-        .message.error { background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.25); color: #ef4444; display: block; }
+        .message.success { background: rgba(34, 197, 94, 0.1); border: 1px solid rgba(34, 197, 94, 0.25); color: #4ade80; display: block; }
+        .message.error { background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.25); color: #fca5a5; display: block; }
         .actions { white-space: nowrap; }
         select.role-select {
             padding: 4px 8px;
@@ -703,7 +764,7 @@ async def users_page(admin: User = Depends(admin_required)):
         .card-hint {
             margin: 0 0 16px;
             font-size: 0.85rem;
-            color: rgba(255, 255, 255, 0.5);
+            color: rgba(255, 255, 255, 0.65);
             line-height: 1.5;
         }
         .role-row {
@@ -740,9 +801,10 @@ async def users_page(admin: User = Depends(admin_required)):
     </style>
 </head>
 <body>
-    <div class="container">
+    <a class="skip-link" href="#main-content">Skip to main content</a>
+    <div class="container" id="main-content" tabindex="-1">
         <div class="header">
-            <a href="/settings" class="back-btn">
+            <a href="/settings" class="back-btn" aria-label="Back to settings">
                 <i class="fa-solid fa-arrow-left"></i>
             </a>
             <h1>User Management</h1>
@@ -754,15 +816,15 @@ async def users_page(admin: User = Depends(admin_required)):
             <div class="card-header">Add New User</div>
             <form id="addUserForm" class="form-row">
                 <div class="form-group">
-                    <label>Username</label>
+                    <label for="newUsername">Username</label>
                     <input type="text" id="newUsername" required>
                 </div>
                 <div class="form-group">
-                    <label>Password</label>
+                    <label for="newPassword">Password</label>
                     <input type="password" id="newPassword" required>
                 </div>
                 <div class="form-group">
-                    <label>Role</label>
+                    <label for="newRole">Role</label>
                     <select id="newRole">
                         <option value="engineer">Engineer</option>
                         <option value="user">User</option>
@@ -778,7 +840,8 @@ async def users_page(admin: User = Depends(admin_required)):
                 <thead>
                     <tr>
                         <th>Username</th>
-                        <th>Role</th>
+                        <th>Administrator</th>
+                            <th>Role</th>
                         <th>Status</th>
                         <th>Created</th>
                         <th class="actions">Actions</th>
@@ -799,6 +862,38 @@ async def users_page(admin: User = Depends(admin_required)):
             </p>
             <div id="roleModes">Loading...</div>
             <button class="btn btn-primary" id="saveRoleModes" onclick="saveRoleModes()">Save Permissions</button>
+        </div>
+
+        <div class="card">
+            <h2>Giving one person both administrator roles</h2>
+            <p class="card-hint">Only an account owner can do this, and it needs a reason, which goes in the audit log.</p>
+            <label for="dualAdminReason">Reason</label>
+            <input type="text" id="dualAdminReason" style="width: 100%;">
+        </div>
+
+        <div class="card">
+            <h2>Write and shell tools</h2>
+            <p class="card-hint">
+                Only applies when this workspace is in zero-data-retention mode. Everyone
+                but admins then gets read-only tools unless their role is ticked here.
+            </p>
+            <div id="roleWriteTools">Loading...</div>
+            <button class="btn btn-primary" onclick="saveRoleWriteTools()">Save Tool Access</button>
+        </div>
+
+        <div class="card">
+            <h2>Sensitive data rules</h2>
+            <p class="card-hint">
+                Only applies in zero-data-retention mode. SSNs, credit cards and student IDs
+                are always filtered before text reaches an AI model. Here you can set the
+                student ID format, add your own rules, and choose redact or block.
+                Example: {"student_id_pattern": "\\\\bS\\\\d{5}\\\\b", "actions": {"ssn": "block"},
+                "custom": [{"name": "badge", "pattern": "BADGE-\\\\d+", "action": "redact"}]}
+            </p>
+            <label for="sensitiveDataRules">Rules (JSON)</label>
+            <textarea id="sensitiveDataRules" rows="6" style="width: 100%; font-family: monospace; background: var(--bg-color); color: var(--text-color);"></textarea>
+            <p class="card-hint" id="sensitiveDataCounts"></p>
+            <button class="btn btn-primary" onclick="saveSensitiveDataRules()">Save Rules</button>
         </div>
     </div>
 
@@ -864,6 +959,56 @@ async def users_page(admin: User = Depends(admin_required)):
             }
         }
 
+        async function loadRoleWriteTools() {
+            const container = document.getElementById('roleWriteTools');
+            const response = await fetch('/api/role-write-tools');
+            if (!response.ok) { container.textContent = 'Could not load.'; return; }
+            const data = await response.json();
+            container.innerHTML = data.roles.map(role => `
+                <label style="display: block; margin-bottom: 6px;">
+                    <input type="checkbox" data-role="${role}" ${data.grants[role] === true ? 'checked' : ''}>
+                    ${role}
+                </label>`).join('');
+        }
+
+        async function saveRoleWriteTools() {
+            const grants = {};
+            document.querySelectorAll('#roleWriteTools input').forEach(box => { grants[box.dataset.role] = box.checked; });
+            const response = await fetch('/api/role-write-tools', {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({grants})
+            });
+            const data = await response.json();
+            showMessage(response.ok ? 'Tool access saved.' : 'Error saving: ' + data.detail, response.ok ? 'success' : 'error');
+        }
+
+        async function loadSensitiveDataRules() {
+            const response = await fetch('/api/sensitive-data-rules');
+            if (!response.ok) return;
+            const data = await response.json();
+            document.getElementById('sensitiveDataRules').value = JSON.stringify(data.rules, null, 2);
+            document.getElementById('sensitiveDataCounts').textContent =
+                'Filtered since last restart: ' + (JSON.stringify(data.counts) === '{}' ? 'none' : JSON.stringify(data.counts));
+        }
+
+        async function saveSensitiveDataRules() {
+            let rules;
+            try {
+                rules = JSON.parse(document.getElementById('sensitiveDataRules').value || '{}');
+            } catch (error) {
+                showMessage('That is not valid JSON: ' + error.message, 'error');
+                return;
+            }
+            const response = await fetch('/api/sensitive-data-rules', {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(rules)
+            });
+            const data = await response.json();
+            showMessage(response.ok ? 'Rules saved.' : 'Error saving: ' + data.detail, response.ok ? 'success' : 'error');
+        }
+
         async function loadUsers() {
             try {
                 const response = await fetch('/api/users');
@@ -871,7 +1016,7 @@ async def users_page(admin: User = Depends(admin_required)):
                 const tbody = document.getElementById('usersTable');
 
                 if (users.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="5">No users found</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="6">No users found</td></tr>';
                     return;
                 }
 
@@ -879,7 +1024,12 @@ async def users_page(admin: User = Depends(admin_required)):
                     <tr>
                         <td><strong>${user.username}</strong>${user.is_admin ? ' <span class="badge badge-admin">Admin</span>' : ''}</td>
                         <td>
-                            <select class="role-select" onchange="updateRole(${user.id}, this.value)">
+                            ${user.is_admin ? '<span>Owner</span>' : `
+                            <label><input type="checkbox" ${user.is_security_admin ? 'checked' : ''} onchange="updateAdminRole(${user.id}, 'is_security_admin', this)"> Security admin</label>
+                            <label><input type="checkbox" ${user.is_system_admin ? 'checked' : ''} onchange="updateAdminRole(${user.id}, 'is_system_admin', this)"> System admin</label>`}
+                        </td>
+                        <td>
+                            <select class="role-select" aria-label="Role" onchange="updateRole(${user.id}, this.value)">
                                 <option value="engineer" ${user.role === 'engineer' ? 'selected' : ''}>Engineer</option>
                                 <option value="user" ${user.role === 'user' ? 'selected' : ''}>User</option>
                             </select>
@@ -905,6 +1055,18 @@ async def users_page(admin: User = Depends(admin_required)):
             msg.textContent = text;
             msg.className = 'message ' + type;
             setTimeout(() => msg.className = 'message', 3000);
+        }
+
+        async function updateAdminRole(userId, field, box) {
+            const body = {[field]: box.checked, dual_admin_reason: document.getElementById('dualAdminReason').value};
+            const response = await fetch(`/api/users/${userId}`, {
+                method: 'PATCH',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(body)
+            });
+            const data = await response.json();
+            showMessage(response.ok ? 'Role updated.' : 'Error: ' + data.detail, response.ok ? 'success' : 'error');
+            if (!response.ok) box.checked = !box.checked;
         }
 
         async function updateRole(userId, role) {
@@ -989,6 +1151,8 @@ async def users_page(admin: User = Depends(admin_required)):
 
         loadUsers();
         loadRoleModes();
+        loadRoleWriteTools();
+        loadSensitiveDataRules();
     </script>
 </body>
 </html>
@@ -1001,8 +1165,10 @@ async def prompt_library_page(current_user: User = Depends(get_current_user)):
     """Serve the prompt library management page (Prompts). Skills are now filesystem Agent Skills."""
     html = """
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <link rel="stylesheet" href="/frontend/a11y.css">
+    <script src="/frontend/a11y.js" defer></script>
     <title>LlamaBot Prompt Library</title>
     <link rel="icon" type="image/png" href="/frontend/leonardo-icon.png">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
@@ -1063,7 +1229,7 @@ async def prompt_library_page(current_user: User = Depends(get_current_user)):
             background: transparent;
             border: none;
             border-bottom: 3px solid transparent;
-            color: rgba(255,255,255,0.6);
+            color: rgba(255, 255, 255, 0.65);
             cursor: pointer;
             font-size: 0.95rem;
             font-weight: 500;
@@ -1074,7 +1240,7 @@ async def prompt_library_page(current_user: User = Depends(get_current_user)):
             background: rgba(255,255,255,0.05);
         }
         .tab-btn.active {
-            color: var(--accent-color);
+            color: #c4b5fd;
             border-bottom-color: var(--accent-color);
         }
         .tab-btn.active.skill-tab {
@@ -1113,13 +1279,13 @@ async def prompt_library_page(current_user: User = Depends(get_current_user)):
         }
         .prompt-description {
             font-size: 0.8rem;
-            color: rgba(255,255,255,0.5);
+            color: rgba(255, 255, 255, 0.65);
             margin-bottom: 8px;
             font-style: italic;
         }
         .prompt-content {
             font-size: 0.85rem;
-            color: rgba(255,255,255,0.6);
+            color: rgba(255, 255, 255, 0.65);
             display: -webkit-box;
             -webkit-line-clamp: 3;
             -webkit-box-orient: vertical;
@@ -1131,11 +1297,11 @@ async def prompt_library_page(current_user: User = Depends(get_current_user)):
             align-items: center;
             margin-top: 12px;
             font-size: 0.75rem;
-            color: rgba(255,255,255,0.4);
+            color: rgba(255, 255, 255, 0.65);
         }
         .prompt-group-badge {
             background: rgba(139, 92, 246, 0.2);
-            color: var(--accent-color);
+            color: #c4b5fd;
             padding: 2px 8px;
             border-radius: 4px;
             font-size: 0.7rem;
@@ -1157,10 +1323,10 @@ async def prompt_library_page(current_user: User = Depends(get_current_user)):
             color: white;
         }
         .btn-primary:hover { opacity: 0.9; }
-        .btn-danger { border-color: rgba(239, 68, 68, 0.25); color: #ef4444; }
+        .btn-danger { border-color: rgba(239, 68, 68, 0.25); color: #fca5a5; }
         .btn-danger:hover { background: rgba(239, 68, 68, 0.15); }
         .form-group { margin-bottom: 16px; }
-        .form-group label { display: block; margin-bottom: 6px; font-size: 0.85rem; color: rgba(255, 255, 255, 0.5); }
+        .form-group label { display: block; margin-bottom: 6px; font-size: 0.85rem; color: rgba(255, 255, 255, 0.65); }
         .form-group input, .form-group select, .form-group textarea {
             width: 100%;
             padding: 10px;
@@ -1243,7 +1409,7 @@ async def prompt_library_page(current_user: User = Depends(get_current_user)):
         .empty-state {
             text-align: center;
             padding: 40px;
-            color: rgba(255,255,255,0.5);
+            color: rgba(255, 255, 255, 0.65);
         }
         .empty-state i { font-size: 3rem; margin-bottom: 16px; opacity: 0.3; }
         .message {
@@ -1252,8 +1418,8 @@ async def prompt_library_page(current_user: User = Depends(get_current_user)):
             margin-bottom: 20px;
             display: none;
         }
-        .message.success { background: rgba(34, 197, 94, 0.1); border: 1px solid rgba(34, 197, 94, 0.25); color: #22c55e; display: block; }
-        .message.error { background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.25); color: #ef4444; display: block; }
+        .message.success { background: rgba(34, 197, 94, 0.1); border: 1px solid rgba(34, 197, 94, 0.25); color: #4ade80; display: block; }
+        .message.error { background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.25); color: #fca5a5; display: block; }
         /* Skill-specific styles */
         .skill-card { border-left: 3px solid var(--skill-color); }
         .skill-card:hover { border-color: var(--skill-hover); }
@@ -1271,9 +1437,10 @@ async def prompt_library_page(current_user: User = Depends(get_current_user)):
     </style>
 </head>
 <body>
-    <div class="container">
+    <a class="skip-link" href="#main-content">Skip to main content</a>
+    <div class="container" id="main-content" tabindex="-1">
         <div class="header">
-            <a href="/" class="back-btn"><i class="fa-solid fa-arrow-left"></i></a>
+            <a href="/" class="back-btn" aria-label="Back to chat"><i class="fa-solid fa-arrow-left"></i></a>
             <h1>Prompt Library</h1>
         </div>
 
@@ -1289,7 +1456,7 @@ async def prompt_library_page(current_user: User = Depends(get_current_user)):
         <div class="tab-content active" id="promptsTab">
             <div class="filter-bar">
                 <input type="text" class="search-input" placeholder="Search prompts..." id="promptSearchInput">
-                <select class="group-select" id="promptGroupFilter">
+                <select class="group-select" id="promptGroupFilter" aria-label="Filter by group">
                     <option value="">All Groups</option>
                 </select>
                 <button class="btn btn-primary" onclick="showCreatePromptModal()">
@@ -1315,20 +1482,20 @@ async def prompt_library_page(current_user: User = Depends(get_current_user)):
             <form id="promptForm">
                 <input type="hidden" id="promptId">
                 <div class="form-group">
-                    <label>Name *</label>
+                    <label for="promptName">Name *</label>
                     <input type="text" id="promptName" required placeholder="e.g., Code Review Instructions">
                 </div>
                 <div class="form-group">
-                    <label>Group</label>
+                    <label for="promptGroup">Group</label>
                     <input type="text" id="promptGroup" value="General" list="promptGroupSuggestions" placeholder="e.g., Code Review, Writing, Analysis">
                     <datalist id="promptGroupSuggestions"></datalist>
                 </div>
                 <div class="form-group">
-                    <label>Description (optional)</label>
+                    <label for="promptDescription">Description (optional)</label>
                     <input type="text" id="promptDescription" placeholder="Brief description of when to use this prompt">
                 </div>
                 <div class="form-group">
-                    <label>Content * <span id="promptCharCount" style="float: right; font-weight: normal; color: #666;">0 / 50,000</span></label>
+                    <label for="promptContent">Content * <span id="promptCharCount" style="float: right; font-weight: normal; color: #b0b0b0;">0 / 50,000</span></label>
                     <textarea id="promptContent" required placeholder="Enter your prompt template..." oninput="updatePromptCharCount()"></textarea>
                 </div>
                 <div style="display: flex; gap: 12px; justify-content: flex-end;">
@@ -1434,7 +1601,7 @@ async def prompt_library_page(current_user: User = Depends(get_current_user)):
             const count = content.length;
             const charCount = document.getElementById('promptCharCount');
             charCount.textContent = count.toLocaleString() + ' / 50,000';
-            charCount.style.color = count > 50000 ? '#e57373' : (count > 40000 ? '#ffb74d' : '#666');
+            charCount.style.color = count > 50000 ? '#e57373' : (count > 40000 ? '#ffb74d' : '#b0b0b0');
         }
 
         function showCreatePromptModal() {
@@ -1616,7 +1783,11 @@ async def settings_page(
         enabled=voice_dictation.dictation_enabled(session),
         key_configured=voice_dictation.key_configured(),
     )
-    is_engineer_or_admin = current_user.role == "engineer" or current_user.is_admin
+    from app.services import checkpoint_service
+    autosave_row = autosave_setting_row(enabled=checkpoint_service.autosave_enabled())
+    is_engineer_or_admin = holds_system_admin(current_user) or (
+        current_user.role == "engineer" and not is_security_only(current_user)
+    )
 
     # Browser-tab rows. Built here rather than inside the page f-string because
     # the page body uses doubled braces for CSS, which a nested loop would make
@@ -1629,12 +1800,12 @@ async def settings_page(
                 <span>Your App</span>
                 <label style="position: relative; display: inline-block; width: 44px; height: 24px;"
                     title="The App tab is always visible">
-                    <input type="checkbox" checked disabled style="opacity: 0; width: 0; height: 0;">
+                    <input type="checkbox" checked disabled aria-label="Your App tab" style="opacity: 0; width: 0; height: 0;">
                     <span style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; background-color: #8b5cf6; border-radius: 24px;"></span>
                     <span style="position: absolute; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; border-radius: 50%; transform: translateX(20px);"></span>
                 </label>
             </div>
-            <div style="padding: 4px 0 12px 36px; font-size: 0.75rem; color: rgba(255,255,255,0.35);">
+            <div style="padding: 4px 0 12px 36px; font-size: 0.75rem; color: rgba(255, 255, 255, 0.65);">
                 Always shown &mdash; this is the only view of your own application
             </div>
 """
@@ -1645,22 +1816,24 @@ async def settings_page(
                 <i class="fa-solid {tab['icon']}"></i>
                 <span>{escape(tab['label'])}</span>
                 <label style="position: relative; display: inline-block; width: 44px; height: 24px;">
-                    <input type="checkbox" class="browser-tab-toggle" data-target="{tab['target']}"
+                    <input type="checkbox" class="browser-tab-toggle" aria-label="{escape(tab['label'])} tab" data-target="{tab['target']}"
                         {'checked' if on else ''} style="opacity: 0; width: 0; height: 0;"
                         onchange="saveVisibleTabs()">
                     <span style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: {'#8b5cf6' if on else '#555'}; border-radius: 24px; transition: 0.3s;"></span>
                     <span style="position: absolute; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; border-radius: 50%; transition: 0.3s; transform: translateX({'20px' if on else '0'});"></span>
                 </label>
             </div>
-            <div style="padding: 4px 0 12px 36px; font-size: 0.75rem; color: rgba(255,255,255,0.35);">
+            <div style="padding: 4px 0 12px 36px; font-size: 0.75rem; color: rgba(255, 255, 255, 0.65);">
                 {escape(tab['description'])}
             </div>
 """
 
     html = f"""
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <link rel="stylesheet" href="/frontend/a11y.css">
+    <script src="/frontend/a11y.js" defer></script>
     <title>LlamaBot Settings</title>
     <link rel="icon" type="image/png" href="/frontend/leonardo-icon.png">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
@@ -1720,7 +1893,7 @@ async def settings_page(
         }}
         .card-header {{
             font-size: 0.85rem;
-            color: rgba(255, 255, 255, 0.5);
+            color: rgba(255, 255, 255, 0.65);
             text-transform: uppercase;
             letter-spacing: 0.5px;
             margin-bottom: 16px;
@@ -1748,7 +1921,7 @@ async def settings_page(
         }}
         .user-details .role {{
             font-size: 0.85rem;
-            color: rgba(255, 255, 255, 0.5);
+            color: rgba(255, 255, 255, 0.65);
         }}
         .badge {{
             display: inline-block;
@@ -1783,7 +1956,7 @@ async def settings_page(
             flex: 1;
         }}
         .menu-item .chevron {{
-            color: rgba(255, 255, 255, 0.35);
+            color: rgba(255, 255, 255, 0.65);
         }}
         .logout-btn {{
             display: flex;
@@ -1795,7 +1968,7 @@ async def settings_page(
             background: rgba(239, 68, 68, 0.15);
             border: 1px solid rgba(239, 68, 68, 0.25);
             border-radius: 8px;
-            color: #ef4444;
+            color: #fca5a5;
             font-size: 1rem;
             cursor: pointer;
             transition: all 0.2s;
@@ -1810,9 +1983,10 @@ async def settings_page(
     </style>
 </head>
 <body>
-    <div class="container">
+    <a class="skip-link" href="#main-content">Skip to main content</a>
+    <div class="container" id="main-content" tabindex="-1">
         <div class="header">
-            <a href="/" class="back-btn">
+            <a href="/" class="back-btn" aria-label="Back to chat">
                 <i class="fa-solid fa-arrow-left"></i>
             </a>
             <h1>Settings</h1>
@@ -1829,7 +2003,7 @@ async def settings_page(
             </div>
         </div>
 
-        {"<div class='card'><a href='/users' class='menu-item'><i class='fa-solid fa-users'></i><span>User Management</span><i class='fa-solid fa-chevron-right chevron'></i></a></div>" if current_user.is_admin else ""}
+        {"<div class='card'><a href='/users' class='menu-item'><i class='fa-solid fa-users'></i><span>User Management</span><i class='fa-solid fa-chevron-right chevron'></i></a></div>" if holds_security_admin(current_user) else ""}
 
         <div class='card'><a href='/prompt-library' class='menu-item'><i class='fa-solid fa-book'></i><span>Prompt Library</span><i class='fa-solid fa-chevron-right chevron'></i></a></div>
 
@@ -1849,7 +2023,7 @@ async def settings_page(
                 <span id='chatgptAccountLabel'>Checking…</span>
                 <i class='fa-solid fa-chevron-right chevron'></i>
             </a>
-            <div id='chatgptAccountNote' style='padding: 4px 0 0 36px; font-size: 0.75rem; color: rgba(255,255,255,0.35);'>
+            <div id='chatgptAccountNote' style='padding: 4px 0 0 36px; font-size: 0.75rem; color: rgba(255, 255, 255, 0.65);'>
                 Run Leo on your own ChatGPT Plus/Pro plan for the models marked “my ChatGPT plan”.
             </div>
         </div>
@@ -1869,13 +2043,13 @@ async def settings_page(
                 <i class="fa-solid fa-cloud-arrow-up"></i>
                 <span>Auto-backup on completion</span>
                 <label style="position: relative; display: inline-block; width: 44px; height: 24px;">
-                    <input type="checkbox" id="autoBackupToggle" style="opacity: 0; width: 0; height: 0;"
+                    <input type="checkbox" id="autoBackupToggle" aria-label="Auto-backup on completion" style="opacity: 0; width: 0; height: 0;"
                         onchange="toggleAutoBackup(this.checked)">
                     <span style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #555; border-radius: 24px; transition: 0.3s;"></span>
                     <span id="autoBackupSlider" style="position: absolute; content: ''; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; border-radius: 50%; transition: 0.3s;"></span>
                 </label>
             </div>
-            <div style="padding: 4px 0 0 36px; font-size: 0.75rem; color: rgba(255,255,255,0.35);">
+            <div style="padding: 4px 0 0 36px; font-size: 0.75rem; color: rgba(255, 255, 255, 0.65);">
                 Runs cloud backup after each task completes
             </div>
         </div>
@@ -1886,13 +2060,13 @@ async def settings_page(
                 <i class="fa-solid fa-arrows-rotate"></i>
                 <span>Auto-refresh on edits</span>
                 <label style="position: relative; display: inline-block; width: 44px; height: 24px;">
-                    <input type="checkbox" id="autoRefreshOnEditToggle" style="opacity: 0; width: 0; height: 0;"
+                    <input type="checkbox" id="autoRefreshOnEditToggle" aria-label="Auto-refresh on edit" style="opacity: 0; width: 0; height: 0;"
                         onchange="toggleAutoRefreshOnEdit(this.checked)">
                     <span style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #555; border-radius: 24px; transition: 0.3s;"></span>
                     <span id="autoRefreshOnEditSlider" style="position: absolute; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; border-radius: 50%; transition: 0.3s;"></span>
                 </label>
             </div>
-            <div style="padding: 4px 0 0 36px; font-size: 0.75rem; color: rgba(255,255,255,0.35);">
+            <div style="padding: 4px 0 0 36px; font-size: 0.75rem; color: rgba(255, 255, 255, 0.65);">
                 Reloads the app preview iframe after each edit_file or write_file tool call
             </div>
         </div>
@@ -1903,15 +2077,20 @@ async def settings_page(
                 <i class="fa-solid fa-chart-pie"></i>
                 <span>Show Token Wheel</span>
                 <label style="position: relative; display: inline-block; width: 44px; height: 24px;">
-                    <input type="checkbox" id="tokenWheelToggle" style="opacity: 0; width: 0; height: 0;"
+                    <input type="checkbox" id="tokenWheelToggle" aria-label="Token usage wheel" style="opacity: 0; width: 0; height: 0;"
                         onchange="toggleTokenWheel(this.checked)">
                     <span style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #555; border-radius: 24px; transition: 0.3s;"></span>
                     <span id="tokenWheelSlider" style="position: absolute; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; border-radius: 50%; transition: 0.3s;"></span>
                 </label>
             </div>
-            <div style="padding: 4px 0 0 36px; font-size: 0.75rem; color: rgba(255,255,255,0.35);">
+            <div style="padding: 4px 0 0 36px; font-size: 0.75rem; color: rgba(255, 255, 255, 0.65);">
                 Shows context window usage percentage in chat
             </div>
+        </div>'''}
+
+        {"" if not is_engineer_or_admin else f'''<div class="card" id="autosave">
+            <div class="card-header">Auto-save</div>
+            {autosave_row}
         </div>'''}
 
         {"" if not is_engineer_or_admin else f'''<div class="card">
@@ -1921,7 +2100,7 @@ async def settings_page(
 
         {"" if not is_engineer_or_admin else f'''<div class="card">
             <div class="card-header">Code Editor</div>
-            <div style="padding: 0 0 12px 0; font-size: 0.75rem; color: rgba(255,255,255,0.35);">
+            <div style="padding: 0 0 12px 0; font-size: 0.75rem; color: rgba(255, 255, 255, 0.65);">
                 The VS Code editor runs in its own container. It is off by default.
                 Turning it on starts the container and shows the Code tab in chat.
                 Turning it off stops the container and hides the Code tab.
@@ -1931,20 +2110,20 @@ async def settings_page(
                 <i class="fa-solid fa-code"></i>
                 <span>Enable VS Code</span>
                 <label style="position: relative; display: inline-block; width: 44px; height: 24px;">
-                    <input type="checkbox" id="vscodeToggle" {'checked' if vscode_on else ''}
+                    <input type="checkbox" id="vscodeToggle" aria-label="VS Code tab" {'checked' if vscode_on else ''}
                         style="opacity: 0; width: 0; height: 0;" onchange="toggleVSCode(this.checked)">
                     <span style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: {'#8b5cf6' if vscode_on else '#555'}; border-radius: 24px; transition: 0.3s;"></span>
                     <span id="vscodeSlider" style="position: absolute; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; border-radius: 50%; transition: 0.3s; transform: translateX({'20px' if vscode_on else '0'});"></span>
                 </label>
             </div>
-            <div id="vscodeStatus" style="padding: 4px 0 0 36px; font-size: 0.75rem; color: rgba(255,255,255,0.35);">
+            <div id="vscodeStatus" style="padding: 4px 0 0 36px; font-size: 0.75rem; color: rgba(255, 255, 255, 0.65);">
                 {'Editor is on. Reload the chat page to see the Code tab.' if vscode_on else 'Editor is off.'}
             </div>
         </div>'''}
 
         {"" if not is_engineer_or_admin else f'''<div class="card">
             <div class="card-header">Browser Tabs</div>
-            <div style="padding: 0 0 12px 0; font-size: 0.75rem; color: rgba(255,255,255,0.35);">
+            <div style="padding: 0 0 12px 0; font-size: 0.75rem; color: rgba(255, 255, 255, 0.65);">
                 Which tabs appear above the app preview. Reload the chat page to see changes.
             </div>
             {browser_tab_rows}
@@ -1956,13 +2135,13 @@ async def settings_page(
                 <i class="fa-solid fa-bolt"></i>
                 <span>Proactively Build After Ticket</span>
                 <label style="position: relative; display: inline-block; width: 44px; height: 24px;">
-                    <input type="checkbox" id="proactiveBuildToggle" style="opacity: 0; width: 0; height: 0;"
+                    <input type="checkbox" id="proactiveBuildToggle" aria-label="Proactive build" style="opacity: 0; width: 0; height: 0;"
                         onchange="toggleProactiveBuild(this.checked)">
                     <span style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #555; border-radius: 24px; transition: 0.3s;"></span>
                     <span id="proactiveBuildSlider" style="position: absolute; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; border-radius: 50%; transition: 0.3s;"></span>
                 </label>
             </div>
-            <div style="padding: 4px 0 0 36px; font-size: 0.75rem; color: rgba(255,255,255,0.35);">
+            <div style="padding: 4px 0 0 36px; font-size: 0.75rem; color: rgba(255, 255, 255, 0.65);">
                 Automatically switches to Engineer mode and starts building after a ticket is written
             </div>
         </div>'''}
@@ -1973,26 +2152,26 @@ async def settings_page(
                 <i class="fa-solid fa-magnifying-glass-chart"></i>
                 <span>Browser Inspect Tool</span>
                 <label style="position: relative; display: inline-block; width: 44px; height: 24px;">
-                    <input type="checkbox" id="browserInspectToggle" style="opacity: 0; width: 0; height: 0;"
+                    <input type="checkbox" id="browserInspectToggle" aria-label="Browser inspect" style="opacity: 0; width: 0; height: 0;"
                         onchange="toggleBrowserInspect(this.checked)">
                     <span style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #555; border-radius: 24px; transition: 0.3s;"></span>
                     <span id="browserInspectSlider" style="position: absolute; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; border-radius: 50%; transition: 0.3s;"></span>
                 </label>
             </div>
-            <div style="padding: 4px 0 0 36px; font-size: 0.75rem; color: rgba(255,255,255,0.35);">
+            <div style="padding: 4px 0 0 36px; font-size: 0.75rem; color: rgba(255, 255, 255, 0.65);">
                 Lets the agent inspect live pages with a headless browser (console logs, DOM, screenshots). Takes effect after the next restart.
             </div>
             <div class="menu-item" style="cursor: default;">
                 <i class="fa-solid fa-window-maximize"></i>
                 <span>Live Browser Tools</span>
                 <label style="position: relative; display: inline-block; width: 44px; height: 24px;">
-                    <input type="checkbox" id="liveBrowserToolsToggle" style="opacity: 0; width: 0; height: 0;"
+                    <input type="checkbox" id="liveBrowserToolsToggle" aria-label="Live browser tools" style="opacity: 0; width: 0; height: 0;"
                         onchange="toggleLiveBrowserTools(this.checked)">
                     <span style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #555; border-radius: 24px; transition: 0.3s;"></span>
                     <span id="liveBrowserToolsSlider" style="position: absolute; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; border-radius: 50%; transition: 0.3s;"></span>
                 </label>
             </div>
-            <div style="padding: 4px 0 0 36px; font-size: 0.75rem; color: rgba(255,255,255,0.35);">
+            <div style="padding: 4px 0 0 36px; font-size: 0.75rem; color: rgba(255, 255, 255, 0.65);">
                 Lets the agent navigate the user's live app preview, read its console logs, and run JavaScript in it. Takes effect after the next restart.
             </div>
         </div>'''}
@@ -2357,8 +2536,10 @@ async def leonardo_md_page(current_user: User = Depends(get_current_user)):
 
     html = f"""
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <link rel="stylesheet" href="/frontend/a11y.css">
+    <script src="/frontend/a11y.js" defer></script>
     <title>LlamaBot - LEONARDO.md</title>
     <link rel="icon" type="image/png" href="/frontend/leonardo-icon.png">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
@@ -2418,7 +2599,7 @@ async def leonardo_md_page(current_user: User = Depends(get_current_user)):
         }}
         .card-header {{
             font-size: 0.85rem;
-            color: rgba(255, 255, 255, 0.5);
+            color: rgba(255, 255, 255, 0.65);
             text-transform: uppercase;
             letter-spacing: 0.5px;
             margin-bottom: 16px;
@@ -2428,7 +2609,7 @@ async def leonardo_md_page(current_user: User = Depends(get_current_user)):
         }}
         .card-header-note {{
             font-size: 0.75rem;
-            color: rgba(255, 255, 255, 0.35);
+            color: rgba(255, 255, 255, 0.65);
             text-transform: none;
             letter-spacing: normal;
         }}
@@ -2492,17 +2673,17 @@ async def leonardo_md_page(current_user: User = Depends(get_current_user)):
         .message.success {{
             display: block;
             background: rgba(34, 197, 94, 0.1);
-            color: #22c55e;
+            color: #4ade80;
             border: 1px solid rgba(34, 197, 94, 0.25);
         }}
         .message.error {{
             display: block;
             background: rgba(239, 68, 68, 0.1);
-            color: #ef4444;
+            color: #fca5a5;
             border: 1px solid rgba(239, 68, 68, 0.25);
         }}
         .read-only-notice {{
-            color: rgba(255, 255, 255, 0.5);
+            color: rgba(255, 255, 255, 0.65);
             font-size: 0.85rem;
             margin-top: 12px;
             display: flex;
@@ -2512,9 +2693,10 @@ async def leonardo_md_page(current_user: User = Depends(get_current_user)):
     </style>
 </head>
 <body>
-    <div class="container">
+    <a class="skip-link" href="#main-content">Skip to main content</a>
+    <div class="container" id="main-content" tabindex="-1">
         <div class="header">
-            <a href="/settings" class="back-btn">
+            <a href="/settings" class="back-btn" aria-label="Back to settings">
                 <i class="fa-solid fa-arrow-left"></i>
             </a>
             <h1>LEONARDO.md</h1>
@@ -2618,8 +2800,10 @@ async def git_history_page(current_user: User = Depends(get_current_user)):
     """Serve the full-page git history visualization."""
     html = """
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <link rel="stylesheet" href="/frontend/a11y.css">
+    <script src="/frontend/a11y.js" defer></script>
     <title>Git History - LlamaBot</title>
     <link rel="icon" type="image/png" href="/frontend/leonardo-icon.png">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
@@ -2628,7 +2812,7 @@ async def git_history_page(current_user: User = Depends(get_current_user)):
             --bg-color: #0d0d1a;
             --panel-bg: #1a1730;
             --text-color: #e0e0e0;
-            --text-secondary: rgba(255, 255, 255, 0.5);
+            --text-secondary: rgba(255, 255, 255, 0.65);
             --border-color: rgba(139, 92, 246, 0.2);
             --accent-color: #8b5cf6;
             --accent-hover: #7c3aed;
@@ -2717,7 +2901,7 @@ async def git_history_page(current_user: User = Depends(get_current_user)):
             align-items: center;
             gap: 8px;
         }
-        .legend-header i { color: var(--accent-color); }
+        .legend-header i { color: #c4b5fd; }
 
         .legend-list {
             flex: 1;
@@ -2752,7 +2936,7 @@ async def git_history_page(current_user: User = Depends(get_current_user)):
 
         .legend-name.head {
             font-weight: 600;
-            color: var(--accent-color);
+            color: #c4b5fd;
         }
 
         /* Graph panel - left side, scrollable */
@@ -2885,7 +3069,7 @@ async def git_history_page(current_user: User = Depends(get_current_user)):
         .commit-sha {
             font-family: 'Monaco', 'Menlo', monospace;
             background: rgba(139, 92, 246, 0.15);
-            color: var(--accent-color);
+            color: #c4b5fd;
             padding: 2px 6px;
             border-radius: 3px;
             cursor: pointer;
@@ -2903,10 +3087,10 @@ async def git_history_page(current_user: User = Depends(get_current_user)):
             padding: 2px 6px;
             border-radius: 3px;
             background: rgba(34, 197, 94, 0.2);
-            color: #22c55e;
+            color: #4ade80;
             white-space: nowrap;
         }
-        .ref-badge.head { background: rgba(139, 92, 246, 0.2); color: #8b5cf6; }
+        .ref-badge.head { background: rgba(139, 92, 246, 0.2); color: #c4b5fd; }
 
         .commit-date {
             min-width: 100px;
@@ -2947,7 +3131,7 @@ async def git_history_page(current_user: User = Depends(get_current_user)):
             font-family: 'Monaco', 'Menlo', monospace;
             font-size: 0.85rem;
             background: rgba(139, 92, 246, 0.2);
-            color: var(--accent-color);
+            color: #c4b5fd;
             padding: 4px 10px;
             border-radius: 4px;
             cursor: pointer;
@@ -3010,7 +3194,7 @@ async def git_history_page(current_user: User = Depends(get_current_user)):
             color: var(--text-secondary);
             margin-bottom: 6px;
         }
-        .detail-meta-row i { width: 14px; color: var(--accent-color); font-size: 0.75rem; }
+        .detail-meta-row i { width: 14px; color: #c4b5fd; font-size: 0.75rem; }
 
         .detail-files {
             background: var(--bg-color);
@@ -3027,7 +3211,7 @@ async def git_history_page(current_user: User = Depends(get_current_user)):
             align-items: center;
             gap: 6px;
         }
-        .detail-files-header i { color: var(--accent-color); font-size: 0.75rem; }
+        .detail-files-header i { color: #c4b5fd; font-size: 0.75rem; }
 
         .detail-files-list {
             max-height: 200px;
@@ -3044,7 +3228,7 @@ async def git_history_page(current_user: User = Depends(get_current_user)):
             border-radius: 3px;
         }
         .file-item:hover { background: rgba(255,255,255,0.05); }
-        .file-item i { color: var(--accent-color); font-size: 0.65rem; }
+        .file-item i { color: #c4b5fd; font-size: 0.65rem; }
         .file-name {
             font-family: 'Monaco', 'Menlo', monospace;
             font-size: 0.7rem;
@@ -3100,8 +3284,9 @@ async def git_history_page(current_user: User = Depends(get_current_user)):
     </style>
 </head>
 <body>
+    <a class="skip-link" href="#main-content">Skip to main content</a>
     <div class="header">
-        <a href="/" class="back-btn"><i class="fa-solid fa-arrow-left"></i></a>
+        <a href="/" class="back-btn" aria-label="Back to chat"><i class="fa-solid fa-arrow-left"></i></a>
         <h1><i class="fa-solid fa-code-branch"></i> Git History</h1>
         <div class="header-actions">
             <button class="btn" onclick="refreshData()">
@@ -3116,17 +3301,17 @@ async def git_history_page(current_user: User = Depends(get_current_user)):
     <div class="main-content">
         <div class="branch-legend" id="branchLegend">
             <div class="legend-header"><i class="fa-solid fa-code-branch"></i> Branches</div>
-            <div class="legend-list" id="legendList"></div>
+            <div class="legend-list" id="legendList" tabindex="0" role="region" aria-label="Branches"></div>
         </div>
-        <div class="graph-panel">
+        <div class="graph-panel" id="main-content" tabindex="-1">
             <div class="graph-toolbar">
                 <input type="text" class="search-box" placeholder="Search commits..." id="searchInput">
-                <select class="branch-filter" id="branchFilter">
+                <select class="branch-filter" id="branchFilter" aria-label="Filter by branch">
                     <option value="">All branches</option>
                 </select>
                 <span class="commit-count" id="commitCount">Loading...</span>
             </div>
-            <div class="graph-container" id="graphContainer">
+            <div class="graph-container" id="graphContainer" tabindex="0" role="region" aria-label="Commit graph" >
                 <div class="loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading commits...</div>
             </div>
         </div>
@@ -3441,7 +3626,7 @@ async def git_history_page(current_user: User = Depends(get_current_user)):
                 const data = await res.json();
                 const files = data.changed_files || [];
                 if (files.length === 0) {
-                    document.getElementById('detailFiles').innerHTML = '<div style="color:#888; font-style:italic;">No files changed</div>';
+                    document.getElementById('detailFiles').innerHTML = '<div style="color:#b0b0b0; font-style:italic;">No files changed</div>';
                 } else {
                     document.getElementById('detailFiles').innerHTML = files.map(f =>
                         '<div class="file-item"><i class="fa-regular fa-file-code"></i><span class="file-name">' + escapeHtml(f) + '</span></div>'
@@ -3562,8 +3747,10 @@ async def scheduled_jobs_page(user: User = Depends(engineer_or_admin_required)):
     """Serve the scheduled jobs management page."""
     html = """
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <link rel="stylesheet" href="/frontend/a11y.css">
+    <script src="/frontend/a11y.js" defer></script>
     <title>LlamaBot Scheduled Jobs</title>
     <link rel="icon" type="image/png" href="/frontend/leonardo-icon.png">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
@@ -3618,7 +3805,7 @@ async def scheduled_jobs_page(user: User = Depends(engineer_or_admin_required)):
         }
         .card-header {
             font-size: 0.85rem;
-            color: rgba(255, 255, 255, 0.5);
+            color: rgba(255, 255, 255, 0.65);
             text-transform: uppercase;
             letter-spacing: 0.5px;
             margin-bottom: 16px;
@@ -3628,7 +3815,7 @@ async def scheduled_jobs_page(user: User = Depends(engineer_or_admin_required)):
         }
         table { width: 100%; border-collapse: collapse; }
         th, td { padding: 12px; text-align: left; border-bottom: 1px solid var(--border-color); }
-        th { color: rgba(255, 255, 255, 0.5); font-weight: 500; font-size: 0.85rem; }
+        th { color: rgba(255, 255, 255, 0.65); font-weight: 500; font-size: 0.85rem; }
         tr:last-child td { border-bottom: none; }
         .badge {
             padding: 4px 10px;
@@ -3637,13 +3824,13 @@ async def scheduled_jobs_page(user: User = Depends(engineer_or_admin_required)):
             font-weight: 500;
             text-transform: uppercase;
         }
-        .badge-enabled { background: rgba(34, 197, 94, 0.15); color: #22c55e; }
-        .badge-disabled { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
-        .badge-completed { background: rgba(34, 197, 94, 0.15); color: #22c55e; }
+        .badge-enabled { background: rgba(34, 197, 94, 0.15); color: #4ade80; }
+        .badge-disabled { background: rgba(239, 68, 68, 0.15); color: #fca5a5; }
+        .badge-completed { background: rgba(34, 197, 94, 0.15); color: #4ade80; }
         .badge-running { background: rgba(139, 92, 246, 0.2); color: #a78bfa; }
-        .badge-failed { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
+        .badge-failed { background: rgba(239, 68, 68, 0.15); color: #fca5a5; }
         .badge-timeout { background: rgba(251, 191, 36, 0.15); color: #fbbf24; }
-        .badge-pending { background: rgba(255, 255, 255, 0.1); color: rgba(255, 255, 255, 0.5); }
+        .badge-pending { background: rgba(255, 255, 255, 0.1); color: rgba(255, 255, 255, 0.65); }
         .btn {
             padding: 6px 12px;
             border: 1px solid var(--border-color);
@@ -3662,11 +3849,11 @@ async def scheduled_jobs_page(user: User = Depends(engineer_or_admin_required)):
             color: white;
         }
         .btn-primary:hover { opacity: 0.9; }
-        .btn-danger { border-color: rgba(239, 68, 68, 0.25); color: #ef4444; }
+        .btn-danger { border-color: rgba(239, 68, 68, 0.25); color: #fca5a5; }
         .btn-danger:hover { background: rgba(239, 68, 68, 0.15); }
         .btn-sm { padding: 4px 8px; font-size: 11px; }
         .form-group { margin-bottom: 16px; }
-        .form-group label { display: block; margin-bottom: 6px; font-size: 0.85rem; color: rgba(255, 255, 255, 0.5); }
+        .form-group label { display: block; margin-bottom: 6px; font-size: 0.85rem; color: rgba(255, 255, 255, 0.65); }
         .form-group input, .form-group select, .form-group textarea {
             width: 100%;
             padding: 10px;
@@ -3689,8 +3876,8 @@ async def scheduled_jobs_page(user: User = Depends(engineer_or_admin_required)):
             margin-bottom: 20px;
             display: none;
         }
-        .message.success { background: rgba(34, 197, 94, 0.1); border: 1px solid rgba(34, 197, 94, 0.25); color: #22c55e; display: block; }
-        .message.error { background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.25); color: #ef4444; display: block; }
+        .message.success { background: rgba(34, 197, 94, 0.1); border: 1px solid rgba(34, 197, 94, 0.25); color: #4ade80; display: block; }
+        .message.error { background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.25); color: #fca5a5; display: block; }
         .message.info { background: rgba(139, 92, 246, 0.1); border: 1px solid rgba(139, 92, 246, 0.25); color: #c4b5fd; display: block; }
         .actions { white-space: nowrap; }
         .modal {
@@ -3755,14 +3942,15 @@ async def scheduled_jobs_page(user: User = Depends(engineer_or_admin_required)):
             color: var(--text-color);
         }
         .tab.active {
-            background: var(--accent-color);
-            border-color: var(--accent-color);
+            color: #fff;
+            background: var(--accent-hover, #7c3aed);
+            border-color: var(--accent-hover, #7c3aed);
         }
         .tab-content { display: none; }
         .tab-content.active { display: block; }
         .cron-help {
             font-size: 11px;
-            color: rgba(255, 255, 255, 0.5);
+            color: rgba(255, 255, 255, 0.65);
             margin-top: 8px;
         }
         .cron-presets {
@@ -3828,15 +4016,16 @@ async def scheduled_jobs_page(user: User = Depends(engineer_or_admin_required)):
         .empty-state {
             text-align: center;
             padding: 40px;
-            color: rgba(255, 255, 255, 0.5);
+            color: rgba(255, 255, 255, 0.65);
         }
         .empty-state i { font-size: 48px; margin-bottom: 16px; }
     </style>
 </head>
 <body>
-    <div class="container">
+    <a class="skip-link" href="#main-content">Skip to main content</a>
+    <div class="container" id="main-content" tabindex="-1">
         <div class="header">
-            <a href="/settings" class="back-btn">
+            <a href="/settings" class="back-btn" aria-label="Back to settings">
                 <i class="fa-solid fa-arrow-left"></i>
             </a>
             <h1>Scheduled Jobs</h1>
@@ -3881,7 +4070,7 @@ async def scheduled_jobs_page(user: User = Depends(engineer_or_admin_required)):
                  Leo edits like any other code. -->
             <div class="card" id="railsTasks">
                 <div class="card-header">App Jobs (Rails, no AI)</div>
-                <p style="font-size: 12px; color: #888; margin-bottom: 16px;">
+                <p style="font-size: 12px; color: #b0b0b0; margin-bottom: 16px;">
                     Plain Ruby jobs your app runs on a schedule, defined in <code>db/recurring.yml</code>.
                     Read-only here &mdash; ask Leo to add or change one.
                 </p>
@@ -3930,7 +4119,7 @@ async def scheduled_jobs_page(user: User = Depends(engineer_or_admin_required)):
         <div id="logs-tab" class="tab-content">
             <div class="card">
                 <div class="card-header">Cron Invocation Logs</div>
-                <p style="font-size: 12px; color: #888; margin-bottom: 16px;">
+                <p style="font-size: 12px; color: #b0b0b0; margin-bottom: 16px;">
                     Every cron ping to /api/scheduled-jobs/invoke is logged here, even when no jobs are due.
                 </p>
                 <table>
@@ -3962,36 +4151,36 @@ async def scheduled_jobs_page(user: User = Depends(engineer_or_admin_required)):
             <form id="jobForm">
                 <input type="hidden" id="jobId">
                 <div class="form-group">
-                    <label>Name</label>
+                    <label for="jobName">Name</label>
                     <input type="text" id="jobName" required placeholder="e.g., Daily Code Review">
                 </div>
                 <div class="form-group">
-                    <label>Description (optional)</label>
+                    <label for="jobDescription">Description (optional)</label>
                     <input type="text" id="jobDescription" placeholder="What this job does">
                 </div>
                 <div class="form-row">
                     <div class="form-group">
-                        <label>Agent</label>
+                        <label for="jobAgent">Agent</label>
                         <select id="jobAgent" required>
                             <option value="">Loading agents…</option>
                         </select>
                     </div>
                     <div class="form-group">
-                        <label>Model</label>
+                        <label for="jobModel">Model</label>
                         <select id="jobModel">
                             <option value="">Loading models…</option>
                         </select>
                     </div>
                 </div>
                 <div class="form-group">
-                    <label>Prompt / Instructions</label>
+                    <label for="jobPrompt">Prompt / Instructions</label>
                     <textarea id="jobPrompt" required placeholder="What should the agent do when it wakes up?"></textarea>
                 </div>
                 <div class="form-group">
                     <label>Cron Expression</label>
                     <div class="form-row">
                         <input type="text" id="jobCron" required placeholder="0 8 * * *" style="flex: 2;">
-                        <select id="jobTimezone" style="flex: 1;">
+                        <select id="jobTimezone" aria-label="Timezone" style="flex: 1;">
                             <option value="UTC">UTC</option>
                             <option value="America/Los_Angeles">Pacific (PT)</option>
                             <option value="America/Denver">Mountain (MT)</option>
@@ -4016,11 +4205,11 @@ async def scheduled_jobs_page(user: User = Depends(engineer_or_admin_required)):
                 </div>
                 <div class="form-row">
                     <div class="form-group">
-                        <label>Timeout (seconds)</label>
+                        <label for="jobTimeout">Timeout (seconds)</label>
                         <input type="number" id="jobTimeout" value="300" min="60" max="3600">
                     </div>
                     <div class="form-group">
-                        <label>Recursion Limit</label>
+                        <label for="jobRecursion">Recursion Limit</label>
                         <input type="number" id="jobRecursion" value="100" min="10" max="1000">
                     </div>
                 </div>
@@ -4052,6 +4241,7 @@ async def scheduled_jobs_page(user: User = Depends(engineer_or_admin_required)):
             'gemini-3-pro': 'Gemini 3 Pro',
             'claude-4.5-haiku': 'Claude 4.5 Haiku',
             'claude-haiku-5.5': 'Claude Haiku 5.5',
+            'claude-haiku-5.5-bedrock': 'Claude Haiku 5.5 (AWS Bedrock)',
             'claude-4.5-sonnet': 'Claude 4.5 Sonnet',
             'gpt-5-mini': 'GPT-5 Mini',
             'gpt-5-codex': 'GPT-5 Codex',
@@ -4159,14 +4349,14 @@ async def scheduled_jobs_page(user: User = Depends(engineer_or_admin_required)):
             }
             tbody.innerHTML = jobs.map(job => `
                 <tr>
-                    <td><strong>${escapeHtml(job.name)}</strong><br><small style="color:#888">${escapeHtml(job.description || '')}</small></td>
+                    <td><strong>${escapeHtml(job.name)}</strong><br><small style="color:#b0b0b0">${escapeHtml(job.description || '')}</small></td>
                     <td>${escapeHtml(job.agent_name)}</td>
-                    <td><code>${escapeHtml(job.cron_expression)}</code><br><small style="color:#888">${escapeHtml(job.timezone)}</small></td>
+                    <td><code>${escapeHtml(job.cron_expression)}</code><br><small style="color:#b0b0b0">${escapeHtml(job.timezone)}</small></td>
                     <td>${job.last_run_at ? formatDate(job.last_run_at) : '-'}</td>
                     <td>${job.next_run_at ? formatDate(job.next_run_at) : '-'}</td>
                     <td>
                         <label class="toggle">
-                            <input type="checkbox" ${job.is_enabled ? 'checked' : ''} onchange="toggleJob(${job.id}, this.checked)">
+                            <input type="checkbox" aria-label="Job enabled" ${job.is_enabled ? 'checked' : ''} onchange="toggleJob(${job.id}, this.checked)">
                             <span class="toggle-slider"></span>
                         </label>
                     </td>
@@ -4207,11 +4397,11 @@ async def scheduled_jobs_page(user: User = Depends(engineer_or_admin_required)):
             notice.innerHTML = notes.join('');
 
             if (!data.available) {
-                tbody.innerHTML = `<tr><td colspan="5"><small style="color:#888">${escapeHtml(data.reason || 'Not available.')}</small></td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="5"><small style="color:#b0b0b0">${escapeHtml(data.reason || 'Not available.')}</small></td></tr>`;
                 return;
             }
             if (tasks.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="5"><small style="color:#888">No app jobs scheduled. Ask Leo to schedule one in db/recurring.yml.</small></td></tr>';
+                tbody.innerHTML = '<tr><td colspan="5"><small style="color:#b0b0b0">No app jobs scheduled. Ask Leo to schedule one in db/recurring.yml.</small></td></tr>';
                 return;
             }
             const badge = status => {
@@ -4225,7 +4415,7 @@ async def scheduled_jobs_page(user: User = Depends(engineer_or_admin_required)):
                 ).join('');
                 return `
                 <tr>
-                    <td><strong>${escapeHtml(task.key)}</strong><br><small style="color:#888">${escapeHtml(task.description || '')}</small></td>
+                    <td><strong>${escapeHtml(task.key)}</strong><br><small style="color:#b0b0b0">${escapeHtml(task.description || '')}</small></td>
                     <td><code>${escapeHtml(task.class_name || task.command || '')}</code></td>
                     <td><code>${escapeHtml(task.schedule)}</code></td>
                     <td>${lastRuns}</td>
@@ -4504,8 +4694,10 @@ async def backup_history_page(current_user: User = Depends(get_current_user)):
     """Serve the backup history page."""
     html = """
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <link rel="stylesheet" href="/frontend/a11y.css">
+    <script src="/frontend/a11y.js" defer></script>
     <title>Backup History</title>
     <link rel="icon" type="image/png" href="/frontend/leonardo-icon.png">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
@@ -4567,19 +4759,19 @@ async def backup_history_page(current_user: User = Depends(get_current_user)):
         }
         .backup-status-badge.completed {
             background: rgba(34, 197, 94, 0.15);
-            color: #22c55e;
+            color: #4ade80;
         }
         .backup-status-badge.failed {
             background: rgba(239, 68, 68, 0.15);
-            color: #ef4444;
+            color: #fca5a5;
         }
         .backup-time {
             font-size: 0.85rem;
-            color: rgba(255, 255, 255, 0.5);
+            color: rgba(255, 255, 255, 0.65);
         }
         .backup-error {
             font-size: 0.8rem;
-            color: #ef4444;
+            color: #fca5a5;
             background: rgba(239, 68, 68, 0.1);
             padding: 8px 12px;
             border-radius: 4px;
@@ -4590,7 +4782,7 @@ async def backup_history_page(current_user: User = Depends(get_current_user)):
         }
         .backup-output {
             font-size: 0.75rem;
-            color: rgba(255, 255, 255, 0.6);
+            color: rgba(255, 255, 255, 0.65);
             background: #0d0d1a;
             padding: 8px 12px;
             border-radius: 4px;
@@ -4603,13 +4795,13 @@ async def backup_history_page(current_user: User = Depends(get_current_user)):
         }
         .backup-output summary {
             cursor: pointer;
-            color: rgba(255, 255, 255, 0.5);
+            color: rgba(255, 255, 255, 0.65);
             font-size: 0.75rem;
             margin-bottom: 4px;
         }
         .empty-state {
             text-align: center;
-            color: rgba(255, 255, 255, 0.5);
+            color: rgba(255, 255, 255, 0.65);
             padding: 60px 20px;
         }
         .empty-state i {
@@ -4620,7 +4812,8 @@ async def backup_history_page(current_user: User = Depends(get_current_user)):
     </style>
 </head>
 <body>
-    <div class="container">
+    <a class="skip-link" href="#main-content">Skip to main content</a>
+    <div class="container" id="main-content" tabindex="-1">
         <div class="header">
             <h1><i class="fa-solid fa-cloud-arrow-up" style="margin-right: 10px;"></i>Backup History</h1>
         </div>

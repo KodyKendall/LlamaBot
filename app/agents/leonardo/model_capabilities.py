@@ -19,6 +19,9 @@ MODEL_CAPABILITIES = {
     # Claude models support images and PDFs only (no video)
     'claude-4.5-haiku': {'images': True, 'video': False, 'pdf': True},
     'claude-haiku-5.5': {'images': True, 'video': False, 'pdf': True},
+    # LP-29. PDF off until verified: Bedrock Converse takes documents in its own
+    # block format, and the Anthropic-shaped PDF block we build is untested there.
+    'claude-haiku-5.5-bedrock': {'images': True, 'video': False, 'pdf': False},
     'claude-4.5-sonnet': {'images': True, 'video': False, 'pdf': True},
     'claude-sonnet-4': {'images': True, 'video': False, 'pdf': True},
     'claude-opus-4': {'images': True, 'video': False, 'pdf': True},
@@ -108,6 +111,10 @@ ZDR_COMPLIANT = {
     'gemini-2.5-pro': False,
     'claude-4.5-haiku': False,
     'claude-haiku-5.5': False,
+    # LP-29: Bedrock neither stores nor trains on prompts/outputs, and traffic
+    # stays in the box's own AWS account. Still needs the mothership's
+    # allowed_models to list it before a ZDR box may use it.
+    'claude-haiku-5.5-bedrock': True,
     'claude-4.5-sonnet': False,
     'claude-sonnet-4': False,
     'claude-opus-4': False,

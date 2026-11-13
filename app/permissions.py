@@ -31,6 +31,7 @@ Design rules, chosen deliberately:
 """
 import json
 import logging
+import time
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -107,6 +108,41 @@ DEFAULT_ROLE_MODES: dict[str, list[str]] = {
 
 # Role used when a user's role is missing or unrecognised (least privilege).
 FALLBACK_ROLE = "user"
+
+# ---------------------------------------------------------------------------
+# Tool grants on ZDR boxes (LP-33, HECVAT AILM-01). Unused on a normal box.
+#
+# An allowlist: a tool added later, or one from a client's own agent, is refused
+# until someone decides otherwise. Adding a name here makes it available to every
+# role on every institutional box, so it must not change anything.
+# ---------------------------------------------------------------------------
+READ_ONLY_TOOLS = frozenset({
+    # Reading the app
+    "ls", "read_file", "grep_files", "glob_files", "git_status", "tail_rails_logs",
+    "read_uploaded_file", "view_image", "get_browser_js_logs", "read_leonardo_md", "read_tech_spec",
+    "read_brand_guide", "read_skill", "use_skill", "list_skills", "list_memories", "list_goals",
+    "ls_agents", "list_books", "get_book",
+    # Reading spreadsheets
+    "list_spreadsheets", "list_sheets", "read_headers", "get_sheet_dimensions",
+    "get_cell_value", "get_chart_data", "sample_rows", "summarize_column",
+    "detect_column_types", "data_quality_check", "statistical_analysis",
+    "find_patterns_and_anomalies", "find_cross_sheet_relationships", "check_formulas",
+    # Talking to the user, and the agent's own notes
+    "ask_user_question", "ask_user_uiux_question", "write_todos", "suggest_plan_mode",
+    "offer_implementation",
+    # Its sub-agent only has read tools, and they are gated here too
+    "delegate_research",
+    # Under ZDR it only answers "web search is disabled" and never calls the vendor
+    "internet_search",
+})
+
+ROLE_WRITE_TOOLS_SETTING_KEY = "role_write_tools"
+_GRANTS_TTL_SECONDS = 30
+_grants_cache: Optional[tuple] = None  # (expires_at, grants)
+
+# Scheduled jobs run with no user. They get this pseudo-role, off until granted,
+# in the same way the gem's embedded chat gets ``rails``.
+SCHEDULED_ROLE = "scheduled"
 
 
 def known_modes(custom_modes: Optional[dict] = None) -> set[str]:
@@ -291,3 +327,154 @@ def can_run_agent(
     everyone.
     """
     return agent_name in allowed_agent_names(session, role, is_admin, custom)
+
+
+def role_write_tool_grants() -> dict[str, bool]:
+    """Which roles an admin has given write and shell tools. Off unless saved."""
+    from sqlmodel import Session
+
+    from app.db import engine
+    from app.models import SiteSetting
+
+    with Session(engine) as session:
+        setting = session.get(SiteSetting, ROLE_WRITE_TOOLS_SETTING_KEY)
+        grants = json.loads(setting.value) if setting and setting.value else {}
+    return {role: value is True for role, value in grants.items()} if isinstance(grants, dict) else {}
+
+
+def _cached_grants() -> dict[str, bool]:
+    """Checked on every tool call, so cached briefly. Failing to read grants nothing."""
+    global _grants_cache
+    now = time.monotonic()
+    if _grants_cache and _grants_cache[0] > now:
+        return _grants_cache[1]
+    try:
+        grants = role_write_tool_grants()
+    except Exception as e:  # noqa: BLE001
+        logger.error("Could not read role tool grants, granting none: %s", e)
+        return {}
+    _grants_cache = (now + _GRANTS_TTL_SECONDS, grants)
+    return grants
+
+
+def invalidate_tool_grants() -> None:
+    global _grants_cache
+    _grants_cache = None
+
+
+def tool_allowed(tool_name: str, role: Optional[str], is_admin: bool = False) -> bool:
+    """On a ZDR box, may this role run this tool? Admins always may."""
+    if is_admin or tool_name in READ_ONLY_TOOLS:
+        return True
+    if not role:
+        return False
+    return _cached_grants().get(role, False) is True
+
+
+# ---------------------------------------------------------------------------
+# Separation of duties (LP-32, HECVAT APPL-05)
+#
+#   owner (is_admin)     both of the below, and the only one who may grant both
+#   security admin       users, role grants, security policy, audit log
+#   system admin         settings, deploys, agent modes, data
+#   standard             everyone else
+#
+# Rails has the same three roles on its own users table (llama_bot_rails
+# AdministrativeRoles). The two sides are separate accounts: same rule, not one record.
+# ---------------------------------------------------------------------------
+
+# Routes that change the system. On a normal box an engineer keeps them; a security
+# admin never has them, and under ZDR only a system admin does.
+SYSTEM_ROUTES = (
+    "/api/update", "/api/env-vars", "/api/env-toggles", "/api/custom-env-vars",
+    "/api/site-settings", "/api/vscode", "/api/skills", "/api/leonardo-md",
+    "/api/write_files", "/api/setup", "/api/slash-commands", "/api/github",
+    "/api/auto-backup", "/api/scheduled-jobs", "/api/checkpoints", "/api/git",
+    "/api/instance-lock", "/api/role-modes",
+)
+# The ones among those that the chat UI also reads, so only writing them is refused.
+_SYSTEM_READS_ALLOWED = (
+    "/api/site-settings", "/api/skills", "/api/slash-commands", "/api/checkpoints",
+    "/api/git", "/api/instance-lock", "/api/leonardo-md", "/api/update", "/api/github/status",
+)
+SYSTEM_PAGES = ("/settings/environment", "/scheduled-jobs", "/git-history")
+
+# A security-only admin may change nothing else. Default-deny, so a route added later is
+# closed to them until someone decides otherwise.
+SECURITY_ADMIN_WRITES = (
+    "/api/users", "/api/role-write-tools", "/api/sensitive-data-rules",
+    "/api/user/visible-agents", "/api/update-activity", "/api/feedback",
+    "/api/frontend-error", "/logout",
+)
+
+_READ_METHODS = {"GET", "HEAD", "OPTIONS"}
+
+
+def _matches(path: str, routes: tuple) -> bool:
+    return any(path == route or path.startswith(route + "/") for route in routes)
+
+
+def holds_security_admin(user) -> bool:
+    return getattr(user, "is_admin", False) is True or getattr(user, "is_security_admin", False) is True
+
+
+def holds_system_admin(user) -> bool:
+    return getattr(user, "is_admin", False) is True or getattr(user, "is_system_admin", False) is True
+
+
+def is_security_only(user) -> bool:
+    return holds_security_admin(user) and not holds_system_admin(user)
+
+
+def holds_admin_role(user) -> bool:
+    return holds_security_admin(user) or holds_system_admin(user)
+
+
+def route_allowed(user, method: str, path: str, zdr_enforced: bool) -> bool:
+    """The domain boundary, checked on every signed-in request."""
+    if getattr(user, "is_admin", False) is True:
+        return True
+    security_only = is_security_only(user)
+    write = method.upper() not in _READ_METHODS
+    system_route = _matches(path, SYSTEM_ROUTES) and (write or not _matches(path, _SYSTEM_READS_ALLOWED))
+    if system_route or _matches(path, SYSTEM_PAGES):
+        return holds_system_admin(user) or (not security_only and not zdr_enforced)
+    if security_only and write:
+        return _matches(path, SECURITY_ADMIN_WRITES)
+    return True
+
+
+def admin_change_refusal(actor, target, changes: dict, reason: Optional[str]) -> Optional[tuple]:
+    """Why ``actor`` may not make ``changes`` to ``target``: ``(status, message)``, or None.
+
+    ``target`` is None when the account is being created.
+    """
+    role_keys = {"is_admin", "is_security_admin", "is_system_admin"}
+    touches_roles = any(key in changes for key in role_keys)
+    actor_is_owner = bool(actor.is_admin)
+
+    if not holds_security_admin(actor):
+        return 403, "Security administrator required"
+    if changes.get("is_admin") is not None and not actor_is_owner:
+        return 403, "Only an account owner can change owner status"
+    if target is not None and target.is_admin and not actor_is_owner:
+        return 403, "Only an account owner can change another owner"
+    if target is not None and target.id == actor.id and touches_roles and not actor_is_owner:
+        return 403, "You cannot change your own roles"
+    if (
+        target is not None
+        and changes.get("new_password") is not None
+        and holds_admin_role(target)
+        and not actor_is_owner
+    ):
+        # Setting it would hand over everything that administrator can do.
+        return 403, "Only an account owner can set an administrator's password"
+
+    security = changes.get("is_security_admin", getattr(target, "is_security_admin", False))
+    system = changes.get("is_system_admin", getattr(target, "is_system_admin", False))
+    if touches_roles and security and system:
+        if not actor_is_owner:
+            return 403, "Only an account owner can give one person both administrator roles"
+        if not (reason or "").strip():
+            return 400, "Giving one person both administrator roles needs a logged reason"
+    return None

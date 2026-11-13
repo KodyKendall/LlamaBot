@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
 
-from app.dependencies import admin_required, engineer_or_admin_required, get_db_session
+from app.dependencies import engineer_or_admin_required, get_db_session, system_admin_required
 from app.models import User
 from app.services import env_settings_service as svc
 
@@ -61,7 +61,7 @@ def client(db_session, env_file):
     """TestClient authenticated as an admin."""
     from main import app
 
-    app.dependency_overrides[admin_required] = lambda: ADMIN
+    app.dependency_overrides[system_admin_required] = lambda: ADMIN
     app.dependency_overrides[engineer_or_admin_required] = lambda: ADMIN
     app.dependency_overrides[get_db_session] = lambda: db_session
     try:
@@ -151,8 +151,8 @@ def test_model_list_does_not_name_env_vars(client, monkeypatch):
         ("/api/env-vars", "GET", "engineer_or_admin_required"),
         ("/api/env-vars/pending", "GET", "engineer_or_admin_required"),
         ("/api/env-toggles/{key}", "PUT", "engineer_or_admin_required"),
-        ("/api/custom-env-vars", "POST", "admin_required"),
-        ("/api/custom-env-vars/{name}", "DELETE", "admin_required"),
+        ("/api/custom-env-vars", "POST", "system_admin_required"),
+        ("/api/custom-env-vars/{name}", "DELETE", "system_admin_required"),
     ],
 )
 def test_routes_keep_their_intended_guard(path, method, guard):
@@ -168,7 +168,7 @@ def test_routes_keep_their_intended_guard(path, method, guard):
 
 
 def test_engineer_cannot_manage_custom_vars(engineer_client):
-    """admin_required is not overridden here, so the real gate runs."""
+    """system_admin_required is not overridden here, so the real gate runs."""
     resp = engineer_client.post("/api/custom-env-vars", json={"name": "X_Y", "value": "1"})
     assert resp.status_code in (401, 403)
 

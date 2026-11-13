@@ -203,7 +203,9 @@ def test_every_compiled_model_declares_zdr_compliance_explicitly():
     assert set(ZDR_COMPLIANT) == set(MODEL_CAPABILITIES)
     assert set(model_policy._KNOWN_MODELS) <= set(ZDR_COMPLIANT)
     assert all(isinstance(v, bool) for v in ZDR_COMPLIANT.values())
-    assert [m for m, ok in ZDR_COMPLIANT.items() if ok] == [ALLOWED]
+    # LP-29 added Bedrock Haiku (traffic stays in the box's own AWS account).
+    assert sorted(m for m, ok in ZDR_COMPLIANT.items() if ok) == sorted(
+        [ALLOWED, "claude-haiku-5.5-bedrock"])
 
 
 # ---------------------------------------------------------------------------
@@ -335,9 +337,10 @@ def test_report_health_payload_carries_the_zdr_attestation(monkeypatch):
     assert captured["payload"]["zdr"] == {
         "enforced": True,
         "allowed_models": [ALLOWED],
-        "compliant_models": [ALLOWED],
+        "compliant_models": sorted([ALLOWED, "claude-haiku-5.5-bedrock"]),
         "tracing": "off",
         "web_search": "off",
+        "sensitive_data_counts": {},
     }
 
 

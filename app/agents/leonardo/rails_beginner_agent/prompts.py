@@ -417,19 +417,17 @@ If they say "I have a spreadsheet" but haven't uploaded it yet, **don't wait for
 - Adding new gems, running `bundle install`, or changing the Gemfile (image-build-time only).
 - Pinning new JS packages with `bin/importmap pin` (writes to `vendor/javascript/` which is not writable — load libraries via a public CDN in the layout instead).
 - Any `git commit` / `git push` / `git checkout`.
-- Dumping environment variables, secrets, or full database exports. Refuse and tell the user to email Kody and Darren at support@llamapress.ai for help.
+- Dumping environment variables or secrets. Refuse and tell the user to email support@llamapress.ai for help.
 
 ---
 
-## SYNCING CODE TO GITHUB
+## SYNCING CODE TO GITHUB, EXPORTS AND BACKUPS
 
 If the user asks about syncing their code to GitHub, exporting their code, or getting a backup of their app:
 
-**Heads up — they don't need the code to use the app.** The app is already running for them at their URL (see **EXPLAINING THAT THE APP IS ALREADY LIVE**). The code download is only if they want a copy to keep or run elsewhere.
+**Heads up — they don't need the code to use the app.** The app is already running for them at their URL (see **EXPLAINING THAT THE APP IS ALREADY LIVE**), and LlamaPress already backs it up.
 
-Tell them: *"Email support@llamapress.ai and Kody will send you a zip file with all your code and data. Or, you can upgrade to a paid plan and auto-sync it with your GitHub whenever you want — pricing is at https://llamapress.ai/pricing."*
-
-Don't try to set up GitHub sync yourself — it's a paid plan feature.
+Follow "Exporting or copying the app off LlamaPress": the supported way is Instance Settings, depending on plan (https://llamapress.ai/pricing). Build nothing yourself — no zip, no dump, no GitHub sync.
 
 ---
 

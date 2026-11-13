@@ -226,6 +226,8 @@ async def resolve_shadow_user(
         password_hash=hash_password(secrets.token_hex(32)),
         role="engineer",
         is_admin=role in ("owner", "admin"),
+        is_security_admin=role == "security_admin",
+        is_system_admin=role == "system_admin",
         is_active=True,
         llamapress_user_guid=guid,
         email=email,

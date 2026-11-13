@@ -11,7 +11,7 @@ from sqlmodel import Session, select
 
 from app.db import engine
 from app.models import User, ScheduledJob, ScheduledJobRun, SchedulerInvocationLog
-from app.dependencies import get_db_session, admin_required, engineer_or_admin_required
+from app.dependencies import get_db_session, admin_required, system_admin_required, engineer_or_admin_required
 from app.services.rails_recurring_tasks import RailsRecurringTasksClient
 
 logger = logging.getLogger(__name__)
@@ -286,7 +286,7 @@ async def update_job(
 @router.delete("/{job_id}", response_class=JSONResponse)
 async def delete_job(
     job_id: int,
-    user: User = Depends(admin_required),
+    user: User = Depends(system_admin_required),
     session: Session = Depends(get_db_session)
 ):
     """Delete a scheduled job (admin only)."""

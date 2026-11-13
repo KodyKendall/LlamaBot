@@ -107,6 +107,15 @@ async def execute_agent_headless(
         "recursion_limit": recursion_limit
     }
 
+    # No user behind a scheduled run: its own role, read-only on a ZDR box until
+    # an admin grants it, and its own tool budget (LP-33).
+    from app.agents.leonardo import tool_limits
+    from app.lib.request_context import set_current_principal
+    from app.permissions import SCHEDULED_ROLE
+
+    set_current_principal(SCHEDULED_ROLE)
+    tool_limits.start_turn()
+
     # Execute with timeout
     output_messages = []
     total_input_tokens = 0

@@ -33,6 +33,7 @@ from app.agents.leonardo.pyxl_agent.tools import (
     read_tech_spec, write_tech_spec,
 )
 from app.agents.leonardo.pyxl_agent.prompts import EXCEL_ANALYSIS_PROMPT
+from app.agents.leonardo.export_rules import NO_APP_EXPORT_RULES
 from app.agents.leonardo.project_context import resolve_base_prompt
 from app.agents.leonardo.rails_agent.middleware import (
     check_failure_limit,
@@ -52,7 +53,7 @@ def get_cached_system_prompt():
         content=[
             {
                 "type": "text",
-                "text": base_prompt,
+                "text": base_prompt + NO_APP_EXPORT_RULES,
                 "cache_control": {"type": "ephemeral"},
             }
         ]

@@ -22,25 +22,13 @@ const CHAT_HTML = readFileSync(resolve(APP_ROOT, 'frontend', 'chat.html'), 'utf8
 const MUSE = 'muse-spark-1.2-contributor';
 const DS_VISION = 'deepseek-v4-flash-vision-exp';
 
-/** The auto-switch block, sliced out so assertions can't match elsewhere. */
-const autoSwitchBlock = INDEX_JS.slice(
-  INDEX_JS.indexOf('--- Auto-switch model when an image is attached'),
-  INDEX_JS.indexOf('--- end auto-switch ---'),
-);
+// LP-44 (0.7.20) removed the automatic switch to this model: an image on a
+// text-only model now gets a notice naming the models that can see images
+// (tests/js/uploaded_image_notice.test.mjs). `vision_model` still decides whether
+// the box can see images at all (visionModelAvailable), so its contract stays.
 
-test('the auto-switch block was actually found', () => {
-  // Guard the slice itself — a rename would make every assertion below vacuous.
-  assert.ok(autoSwitchBlock.length > 200, 'auto-switch block not found in index.js');
-});
-
-test('the switch target comes from the backend, not a constant', () => {
+test('the vision model comes from the backend, not a constant', () => {
   assert.match(INDEX_JS, /this\.visionModel = data\.vision_model/);
-  assert.match(autoSwitchBlock, /this\.visionModel/);
-  assert.doesNotMatch(
-    autoSwitchBlock,
-    /['"]muse-spark-1\.2-contributor['"]/,
-    'the auto-switch must not name a model id — it is box-dependent',
-  );
 });
 
 test('an empty vision_model is preserved, not replaced by the legacy default', () => {
@@ -53,32 +41,20 @@ test('an empty vision_model is preserved, not replaced by the legacy default', (
 
 test('an older backend that omits the field keeps the pre-0.7.5 behaviour', () => {
   assert.match(INDEX_JS, /LEGACY_IMAGE_MODEL = 'muse-spark-1\.2-contributor'/);
-  // ...and it is only ever a skew fallback, never the general default: the two
-  // uses are the fetch fallback and the send-path guard.
+  // ...and it is only ever a skew fallback, never the general default.
   assert.equal(
     (INDEX_JS.match(/LEGACY_IMAGE_MODEL/g) || []).length,
-    3,
-    'declaration + fetch fallback + send-path guard',
+    2,
+    'declaration + fetch fallback',
   );
 });
 
-test('the switch notice names the model the user is actually moved to', () => {
-  // Was a hardcoded IMAGE_MODEL_LABEL string, which would now lie on a DeepSeek
-  // box. modelLabel() reads the label off the dropdown option instead.
-  assert.doesNotMatch(INDEX_JS, /IMAGE_MODEL_LABEL/);
-  assert.match(autoSwitchBlock, /this\.modelLabel\(imageModel\)/);
-});
-
-test('the vision model is offered in the dropdown so the switch has an option', () => {
-  // setModel() drives the <select>; a target with no <option> silently no-ops.
+test('the vision model is offered in the dropdown so the user can switch to it', () => {
   const block = CHAT_HTML.split('data-llamabot="model-select"')[1].split('</select>')[0];
   assert.ok(block.includes(`value="${DS_VISION}"`), `${DS_VISION} missing from the dropdown`);
   assert.ok(block.includes(`value="${MUSE}"`), `${MUSE} missing from the dropdown`);
 });
 
-test('a disabled target still refuses instead of sending', () => {
-  // The refusal path is what stops an image reaching a text-only model and
-  // 400ing mid-stream as a stack trace in the user's face.
-  assert.match(autoSwitchBlock, /imageModelAvailable/);
-  assert.match(autoSwitchBlock, /this\.refuseImageAttachment\(\)/);
+test('nothing switches the model for an image any more (LP-44)', () => {
+  assert.doesNotMatch(INDEX_JS, /setModel\(imageModel/);
 });

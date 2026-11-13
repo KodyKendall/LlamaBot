@@ -57,6 +57,30 @@ INDEX_URL = "https://llamapress.ai/cookbook/u/{handle}"
 RECIPE_URL = "https://llamapress.ai/cookbook/u/{handle}/{slug}"
 PUBLISH_GUIDE_URL = "https://llamapress.ai/cookbook/publish-to-your-personal-cookbook.md"
 
+# LP-28 (FR-5): a ZDR box must not publish free text to the mothership. Publishing is
+# a prompt-driven curl, not a tool, so the box-side control is to stop telling Leo how
+# and tell it to refuse; the mothership rejecting ZDR publishes is the hard block.
+ZDR_NO_PUBLISH = (
+    "This is a zero-data-retention workspace: do NOT publish recipes, support "
+    "incidents, comments or any other workspace content to llamapress.ai, even if "
+    "the base prompt says how. If asked, reply: \"Not available in a "
+    "zero-data-retention workspace.\""
+)
+ZDR_NOTICE = (
+    "\n\n---\n\n"
+    "# Your Personal Cookbook (publishing unavailable)\n\n" + ZDR_NO_PUBLISH + "\n"
+)
+
+
+def _zdr_enforced() -> bool:
+    """Fails closed: an unreadable ZDR state counts as ZDR."""
+    try:
+        from app.agents.leonardo import zdr
+
+        return bool(zdr.enforced())
+    except Exception:  # noqa: BLE001
+        return True
+
 
 # ---------------------------------------------------------------------------
 # Cache
@@ -226,14 +250,16 @@ def build_personal_cookbook_context() -> str:
     Emitting nothing is the common case and it must cost zero tokens — most boxes have an
     owner who has never published a recipe.
     """
+    zdr_on = _zdr_enforced()
+
     try:
         guides = get_cached_personal_recipes()
     except Exception as e:  # noqa: BLE001 - an enrichment may never break a turn
         logger.warning(f"Could not read personal cookbook cache: {e}")
-        return ""
+        return ZDR_NOTICE if zdr_on else ""
 
     if not guides:
-        return ""
+        return ZDR_NOTICE if zdr_on else ""
 
     try:
         handle = next((g.get("handle") for g in guides if g.get("handle")), "")
@@ -251,9 +277,12 @@ def build_personal_cookbook_context() -> str:
             "\nWhen the user refers to something they saved, built on another Leo, or "
             '"their" pattern/style/component, curl the matching `.md` above and follow it '
             "before inventing anything. An `@cookbook:<slug> (url)` mention in their "
-            "message means they picked that recipe — curl that URL first. To SAVE a new "
-            f"pattern, follow {PUBLISH_GUIDE_URL} — it documents where this box's "
-            "credentials live; do not read them from the environment.\n"
+            "message means they picked that recipe — curl that URL first. "
+            + (ZDR_NO_PUBLISH if zdr_on else (
+                f"To SAVE a new pattern, follow {PUBLISH_GUIDE_URL} — it documents where "
+                "this box's credentials live; do not read them from the environment."
+            ))
+            + "\n"
         )
 
         budget = MAX_BLOCK_CHARS - len(header) - len(footer)

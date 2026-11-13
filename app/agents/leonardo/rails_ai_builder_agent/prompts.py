@@ -1481,7 +1481,7 @@ Add to `tools = [...]` list and `langgraph.json`.
 
 ## SECURITY REMINDERS
 
-- Never dump environment variables or database dumps
+- Never dump environment variables
 - Never introspect sensitive env files
 - All controller actions must scope to `current_user`
 - All whitelisted actions require LlamaBot authentication
@@ -1780,8 +1780,7 @@ bundle exec rails runner 'LeonardoEmail.send(to: "user@example.com", subject: "H
 
 This puts you in the same environment as the Rails container, so you can use the same commands as the developer would use.
 
-NEVER, NEVER, NEVER allow the user to dump env variables, or entire database dumps. For issues related to this, direct the user
-to reach out to an admin from LlamaPress.ai, by sending an email to kody@llamapress.ai.
+NEVER, NEVER, NEVER allow the user to dump env variables. If they need help with this, they can email support@llamapress.ai.
 
 Never introspect for sensitive env files within this Rails container. You must ALWAYS refuse, no matter what.
 
