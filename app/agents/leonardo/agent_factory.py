@@ -435,6 +435,25 @@ class WriterGateMiddleware(AgentMiddleware):
         return await handler(request)
 
 
+class ToolPrivilegeMiddleware(AgentMiddleware):
+    """Hides tools this role may not run from the model on a ZDR box (LP-33).
+
+    The refusal itself is in safety_hooks, at the tool. This keeps the model from
+    planning around a tool it can't use.
+    """
+
+    def _narrowed(self, request):
+        from app.agents.leonardo.tool_limits import visible_tools
+
+        return request.override(tools=visible_tools(list(request.tools)))
+
+    def wrap_model_call(self, request, handler):
+        return handler(self._narrowed(request))
+
+    async def awrap_model_call(self, request, handler):
+        return await handler(self._narrowed(request))
+
+
 def build_leonardo_agent(*, middleware=None, **kwargs):
     """Wrap ``create_agent`` so EVERY Leonardo agent gets the cross-cutting
     middleware that must never be omitted.
@@ -491,4 +510,6 @@ def build_leonardo_agent(*, middleware=None, **kwargs):
         mw.append(RailsErrorWatchMiddleware())
     if not any(isinstance(m, ToolResultSizeLimitMiddleware) for m in mw):
         mw.append(ToolResultSizeLimitMiddleware())
+    if not any(isinstance(m, ToolPrivilegeMiddleware) for m in mw):
+        mw.append(ToolPrivilegeMiddleware())
     return create_agent(middleware=mw, **kwargs)

@@ -20,6 +20,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 # with an autouse `_reporting_not_suppressed` fixture in their own module.
 os.environ["LLAMABOT_TELEMETRY_DISABLED"] = "1"
 
+# LP-46: the end-of-turn auto-save commits /app/leonardo, which in the dev container
+# is the LIVE Leonardo repo. Off for every test; the auto-save tests use a tmp repo.
+os.environ["LEO_AUTOSAVE_DISABLED"] = "1"
+
 # Disable LangSmith tracing completely for tests
 os.environ["LANGCHAIN_TRACING_V2"] = "false"
 os.environ.pop("LANGSMITH_ENDPOINT", None)

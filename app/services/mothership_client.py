@@ -6,10 +6,12 @@ Handles communication with the LlamaPressLeo mothership for:
 - Graceful teardown notification (on SIGTERM)
 """
 
+import hashlib
 import httpx
 import json
 import logging
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -38,6 +40,86 @@ def _zdr_report() -> dict:
     except Exception as e:  # noqa: BLE001
         logger.error(f"Could not build the ZDR report: {e}")
         return {"enforced": None, "error": "unavailable"}
+
+
+def _autosave_report() -> Optional[bool]:
+    """Is end-of-turn auto-save on (LP-49)? None if it can't be read. Never raises."""
+    try:
+        from app.services import checkpoint_service
+
+        return checkpoint_service.autosave_enabled()
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"Could not read the auto-save setting: {e}")
+        return None
+
+
+# ---------------------------------------------------------------------------
+# LP-28: ZDR telemetry redaction
+#
+# The mothership drops free text from ZDR boxes on receipt (2026-10-31). This
+# is the independent box-side layer: on a ZDR box, chat text, tool arguments,
+# error text and feedback notes never go on the wire at all. What survives is
+# structure — classes, fingerprints, frame locations, names, counts, timings.
+# ---------------------------------------------------------------------------
+
+ZDR_REDACTED = "[redacted: ZDR workspace]"
+
+#: The only turn-metrics keys a ZDR box reports, and only when numeric.
+ZDR_TURN_METRIC_KEYS = (
+    "total_ms", "ttft_ms", "model_ms", "tool_ms", "overhead_ms", "model_calls",
+    "tool_calls", "input_tokens", "output_tokens", "tokens_per_second",
+)
+
+# Frame references only — never the quoted source line under a Python frame.
+_PY_FRAME = re.compile(r'^\s*File "[^"\n]*", line \d+(, in [^\n]*)?$')
+# JS stack frames: "at fn (url:line:col)" / "at url:line:col".
+_JS_FRAME = re.compile(r"^\s*at \S.*:\d+(:\d+)?\)?$")
+_QUERY_IN_URL = re.compile(r"\?[^\s():]*")
+
+
+def _zdr_enforced() -> bool:
+    """Fails closed: if ZDR state cannot be read, treat the box as ZDR."""
+    try:
+        from app.agents.leonardo import zdr
+
+        return bool(zdr.enforced())
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"Could not read ZDR state for telemetry ({e}); redacting.")
+        return True
+
+
+def zdr_error_fingerprint(error_class: str, error_message: str, agent_mode: Optional[str]) -> str:
+    """The mothership's own formula, over the REAL message, so redacted errors still cluster."""
+    first_line = ((error_message or "").strip().splitlines() or [""])[0]
+    key = f"{error_class}|{first_line[:160]}|{agent_mode or ''}"
+    return hashlib.md5(key.encode("utf-8", "replace")).hexdigest()
+
+
+def zdr_scrub_traceback(traceback_str: str) -> str:
+    """Keep only frame locations; drop message lines and quoted source."""
+    kept = []
+    for line in (traceback_str or "").splitlines():
+        if _PY_FRAME.match(line):
+            kept.append(line)
+        elif _JS_FRAME.match(line):
+            kept.append(_QUERY_IN_URL.sub("", line))
+    return "\n".join(kept)
+
+
+def zdr_tool_call_names(tool_calls: Optional[list]) -> list:
+    names = []
+    for call in tool_calls or []:
+        name = call.get("name") if isinstance(call, dict) else getattr(call, "name", None)
+        if name:
+            names.append({"name": name})
+    return names
+
+
+def zdr_numeric_metrics(metrics: dict) -> dict:
+    return {
+        k: metrics[k] for k in ZDR_TURN_METRIC_KEYS
+        if isinstance(metrics.get(k), (int, float)) and not isinstance(metrics.get(k), bool)
+    }
 
 
 def telemetry_disabled() -> bool:
@@ -196,6 +278,8 @@ class MothershipClient:
                         # The box's own ZDR attestation, shown next to the
                         # mothership's view by leo-zdr-check.sh.
                         "zdr": _zdr_report(),
+                        # LP-49: so support can tell why a box shows unsaved changes.
+                        "autosave_enabled": _autosave_report(),
                     },
                     headers={"Authorization": f"Bearer {self.config['mothership_api_token']}"},
                 )
@@ -258,6 +342,11 @@ class MothershipClient:
         """
         if not self.reporting_enabled:
             return None
+
+        # LP-28: a ZDR box reports that a message happened, never what it said.
+        if _zdr_enforced():
+            content = None
+            tool_calls = zdr_tool_call_names(tool_calls)
 
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
@@ -331,6 +420,12 @@ class MothershipClient:
         if not self.reporting_enabled:
             return None
 
+        zdr_on = _zdr_enforced()
+        if zdr_on:
+            # LP-28: the rating only. Notes, quoted replies and the debug trail
+            # (which can carry error text) stay on the box.
+            note = content = debug_context = None
+
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
                 payload = {
@@ -339,6 +434,9 @@ class MothershipClient:
                     "rating": rating,
                     "scope": scope,
                 }
+                if zdr_on:
+                    payload["note"] = None
+                    payload["content"] = None
                 if note:
                     payload["note"] = note
                 # Sent alongside the key, never instead of it: the mothership matched on
@@ -521,6 +619,14 @@ class MothershipClient:
         if not self.reporting_enabled:
             return None
 
+        # LP-28: fingerprint the real message FIRST so ZDR errors still cluster,
+        # then send only the class and frame locations.
+        if _zdr_enforced():
+            if not fingerprint:
+                fingerprint = zdr_error_fingerprint(error_class, error_message, agent_mode)
+            error_message = ZDR_REDACTED
+            traceback_str = zdr_scrub_traceback(traceback_str)
+
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
                 payload = {
@@ -603,6 +709,10 @@ class MothershipClient:
         # averages toward zero.
         if not metrics:
             return None
+
+        # LP-28: numbers only on a ZDR box.
+        if _zdr_enforced():
+            metrics = zdr_numeric_metrics(metrics)
 
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:

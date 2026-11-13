@@ -15,7 +15,8 @@ from sqlmodel import Session
 from langgraph.types import StateSnapshot
 
 from app.models import User, ThreadMetadata
-from app.dependencies import get_db_session, auth, admin_required, engineer_or_admin_required, get_current_user
+from app.permissions import admin_change_refusal
+from app.dependencies import get_db_session, auth, admin_required, record_audit, security_admin_required, system_admin_required, engineer_or_admin_required, get_current_user
 from app.services.thread_service import can_access_thread, get_thread_list
 from app.services.user_service import (
     get_all_users, get_user_by_username, update_user, delete_user
@@ -53,6 +54,9 @@ class CreateUserRequest(BaseModel):
 class UpdateUserRequest(BaseModel):
     is_active: bool | None = None
     is_admin: bool | None = None
+    is_security_admin: bool | None = None
+    is_system_admin: bool | None = None
+    dual_admin_reason: str | None = None
     new_password: str | None = None
     role: str | None = None
 
@@ -297,6 +301,21 @@ async def _report_update_failure(lb_version: str, lp_version: str,
         logger.warning(f"Could not report update failure to mothership: {e}")
 
 
+@router.get("/api/zdr-status", response_class=JSONResponse)
+async def api_zdr_status():
+    """Is this box zero-data-retention? (LP-28)
+
+    The llama_bot_rails gem asks this, server-to-server, before reporting a Rails
+    error to the mothership: the Rails container cannot see LlamaBot's ZDR lock
+    file, so this is how it learns to redact. Unauthenticated on purpose — Rails
+    has no user session here, and the answer is one boolean the box already
+    reports to the mothership in its health check.
+    """
+    from app.agents.leonardo import zdr
+
+    return {"zdr": bool(zdr.enforced())}
+
+
 @router.get("/api/check-updates", response_class=JSONResponse)
 async def api_check_updates(session: Session = Depends(get_db_session)):
     """Check mothership for available updates to llamabot and llamapress."""
@@ -529,17 +548,23 @@ async def get_ws_token(current_user: User = Depends(get_current_user)):
 
     The token is used by the frontend to authenticate WebSocket connections.
     It expires after WS_TOKEN_EXPIRY_MINUTES (default 30 minutes).
+
+    no-store, so no browser or proxy keeps a copy: a reopened tab was handed an old,
+    expired token from the browser cache and could never sign in (LP-30).
     """
     from app.services.token_service import create_ws_token, EXPIRY_MINUTES
     token = create_ws_token(current_user)
-    return {"token": token, "expires_in": EXPIRY_MINUTES * 60}
+    return JSONResponse(
+        {"token": token, "expires_in": EXPIRY_MINUTES * 60},
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 # ============== User Management API ==============
 
 @router.get("/api/users", response_class=JSONResponse)
 async def api_get_users(
-    admin: User = Depends(admin_required),
+    admin: User = Depends(security_admin_required),
     session: Session = Depends(get_db_session)
 ):
     """Get all users (admin only)."""
@@ -550,6 +575,8 @@ async def api_get_users(
             "username": u.username,
             "is_active": u.is_active,
             "is_admin": u.is_admin,
+            "is_security_admin": u.is_security_admin,
+            "is_system_admin": u.is_system_admin,
             "role": getattr(u, 'role', 'engineer'),
             "created_at": u.created_at.isoformat() if u.created_at else None,
             "updated_at": u.updated_at.isoformat() if u.updated_at else None,
@@ -561,7 +588,7 @@ async def api_get_users(
 @router.post("/api/users", response_class=JSONResponse)
 async def api_create_user(
     request: CreateUserRequest,
-    admin: User = Depends(admin_required),
+    admin: User = Depends(security_admin_required),
     session: Session = Depends(get_db_session)
 ):
     """Create a new user (admin only)."""
@@ -572,6 +599,12 @@ async def api_create_user(
         clean_username = sanitize_username(request.username)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+    if request.is_admin:
+        refusal = admin_change_refusal(admin, None, {"is_admin": True}, None)
+        if refusal:
+            record_audit(session, "access_denied", actor=admin.username, detail="POST /api/users as owner")
+            raise HTTPException(status_code=refusal[0], detail=refusal[1])
 
     # Check if username exists
     if get_user_by_username(session, clean_username):
@@ -586,6 +619,8 @@ async def api_create_user(
     session.add(user)
     session.commit()
     session.refresh(user)
+    record_audit(session, "user_created", actor=admin.username, subject=user.username,
+                 detail=f"is_admin={user.is_admin} role={user.role}")
 
     logger.info(f"Admin '{admin.username}' created user '{clean_username}' with role '{request.role}'")
     return {"id": user.id, "username": user.username, "message": "User created successfully"}
@@ -595,7 +630,7 @@ async def api_create_user(
 async def api_update_user(
     user_id: int,
     request: UpdateUserRequest,
-    admin: User = Depends(admin_required),
+    admin: User = Depends(security_admin_required),
     session: Session = Depends(get_db_session)
 ):
     """Update a user (admin only)."""
@@ -607,16 +642,37 @@ async def api_update_user(
     if request.is_admin is False and user_id == admin.id:
         raise HTTPException(status_code=400, detail="Cannot remove your own admin status")
 
+    target = session.get(User, user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    changes = request.model_dump(exclude_none=True, exclude={"dual_admin_reason"})
+    refusal = admin_change_refusal(admin, target, changes, request.dual_admin_reason)
+    if refusal:
+        record_audit(session, "access_denied", actor=admin.username, subject=target.username,
+                     detail=f"PATCH /api/users: {refusal[1]}")
+        raise HTTPException(status_code=refusal[0], detail=refusal[1])
+
+    before = {key: getattr(target, key) for key in ("is_admin", "is_security_admin", "is_system_admin", "role", "is_active")}
     user = update_user(
         session, user_id,
         is_active=request.is_active,
         is_admin=request.is_admin,
         new_password=request.new_password,
-        role=request.role
+        role=request.role,
+        is_security_admin=request.is_security_admin,
+        is_system_admin=request.is_system_admin,
     )
 
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+
+    changed = {key: [old, getattr(user, key)] for key, old in before.items() if getattr(user, key) != old}
+    if changed or request.new_password is not None:
+        detail = f"changed={changed}" + (" password_set" if request.new_password is not None else "")
+        if request.dual_admin_reason:
+            detail += f" reason={request.dual_admin_reason}"
+        record_audit(session, "role_changed", actor=admin.username, subject=user.username, detail=detail)
 
     logger.info(f"Admin '{admin.username}' updated user {user_id}")
     return {"message": "User updated successfully"}
@@ -625,7 +681,7 @@ async def api_update_user(
 @router.delete("/api/users/{user_id}", response_class=JSONResponse)
 async def api_delete_user(
     user_id: int,
-    admin: User = Depends(admin_required),
+    admin: User = Depends(security_admin_required),
     session: Session = Depends(get_db_session)
 ):
     """Delete a user (admin only)."""
@@ -633,8 +689,17 @@ async def api_delete_user(
     if user_id == admin.id:
         raise HTTPException(status_code=400, detail="Cannot delete yourself")
 
+    target = session.get(User, user_id)
+    refusal = admin_change_refusal(admin, target, {}, None) if target else None
+    if refusal:
+        record_audit(session, "access_denied", actor=admin.username, subject=target.username,
+                     detail=f"DELETE /api/users: {refusal[1]}")
+        raise HTTPException(status_code=refusal[0], detail=refusal[1])
+    deleted_name = target.username if target else None
+
     if not delete_user(session, user_id):
         raise HTTPException(status_code=404, detail="User not found")
+    record_audit(session, "user_deleted", actor=admin.username, subject=deleted_name)
 
     logger.info(f"Admin '{admin.username}' deleted user {user_id}")
     return {"message": "User deleted successfully"}
@@ -947,11 +1012,16 @@ async def available_models(request: Request):
     Returns which models are available (have API keys) and which are not.
     Frontend uses this to disable unavailable models in the dropdown.
     """
+    from app.agents.leonardo.bedrock import available as bedrock_available, is_bedrock_model
+
     # Map of model frontend values to their required API key env vars
     # Values can be a single string or tuple of strings (checked in order, first found wins)
     model_api_keys = {
         "claude-4.5-haiku": "ANTHROPIC_API_KEY",
         "claude-haiku-5.5": "ANTHROPIC_API_KEY",
+        # LP-29: no API key — BEDROCK_REGION is the per-box opt-in, and the real
+        # test (instance-role credentials) is bedrock.available(), applied below.
+        "claude-haiku-5.5-bedrock": "BEDROCK_REGION",
         "claude-4.5-sonnet": "ANTHROPIC_API_KEY",
         "gpt-5-mini": "OPENAI_API_KEY",
         "gpt-5-codex": "OPENAI_API_KEY",
@@ -1039,6 +1109,8 @@ async def available_models(request: Request):
             if api_key and api_key.strip():
                 has_key = True
                 break
+        if has_key and is_bedrock_model(model_value):
+            has_key = bedrock_available()
 
         # Operator/mothership policy can disable a model regardless of its key
         # (see model_policy). A disabled model is greyed out in the dropdown; the
@@ -1046,6 +1118,9 @@ async def available_models(request: Request):
         enabled = is_model_enabled(model_value)
         if not enabled:
             reason = "Disabled by administrator"
+        elif not has_key and is_bedrock_model(model_value):
+            # LP-29: there is no API key to configure — it is the box's AWS setup.
+            reason = "AWS Bedrock is not set up on this box"
         elif not has_key:
             # Deliberately does NOT name the env var. This endpoint is readable by
             # every signed-in user, and the variable name is a fact about the
@@ -1741,6 +1816,16 @@ VALID_SITE_SETTINGS = {
     # Mic button in the chat box. Refused as "true" while the box has no
     # AssemblyAI key — see app/services/voice_dictation.py.
     "enable_voice_dictation",
+    # End-of-turn Git auto-save (LP-49). Read live by checkpoint_service.autosave_enabled();
+    # only "false" turns it off. The same role gate as checkpoint writes: this PUT is
+    # engineer-or-admin, and /api/site-settings is a SYSTEM_ROUTE in app/permissions.py.
+    "leo_autosave_enabled",
+}
+
+# What GET returns for a key with no row. Most settings are opt-in ("false"); these are
+# on unless someone turned them off. No row is written for them, so the default can move.
+SITE_SETTING_DEFAULTS = {
+    "leo_autosave_enabled": "true",
 }
 
 
@@ -1753,7 +1838,7 @@ VALID_SITE_SETTINGS = {
 
 @router.get("/api/role-modes", response_class=JSONResponse)
 async def api_get_role_modes(
-    admin: User = Depends(admin_required),
+    admin: User = Depends(system_admin_required),
     session: Session = Depends(get_db_session),
 ):
     """Current role → agent-mode grants, plus the catalog to render a picker from."""
@@ -1771,7 +1856,7 @@ async def api_get_role_modes(
 @router.put("/api/role-modes", response_class=JSONResponse)
 async def api_set_role_modes(
     request: Request,
-    admin: User = Depends(admin_required),
+    admin: User = Depends(system_admin_required),
     session: Session = Depends(get_db_session),
 ):
     """Replace the role → agent-mode grants (admin only).
@@ -1820,6 +1905,121 @@ async def api_set_role_modes(
     return {"role_modes": cleaned}
 
 
+@router.get("/api/audit-events", response_class=JSONResponse)
+async def api_get_audit_events(
+    limit: int = Query(default=200, ge=1, le=1000),
+    admin: User = Depends(security_admin_required),
+    session: Session = Depends(get_db_session),
+):
+    """The security audit trail, newest first."""
+    from sqlmodel import select
+
+    from app.models import AuditEvent
+
+    rows = session.exec(select(AuditEvent).order_by(AuditEvent.id.desc()).limit(limit)).all()
+    return {"events": [
+        {"id": r.id, "at": r.created_at.isoformat(), "type": r.event_type,
+         "actor": r.actor, "subject": r.subject, "detail": r.detail}
+        for r in rows
+    ]}
+
+
+def _save_site_setting(session: Session, key: str, value: str) -> None:
+    from datetime import datetime, timezone
+
+    from app.models import SiteSetting
+
+    setting = session.get(SiteSetting, key)
+    if setting:
+        setting.value = value
+        setting.updated_at = datetime.now(timezone.utc)
+    else:
+        session.add(SiteSetting(key=key, value=value))
+    session.commit()
+
+
+def _read_site_setting_json(session: Session, key: str) -> dict:
+    from app.models import SiteSetting
+
+    setting = session.get(SiteSetting, key)
+    try:
+        value = json.loads(setting.value) if setting and setting.value else {}
+    except ValueError:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+@router.get("/api/sensitive-data-rules", response_class=JSONResponse)
+async def api_get_sensitive_data_rules(
+    admin: User = Depends(security_admin_required),
+    session: Session = Depends(get_db_session),
+):
+    """The ZDR sensitive-data filter's saved rules and what it has counted (admin only)."""
+    from app.agents.leonardo import sensitive_data
+
+    return {
+        "rules": _read_site_setting_json(session, sensitive_data.SETTING_KEY),
+        "builtin": list(sensitive_data.BUILTIN_RULES),
+        "default_student_id_pattern": sensitive_data.DEFAULT_STUDENT_ID_PATTERN,
+        "counts": sensitive_data.counts(),
+    }
+
+
+@router.put("/api/sensitive-data-rules", response_class=JSONResponse)
+async def api_set_sensitive_data_rules(
+    request: Request,
+    admin: User = Depends(security_admin_required),
+    session: Session = Depends(get_db_session),
+):
+    """Replace the filter's rules (admin only). A rule that won't compile is refused here."""
+    from app.agents.leonardo import sensitive_data
+
+    try:
+        cleaned = sensitive_data.validate_config(await request.json())
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    _save_site_setting(session, sensitive_data.SETTING_KEY, json.dumps(cleaned))
+    sensitive_data.invalidate_rules()
+    logger.info(f"Sensitive data rules changed by {admin.username}")
+    return {"rules": cleaned}
+
+
+@router.get("/api/role-write-tools", response_class=JSONResponse)
+async def api_get_role_write_tools(
+    admin: User = Depends(security_admin_required),
+    session: Session = Depends(get_db_session),
+):
+    """Which roles have write and shell tools on a ZDR box (admin only)."""
+    from app.permissions import DEFAULT_ROLE_MODES, ROLE_WRITE_TOOLS_SETTING_KEY, SCHEDULED_ROLE
+
+    grants = _read_site_setting_json(session, ROLE_WRITE_TOOLS_SETTING_KEY)
+    return {"grants": grants, "roles": sorted({*DEFAULT_ROLE_MODES, SCHEDULED_ROLE, *grants})}
+
+
+@router.put("/api/role-write-tools", response_class=JSONResponse)
+async def api_set_role_write_tools(
+    request: Request,
+    admin: User = Depends(security_admin_required),
+    session: Session = Depends(get_db_session),
+):
+    """Replace those grants (admin only). Body: ``{"grants": {"engineer": true}}``."""
+    from app.permissions import ROLE_WRITE_TOOLS_SETTING_KEY, invalidate_tool_grants
+
+    body = await request.json()
+    grants = body.get("grants") if isinstance(body, dict) else None
+    if not isinstance(grants, dict) or not all(
+        isinstance(role, str) and role.strip() and isinstance(on, bool) for role, on in grants.items()
+    ):
+        raise HTTPException(status_code=400, detail="grants must map role names to true or false")
+    value = json.dumps(grants)
+    if len(value) > 1000:  # SiteSetting.value is max_length=1000
+        raise HTTPException(status_code=400, detail="Too many roles to store")
+    _save_site_setting(session, ROLE_WRITE_TOOLS_SETTING_KEY, value)
+    invalidate_tool_grants()
+    logger.info(f"Role write-tool grants set to {value} by {admin.username}")
+    return {"grants": grants}
+
+
 def get_site_setting(session: Session, key: str, default: str = "false") -> str:
     """Get a site setting value, returning default if not found.
 
@@ -1844,7 +2044,7 @@ async def api_get_site_setting(
     """Get a site setting value."""
     if key not in VALID_SITE_SETTINGS:
         raise HTTPException(status_code=400, detail=f"Unknown setting: {key}")
-    value = get_site_setting(session, key)
+    value = get_site_setting(session, key, SITE_SETTING_DEFAULTS.get(key, "false"))
     return {"key": key, "value": value}
 
 
@@ -2136,7 +2336,7 @@ async def api_pending_env_changes(
 
 @router.post("/api/env-vars/apply", response_class=JSONResponse)
 async def api_apply_env_changes(
-    admin: User = Depends(admin_required),
+    admin: User = Depends(system_admin_required),
     session: Session = Depends(get_db_session),
 ):
     """Recreate the Rails app so it loads saved custom variables.
@@ -2193,7 +2393,7 @@ async def api_set_env_toggle(
 @router.post("/api/custom-env-vars", response_class=JSONResponse)
 async def api_create_custom_env_var(
     request: Request,
-    admin: User = Depends(admin_required),
+    admin: User = Depends(system_admin_required),
     session: Session = Depends(get_db_session),
 ):
     """Define a custom variable, stored in the DB and merged into .env.
@@ -2223,7 +2423,7 @@ async def api_create_custom_env_var(
 @router.delete("/api/custom-env-vars/{name}", response_class=JSONResponse)
 async def api_delete_custom_env_var(
     name: str,
-    admin: User = Depends(admin_required),
+    admin: User = Depends(system_admin_required),
     session: Session = Depends(get_db_session),
 ):
     """Remove a custom variable and re-render the managed block."""
@@ -2722,7 +2922,7 @@ WRITE_FILES_PATH_MAP = {
 @router.post("/api/write_files", response_class=JSONResponse)
 async def api_write_files(
     body: WriteFilesRequest,
-    current_user: User = Depends(admin_required),
+    current_user: User = Depends(system_admin_required),
 ):
     """Write files to disk. Used by the mothership to push context files after claiming an instance."""
     results = []
@@ -2762,7 +2962,7 @@ class ImportFromS3Request(BaseModel):
 @router.post("/api/setup/import-excel", response_class=JSONResponse)
 async def api_import_excel_from_s3(
     body: ImportFromS3Request,
-    current_user: User = Depends(admin_required),
+    current_user: User = Depends(system_admin_required),
 ):
     """Download a file from S3 (pre-signed URL) and save it to rails/app/imports/."""
     import pathlib
@@ -2817,7 +3017,7 @@ MAX_IMAGE_SIZE = 25 * 1024 * 1024  # 25 MB
 @router.post("/api/setup/import-image", response_class=JSONResponse)
 async def api_import_image_from_s3(
     body: ImportFromS3Request,
-    current_user: User = Depends(admin_required),
+    current_user: User = Depends(system_admin_required),
 ):
     """Download an image from S3 and save it to rails/app/imports/."""
     import pathlib

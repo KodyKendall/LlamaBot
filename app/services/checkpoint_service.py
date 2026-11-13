@@ -1,11 +1,15 @@
 """Git-based checkpoint service for code rollback functionality."""
+import fnmatch
 import logging
 import os
 import subprocess
 import re
+import threading
+import time
+import unicodedata
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from app.models import CheckpointInfo
 from app.services import git_setup
@@ -184,6 +188,9 @@ def _restore_ubuntu_ownership() -> int:
 
 
 DISCARD_BACKUP_REF_PREFIX = "refs/llamabot/discards"
+# Pre-restore saves (LP-46). After `reset --hard` they sit on no branch, so without a
+# ref they would drop out of the History list (`git log --all`) and, later, out of git.
+RESTORE_SAVE_REF_PREFIX = "refs/llamabot/saves"
 # One ref per discard the user has not yet undone or dismissed, named like its
 # backup. It keeps the chat's Undo card up across reloads. Discards from before
 # 0.7.15 never got one, so an old snapshot (perhaps already applied by hand)
@@ -249,16 +256,256 @@ def _snapshot_working_tree(label: str) -> Dict[str, str]:
     return {"ref": ref, "sha": sha}
 
 
+# ============== Saving (LP-46) ==============
+#
+# Leo commits on its own at the end of every turn that changed files. Without it,
+# a box where the user never clicked Save showed a growing "669 unsaved changes"
+# that nothing on screen could fix except Discard — which deletes working code.
+
+# One lock around "check status, stage, commit" — and around restore and discard —
+# shared by the end-of-turn auto-save and the manual Save / Restore routes, so two
+# saves at the same moment make one commit and neither errors. Re-entrant because a
+# restore saves first.
+REPO_LOCK = threading.RLock()
+
+# Auto-saves commit as Leo, set per commit, so they work on a box with no git
+# identity and never touch the box's git config.
+LEO_AUTHOR_NAME = "Leo"
+LEO_AUTHOR_EMAIL = "leo@llamapress.local"
+
+# The first auto-save on a box with weeks of uncommitted work commits all of it at once.
+BACKLOG_TITLE = "Saved all earlier work"
+
+# Larger files stay out of saves (logged), so one stray video can't bloat .git.
+MAX_SAVE_FILE_BYTES = 50 * 1024 * 1024
+
+# Never committed, whatever .gitignore says: secrets, uploads, logs, scratch.
+_NEVER_SAVED_NAMES = (".env", ".env.*", "*.pem", "*.key")
+_NEVER_SAVED_NAME_EXCEPTIONS = (".env.example",)
+# Rails' storage/ (uploads), log/ and tmp/, at the repo root or in the rails/ app.
+_NEVER_SAVED_DIRS = ("storage", "log", "tmp")
+
+INDEX_LOCK_WAIT_SECONDS = 2.0
+
+# What the History panel says when a save failed. Git's stderr goes to the log only.
+SAVE_FAILED_SENTENCE = "Leo couldn't save your latest changes. It will try again after the next turn."
+
+_last_save_error: Optional[str] = None
+_has_leo_save: Optional[bool] = None    # cached once True: has Leo ever saved on this box?
+_backlog_pending = False                # this turn started with work nobody had saved
+
+
+def is_never_saved(path: str) -> bool:
+    """True for a path no save may commit (a secret, an upload, a log, scratch)."""
+    parts = PurePosixPath(path).parts
+    if not parts:
+        return False
+    name = parts[-1]
+    if name not in _NEVER_SAVED_NAME_EXCEPTIONS and any(fnmatch.fnmatch(name, p) for p in _NEVER_SAVED_NAMES):
+        return True
+    if len(parts) > 1 and parts[0] in _NEVER_SAVED_DIRS:
+        return True
+    return len(parts) > 2 and parts[0] == "rails" and parts[1] in _NEVER_SAVED_DIRS
+
+
+def _git_run(*args: str, timeout: int = 60, input: Optional[str] = None) -> subprocess.CompletedProcess:
+    """git in the Leonardo repo; if another git holds index.lock, wait and retry once."""
+    def once():
+        return subprocess.run(
+            ["git", "-C", str(LEONARDO_PATH), *args],
+            capture_output=True, text=True, timeout=timeout, input=input,
+        )
+
+    result = once()
+    if result.returncode != 0 and "index.lock" in (result.stderr or ""):
+        time.sleep(INDEX_LOCK_WAIT_SECONDS)
+        result = once()
+    return result
+
+
+def _changed_paths() -> List[str]:
+    """Every path git sees as changed, new or deleted (both sides of a rename)."""
+    result = _git_run("status", "--porcelain=v1", "-z", "--untracked-files=all", timeout=30)
+    if result.returncode != 0:
+        raise Exception(f"Git status failed: {result.stderr.strip()}")
+    tokens = result.stdout.split("\0")
+    paths, i = [], 0
+    while i < len(tokens):
+        entry = tokens[i]
+        i += 1
+        if len(entry) < 4:
+            continue
+        paths.append(entry[3:])
+        if entry[0] in "RC" and i < len(tokens):  # -z puts a rename's old path next
+            paths.append(tokens[i])
+            i += 1
+    return paths
+
+
+def _too_big(path: str) -> bool:
+    try:
+        return (LEONARDO_PATH / path).lstat().st_size > MAX_SAVE_FILE_BYTES
+    except OSError:  # deleted: staging the deletion is fine
+        return False
+
+
+def _split_savable(paths: List[str]):
+    """(paths a save may commit, [(path, why) left out])."""
+    keep, dropped = [], []
+    for path in paths:
+        if is_never_saved(path):
+            dropped.append((path, "secret or upload"))
+        elif _too_big(path):
+            dropped.append((path, f"over {MAX_SAVE_FILE_BYTES // (1024 * 1024)} MB"))
+        else:
+            keep.append(path)
+    return keep, dropped
+
+
+def _stage_savable() -> None:
+    """Stage what a save may commit, then make sure nothing else is staged."""
+    keep, dropped = _split_savable(_changed_paths())
+    for path, why in dropped:
+        logger.warning(f"Save left out {path} ({why})")
+    if keep:
+        added = _git_run("--literal-pathspecs", "add", "-A", "--pathspec-from-file=-",
+                         "--pathspec-file-nul", input="\0".join(keep))
+        if added.returncode != 0:
+            raise Exception(f"Git add failed: {added.stderr.strip()}")
+
+    # Belt and braces: anything already staged by someone else is checked too.
+    staged = _git_run("diff", "--cached", "--name-only", "-z", timeout=30).stdout.split("\0")
+    _, refused = _split_savable([p for p in staged if p])
+    if not refused:
+        return
+    paths = [p for p, _ in refused]
+    for path, why in refused:
+        if path not in {d for d, _ in dropped}:
+            logger.warning(f"Save unstaged {path} ({why})")
+    has_head = _git_run("rev-parse", "--verify", "-q", "HEAD", timeout=5).returncode == 0
+    unstage = (["reset", "-q", "HEAD", "--"] if has_head
+               else ["rm", "--cached", "-r", "-q", "--ignore-unmatch", "--"])
+    result = _git_run("--literal-pathspecs", *unstage, *paths)
+    if result.returncode != 0:
+        raise Exception(f"Could not unstage a refused path: {result.stderr.strip()}")
+
+
+def _anything_staged() -> bool:
+    return _git_run("diff", "--cached", "--quiet", timeout=30).returncode == 1
+
+
+def _leo_has_saved() -> bool:
+    global _has_leo_save
+    if not _has_leo_save:
+        found = _git_run("log", "-1", "--format=%H", f"--author={re.escape(LEO_AUTHOR_EMAIL)}", timeout=30)
+        _has_leo_save = found.returncode == 0 and bool(found.stdout.strip())
+    return _has_leo_save
+
+
+def turn_title(request_text: Optional[str], now: Optional[datetime] = None) -> str:
+    """`Leo: <start of the user's request> · 2026-11-10 14:32 UTC`, on one clean line."""
+    now = now or datetime.now(timezone.utc)
+    text = "".join(" " if unicodedata.category(ch).startswith("C") else ch for ch in (request_text or ""))
+    text = " ".join(text.split())[:60].rstrip() or "Saved Leo's changes"
+    return f"Leo: {text} · {now:%Y-%m-%d %H:%M} UTC"
+
+
+def note_turn_start() -> None:
+    """Before a turn: does it start on top of work nobody ever saved? (Until Leo's first save.)"""
+    global _backlog_pending
+    try:
+        _backlog_pending = (not _leo_has_saved()) and bool(_split_savable(_changed_paths())[0])
+    except Exception as e:  # noqa: BLE001 - never block a turn on this
+        logger.debug(f"Backlog check skipped: {e}")
+
+
+def autosave_after_turn(request_text: Optional[str], thread_id: str = "") -> Optional[Dict[str, Any]]:
+    """The end-of-turn save: one commit if anything changed. Never raises.
+
+    A failure is logged and shown in the History panel; the tree stays dirty, so
+    the next turn tries again.
+    """
+    global _last_save_error, _has_leo_save, _backlog_pending
+    try:
+        with REPO_LOCK:
+            title = BACKLOG_TITLE if _backlog_pending and not _leo_has_saved() else turn_title(request_text)
+            result = CheckpointService.create_checkpoint(
+                thread_id=thread_id or "auto", description=title, leo=True, skip_if_clean=True,
+            )
+        if not result.get("skipped"):
+            _has_leo_save = True
+            _backlog_pending = False
+        return result
+    except Exception as e:  # noqa: BLE001 - a save must never break a turn
+        logger.error(f"Auto-save failed on box {os.getenv('INSTANCE_NAME', '?')} "
+                     f"(thread {thread_id}): {e}")
+        _last_save_error = SAVE_FAILED_SENTENCE
+        return None
+
+
+AUTOSAVE_SETTING_KEY = "leo_autosave_enabled"
+
+
+def autosave_enabled() -> bool:
+    """Should Leo commit at the end of a turn? (LP-49) Read live, so a toggle needs no restart.
+
+    LEO_AUTOSAVE_DISABLED=1 (the test suite's switch) wins. Otherwise only the exact
+    value "false" turns it off: no row, no auth DB, or an unreadable value means ON.
+    Nothing writes a row by default, so the fleet default stays in this code.
+    """
+    if os.getenv("LEO_AUTOSAVE_DISABLED") == "1":
+        return False
+    try:
+        from sqlmodel import Session as DbSession  # this module's `Session` is the checkpoint DB's
+        from app import db
+        from app.models import SiteSetting
+        if db.engine is None:
+            return True
+        with DbSession(db.engine) as session:
+            row = session.get(SiteSetting, AUTOSAVE_SETTING_KEY)
+        return row is None or str(row.value).strip().lower() != "false"
+    except Exception as e:  # noqa: BLE001 - never block a save on reading a switch
+        logger.warning(f"Could not read {AUTOSAVE_SETTING_KEY}, auto-save stays on: {e}")
+        return True
+
+
+def save_status(turn_in_progress: bool = False) -> Dict[str, Any]:
+    """What the History panel shows. `clean` is live git status, never "a save was tried"."""
+    changed, _ = _split_savable(_changed_paths())
+    last = _git_run("log", "-1", "--format=%ct", timeout=10).stdout.strip()
+    last_saved_at = (
+        datetime.fromtimestamp(int(last), timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") if last else None
+    )
+    return {
+        "clean": not changed,
+        "last_saved_at": last_saved_at,
+        "turn_in_progress": bool(turn_in_progress),
+        "changed_files": len(changed),
+        "last_save_error": _last_save_error,
+        "autosave_enabled": autosave_enabled(),
+    }
+
+
 class CheckpointService:
     """Service for managing git-based checkpoints for code rollback."""
 
     @staticmethod
-    def create_checkpoint(thread_id: str, description: str) -> Dict[str, Any]:
-        """Create a git checkpoint (commit) before AI agent makes changes.
+    def create_checkpoint(
+        thread_id: str,
+        description: str,
+        *,
+        leo: bool = False,
+        skip_if_clean: bool = False,
+    ) -> Dict[str, Any]:
+        """Create a git checkpoint (commit) of the working tree.
 
         Args:
             thread_id: The conversation thread ID
-            description: Human-readable description of what's about to change
+            description: Human-readable description (for ``leo`` saves, the subject line)
+            leo: Commit as Leo (auto-saves, pre-restore saves) instead of the box's identity
+            skip_if_clean: Make no commit when nothing is staged; returns ``skipped: True``
+
+        Secrets, uploads and oversized files are never staged (LP-46).
 
         Returns:
             Dictionary with checkpoint info including commit SHA
@@ -266,34 +513,35 @@ class CheckpointService:
         Raises:
             Exception: If git operations fail
         """
+        global _last_save_error
+        with REPO_LOCK:
+            result = CheckpointService._create_checkpoint_locked(thread_id, description, leo, skip_if_clean)
+        _last_save_error = None
+        return result
+
+    @staticmethod
+    def _create_checkpoint_locked(thread_id, description, leo, skip_if_clean) -> Dict[str, Any]:
         try:
-            # Stage all changes
-            add_result = subprocess.run(
-                ["git", "-C", str(LEONARDO_PATH), "add", "."],
-                capture_output=True,
-                text=True,
-                timeout=10
-            )
+            _stage_savable()
 
-            if add_result.returncode != 0:
-                raise Exception(f"Git add failed: {add_result.stderr}")
+            if skip_if_clean and not _anything_staged():
+                head = _git_run("rev-parse", "HEAD", timeout=5).stdout.strip()
+                return {"checkpoint_id": head, "thread_id": thread_id, "description": description,
+                        "skipped": True, "changed_files": [], "changed_files_count": 0}
 
-            # Create commit with standardized message format
             timestamp = datetime.now(timezone.utc).isoformat()
-            commit_message = f"""🔖 Checkpoint: {description}
+            subject = description if leo else f"🔖 Checkpoint: {description}"
+            commit_message = f"""{subject}
 
 Thread: {thread_id}
 Agent: Leonardo
 Timestamp: {timestamp}
 """
+            identity = (["-c", f"user.name={LEO_AUTHOR_NAME}", "-c", f"user.email={LEO_AUTHOR_EMAIL}"]
+                        if leo else [])
 
             def commit():
-                return subprocess.run(
-                    ["git", "-C", str(LEONARDO_PATH), "commit", "-m", commit_message, "--allow-empty"],
-                    capture_output=True,
-                    text=True,
-                    timeout=10
-                )
+                return _git_run(*identity, "commit", "-m", commit_message, "--allow-empty")
 
             commit_result = commit()
 
@@ -520,6 +768,31 @@ Timestamp: {timestamp}
             raise Exception("Git operation timed out")
         except Exception as e:
             raise Exception(f"Failed to rollback: {str(e)}")
+
+    @staticmethod
+    def restore_checkpoint(checkpoint_id: str) -> Dict[str, Any]:
+        """Go back to a checkpoint, saving the current state first so it can be undone.
+
+        The save is skipped on a clean tree (HEAD already holds it). If the save
+        fails, nothing is restored. ``saved_before_restore`` is the new commit, or None.
+        """
+        with REPO_LOCK:
+            if _git_run("cat-file", "-e", f"{checkpoint_id}^{{commit}}", timeout=5).returncode != 0:
+                raise Exception(f"Checkpoint {checkpoint_id} does not exist")
+            name = _git_run("log", "-1", "--format=%s", checkpoint_id, timeout=5).stdout.strip()[:60]
+            pre = CheckpointService.create_checkpoint(
+                thread_id="restore", description=f"Before going back to {name or checkpoint_id[:8]}",
+                leo=True, skip_if_clean=True,
+            )
+            if not pre.get("skipped"):
+                sha = pre["checkpoint_id"]
+                ref = f"{RESTORE_SAVE_REF_PREFIX}/{datetime.now(timezone.utc):%Y%m%dT%H%M%S%fZ}-{sha[:8]}"
+                pin = _git_run("update-ref", ref, sha, timeout=5)
+                if pin.returncode != 0:
+                    raise Exception(f"Could not pin the pre-restore save: {pin.stderr.strip()}")
+            result = CheckpointService.rollback_to_checkpoint(checkpoint_id, report=True)
+        result["saved_before_restore"] = None if pre.get("skipped") else pre["checkpoint_id"]
+        return result
 
     @staticmethod
     def get_changed_files(since_checkpoint: Optional[str] = None) -> List[str]:
@@ -1003,6 +1276,9 @@ Timestamp: {timestamp}
                                 ref_list.extend(ref.split(' -> '))
                             else:
                                 ref_list.append(ref)
+                # Our own bookkeeping refs (discard backups, pre-restore saves) are
+                # not branches the user made; keep them out of the badges.
+                ref_list = [r for r in ref_list if not r.startswith("refs/llamabot/")]
 
                 # Determine lane for this commit
                 # First check if any child commit assigned us a lane

@@ -1,0 +1,14 @@
+{
+  "claude-haiku-5.5-bedrock": {
+    "status": "pending",
+    "pass_rate": null,
+    "date": null,
+    "note": "LP-29. Harness not yet run."
+  },
+  "deepseek-v4.1-flash-fireworks": {
+    "status": "pending",
+    "pass_rate": null,
+    "date": null,
+    "note": "Added before this step existed. Harness not yet run."
+  }
+}

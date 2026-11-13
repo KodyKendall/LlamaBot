@@ -129,12 +129,12 @@ test('the createNewThread handler asks the helper instead of resetting outright'
   );
 });
 
-test('the policy lock and the image auto-switch do not persist either', () => {
-  // Neither is a user choice: the lock pins the default because switching is
-  // disabled, and the image path switches because the chosen model cannot see
-  // images. Persisting either one silently rewrites the user's preference.
+test('the policy lock does not persist either', () => {
+  // Not a user choice: the lock pins the default because switching is disabled.
+  // Persisting it silently rewrites the user's preference. (The image auto-switch
+  // that used to be checked here was removed in LP-44.)
   const programmatic = [...INDEX_JS.matchAll(/this\.setModel\(\s*(this\.defaultTextModel|imageModel)\s*(,[^)]*)?\)/g)];
-  assert.ok(programmatic.length >= 3, `expected the programmatic setModel call sites, found ${programmatic.length}`);
+  assert.ok(programmatic.length >= 1, `expected the programmatic setModel call sites, found ${programmatic.length}`);
 
   for (const call of programmatic) {
     assert.match(

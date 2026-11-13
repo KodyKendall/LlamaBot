@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from app.dependencies import get_current_user
 from app.services import git_setup
+from app.services import checkpoint_service as checkpoint_service_module
 from app.services.checkpoint_service import checkpoint_service
 
 logger = logging.getLogger(__name__)
@@ -89,9 +90,12 @@ def create_checkpoint(
         )
 
     try:
+        # Clean tree = nothing to save; this also makes "Save now" racing the
+        # end-of-turn auto-save a no-op instead of an empty extra commit (LP-46).
         checkpoint = checkpoint_service.create_checkpoint(
             thread_id=request.thread_id,
-            description=request.description
+            description=request.description,
+            skip_if_clean=True,
         )
         return JSONResponse(content=checkpoint, status_code=201)
 
@@ -121,6 +125,21 @@ def list_checkpoints(
     except Exception as e:
         logger.error(f"Failed to list checkpoints: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/checkpoints/status")
+def get_save_status(http_request: Request):
+    """The History panel's save state (LP-46): saved / Leo working / not yet saved.
+
+    ``clean`` is live git status, so the panel can never say "saved" after a failed save.
+    """
+    run_manager = getattr(http_request.app.state, "run_manager", None)
+    turn_in_progress = bool(run_manager is not None and run_manager.busy())
+    try:
+        return JSONResponse(content=checkpoint_service_module.save_status(turn_in_progress))
+    except Exception as e:
+        logger.error(f"Failed to read save status: {str(e)}")
+        raise HTTPException(status_code=500, detail="Couldn't check whether your changes are saved.")
 
 
 @router.get("/api/checkpoints/{checkpoint_id}/diff")
@@ -159,7 +178,8 @@ def rollback_checkpoint(
         Success status
     """
     try:
-        result = checkpoint_service.rollback_to_checkpoint(checkpoint_id, report=True)
+        # Saves the current state first, so going back can itself be undone (LP-46).
+        result = checkpoint_service.restore_checkpoint(checkpoint_id)
         success = bool(result.get("success"))
 
         if success:
@@ -172,6 +192,7 @@ def rollback_checkpoint(
         return JSONResponse(content={
             "success": success,
             "platform_files_reapplied": result.get("platform_files_reapplied", []),
+            "saved_before_restore": result.get("saved_before_restore"),
         })
 
     except Exception as e:
@@ -288,7 +309,8 @@ def discard_uncommitted_changes():
         Success status, count of discarded files, and the backup ref to undo with
     """
     try:
-        result = checkpoint_service.discard_uncommitted_changes()
+        with checkpoint_service_module.REPO_LOCK:  # never mid-save (LP-46)
+            result = checkpoint_service.discard_uncommitted_changes()
         return JSONResponse(content=result)
 
     except Exception as e:

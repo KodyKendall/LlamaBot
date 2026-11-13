@@ -27,6 +27,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
 from langchain_qwq import ChatQwen
 
+from app.agents.leonardo import safety_hooks
 from app.agents.leonardo.openrouter_models import (
     API_KEY_ENV as _OPENROUTER_API_KEY_ENV,
     api_base as openrouter_api_base,
@@ -39,6 +40,9 @@ def openrouter_api_key_env() -> str:
     """The single env var every OpenRouter-routed model authenticates with."""
     return _OPENROUTER_API_KEY_ENV
 
+
+# ZDR safety limits on every chat model and tool. Off unless ZDR is on (LP-33).
+safety_hooks.install()
 
 logger = logging.getLogger(__name__)
 
@@ -488,6 +492,10 @@ def supports_prompt_caching(model_name: str) -> bool:
     `TypeError: Completions.create() got an unexpected keyword argument
     'cache_control'` and 500s every agent turn on that box.
     """
+    # Bedrock-hosted Claude goes through ChatBedrockConverse, which has no
+    # cache_control kwarg (LP-29), so the name prefix alone is not enough.
+    if (model_name or "").endswith("-bedrock"):
+        return False
     return (model_name or "").startswith(("claude", "anthropic"))
 
 
@@ -1039,6 +1047,11 @@ def _build_client(model_name: str):
             thinking={"type": "enabled", "budget_tokens": 3000},
             max_retries=0,
         )
+    if model_name == "claude-haiku-5.5-bedrock":
+        # LP-29: same model, served from the box's own AWS account and
+        # authenticated by its instance role only. See app/agents/leonardo/bedrock.py.
+        from app.agents.leonardo import bedrock
+        return bedrock.build_client(model_name)
     if model_name == "claude-haiku-5.5":
         # Haiku 5.5 is adaptive-thinking only: a thinking budget (Haiku 4.5's
         # config above) is a 400 here. Effort stays at the model default.

@@ -318,6 +318,8 @@ def _note_state(state: ZDRState) -> None:
 
 def report() -> dict:
     """The box's own ZDR attestation, sent with ``report_health``."""
+    from app.agents.leonardo import sensitive_data
+
     state = zdr_state()
     return {
         "enforced": state.enabled,
@@ -325,6 +327,8 @@ def report() -> dict:
         "compliant_models": compliant_models(),
         "tracing": "on" if tracing_enabled() else "off",
         "web_search": "off" if state.enabled else "on",
+        # Rule names and counts only, never what matched.
+        "sensitive_data_counts": sensitive_data.counts(),
     }
 
 

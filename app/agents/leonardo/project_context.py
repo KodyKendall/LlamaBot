@@ -8,6 +8,7 @@ import json
 import logging
 from typing import Optional
 
+from app.agents.leonardo.export_rules import NO_APP_EXPORT_RULES
 from app.services import system_prompt_cache
 from app.agents.leonardo.personal_cookbook_context import personal_cookbook_section
 
@@ -323,6 +324,10 @@ def build_system_prompt_with_project_context(
     if suffix:
         parts.append(suffix)
 
+    # LP-45: after the (possibly mothership) base prompt, so it overrides any stale
+    # export rule there. Every mode built here gets it; see export_rules.py.
+    parts.append(NO_APP_EXPORT_RULES)
+
     return "".join(parts)
 
 
@@ -385,5 +390,9 @@ def build_beginner_system_prompt(
 
     if suffix:
         parts.append(suffix)
+
+    # LP-45: after the (possibly mothership) base prompt, so it overrides any stale
+    # export rule there. Every mode built here gets it; see export_rules.py.
+    parts.append(NO_APP_EXPORT_RULES)
 
     return "".join(parts)

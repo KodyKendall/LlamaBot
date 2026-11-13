@@ -22,6 +22,7 @@ from app.agents.leonardo.llm_factory import get_llm, system_message_for_model
 from app.agents.leonardo.model_policy import enabled_default_model
 from app.agents.leonardo.rails_agent.state import RailsAgentState
 from app.agents.leonardo.project_context import brand_context_section
+from app.agents.leonardo.export_rules import NO_APP_EXPORT_RULES
 from app.agents.leonardo.resilience import invoke_with_transient_retry
 from app.agents.leonardo.summarization import compact_messages_if_needed
 from app.agents.leonardo.message_invariants import normalize_messages_for_provider
@@ -49,7 +50,7 @@ def get_sys_msg():
         "content": [
             {
                 "type": "text",
-                "text": PLAIN_CHAT_PROMPT + brand_context_section(),
+                "text": PLAIN_CHAT_PROMPT + brand_context_section() + NO_APP_EXPORT_RULES,
                 "cache_control": {"type": "ephemeral"},
             },
         ],

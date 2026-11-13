@@ -25,6 +25,29 @@ const PRE_AUTH_TYPES = new Set(['auth', 'ping', 'cancel', 'attach']);
 // Server close code for "sign-in failed" (WS_CLOSE_AUTH_FAILED).
 const AUTH_FAILED_CLOSE_CODE = 4401;
 
+/**
+ * The FrontendWsAuthFailed message (LP-30). The first line is the one the error
+ * fingerprint is built from, so it stays exactly as before; where the token came from
+ * and how old it was go on a second line, which keeps every failure in one group.
+ * Never includes the token.
+ */
+export function authFailureReport(detail = {}) {
+  const head = `WebSocket sign-in failed: ${detail?.reason || 'n/a'}`;
+  const t = detail?.token;
+  if (!t) return head;
+
+  const parts = [`token from ${t.source || 'unknown'}`];
+  if (t.status && t.status !== 200) parts.push(`token request HTTP ${t.status}`);
+  if (t.error) parts.push(`token request ${t.error}`);
+  const nowSec = Date.now() / 1000;
+  if (typeof t.iat === 'number') {
+    parts.push(`age ${Math.max(0, Math.floor((nowSec - t.iat) / 60))} min`);
+  } else if (typeof t.exp === 'number') {
+    parts.push(`${Math.floor((nowSec - t.exp) / 60)} min past exp`);
+  }
+  return `${head}\n${parts.join(', ')}`;
+}
+
 export class WebSocketManager {
   constructor(messageHandler, config = {}, elements = {}) {
     this.messageHandler = messageHandler;
@@ -169,7 +192,10 @@ export class WebSocketManager {
    */
   async sendAuthMessage() {
     try {
-      const token = await TokenManager.getToken();
+      // A token handleAuthError just fetched is used as is, even when its lifetime is
+      // shorter than the cache's 5-minute buffer (LP-30).
+      const token = this.pendingAuthToken || await TokenManager.getToken();
+      this.pendingAuthToken = null;
       if (token) {
         this.send({ type: 'auth', token: token });
       } else {
@@ -275,6 +301,7 @@ export class WebSocketManager {
       return;
     }
 
+    this.pendingAuthToken = token;
     this.dropSocket();
     this.authRecovering = false;
     this.connect();
@@ -290,7 +317,8 @@ export class WebSocketManager {
     if (this.elements.sendButton) {
       this.elements.sendButton.disabled = false;
     }
-    window.dispatchEvent(new CustomEvent('websocketAuthFailed', { detail: { reason } }));
+    const token = TokenManager.lastToken ? { ...TokenManager.lastToken } : null;
+    window.dispatchEvent(new CustomEvent('websocketAuthFailed', { detail: { reason, token } }));
   }
 
   /** Close the current socket without triggering the normal reconnect path. */

@@ -13,6 +13,7 @@ import { GitGraphRenderer } from './GitGraphRenderer.js';
 import { GitHubAuthModal } from './GitHubAuthModal.js';
 import { DiscardUndoCard } from './DiscardUndoCard.js';
 import { confirmLargeDiscard, needsStrongWarning } from './discardWarning.js';
+import { describeSaveStatus, undoChangesConfirmText, DOT_LABEL } from './saveStatus.js';
 
 export class CheckpointManager {
   constructor(chatApp) {
@@ -46,7 +47,7 @@ export class CheckpointManager {
       this.checkpointButton.onclick = () => this.togglePanel();
     }
 
-    // Get the unsaved badge element
+    // The neutral "changes not yet saved" dot on the History button (LP-46)
     this.unsavedBadge = document.querySelector('[data-llamabot="unsaved-badge"]');
 
     // Create checkpoint panel (hidden by default)
@@ -63,13 +64,13 @@ export class CheckpointManager {
       chatSection.appendChild(this.checkpointPanel);
     }
 
-    // Initial badge check and start periodic polling
-    this.updateUnsavedBadge();
+    // Initial save-status check, then poll (also keeps "2 min ago" fresh)
+    this.refreshSaveStatus();
     this.startBadgePolling();
   }
 
   /**
-   * Start polling for uncommitted changes (every 30 seconds)
+   * Poll the save status every 30 seconds
    */
   startBadgePolling() {
     // Clear any existing interval
@@ -84,27 +85,97 @@ export class CheckpointManager {
   }
 
   /**
-   * Update the unsaved badge visibility based on uncommitted changes
+   * Kept for existing callers: the badge now follows the save status.
    */
-  async updateUnsavedBadge() {
-    if (!this.unsavedBadge) return;
+  updateUnsavedBadge() {
+    return this.refreshSaveStatus();
+  }
 
+  /**
+   * Read GET /api/checkpoints/status and show it on the badge and in the panel (LP-46).
+   */
+  async refreshSaveStatus() {
     try {
-      const response = await fetch('/api/checkpoints/uncommitted', {
-        credentials: 'same-origin'
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        if (data.has_changes) {
-          this.unsavedBadge.classList.remove('hidden');
-        } else {
-          this.unsavedBadge.classList.add('hidden');
-        }
-      }
+      const response = await fetch('/api/checkpoints/status', { credentials: 'same-origin' });
+      if (!response.ok) return;
+      this.saveStatus = await response.json();
     } catch (error) {
-      console.warn('Could not check for unsaved changes:', error);
+      console.warn('Could not check save status:', error);
+      return;
     }
+    this.renderSaveStatus();
+  }
+
+  renderSaveStatus() {
+    const view = describeSaveStatus(this.saveStatus);
+
+    if (this.unsavedBadge) {
+      this.unsavedBadge.classList.toggle('hidden', !view.showDot);
+      this.unsavedBadge.setAttribute('aria-label', DOT_LABEL);
+    }
+    if (this.checkpointButton) {
+      this.checkpointButton.setAttribute('aria-label',
+        view.showDot ? `Version history, ${DOT_LABEL.toLowerCase()}` : 'Version history');
+    }
+
+    const panel = this.checkpointPanel;
+    if (!panel) return;
+    const q = (sel) => panel.querySelector(sel);
+    q('.save-status')?.setAttribute('data-state', view.state);
+    // The live region only changes with the state, so a screen reader hears each
+    // change once, not "2 min ago… 3 min ago…" on every poll.
+    const text = q('.save-status-text');
+    if (text && text.textContent !== view.text) text.textContent = view.text;
+    const time = q('.save-status-time');
+    if (time) time.textContent = view.time;
+    const detail = q('.save-status-detail');
+    if (detail) {
+      detail.textContent = view.detail;
+      detail.classList.toggle('hidden', !view.detail);
+    }
+    const icon = q('.save-status-icon');
+    if (icon) {
+      icon.className = 'save-status-icon fa-solid ' + ({
+        saved: 'fa-circle-check', working: 'fa-spinner fa-spin', 'not-saved': 'fa-circle-info',
+        off: 'fa-circle-pause',
+      }[view.state] || 'fa-circle-notch');
+    }
+    q('.btn-save-now')?.classList.toggle('hidden', !view.showSaveNow);
+    q('.save-status-autosave-link')?.classList.toggle('hidden', !view.autosaveOff);
+
+    // "Changed since last save" (and Undo changes, inside it) only when there is something.
+    const dirty = this.saveStatus ? !this.saveStatus.clean : false;
+    q('.save-status-files-toggle')?.classList.toggle('hidden', !dirty);
+    if (!dirty) {
+      q('.changed-files-section')?.classList.add('hidden');
+      q('.save-status-files-toggle')?.setAttribute('aria-expanded', 'false');
+    }
+  }
+
+  /**
+   * "Save now": one checkpoint of everything not yet in a save point.
+   */
+  async saveNow() {
+    try {
+      const response = await fetch('/api/checkpoints', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ description: 'Saved your recent changes' })
+      });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || "Couldn't save your progress right now. Please try again in a moment.");
+      }
+      await response.json();
+      this.showSuccess('All changes saved');
+      this.fetchCheckpoints();
+    } catch (error) {
+      console.error('Error saving:', error);
+      this.showError(error.message);
+    }
+    await this.refreshSaveStatus();
+    this.checkUncommittedChanges();
   }
 
   /**
@@ -125,6 +196,7 @@ export class CheckpointManager {
   createCheckpointPanel() {
     const panel = document.createElement('div');
     panel.className = 'checkpoint-panel hidden';
+    panel.dataset.llamabot = 'checkpoint-panel';
     panel.innerHTML = `
       <div class="checkpoint-panel-header">
         <h3><i class="fa-solid fa-clock-rotate-left"></i> History</h3>
@@ -158,15 +230,24 @@ export class CheckpointManager {
           <select class="pull-branch-select"></select>
         </div>
       </div>
-      <div class="uncommitted-changes-banner hidden">
-        <div class="uncommitted-changes-info" title="Click to see changed files">
-          <i class="fa-solid fa-circle-exclamation"></i>
-          <span class="uncommitted-changes-text">Unsaved changes</span>
-          <i class="fa-solid fa-chevron-down uncommitted-expand-icon"></i>
+      <div class="save-status" data-llamabot="save-status" data-state="unknown">
+        <div class="save-status-row">
+          <i class="save-status-icon fa-solid fa-circle-notch" aria-hidden="true"></i>
+          <div class="save-status-body">
+            <span class="save-status-text" role="status" aria-live="polite">Checking save status…</span><span class="save-status-time"></span>
+            <span class="save-status-detail hidden"></span>
+            <a class="save-status-autosave-link hidden" href="/settings#autosave" target="_blank" rel="noopener">Auto-save setting</a>
+          </div>
+          <button type="button" class="btn-save-now hidden">Save now</button>
         </div>
-        <button class="btn-discard-changes" title="Discard all uncommitted changes">
-          <i class="fa-solid fa-trash"></i> Discard
+        <button type="button" class="save-status-files-toggle hidden" aria-expanded="false" aria-controls="changed-since-last-save">
+          Changed since last save <i class="fa-solid fa-chevron-down uncommitted-expand-icon" aria-hidden="true"></i>
         </button>
+        <div class="changed-files-section hidden" id="changed-since-last-save">
+          <div class="uncommitted-file-list"></div>
+          <button type="button" class="btn-discard-changes">Undo changes since last save</button>
+        </div>
+        <p class="save-status-note">Saves your app's code. Your data is backed up separately by LlamaPress.</p>
       </div>
       <div class="discard-undo-banner hidden">
         <div class="discard-undo-info">
@@ -177,7 +258,6 @@ export class CheckpointManager {
           Undo discard
         </button>
       </div>
-      <div class="uncommitted-file-list hidden"></div>
       <div class="save-checkpoint-form hidden">
         <input type="text" class="checkpoint-message-input" placeholder="Describe your changes...">
         <div class="save-checkpoint-actions">
@@ -185,7 +265,7 @@ export class CheckpointManager {
           <button class="btn-cancel-checkpoint">Cancel</button>
         </div>
       </div>
-      <div class="checkpoint-panel-content">
+      <div class="checkpoint-panel-content" tabindex="0">
         <div class="checkpoint-list"></div>
         <div class="checkpoint-empty-state hidden">
           <p>No history yet</p>
@@ -210,9 +290,10 @@ export class CheckpointManager {
           </div>
         </div>
         <div class="checkpoint-detail-actions">
-          <button class="btn-detail-rollback">
-            <i class="fa-solid fa-rotate-left"></i> Rollback to this commit
+          <button type="button" class="btn-detail-rollback" aria-describedby="go-back-help">
+            <i class="fa-solid fa-rotate-left" aria-hidden="true"></i> Go back to this version
           </button>
+          <small class="go-back-help" id="go-back-help">Your current version is saved first.</small>
           <button class="btn-detail-diff">
             <i class="fa-solid fa-code-compare"></i> View Full Diff
           </button>
@@ -266,9 +347,12 @@ export class CheckpointManager {
     const undoDiscardBtn = panel.querySelector('.btn-undo-discard');
     undoDiscardBtn.onclick = () => this.undoDiscard();
 
-    // Add uncommitted changes info click handler for expand/collapse
-    const uncommittedInfo = panel.querySelector('.uncommitted-changes-info');
-    uncommittedInfo.onclick = () => this.toggleUncommittedFileList();
+    // "Changed since last save" expands the file list (with Undo changes inside)
+    const filesToggle = panel.querySelector('.save-status-files-toggle');
+    filesToggle.onclick = () => this.toggleUncommittedFileList();
+
+    // "Save now" (shown only when something isn't in a save point)
+    panel.querySelector('.btn-save-now').onclick = () => this.saveNow();
 
     // Add form handlers
     const saveFormBtn = panel.querySelector('.btn-save-checkpoint');
@@ -366,13 +450,14 @@ export class CheckpointManager {
         throw new Error(errorData.detail || `Failed to save checkpoint: ${response.statusText}`);
       }
 
-      await response.json();
+      const data = await response.json();
 
       // Hide form and refresh list
       this.hideSaveCheckpointForm();
-      this.showSuccess(`Checkpoint saved: ${message}`);
+      this.showSuccess(data.skipped ? 'Everything is already saved' : `Checkpoint saved: ${message}`);
       this.fetchCheckpoints();
-      this.updateUnsavedBadge(); // Update badge after saving
+      this.refreshSaveStatus();
+      this.checkUncommittedChanges();
 
     } catch (error) {
       console.error('Error saving checkpoint:', error);
@@ -390,6 +475,7 @@ export class CheckpointManager {
     if (this.isVisible) {
       this.checkpointPanel.classList.remove('hidden');
       this.fetchCheckpoints();
+      this.refreshSaveStatus();
       this.checkUncommittedChanges();
       this.checkRemoteStatus(); // refresh the "updates available" badge
     } else {
@@ -399,7 +485,7 @@ export class CheckpointManager {
   }
 
   /**
-   * Check for uncommitted changes and update the banner
+   * Fill the "Changed since last save" list (one click down — never a headline count).
    */
   async checkUncommittedChanges() {
     try {
@@ -408,29 +494,20 @@ export class CheckpointManager {
       });
 
       if (!response.ok) {
-        throw new Error(`Failed to check uncommitted changes: ${response.statusText}`);
+        throw new Error(`Failed to check changed files: ${response.statusText}`);
       }
 
       const data = await response.json();
-      const banner = this.checkpointPanel.querySelector('.uncommitted-changes-banner');
-      const textSpan = banner.querySelector('.uncommitted-changes-text');
       const fileList = this.checkpointPanel.querySelector('.uncommitted-file-list');
 
       if (data.has_changes) {
-        const count = data.total_count;
-        textSpan.textContent = `${count} unsaved change${count !== 1 ? 's' : ''}`;
-        banner.classList.remove('hidden');
-
-        // Render the file list
         this.renderUncommittedFileList(data.changed_files || [], data.untracked_files || []);
       } else {
-        banner.classList.add('hidden');
-        fileList.classList.add('hidden');
         fileList.innerHTML = '';
       }
 
     } catch (error) {
-      console.warn('Could not check uncommitted changes:', error);
+      console.warn('Could not list changed files:', error);
     }
   }
 
@@ -463,14 +540,18 @@ export class CheckpointManager {
    * Toggle the uncommitted file list visibility
    */
   toggleUncommittedFileList() {
-    const fileList = this.checkpointPanel.querySelector('.uncommitted-file-list');
+    const fileList = this.checkpointPanel.querySelector('.changed-files-section');
     const expandIcon = this.checkpointPanel.querySelector('.uncommitted-expand-icon');
+    const toggle = this.checkpointPanel.querySelector('.save-status-files-toggle');
 
     if (fileList.classList.contains('hidden')) {
+      this.checkUncommittedChanges();
+      toggle?.setAttribute('aria-expanded', 'true');
       fileList.classList.remove('hidden');
       expandIcon.classList.remove('fa-chevron-down');
       expandIcon.classList.add('fa-chevron-up');
     } else {
+      toggle?.setAttribute('aria-expanded', 'false');
       fileList.classList.add('hidden');
       expandIcon.classList.remove('fa-chevron-up');
       expandIcon.classList.add('fa-chevron-down');
@@ -501,7 +582,7 @@ export class CheckpointManager {
         return;
       }
       if (choice !== 'discard') return;
-    } else if (!confirm('Discard all uncommitted changes?\n\nA backup is saved first, so you can undo this.')) {
+    } else if (!confirm(undoChangesConfirmText(changes.total_count))) {
       // The backend snapshots everything first, so this is recoverable — say so
       // rather than scaring people with the old "cannot be undone".
       return;
@@ -1265,13 +1346,14 @@ export class CheckpointManager {
    * Confirm rollback with user
    */
   confirmRollback(checkpointId) {
-    const checkpoint = this.checkpoints.find(cp => cp.checkpoint_id === checkpointId);
-    const description = checkpoint ? checkpoint.description : 'this checkpoint';
+    const checkpoint = (this.checkpoints || []).find(cp => cp.checkpoint_id === checkpointId);
+    const commit = (this.graphData?.commits || []).find(c => c.sha === checkpointId);
+    const description = commit?.subject || checkpoint?.description || 'this version';
 
+    // The server saves the current state first (LP-46), so this is not a one-way door.
     const confirmed = confirm(
-      `Are you sure you want to rollback to "${description}"?\n\n` +
-      `This will discard all changes made after this checkpoint.\n` +
-      `This action cannot be undone.`
+      `Go back to "${description}"?\n\n` +
+      `Your current version is saved first, so you can come back to it from History.`
     );
 
     if (confirmed) {
@@ -1304,7 +1386,10 @@ export class CheckpointManager {
           this.chatApp.iframeManager.refreshRailsApp((callback) => this.chatApp.getRailsDebugInfo(callback));
         }
 
-        this.showSuccess('Successfully rolled back changes');
+        this.showSuccess(data.saved_before_restore
+          ? 'Went back to that version. Your previous version is saved in History.'
+          : 'Went back to that version.');
+        this.refreshSaveStatus();
         // Refresh checkpoint list
         this.fetchCheckpoints();
       } else {

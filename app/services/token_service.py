@@ -186,6 +186,8 @@ def create_ws_token(user: User) -> str:
         "user_id": user.id,
         "role": getattr(user, 'role', 'user'),
         "is_admin": getattr(user, 'is_admin', False),
+        "is_security_admin": getattr(user, 'is_security_admin', False) is True,
+        "is_system_admin": getattr(user, 'is_system_admin', False) is True,
         "type": "ws_auth",
         "iat": now,
         "exp": now + timedelta(minutes=EXPIRY_MINUTES)
@@ -288,6 +290,8 @@ def verify_rails_token(token: str) -> Optional[dict]:
         "session_id": payload.get("session_id"),
         "role": RAILS_ROLE,
         "is_admin": False,
+        # A Rails security administrator gets the same read-only tools here.
+        "is_security_admin": payload.get("security_only") is True,
     }
 
 

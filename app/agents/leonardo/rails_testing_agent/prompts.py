@@ -1762,7 +1762,7 @@ The only acceptable reasons to delete a test:
 
 ## SECURITY REMINDERS
 
-- Never dump environment variables or database dumps
+- Never dump environment variables
 - Never introspect sensitive env files
 - When testing authentication: use test tokens, not real credentials
 - When testing authorization: verify user scoping works correctly

@@ -1,0 +1,15 @@
+0.7.20:
+[x] - LP-28: ZDR boxes stop sending chat, tool-arg and error text to mothership.
+[x] - LP-29: Claude Haiku 5.5 on AWS Bedrock via instance role.
+[x] - LP-34: Keyboard access, WCAG fixes, axe release gate, VPAT draft.
+[x] - LP-33: ZDR boxes redact sensitive data, least-privilege tools, tool cap.
+[x] - LP-32: Security admin, system admin and standard user are separate roles.
+[x] - LP-31: Institution password policy, sign-in audit log with CSV.
+[x] - LP-43: Live-region announcer, a11y switches, axe check for every app.
+[x] - LP-30: Reopened chat tabs sign in again instead of "Refresh the page".
+[x] - LP-46: Leo auto-saves every turn; History panel says "All changes saved".
+[x] - LP-45: Leo refuses to bundle or copy a whole app off LlamaPress.
+[x] - LP-44: Images from Uploaded files reach the vision model; Leo gets view_image.
+[x] - LP-49: Auto-save can be turned off in Settings; on by default.
+[x] - LP-38: Leonardo INSTITUTIONAL switch + bin/check_error_pages (HECVAT A12).
+[x] - Leonardo schema.rb carries the Solid Queue tables; new boxes no longer skip them.

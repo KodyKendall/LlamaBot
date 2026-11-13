@@ -479,6 +479,10 @@ export class ThreadManager {
     messages.forEach(message => {
       // Background task results are delivered to Leo as a message; the user
       // sees Leo's answer, so show a one-line marker, not the raw report.
+      // The picture view_image hands the model (LP-44) is not something anyone typed.
+      if (message?.type === 'human' && message?.additional_kwargs?.view_image === true) {
+        return;
+      }
       if (isTaskNotification(message)) {
         this.messageRenderer.addMessage(taskNotificationMarker(message), 'system_message');
         return;

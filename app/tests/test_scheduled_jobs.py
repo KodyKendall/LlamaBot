@@ -13,7 +13,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from main import app
-from app.dependencies import get_current_user, get_db_session, engineer_or_admin_required, admin_required
+from app.dependencies import system_admin_required, get_current_user, get_db_session, engineer_or_admin_required, admin_required
 from app.models import User, ScheduledJob, ScheduledJobRun
 
 
@@ -197,7 +197,7 @@ class TestScheduledJobsAPI:
 
         # Should fail with 403 because engineer is not admin
         assert response.status_code == 403
-        assert "Admin privileges required" in response.json()["detail"]
+        assert "System administrator required" in response.json()["detail"]
 
         app.dependency_overrides = {}
 
@@ -206,7 +206,7 @@ class TestScheduledJobsAPI:
         mock_db_session.get.return_value = sample_job
 
         app.dependency_overrides[get_current_user] = lambda: mock_admin_user
-        app.dependency_overrides[admin_required] = lambda: mock_admin_user
+        app.dependency_overrides[system_admin_required] = lambda: mock_admin_user
         app.dependency_overrides[get_db_session] = lambda: mock_db_session
 
         client = TestClient(app)

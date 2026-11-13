@@ -72,7 +72,15 @@ const tick = () => new Promise((r) => setTimeout(r, 0));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const events = (type) => dispatched.filter((e) => e.type === type);
 
-function setup({ cachedToken = 'stale-token', ackTimeoutMs = 10_000 } = {}) {
+// A readable, unexpired JWT the server still rejects (crm-4: signed with the old key).
+// Since LP-30 the cache drops anything it can't decode, so an opaque string would never
+// be sent at all.
+const b64url = (obj) => Buffer.from(JSON.stringify(obj)).toString('base64url');
+const STALE_TOKEN = `${b64url({ alg: 'HS256' })}.${b64url({
+  sub: 'kody', iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + 30 * 60,
+})}.b2xkLWtleQ`;
+
+function setup({ cachedToken = STALE_TOKEN, ackTimeoutMs = 10_000 } = {}) {
   dispatched.length = 0;
   FakeSocket.all = [];
   tokenResponses = [];
@@ -335,7 +343,7 @@ test('giving up on sign-in leaves Send usable, even when the close beat the toke
   try {
     const sendButton = { disabled: false };
     const mgr = new WebSocketManager({ handleMessage() {} }, { websocketUrl: 'ws://box/ws' }, { sendButton });
-    store.set('llamabot_ws_token', 'stale-token');
+    store.set('llamabot_ws_token', STALE_TOKEN);
     store.set('llamabot_ws_token_expiry', String(Date.now() + 25 * 60 * 1000));
     mgr.connect();
     const sock = FakeSocket.all[0];

@@ -40,3 +40,33 @@ def reset_current_user_id(token: object) -> None:
         _current_user_id.reset(token)  # type: ignore[arg-type]
     except (ValueError, TypeError):
         pass
+
+
+# The role behind this turn, for the ZDR tool gate (see app/permissions.py). Unset
+# means unknown, which that gate treats as least privilege.
+_current_principal: ContextVar[tuple] = ContextVar(
+    "llamabot_current_principal", default=(None, False, False)
+)
+
+
+def set_current_principal(
+    role: Optional[str], is_admin: bool = False, security_only: bool = False
+) -> object:
+    """Stamp the role this turn runs as. Returns a token for ``reset``.
+
+    ``is_admin`` means all tools (owner or system admin). ``security_only`` is a security
+    administrator, whose tools are read-only on any box.
+    """
+    return _current_principal.set((role, bool(is_admin), bool(security_only)))
+
+
+def current_principal() -> tuple:
+    """``(role, is_admin, security_only)`` for this turn; ``(None, False, False)`` if unknown."""
+    return _current_principal.get()
+
+
+def reset_current_principal(token: object) -> None:
+    try:
+        _current_principal.reset(token)  # type: ignore[arg-type]
+    except (ValueError, TypeError):
+        pass

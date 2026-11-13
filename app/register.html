@@ -1,6 +1,8 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <link rel="stylesheet" href="/frontend/a11y.css">
+    <script src="/frontend/a11y.js" defer></script>
     <title>Leonardo</title>
     <link rel="icon" type="image/png" href="/frontend/leonardo-icon.png">
     <style>
@@ -52,7 +54,7 @@
         label {
             display: block;
             font-size: 0.85rem;
-            color: rgba(255, 255, 255, 0.5);
+            color: rgba(255, 255, 255, 0.65);
             margin-bottom: 6px;
         }
         input[type="text"], input[type="password"] {
@@ -98,12 +100,12 @@
         .error {
             background: rgba(239, 68, 68, 0.1);
             border: 1px solid rgba(239, 68, 68, 0.25);
-            color: #ef4444;
+            color: #fca5a5;
         }
         .success {
             background: rgba(34, 197, 94, 0.1);
             border: 1px solid rgba(34, 197, 94, 0.25);
-            color: #22c55e;
+            color: #4ade80;
         }
         .warning {
             background: rgba(251, 191, 36, 0.1);
@@ -114,7 +116,8 @@
     </style>
 </head>
 <body>
-    <div class="container">
+    <a class="skip-link" href="#main-content">Skip to main content</a>
+    <div class="container" id="main-content" tabindex="-1">
         <div class="logo">
             <img src="https://llamapress-ai-image-uploads.s3.us-west-2.amazonaws.com/4bmqe5iolvp84ceyk9ttz8vylrym" alt="Leonardo">
             <h2>Leonardo</h2>
@@ -132,7 +135,7 @@
 
                 <button type="submit">Register</button>
             </form>
-            <div id="message"></div>
+            <div id="message" role="alert"></div>
         </div>
     </div>
 

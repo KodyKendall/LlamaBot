@@ -359,6 +359,7 @@ _KNOWN_MODELS = [
     "claude-4.5-sonnet",
     "claude-4.5-haiku",
     "claude-haiku-5.5",
+    "claude-haiku-5.5-bedrock",
     "gpt-5-codex",
     "gpt-5-mini",
     "gpt-5-nano",

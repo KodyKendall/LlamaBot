@@ -34,11 +34,13 @@ from app.agents.leonardo.rails_agent.sub_agents import delegate_research
 from app.agents.leonardo.rails_ai_builder_agent.prompts import RAILS_AI_BUILDER_AGENT_PROMPT
 from app.agents.leonardo.project_context import build_system_prompt_with_project_context, brand_context_section
 from app.agents.leonardo.llm_factory import get_llm, invoke_with_cache, system_message_for_model
+from app.agents.leonardo.tool_limits import visible_tools
 from app.agents.leonardo.message_invariants import normalize_messages_for_provider
 from app.agents.leonardo.resilience import invoke_with_transient_retry
 from app.agents.leonardo.rails_agent.nodes import SUMMARIZATION_PROMPT
 from app.agents.leonardo.summarization import compact_messages_if_needed
 
+from app.agents.leonardo.accessible_views import ACCESSIBLE_VIEWS_DIRECTIVE
 import logging
 logger = logging.getLogger(__name__)
 
@@ -57,7 +59,7 @@ def get_sys_msg():
     """
     # Rebuilt every turn (see get_sys_msg call site), so the brand guide appended
     # here stays live without a restart.
-    full_prompt = build_system_prompt_with_project_context(RAILS_AI_BUILDER_AGENT_PROMPT, agent_mode="rails_ai_builder_agent") + brand_context_section()
+    full_prompt = build_system_prompt_with_project_context(RAILS_AI_BUILDER_AGENT_PROMPT, suffix=ACCESSIBLE_VIEWS_DIRECTIVE, agent_mode="rails_ai_builder_agent") + brand_context_section()
     return {
         "role": "system",
         "content": [
@@ -137,6 +139,8 @@ def leonardo_ai_builder(state: RailsAgentState) -> Command[Literal["tools"]]:
       return {"messages": compaction_ops + [response], "failed_tool_calls_count": -failed_tool_calls_count} # by adding a negative number, we subtract the current count and reset it to 0.
 
    # Bind tools - parallel_tool_calls is not supported by Gemini
+   # Raw node: no shared middleware to hide what this role may not run (LP-33).
+   tools = visible_tools(tools)
    if llm_model.startswith("gemini"):
       llm_with_tools = llm.bind_tools(tools)
    else:

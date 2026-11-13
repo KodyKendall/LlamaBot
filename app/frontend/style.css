@@ -592,7 +592,7 @@ body {
     background: transparent;
     border: none;
     border-radius: 8px;
-    color: rgba(255, 255, 255, 0.6);
+    color: rgba(255, 255, 255, 0.65);
     cursor: pointer;
     transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
     position: relative;
@@ -873,7 +873,7 @@ body {
     background: transparent;
     border: none;
     border-radius: 8px;
-    color: rgba(255, 255, 255, 0.6);
+    color: rgba(255, 255, 255, 0.65);
     cursor: pointer;
     transition: all 0.15s ease;
 }
@@ -1195,7 +1195,7 @@ body {
 
 .backup-model-picker .backup-model-label {
     font-size: 0.75rem;
-    color: rgba(255, 255, 255, 0.55);
+    color: rgba(255, 255, 255, 0.65);
 }
 
 /* The toolbar's Model button while a backup model is answering. */
@@ -1276,7 +1276,7 @@ body {
     font-weight: 700;
     letter-spacing: 0.08em;
     text-transform: uppercase;
-    color: rgba(255, 255, 255, 0.45);
+    color: rgba(255, 255, 255, 0.65);
 }
 
 .brand-colors,
@@ -1414,7 +1414,7 @@ body {
     align-items: center;
     justify-content: center;
     font-size: 12px;
-    color: rgba(255, 255, 255, 0.55);
+    color: rgba(255, 255, 255, 0.65);
     background: transparent;
     border: none;
     border-radius: 6px;
@@ -1462,7 +1462,7 @@ body {
 
 .brand-empty {
     font-size: 0.78rem;
-    color: rgba(255, 255, 255, 0.4);
+    color: rgba(255, 255, 255, 0.65);
     padding: 4px 2px;
 }
 
@@ -1511,7 +1511,7 @@ body {
     align-items: center;
     justify-content: center;
     font-size: 14px;
-    color: rgba(255, 255, 255, 0.6);
+    color: rgba(255, 255, 255, 0.65);
     background: rgba(255, 255, 255, 0.06);
     border: none;
     border-radius: 8px;
@@ -1563,7 +1563,7 @@ button.brand-logo-thumb:hover .brand-logo-zoom {
     row-gap: 4px;
     padding: 2px 2px 6px;
     font-size: 0.7rem;
-    color: rgba(255, 255, 255, 0.42);
+    color: rgba(255, 255, 255, 0.65);
     line-height: 1.3;
 }
 
@@ -1610,7 +1610,7 @@ button.brand-logo-thumb:hover .brand-logo-zoom {
     accent-color: #8B5CF6;
 }
 
-.js-error-banner:hover { color: rgba(255, 255, 255, 0.6); }
+.js-error-banner:hover { color: rgba(255, 255, 255, 0.65); }
 
 /* Nested selector on purpose: `.input-area button` styles every button in the
    composer as a filled pill, and would turn this × into a chunky box. */
@@ -1619,7 +1619,7 @@ button.brand-logo-thumb:hover .brand-logo-zoom {
     border: none;
     box-shadow: none;
     border-radius: 0;
-    color: rgba(255, 255, 255, 0.28);
+    color: rgba(255, 255, 255, 0.65);
     cursor: pointer;
     font-size: 13px;
     line-height: 1;
@@ -1656,7 +1656,7 @@ button.brand-logo-thumb:hover .brand-logo-zoom {
     white-space: nowrap;
     font-size: 0.63rem;
     font-weight: 400;
-    color: rgba(255, 255, 255, 0.34);
+    color: rgba(255, 255, 255, 0.65);
     cursor: pointer;
     text-decoration: none;
     opacity: 0;
@@ -1672,7 +1672,7 @@ button.brand-logo-thumb:hover .brand-logo-zoom {
 
 .js-error-banner .js-error-more:hover {
     background: none;
-    color: rgba(255, 255, 255, 0.62);
+    color: rgba(255, 255, 255, 0.65);
     text-decoration: underline;
     text-underline-offset: 2px;
     transform: none;
@@ -1736,7 +1736,7 @@ button.brand-logo-thumb:hover .brand-logo-zoom {
     background: none;
     border: none;
     box-shadow: none;
-    color: rgba(255, 255, 255, 0.45);
+    color: rgba(255, 255, 255, 0.65);
     cursor: pointer;
     font-size: 20px;
     line-height: 1;
@@ -1812,19 +1812,19 @@ button.brand-logo-thumb:hover .brand-logo-zoom {
 .js-error-item-tech {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 0.72rem;
-    color: rgba(255, 255, 255, 0.55);
+    color: rgba(255, 255, 255, 0.65);
     word-break: break-word;
 }
 
 .js-error-item-meta {
     font-size: 0.7rem;
-    color: rgba(255, 255, 255, 0.38);
+    color: rgba(255, 255, 255, 0.65);
     margin-top: 4px;
 }
 
 .js-error-item-meta code {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    color: rgba(255, 255, 255, 0.5);
+    color: rgba(255, 255, 255, 0.65);
 }
 
 .js-error-item-stack {
@@ -1833,7 +1833,7 @@ button.brand-logo-thumb:hover .brand-logo-zoom {
 
 .js-error-item-stack summary {
     font-size: 0.7rem;
-    color: rgba(255, 255, 255, 0.4);
+    color: rgba(255, 255, 255, 0.65);
     cursor: pointer;
 }
 
@@ -1843,7 +1843,7 @@ button.brand-logo-thumb:hover .brand-logo-zoom {
     background: rgba(0, 0, 0, 0.28);
     border-radius: 6px;
     font-size: 0.68rem;
-    color: rgba(255, 255, 255, 0.6);
+    color: rgba(255, 255, 255, 0.65);
     overflow-x: auto;
     white-space: pre;
 }
@@ -1904,7 +1904,7 @@ button.brand-logo-thumb:hover .brand-logo-zoom {
 .color-attach-chip-close {
     background: none;
     border: none;
-    color: rgba(255, 255, 255, 0.55);
+    color: rgba(255, 255, 255, 0.65);
     cursor: pointer;
     font-size: 15px;
     line-height: 1;
@@ -1998,12 +1998,15 @@ button.brand-logo-thumb:hover .brand-logo-zoom {
     box-shadow: 2px 0 12px rgba(0, 0, 0, 0.15);
     z-index: 999; /* Lower than hamburger menu */
     transform: translateX(-100%);
-    transition: transform 0.3s ease;
+    visibility: hidden; /* off-screen alone leaves its rows in the Tab order */
+    transition: transform 0.3s ease, visibility 0s linear 0.3s;
     overflow: hidden;
 }
 
 .menu-drawer.open {
     transform: translateX(0);
+    visibility: visible;
+    transition: transform 0.3s ease, visibility 0s;
 }
 
 .drawer-content {
@@ -2044,7 +2047,7 @@ button.brand-logo-thumb:hover .brand-logo-zoom {
 
 .drawer-header .version-badge {
     font-size: 0.55rem;
-    color: #666;
+    color: #b0b0b0;
     font-weight: 400;
     margin-top: 1px;
     cursor: default;
@@ -2096,7 +2099,7 @@ button.brand-logo-thumb:hover .brand-logo-zoom {
 }
 
 .version-badge.update-available {
-    color: #22c55e;
+    color: #4ade80;
     cursor: pointer;
 }
 
@@ -2257,7 +2260,7 @@ button.brand-logo-thumb:hover .brand-logo-zoom {
 }
 
 .session-feedback-note::placeholder {
-    color: rgba(255, 255, 255, 0.4);
+    color: rgba(255, 255, 255, 0.65);
 }
 
 .session-feedback-note:focus {
@@ -2277,7 +2280,7 @@ button.brand-logo-thumb:hover .brand-logo-zoom {
 .session-feedback-dismiss {
     background: none;
     border: none;
-    color: rgba(255, 255, 255, 0.5);
+    color: rgba(255, 255, 255, 0.65);
     font-size: 1.1rem;
     line-height: 1;
     cursor: pointer;
@@ -2672,9 +2675,8 @@ body.instance-locked .lock-modal-overlay {
 
 .thread-timestamp {
     font-size: 0.75rem;
-    color: var(--text-muted, #888);
+    color: #b0b0b0;
     margin-top: 2px;
-    opacity: 0.7;
 }
 
 /* Overlay for when drawer is open */
@@ -2761,7 +2763,7 @@ body.instance-locked .lock-modal-overlay {
     top: 4px;
     background: transparent;
     border: none;
-    color: rgba(255, 255, 255, 0.4);
+    color: rgba(255, 255, 255, 0.65);
     cursor: pointer;
     padding: 4px 6px;
     border-radius: 4px;
@@ -3006,7 +3008,7 @@ body.instance-locked .lock-modal-overlay {
 }
 
 [data-llamabot="tool-compact"][data-status="error"] [data-llamabot="tool-icon"] {
-    color: #ef4444;
+    color: #fca5a5;
 }
 
 [data-llamabot="tool-icon"][data-state="spinning"] {
@@ -3025,7 +3027,7 @@ body.instance-locked .lock-modal-overlay {
 }
 
 [data-llamabot="tool-compact-target"] {
-    color: rgba(255, 255, 255, 0.5);
+    color: rgba(255, 255, 255, 0.65);
     font-size: 0.7rem;
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
     max-width: 200px;
@@ -3052,7 +3054,7 @@ body.instance-locked .lock-modal-overlay {
 [data-llamabot="tool-expand-arrow"] {
     font-size: 8px;
     margin-left: 4px;
-    color: rgba(255, 255, 255, 0.4);
+    color: rgba(255, 255, 255, 0.65);
     transition: transform 0.2s ease, opacity 0.2s ease;
     display: none;  /* Hidden by default */
 }
@@ -3248,7 +3250,7 @@ body.instance-locked .lock-modal-overlay {
 .send-icon-button.stop-mode {
     background: rgba(239, 68, 68, 0.15);
     border-color: rgba(239, 68, 68, 0.3);
-    color: #ef4444;
+    color: #fca5a5;
 }
 
 .send-icon-button.stop-mode:hover:not(:disabled) {
@@ -3271,7 +3273,7 @@ body.instance-locked .lock-modal-overlay {
     font-weight: 500;
     border: 1px solid rgba(139, 92, 246, 0.2);
     background: rgba(139, 92, 246, 0.08);
-    color: #8b5cf6;
+    color: #c4b5fd;
     border-radius: 6px;
     cursor: pointer;
     transition: all 0.15s ease;
@@ -3326,12 +3328,12 @@ body.instance-locked .lock-modal-overlay {
 
 .execution-mode-check {
     margin-right: 6px;
-    color: #8b5cf6;
+    color: #c4b5fd;
 }
 
 .execution-mode-option-desc {
     font-size: 12px;
-    color: rgba(255, 255, 255, 0.45);
+    color: rgba(255, 255, 255, 0.65);
     line-height: 1.3;
 }
 
@@ -3390,7 +3392,7 @@ body.instance-locked .lock-modal-overlay {
 .approve-btn {
     background: rgba(34, 197, 94, 0.15);
     border-color: rgba(34, 197, 94, 0.3);
-    color: #22c55e;
+    color: #4ade80;
 }
 
 .approve-btn:hover:not(:disabled) {
@@ -3400,7 +3402,7 @@ body.instance-locked .lock-modal-overlay {
 .reject-btn {
     background: rgba(239, 68, 68, 0.1);
     border-color: rgba(239, 68, 68, 0.25);
-    color: #ef4444;
+    color: #fca5a5;
 }
 
 .reject-btn:hover:not(:disabled) {
@@ -3532,7 +3534,7 @@ body.instance-locked .lock-modal-overlay {
 .plan-skip-all-btn {
     background: transparent;
     border: 1px solid rgba(255, 255, 255, 0.15);
-    color: rgba(255, 255, 255, 0.35);
+    color: rgba(255, 255, 255, 0.65);
     font-size: 12px;
     padding: 8px 16px;
     border-radius: 8px;
@@ -3542,7 +3544,7 @@ body.instance-locked .lock-modal-overlay {
 
 .plan-skip-btn:hover:not(:disabled),
 .plan-skip-all-btn:hover:not(:disabled) {
-    color: rgba(255, 255, 255, 0.6);
+    color: rgba(255, 255, 255, 0.65);
 }
 
 .plan-skip-btn:disabled,
@@ -3767,7 +3769,7 @@ body.instance-locked .lock-modal-overlay {
     gap: 6px;
     background: transparent;
     border: 1px solid rgba(255, 255, 255, 0.15);
-    color: rgba(255, 255, 255, 0.55);
+    color: rgba(255, 255, 255, 0.65);
     font-size: 12px;
     padding: 8px 14px;
     border-radius: 8px;
@@ -3947,7 +3949,7 @@ body.instance-locked .lock-modal-overlay {
     flex-shrink: 0;
     background: none;
     border: none;
-    color: rgba(255, 255, 255, 0.6);
+    color: rgba(255, 255, 255, 0.65);
     font-size: 1.6rem;
     line-height: 1;
     cursor: pointer;
@@ -4101,7 +4103,7 @@ body.instance-locked .lock-modal-overlay {
 [data-llamabot="system-message"] {
     text-align: center;
     font-size: 12px;
-    color: rgba(255, 255, 255, 0.4);
+    color: rgba(255, 255, 255, 0.65);
     padding: 6px 0;
     font-style: italic;
 }
@@ -4303,7 +4305,7 @@ body.instance-locked .lock-modal-overlay {
 .custom-dropdown-container::after {
     content: '▾';
     font-size: 0.7rem;
-    color: rgba(255, 255, 255, 0.4);
+    color: rgba(255, 255, 255, 0.65);
     position: absolute;
     right: 0.5rem;
     top: 50%;
@@ -4313,12 +4315,12 @@ body.instance-locked .lock-modal-overlay {
 }
 
 .custom-dropdown-container:hover::after {
-    color: rgba(255, 255, 255, 0.6);
+    color: rgba(255, 255, 255, 0.65);
 }
 
 /* Disabled dropdown options (e.g., models without API keys) */
 .custom-dropdown option:disabled {
-    color: rgba(255, 255, 255, 0.35);
+    color: rgba(255, 255, 255, 0.65);
     background: rgba(0, 0, 0, 0.2);
     font-style: italic;
 }
@@ -4504,7 +4506,7 @@ body.instance-locked .lock-modal-overlay {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    color: #888;
+    color: #b0b0b0;
     font-size: 0.85rem;
     font-family: -apple-system, BlinkMacSystemFont, sans-serif;
     width: 100%;
@@ -4515,7 +4517,7 @@ body.instance-locked .lock-modal-overlay {
     background: transparent;
     border: none;
     outline: none;
-    color: #888;
+    color: #b0b0b0;
     font-size: 0.85rem;
     font-family: -apple-system, BlinkMacSystemFont, sans-serif;
     flex-grow: 1;
@@ -4557,7 +4559,7 @@ body.instance-locked .lock-modal-overlay {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    color: #888;
+    color: #b0b0b0;
     font-size: 0.85rem;
     transition: background-color 0.15s ease;
 }
@@ -4584,7 +4586,7 @@ body.instance-locked .lock-modal-overlay {
 
 .url-dropdown-name {
     margin-left: 12px;
-    color: #888;
+    color: #b0b0b0;
     font-size: 0.8rem;
 }
 
@@ -4599,7 +4601,7 @@ body.instance-locked .lock-modal-overlay {
 .nav-button {
     background: none;
     border: none;
-    color: #888;
+    color: #b0b0b0;
     cursor: pointer;
     padding: 4px;
     border-radius: 4px;
@@ -4622,13 +4624,13 @@ body.instance-locked .lock-modal-overlay {
 }
 
 .nav-button:disabled {
-    color: #555;
+    color: #b0b0b0;
     cursor: not-allowed;
     background-color: transparent;
 }
 
 .nav-button:disabled:hover {
-    color: #555;
+    color: #b0b0b0;
     background-color: transparent;
     transform: none;
 }
@@ -4653,7 +4655,7 @@ body.instance-locked .lock-modal-overlay {
 .view-mode-btn {
     background: none;
     border: none;
-    color: #888;
+    color: #b0b0b0;
     cursor: pointer;
     padding: 2px 4px;
     border-radius: 4px;
@@ -4798,7 +4800,7 @@ body.instance-locked .lock-modal-overlay {
 .thinking-content .thinking-toggle {
     margin-left: auto;
     font-size: 0.7rem;
-    color: rgba(255, 255, 255, 0.5);
+    color: rgba(255, 255, 255, 0.65);
     transition: transform 0.2s ease;
 }
 
@@ -4820,7 +4822,7 @@ body.instance-locked .lock-modal-overlay {
 /* Collapsed state styles */
 .thinking-content.collapsed .thinking-summary {
     font-size: 0.75rem;
-    color: rgba(255, 255, 255, 0.5);
+    color: rgba(255, 255, 255, 0.65);
     font-style: italic;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -4884,7 +4886,7 @@ body.instance-locked .lock-modal-overlay {
 
 /* Label - very subtle, blends with background */
 .thinking-message-header .thinking-label {
-    color: rgba(255, 255, 255, 0.15);
+    color: rgba(255, 255, 255, 0.65);
     font-weight: 300;
     font-size: 0.65rem;
     text-transform: lowercase;
@@ -4917,7 +4919,7 @@ body.instance-locked .lock-modal-overlay {
 .thinking-message-text {
     display: none;
     font-size: 0.7rem;
-    color: rgba(255, 255, 255, 0.4);
+    color: rgba(255, 255, 255, 0.65);
     font-style: italic;
     max-height: 200px;
     overflow-y: auto;
@@ -5032,7 +5034,7 @@ body.instance-locked .lock-modal-overlay {
     top: 4px;
     left: 10px;
     font-size: 0.7em;
-    color: rgba(255, 255, 255, 0.4);
+    color: rgba(255, 255, 255, 0.65);
     text-transform: uppercase;
     font-family: inherit;
     pointer-events: none;
@@ -5064,7 +5066,7 @@ body.instance-locked .lock-modal-overlay {
 
 .code-block-copy-btn.copied {
     background: rgba(34, 197, 94, 0.3);
-    color: #22c55e;
+    color: #4ade80;
 }
 
 [data-llamabot="ai-message"] strong,
@@ -5293,7 +5295,7 @@ body.instance-locked .lock-modal-overlay {
 .duration-timer-inline .timer-icon {
     width: 10px;
     height: 10px;
-    color: #888;
+    color: #b0b0b0;
 }
 
 .duration-timer-inline .timer-text {
@@ -5732,7 +5734,7 @@ body.instance-locked .lock-modal-overlay {
     font-size: 0.7em;
     font-weight: 600;
     text-transform: uppercase;
-    color: rgba(255, 255, 255, 0.6);
+    color: rgba(255, 255, 255, 0.65);
     margin: 12px 0 6px 0;
     letter-spacing: 0.5px;
 }
@@ -5997,7 +5999,7 @@ body.instance-locked .lock-modal-overlay {
 }
 
 .plan-count {
-    color: rgba(255, 255, 255, 0.5);
+    color: rgba(255, 255, 255, 0.65);
     font-weight: 500;
 }
 
@@ -6019,26 +6021,26 @@ body.instance-locked .lock-modal-overlay {
 }
 
 .plan-expand-hint {
-    color: rgba(255, 255, 255, 0.3);
+    color: rgba(255, 255, 255, 0.65);
     font-size: 0.8em;
     transition: color 0.2s ease;
 }
 
 .plan-progress-text:hover .plan-expand-hint {
-    color: rgba(255, 255, 255, 0.5);
+    color: rgba(255, 255, 255, 0.65);
 }
 
 /* Arrow icon for expand/collapse */
 .plan-expand-arrow {
     width: 14px;
     height: 14px;
-    color: rgba(255, 255, 255, 0.4);
+    color: rgba(255, 255, 255, 0.65);
     transition: all 0.2s ease;
     flex-shrink: 0;
 }
 
 .plan-progress-text:hover .plan-expand-arrow {
-    color: rgba(255, 255, 255, 0.6);
+    color: rgba(255, 255, 255, 0.65);
 }
 
 /* Rotate arrow when expanded */
@@ -6060,7 +6062,7 @@ body.instance-locked .lock-modal-overlay {
     font-size: 0.75em;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    color: rgba(255, 255, 255, 0.4);
+    color: rgba(255, 255, 255, 0.65);
     margin-bottom: 8px;
     font-weight: 600;
 }
@@ -6076,7 +6078,7 @@ body.instance-locked .lock-modal-overlay {
 
 /* Task status styles */
 .plan-task-completed {
-    color: rgba(255, 255, 255, 0.4);
+    color: rgba(255, 255, 255, 0.65);
 }
 
 .plan-task-in_progress {
@@ -6084,7 +6086,7 @@ body.instance-locked .lock-modal-overlay {
 }
 
 .plan-task-pending {
-    color: rgba(255, 255, 255, 0.35);
+    color: rgba(255, 255, 255, 0.65);
 }
 
 /* Active icon for in-progress tasks in list */
@@ -6094,7 +6096,7 @@ body.instance-locked .lock-modal-overlay {
     display: flex;
     align-items: center;
     justify-content: center;
-    color: #8b5cf6;
+    color: #c4b5fd;
     font-size: 1.1em;
     flex-shrink: 0;
     animation: star-shimmer 2s ease-in-out infinite;
@@ -6134,7 +6136,7 @@ body.instance-locked .lock-modal-overlay {
     font-size: 0.75em;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    color: rgba(255, 255, 255, 0.4);
+    color: rgba(255, 255, 255, 0.65);
     margin-bottom: 8px;
     font-weight: 600;
 }
@@ -6144,7 +6146,7 @@ body.instance-locked .lock-modal-overlay {
     align-items: center;
     gap: 8px;
     padding: 6px 0;
-    color: rgba(255, 255, 255, 0.4);
+    color: rgba(255, 255, 255, 0.65);
     font-size: 0.85em;
     line-height: 1.4;
 }
@@ -6209,7 +6211,7 @@ body.instance-locked .lock-modal-overlay {
 .prompt-library-btn.active {
     background: rgba(139, 92, 246, 0.25);
     border-color: rgba(139, 92, 246, 0.5);
-    color: #8b5cf6;
+    color: #c4b5fd;
 }
 
 /* Prompt library panel */
@@ -6246,7 +6248,7 @@ body.instance-locked .lock-modal-overlay {
 }
 
 .prompt-panel-manage {
-    color: rgba(255, 255, 255, 0.5);
+    color: rgba(255, 255, 255, 0.65);
     font-size: 0.85rem;
     text-decoration: none;
     padding: 4px;
@@ -6262,7 +6264,7 @@ body.instance-locked .lock-modal-overlay {
 .prompt-panel-close {
     background: none;
     border: none;
-    color: rgba(255, 255, 255, 0.6);
+    color: rgba(255, 255, 255, 0.65);
     font-size: 1.2rem;
     cursor: pointer;
     padding: 0;
@@ -6298,7 +6300,7 @@ body.instance-locked .lock-modal-overlay {
 }
 
 .prompt-search-input::placeholder {
-    color: rgba(255, 255, 255, 0.4);
+    color: rgba(255, 255, 255, 0.65);
 }
 
 .prompt-search-input:focus {
@@ -6363,28 +6365,28 @@ body.instance-locked .lock-modal-overlay {
 .prompt-item-group {
     font-size: 0.7rem;
     background: rgba(139, 92, 246, 0.2);
-    color: #8b5cf6;
+    color: #c4b5fd;
     padding: 2px 8px;
     border-radius: 4px;
 }
 
 .prompt-item-description {
     font-size: 0.75rem;
-    color: rgba(255, 255, 255, 0.4);
+    color: rgba(255, 255, 255, 0.65);
     margin-bottom: 4px;
     font-style: italic;
 }
 
 .prompt-item-preview {
     font-size: 0.8rem;
-    color: rgba(255, 255, 255, 0.5);
+    color: rgba(255, 255, 255, 0.65);
     line-height: 1.4;
 }
 
 .prompt-empty {
     text-align: center;
     padding: 20px;
-    color: rgba(255, 255, 255, 0.5);
+    color: rgba(255, 255, 255, 0.65);
     font-size: 0.85rem;
 }
 
@@ -6393,7 +6395,7 @@ body.instance-locked .lock-modal-overlay {
 }
 
 .prompt-create-link {
-    color: #8b5cf6;
+    color: #c4b5fd;
     text-decoration: none;
     font-size: 0.8rem;
 }
@@ -6405,7 +6407,7 @@ body.instance-locked .lock-modal-overlay {
 .prompt-error {
     text-align: center;
     padding: 20px;
-    color: #ef4444;
+    color: #fca5a5;
     font-size: 0.85rem;
 }
 
@@ -6425,7 +6427,7 @@ body.instance-locked .lock-modal-overlay {
 }
 
 .prompt-selected-badge .badge-icon {
-    color: #8b5cf6;
+    color: #c4b5fd;
     font-size: 0.9rem;
 }
 
@@ -6525,7 +6527,7 @@ body.instance-locked .lock-modal-overlay {
 .prompt-expanded-close {
     background: rgba(239, 68, 68, 0.2);
     border: 1px solid rgba(239, 68, 68, 0.4);
-    color: #ef4444;
+    color: #fca5a5;
     font-size: 1.3rem;
     cursor: pointer;
     padding: 0;
@@ -6582,7 +6584,7 @@ body.instance-locked .lock-modal-overlay {
     background: transparent;
     border: none;
     border-bottom: 2px solid transparent;
-    color: rgba(255, 255, 255, 0.5);
+    color: rgba(255, 255, 255, 0.65);
     cursor: pointer;
     font-size: 0.85rem;
     font-weight: 500;
@@ -6594,7 +6596,7 @@ body.instance-locked .lock-modal-overlay {
 }
 
 .prompt-panel-tab.active {
-    color: #8b5cf6;
+    color: #c4b5fd;
     border-bottom-color: #8b5cf6;
 }
 
@@ -6636,7 +6638,7 @@ body.instance-locked .lock-modal-overlay {
 }
 
 .skill-item-checkbox {
-    color: rgba(255, 255, 255, 0.5);
+    color: rgba(255, 255, 255, 0.65);
     font-size: 0.9rem;
     width: 16px;
 }
@@ -6662,7 +6664,7 @@ body.instance-locked .lock-modal-overlay {
 
 .skill-item-description {
     font-size: 0.75rem;
-    color: rgba(255, 255, 255, 0.4);
+    color: rgba(255, 255, 255, 0.65);
     margin-bottom: 4px;
     margin-left: 24px;
     font-style: italic;
@@ -6670,7 +6672,7 @@ body.instance-locked .lock-modal-overlay {
 
 .skill-item-preview {
     font-size: 0.8rem;
-    color: rgba(255, 255, 255, 0.5);
+    color: rgba(255, 255, 255, 0.65);
     line-height: 1.4;
     margin-left: 24px;
 }
@@ -6742,7 +6744,7 @@ body.instance-locked .lock-modal-overlay {
 .prompt-panel-add {
     background: rgba(139, 92, 246, 0.2);
     border: 1px solid rgba(139, 92, 246, 0.3);
-    color: #8b5cf6;
+    color: #c4b5fd;
     width: 28px;
     height: 28px;
     border-radius: 6px;
@@ -6773,7 +6775,7 @@ body.instance-locked .lock-modal-overlay {
 .skill-item-edit {
     background: none;
     border: none;
-    color: rgba(255, 255, 255, 0.4);
+    color: rgba(255, 255, 255, 0.65);
     cursor: pointer;
     padding: 4px 6px;
     border-radius: 4px;
@@ -6789,7 +6791,7 @@ body.instance-locked .lock-modal-overlay {
 
 .prompt-item-edit:hover {
     background: rgba(139, 92, 246, 0.2);
-    color: #8b5cf6;
+    color: #c4b5fd;
 }
 
 .skill-item-edit:hover {
@@ -6800,7 +6802,7 @@ body.instance-locked .lock-modal-overlay {
 .prompt-create-btn {
     background: rgba(139, 92, 246, 0.2);
     border: 1px solid rgba(139, 92, 246, 0.3);
-    color: #8b5cf6;
+    color: #c4b5fd;
     padding: 8px 16px;
     border-radius: 6px;
     cursor: pointer;
@@ -6869,7 +6871,7 @@ body.instance-locked .lock-modal-overlay {
 .prompt-edit-modal-close {
     background: none;
     border: none;
-    color: rgba(255, 255, 255, 0.6);
+    color: rgba(255, 255, 255, 0.65);
     font-size: 1.5rem;
     cursor: pointer;
     padding: 0;
@@ -6899,7 +6901,7 @@ body.instance-locked .lock-modal-overlay {
     display: block;
     margin-bottom: 6px;
     font-size: 0.85rem;
-    color: rgba(255, 255, 255, 0.6);
+    color: rgba(255, 255, 255, 0.65);
 }
 
 .prompt-edit-field input,
@@ -6982,7 +6984,7 @@ body.instance-locked .lock-modal-overlay {
     border: 1px solid rgba(239, 68, 68, 0.4);
     border-radius: 6px;
     background: rgba(239, 68, 68, 0.1);
-    color: #ef4444;
+    color: #fca5a5;
     cursor: pointer;
     font-size: 0.9rem;
     transition: all 0.2s;
@@ -7033,7 +7035,7 @@ body.instance-locked .lock-modal-overlay {
 .skill-expanded-close {
     background: rgba(239, 68, 68, 0.2);
     border: 1px solid rgba(239, 68, 68, 0.4);
-    color: #ef4444;
+    color: #fca5a5;
     font-size: 1.3rem;
     cursor: pointer;
     padding: 0;
@@ -7330,7 +7332,7 @@ body.instance-locked .lock-modal-overlay {
 .file-browser-expand {
     background: none;
     border: none;
-    color: rgba(255, 255, 255, 0.5);
+    color: rgba(255, 255, 255, 0.65);
     font-size: 18px;
     cursor: pointer;
     padding: 0 4px;
@@ -7414,7 +7416,7 @@ body.instance-locked .lock-modal-overlay {
 .asset-modal-count {
     font-size: 12px;
     font-weight: 500;
-    color: rgba(255, 255, 255, 0.45);
+    color: rgba(255, 255, 255, 0.65);
 }
 
 .asset-modal-header-actions {
@@ -7425,7 +7427,7 @@ body.instance-locked .lock-modal-overlay {
 .asset-modal-icon-btn {
     background: none;
     border: none;
-    color: rgba(255, 255, 255, 0.55);
+    color: rgba(255, 255, 255, 0.65);
     font-size: 16px;
     cursor: pointer;
     padding: 6px 8px;
@@ -7472,7 +7474,7 @@ body.instance-locked .lock-modal-overlay {
 
 .asset-row > i {
     font-size: 20px;
-    color: rgba(255, 255, 255, 0.6);
+    color: rgba(255, 255, 255, 0.65);
     width: 36px;
     text-align: center;
     flex-shrink: 0;
@@ -7504,12 +7506,12 @@ body.instance-locked .lock-modal-overlay {
 
 .asset-row-size {
     font-size: 11px;
-    color: rgba(255, 255, 255, 0.4);
+    color: rgba(255, 255, 255, 0.65);
 }
 
 .asset-row-date {
     font-size: 11px;
-    color: rgba(255, 255, 255, 0.35);
+    color: rgba(255, 255, 255, 0.65);
 }
 
 .asset-modal-preview {
@@ -7526,7 +7528,7 @@ body.instance-locked .lock-modal-overlay {
     align-items: center;
     justify-content: center;
     gap: 12px;
-    color: rgba(255, 255, 255, 0.35);
+    color: rgba(255, 255, 255, 0.65);
     font-size: 14px;
 }
 
@@ -7634,7 +7636,7 @@ body.instance-locked .lock-modal-overlay {
     background: none;
     border: 1px solid rgba(255, 255, 255, 0.12);
     border-radius: 6px;
-    color: rgba(255, 255, 255, 0.6);
+    color: rgba(255, 255, 255, 0.65);
     cursor: pointer;
     padding: 6px 9px;
     flex-shrink: 0;
@@ -7648,7 +7650,7 @@ body.instance-locked .lock-modal-overlay {
 
 .asset-preview-filesize {
     font-size: 12px;
-    color: rgba(255, 255, 255, 0.4);
+    color: rgba(255, 255, 255, 0.65);
     flex-shrink: 0;
 }
 
@@ -7694,7 +7696,7 @@ body.instance-locked .lock-modal-overlay {
     align-items: center;
     justify-content: center;
     gap: 12px;
-    color: rgba(255, 255, 255, 0.5);
+    color: rgba(255, 255, 255, 0.65);
     font-size: 14px;
     text-align: center;
     padding: 24px;
@@ -7703,12 +7705,12 @@ body.instance-locked .lock-modal-overlay {
 
 .asset-preview-placeholder > i {
     font-size: 36px;
-    color: rgba(255, 255, 255, 0.35);
+    color: rgba(255, 255, 255, 0.65);
 }
 
 .asset-office-note {
     font-size: 11px;
-    color: rgba(255, 255, 255, 0.35);
+    color: rgba(255, 255, 255, 0.65);
     max-width: 320px;
 }
 
@@ -7872,7 +7874,7 @@ body.instance-locked .lock-modal-overlay {
 .file-browser-group-label {
     font-size: 11px;
     font-weight: 600;
-    color: rgba(255, 255, 255, 0.45);
+    color: rgba(255, 255, 255, 0.65);
     text-transform: uppercase;
     letter-spacing: 0.05em;
     padding: 8px 10px 4px;
@@ -7918,13 +7920,13 @@ body.instance-locked .lock-modal-overlay {
 }
 
 .file-browser-item-size {
-    color: rgba(255, 255, 255, 0.35);
+    color: rgba(255, 255, 255, 0.65);
     font-size: 11px;
     flex-shrink: 0;
 }
 
 .file-browser-item-date {
-    color: rgba(255, 255, 255, 0.3);
+    color: rgba(255, 255, 255, 0.65);
     font-size: 10px;
     flex-shrink: 0;
 }
@@ -7932,7 +7934,7 @@ body.instance-locked .lock-modal-overlay {
 .file-browser-attach-btn {
     background: none;
     border: none;
-    color: rgba(255, 255, 255, 0.4);
+    color: rgba(255, 255, 255, 0.65);
     cursor: pointer;
     padding: 2px 4px;
     border-radius: 4px;
@@ -7949,7 +7951,7 @@ body.instance-locked .lock-modal-overlay {
 .file-browser-download-btn {
     background: none;
     border: none;
-    color: rgba(255, 255, 255, 0.4);
+    color: rgba(255, 255, 255, 0.65);
     cursor: pointer;
     padding: 2px 4px;
     border-radius: 4px;
@@ -7965,7 +7967,7 @@ body.instance-locked .lock-modal-overlay {
 }
 
 .file-browser-item--attached .file-browser-attach-btn {
-    color: #22c55e;
+    color: #4ade80;
     cursor: default;
 }
 
@@ -7977,7 +7979,7 @@ body.instance-locked .lock-modal-overlay {
 .file-browser-empty {
     padding: 20px;
     text-align: center;
-    color: rgba(255, 255, 255, 0.4);
+    color: rgba(255, 255, 255, 0.65);
     font-size: 13px;
 }
 
@@ -8148,7 +8150,7 @@ body.instance-locked .lock-modal-overlay {
 }
 
 .attachment-badge .attachment-size {
-    color: rgba(255, 255, 255, 0.5);
+    color: rgba(255, 255, 255, 0.65);
     font-size: 0.7rem;
     flex-shrink: 0;
 }
@@ -8156,7 +8158,7 @@ body.instance-locked .lock-modal-overlay {
 .attachment-badge .attachment-remove {
     background: none;
     border: none;
-    color: rgba(255, 255, 255, 0.5);
+    color: rgba(255, 255, 255, 0.65);
     cursor: pointer;
     padding: 0;
     width: 16px;
@@ -8172,7 +8174,7 @@ body.instance-locked .lock-modal-overlay {
 
 .attachment-badge .attachment-remove:hover {
     background: rgba(239, 68, 68, 0.2);
-    color: #ef4444;
+    color: #fca5a5;
 }
 
 .attachment-badge .attachment-remove i {
@@ -8182,7 +8184,7 @@ body.instance-locked .lock-modal-overlay {
 
 /* PDF icon specific color */
 .attachment-badge i.fa-file-pdf {
-    color: #ef4444;
+    color: #fca5a5;
 }
 
 /* Uploaded file badge (green tint to distinguish from AI-attached files) */
@@ -8192,7 +8194,7 @@ body.instance-locked .lock-modal-overlay {
 }
 
 .attachment-badge--uploaded i {
-    color: #22c55e;
+    color: #4ade80;
 }
 
 .attachment-badge--uploaded .attachment-name {
@@ -8274,11 +8276,11 @@ body.instance-locked .lock-modal-overlay {
 }
 
 .message-attachment-badge i.fa-file-pdf {
-    color: #ef4444;
+    color: #fca5a5;
 }
 
 .message-attachment-badge i.fa-file-video {
-    color: #8b5cf6;
+    color: #c4b5fd;
 }
 
 .message-attachment-badge i.fa-file-audio {
@@ -8362,7 +8364,7 @@ body.instance-locked .lock-modal-overlay {
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    color: rgba(255, 255, 255, 0.4);
+    color: rgba(255, 255, 255, 0.65);
     position: sticky;
     top: 0;
     background: inherit;
@@ -8382,7 +8384,7 @@ body.instance-locked .lock-modal-overlay {
 .slash-command-empty {
     padding: 10px 14px;
     font-size: 0.85rem;
-    color: rgba(255, 255, 255, 0.55);
+    color: rgba(255, 255, 255, 0.65);
     font-style: italic;
 }
 
@@ -8431,7 +8433,7 @@ body.instance-locked .lock-modal-overlay {
     line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
-    color: rgba(255, 255, 255, 0.6);
+    color: rgba(255, 255, 255, 0.65);
     font-size: 0.8rem;
     line-height: 1.35;
 }
@@ -8452,7 +8454,7 @@ body.instance-locked .lock-modal-overlay {
 
 /* Open-on-llamapress.ai link; picking the row itself fills the composer. */
 .slash-command-item .cookbook-open {
-    color: rgba(255, 255, 255, 0.35);
+    color: rgba(255, 255, 255, 0.65);
     font-size: 0.8rem;
     padding: 2px 4px;
     text-decoration: none;
@@ -8637,11 +8639,11 @@ body.instance-locked .lock-modal-overlay {
 }
 
 .slash-command-toast.success .toast-icon {
-    color: #22c55e;
+    color: #4ade80;
 }
 
 .slash-command-toast.error .toast-icon {
-    color: #ef4444;
+    color: #fca5a5;
 }
 
 .slash-command-toast.info .toast-icon {
@@ -8659,7 +8661,7 @@ body.instance-locked .lock-modal-overlay {
 .slash-command-toast .toast-close {
     background: none;
     border: none;
-    color: rgba(255, 255, 255, 0.5);
+    color: rgba(255, 255, 255, 0.65);
     cursor: pointer;
     padding: 0;
     font-size: 0.9rem;
@@ -8730,7 +8732,7 @@ body.instance-locked .lock-modal-overlay {
 .command-history-modal .modal-close {
     background: none;
     border: none;
-    color: rgba(255, 255, 255, 0.5);
+    color: rgba(255, 255, 255, 0.65);
     cursor: pointer;
     padding: 8px;
     font-size: 1rem;
@@ -8757,12 +8759,12 @@ body.instance-locked .lock-modal-overlay {
     justify-content: center;
     gap: 10px;
     padding: 40px 20px;
-    color: rgba(255, 255, 255, 0.6);
+    color: rgba(255, 255, 255, 0.65);
     font-size: 0.95rem;
 }
 
 .history-error {
-    color: #ef4444;
+    color: #fca5a5;
 }
 
 .command-history-item {
@@ -8779,11 +8781,11 @@ body.instance-locked .lock-modal-overlay {
 }
 
 .command-history-item.success .history-status-icon {
-    color: #22c55e;
+    color: #4ade80;
 }
 
 .command-history-item.error .history-status-icon {
-    color: #ef4444;
+    color: #fca5a5;
 }
 
 .history-item-header {
@@ -8829,12 +8831,12 @@ body.instance-locked .lock-modal-overlay {
 }
 
 .history-time {
-    color: rgba(255, 255, 255, 0.4);
+    color: rgba(255, 255, 255, 0.65);
     font-size: 0.8rem;
 }
 
 .history-expand-icon {
-    color: rgba(255, 255, 255, 0.4);
+    color: rgba(255, 255, 255, 0.65);
     font-size: 0.75rem;
     transition: transform 0.2s ease;
 }
@@ -8858,12 +8860,12 @@ body.instance-locked .lock-modal-overlay {
 }
 
 .history-output-section.stderr .history-output-label {
-    color: #ef4444;
+    color: #fca5a5;
 }
 
 .history-output-label {
     font-size: 0.75rem;
-    color: rgba(255, 255, 255, 0.5);
+    color: rgba(255, 255, 255, 0.65);
     text-transform: uppercase;
     letter-spacing: 0.5px;
     margin-bottom: 6px;
@@ -8892,7 +8894,7 @@ body.instance-locked .lock-modal-overlay {
     padding-top: 12px;
     border-top: 1px solid rgba(255, 255, 255, 0.08);
     font-size: 0.75rem;
-    color: rgba(255, 255, 255, 0.4);
+    color: rgba(255, 255, 255, 0.65);
 }
 
 /* Mobile responsive for command history */
@@ -8983,7 +8985,7 @@ body.instance-locked .lock-modal-overlay {
 .command-output-modal .modal-close {
     background: none;
     border: none;
-    color: rgba(255, 255, 255, 0.5);
+    color: rgba(255, 255, 255, 0.65);
     cursor: pointer;
     padding: 8px;
     font-size: 1rem;
@@ -9013,14 +9015,14 @@ body.instance-locked .lock-modal-overlay {
 
 .command-output-modal .output-label {
     font-size: 0.75rem;
-    color: rgba(255, 255, 255, 0.5);
+    color: rgba(255, 255, 255, 0.65);
     text-transform: uppercase;
     letter-spacing: 0.5px;
     margin-bottom: 8px;
 }
 
 .command-output-modal .output-label.stderr {
-    color: #ef4444;
+    color: #fca5a5;
 }
 
 .command-output-modal .output-content {
@@ -9044,7 +9046,7 @@ body.instance-locked .lock-modal-overlay {
     padding-top: 16px;
     border-top: 1px solid rgba(255, 255, 255, 0.08);
     font-size: 0.8rem;
-    color: rgba(255, 255, 255, 0.4);
+    color: rgba(255, 255, 255, 0.65);
 }
 
 .command-output-modal .stderr-section.hidden {
@@ -9068,7 +9070,7 @@ body.instance-locked .lock-modal-overlay {
 
 .slash-command-toast .toast-hint {
     font-size: 0.75rem;
-    color: rgba(255, 255, 255, 0.4);
+    color: rgba(255, 255, 255, 0.65);
     margin-top: 6px;
 }
 
@@ -9157,20 +9159,133 @@ body.instance-locked .lock-modal-overlay {
     font-size: 18px;
 }
 
-/* Unsaved changes badge (red dot) */
-.unsaved-badge {
+/* "Changes not yet saved" dot (LP-46): small and neutral, never a red alarm.
+   Its meaning is in its aria-label and the button's label, not its colour. */
+.save-pending-dot {
     position: absolute;
     top: 4px;
     right: 4px;
-    width: 8px;
-    height: 8px;
-    background: #ef4444;
+    width: 7px;
+    height: 7px;
+    background: #a1a1aa;
     border-radius: 50%;
     border: 1px solid var(--bg-color, #1a1a1a);
 }
 
-.unsaved-badge.hidden {
+.save-pending-dot.hidden {
     display: none;
+}
+
+/* History panel save status (LP-46). Colours on #1e1e1e: #e5e7eb 13.5:1,
+   #a1a1aa 6.5:1, #4ade80 9.6:1 — all past WCAG AA's 4.5:1. */
+.save-status {
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border-color, #333);
+    color: #e5e7eb;
+    font-size: 0.85rem;
+}
+
+.save-status-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.save-status-icon {
+    color: #a1a1aa;
+    font-size: 1rem;
+}
+
+.save-status[data-state="saved"] .save-status-icon {
+    color: #4ade80;
+}
+
+.save-status-body {
+    flex: 1;
+    min-width: 0;
+}
+
+.save-status-time,
+.save-status-detail,
+.save-status-note,
+.go-back-help {
+    color: #a1a1aa;
+}
+
+.save-status-detail {
+    display: block;
+    font-size: 0.78rem;
+    margin-top: 2px;
+}
+
+/* LP-49: link to the auto-save switch, shown only while auto-save is off. */
+.save-status-autosave-link {
+    display: inline-block;
+    margin-top: 2px;
+    color: #c4b5fd;
+    font-size: 0.78rem;
+    text-decoration: underline;
+}
+
+.save-status-autosave-link.hidden,
+.save-status-detail.hidden,
+.save-status-files-toggle.hidden,
+.changed-files-section.hidden,
+.btn-save-now.hidden {
+    display: none;
+}
+
+.btn-save-now {
+    padding: 5px 10px;
+    border: 1px solid #a1a1aa;
+    border-radius: 4px;
+    background: transparent;
+    color: #e5e7eb;
+    font-size: 0.8rem;
+    cursor: pointer;
+}
+
+.btn-save-now:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.save-status-files-toggle {
+    margin-top: 8px;
+    padding: 2px 0;
+    background: none;
+    border: none;
+    color: #e5e7eb;
+    font-size: 0.8rem;
+    text-decoration: underline;
+    cursor: pointer;
+}
+
+.changed-files-section .uncommitted-file-list {
+    margin: 6px -16px 0;
+}
+
+.changed-files-section .btn-discard-changes {
+    margin-top: 8px;
+}
+
+.save-status-note {
+    margin: 8px 0 0;
+    font-size: 0.75rem;
+}
+
+.btn-save-now:focus-visible,
+.save-status-autosave-link:focus-visible,
+.save-status-files-toggle:focus-visible,
+.btn-discard-changes:focus-visible,
+.btn-detail-rollback:focus-visible {
+    outline: 2px solid #93c5fd;
+    outline-offset: 2px;
+}
+
+.go-back-help {
+    display: block;
+    width: 100%;
+    font-size: 0.75rem;
 }
 
 /* Checkpoint panel */
@@ -9212,7 +9327,7 @@ body.instance-locked .lock-modal-overlay {
 .save-checkpoint-btn {
     background: none;
     border: none;
-    color: #8b5cf6;
+    color: #c4b5fd;
     font-size: 1.1rem;
     cursor: pointer;
     padding: 4px 8px;
@@ -9388,7 +9503,7 @@ body.instance-locked .lock-modal-overlay {
 
 .expand-history-btn:hover {
     background-color: rgba(139, 92, 246, 0.2);
-    color: #8b5cf6;
+    color: #c4b5fd;
 }
 
 .close-checkpoint-panel {
@@ -9509,7 +9624,7 @@ body.instance-locked .lock-modal-overlay {
     font-size: 0.8rem;
     cursor: pointer;
     background: rgba(239, 68, 68, 0.2);
-    color: #ef4444;
+    color: #fca5a5;
     transition: all 0.2s ease;
 }
 
@@ -9684,7 +9799,7 @@ body.instance-locked .lock-modal-overlay {
 }
 
 .uncommitted-file-item.new i {
-    color: #22c55e;
+    color: #4ade80;
 }
 
 .uncommitted-file-name {
@@ -9709,7 +9824,7 @@ body.instance-locked .lock-modal-overlay {
 
 .uncommitted-file-item.new .uncommitted-file-type {
     background: rgba(34, 197, 94, 0.2);
-    color: #22c55e;
+    color: #4ade80;
 }
 
 .checkpoint-panel-content {
@@ -9824,7 +9939,7 @@ body.instance-locked .lock-modal-overlay {
 }
 
 .checkpoint-file-item i {
-    color: #8b5cf6;
+    color: #c4b5fd;
     font-size: 0.75rem;
 }
 
@@ -9836,12 +9951,12 @@ body.instance-locked .lock-modal-overlay {
 
 .checkpoint-file-item.no-files,
 .checkpoint-file-item.error {
-    color: var(--text-secondary, #888);
+    color: var(--text-secondary, #b0b0b0);
     font-style: italic;
 }
 
 .checkpoint-file-item.error {
-    color: #ef4444;
+    color: #fca5a5;
 }
 
 .checkpoint-file-list-loading {
@@ -9879,7 +9994,7 @@ body.instance-locked .lock-modal-overlay {
 
 .btn-rollback {
     background: rgba(139, 92, 246, 0.2);
-    color: #8b5cf6;
+    color: #c4b5fd;
     border: 1px solid #8b5cf6;
 }
 
@@ -9896,7 +10011,7 @@ body.instance-locked .lock-modal-overlay {
 
 .btn-rollback:disabled:hover {
     background: rgba(139, 92, 246, 0.1);
-    color: #8b5cf6;
+    color: #c4b5fd;
 }
 
 .checkpoint-empty-state {
@@ -9994,7 +10109,7 @@ body.instance-locked .lock-modal-overlay {
 
 /* Current HEAD indicator */
 .current-indicator {
-    color: #8b5cf6;
+    color: #c4b5fd;
     font-size: 0.75rem;
     margin-right: 4px;
 }
@@ -10014,21 +10129,21 @@ body.instance-locked .lock-modal-overlay {
     padding: 1px 6px;
     border-radius: 3px;
     background: rgba(139, 92, 246, 0.2);
-    color: #8b5cf6;
+    color: #c4b5fd;
     font-weight: 500;
     white-space: nowrap;
 }
 
 .git-ref-badge:first-child {
     background: rgba(34, 197, 94, 0.2);
-    color: #22c55e;
+    color: #4ade80;
 }
 
 /* SHA badge in commit row */
 .git-commit-sha-badge {
     font-family: 'Monaco', 'Menlo', monospace;
     font-size: 0.7rem;
-    color: var(--text-secondary, #888);
+    color: var(--text-secondary, #b0b0b0);
     background: rgba(139, 92, 246, 0.1);
     padding: 2px 6px;
     border-radius: 3px;
@@ -10038,13 +10153,13 @@ body.instance-locked .lock-modal-overlay {
 
 .git-commit-sha-badge:hover {
     background: rgba(139, 92, 246, 0.3);
-    color: #8b5cf6;
+    color: #c4b5fd;
 }
 
 /* Files count badge */
 .checkpoint-files-count {
     font-size: 0.8rem;
-    color: var(--text-secondary, #888);
+    color: var(--text-secondary, #b0b0b0);
 }
 
 .checkpoint-files-count i {
@@ -10083,12 +10198,12 @@ body.instance-locked .lock-modal-overlay {
     justify-content: center;
     padding: 24px 16px;
     text-align: center;
-    color: var(--text-secondary, #888);
+    color: var(--text-secondary, #b0b0b0);
 }
 
 .checkpoint-error-state i {
     font-size: 2rem;
-    color: #ef4444;
+    color: #fca5a5;
     margin-bottom: 12px;
 }
 
@@ -10121,7 +10236,7 @@ body.instance-locked .lock-modal-overlay {
     gap: 6px;
     background: rgba(139, 92, 246, 0.2);
     border: 1px solid rgba(139, 92, 246, 0.4);
-    color: #8b5cf6;
+    color: #c4b5fd;
     padding: 8px 16px;
     border-radius: 6px;
     cursor: pointer;
@@ -10174,7 +10289,7 @@ body.instance-locked .lock-modal-overlay {
     font-family: 'Monaco', 'Menlo', monospace;
     font-size: 0.85rem;
     background: rgba(139, 92, 246, 0.2);
-    color: #8b5cf6;
+    color: #c4b5fd;
     padding: 4px 10px;
     border-radius: 4px;
     cursor: pointer;
@@ -10233,7 +10348,7 @@ body.instance-locked .lock-modal-overlay {
 
 .detail-meta-row i {
     width: 14px;
-    color: #8b5cf6;
+    color: #c4b5fd;
 }
 
 .checkpoint-detail-files {
@@ -10253,7 +10368,7 @@ body.instance-locked .lock-modal-overlay {
 }
 
 .checkpoint-detail-files-header i {
-    color: #8b5cf6;
+    color: #c4b5fd;
 }
 
 .checkpoint-detail-files-list {
@@ -10277,7 +10392,7 @@ body.instance-locked .lock-modal-overlay {
 }
 
 .detail-file-item i {
-    color: #8b5cf6;
+    color: #c4b5fd;
     font-size: 0.75rem;
     flex-shrink: 0;
 }
@@ -10292,13 +10407,13 @@ body.instance-locked .lock-modal-overlay {
 .no-files,
 .error-files {
     font-size: 0.85rem;
-    color: var(--text-secondary, #888);
+    color: var(--text-secondary, #b0b0b0);
     font-style: italic;
     padding: 8px;
 }
 
 .error-files {
-    color: #ef4444;
+    color: #fca5a5;
 }
 
 .checkpoint-detail-actions {
@@ -10326,7 +10441,7 @@ body.instance-locked .lock-modal-overlay {
 
 .btn-detail-rollback {
     background: rgba(139, 92, 246, 0.2);
-    color: #8b5cf6;
+    color: #c4b5fd;
     border: 1px solid #8b5cf6;
 }
 
@@ -10720,7 +10835,7 @@ body.instance-locked .lock-modal-overlay {
     gap: 10px;
     margin-top: 20px;
     padding: 12px;
-    color: rgba(255, 255, 255, 0.6);
+    color: rgba(255, 255, 255, 0.65);
     font-size: 0.9rem;
 }
 
@@ -10731,7 +10846,7 @@ body.instance-locked .lock-modal-overlay {
 .gh-auth-check-btn {
     background: rgba(255, 255, 255, 0.08);
     border: 1px solid rgba(255, 255, 255, 0.15);
-    color: rgba(255, 255, 255, 0.5);
+    color: rgba(255, 255, 255, 0.65);
     padding: 4px 8px;
     border-radius: 4px;
     cursor: pointer;
@@ -10761,7 +10876,7 @@ body.instance-locked .lock-modal-overlay {
 
 .gh-auth-success i {
     font-size: 2.5rem;
-    color: #22c55e;
+    color: #4ade80;
 }
 
 .gh-auth-success p {
@@ -10781,7 +10896,7 @@ body.instance-locked .lock-modal-overlay {
 
 .gh-auth-error i {
     font-size: 2.5rem;
-    color: #ef4444;
+    color: #fca5a5;
 }
 
 .gh-auth-error p {
@@ -10797,7 +10912,7 @@ body.instance-locked .lock-modal-overlay {
     border-radius: 6px;
     font-family: 'SF Mono', Monaco, monospace;
     font-size: 0.8rem;
-    color: rgba(255, 255, 255, 0.6);
+    color: rgba(255, 255, 255, 0.65);
     white-space: pre-wrap;
     word-break: break-all;
     max-height: 120px;
@@ -10876,7 +10991,7 @@ body.instance-locked .lock-modal-overlay {
 .chatgpt-copy-icon {
     font-size: 15px;
     letter-spacing: normal;
-    color: rgba(255, 255, 255, 0.35);
+    color: rgba(255, 255, 255, 0.65);
     transition: color 0.15s;
 }
 
@@ -10953,7 +11068,7 @@ body.instance-locked .lock-modal-overlay {
 .chatgpt-method {
     font-size: 13px;
     line-height: 1.5;
-    color: rgba(255, 255, 255, 0.6);
+    color: rgba(255, 255, 255, 0.65);
 }
 
 .chatgpt-method.warn {
@@ -10967,7 +11082,7 @@ body.instance-locked .lock-modal-overlay {
     align-items: center;
     gap: 8px;
     font-size: 0.75rem;
-    color: rgba(255, 255, 255, 0.55);
+    color: rgba(255, 255, 255, 0.65);
     white-space: nowrap;
     overflow: hidden;
 }
@@ -11007,7 +11122,7 @@ body.instance-locked .lock-modal-overlay {
 /* Red while live, with a pulsing dot, so it is obvious the mic is open. */
 .send-controls .mic-button.recording,
 .send-controls .mic-button.recording:hover {
-    color: #ef4444;
+    color: #fca5a5;
     position: relative;
 }
 

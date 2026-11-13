@@ -199,6 +199,10 @@ export class MessageHandler {
       this.handleBrowserCommand(data);
     } else if (data.type === 'delegation_progress') {
       window.chatApp?.handleDelegationProgress(data);
+    } else if (data.type === 'save_status') {
+      // LP-46: Leo just saved (or tried to) at the end of a turn — re-read the
+      // History panel's status now instead of waiting for the next poll.
+      window.chatApp?.checkpointManager?.refreshSaveStatus?.();
     } else if (data.type === 'model_substituted') {
       // This turn is not running on the model the dropdown shows. Two causes,
       // told apart by data.reason: 'policy' (operator disabled the pick, raised

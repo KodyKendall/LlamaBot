@@ -535,15 +535,9 @@ def locate_normalized_span(content: str, old_string: str, *, ignore_indentation:
     return spans[first][0], spans[first + len(needle) - 1][1]
 
 
-# NOTE: Auto-checkpoint functionality has been disabled.
-# Users now manually create checkpoints via the History panel UI.
-# The checkpoint_service is still used by the /api/checkpoints endpoint for manual creation.
-#
-# def maybe_create_checkpoint(runtime: ToolRuntime, description: str):
-#     """Create a git checkpoint before file modifications if not already created this turn.
-#     ...
-#     """
-#     pass
+# Saving is NOT done per tool call. Leo commits once at the END of every turn that
+# changed files (LP-46): RunManager._wrap -> run_manager.autosave_hook ->
+# checkpoint_service.autosave_after_turn. One commit per turn, never per edit.
 
 
 @tool(description=LIST_DIRECTORY_DESCRIPTION)
@@ -643,7 +637,7 @@ def write_file(
     except PathTraversalError as e:
         return Command(update={"messages": [ToolMessage(f"Error: {e}", tool_call_id=runtime.tool_call_id)]})
 
-    # NOTE: Auto-checkpoint disabled. Users create checkpoints manually via History panel.
+    # Saved once at the end of the turn, not here (LP-46, see the note above ls).
 
     # Whether this call creates the file decides if we bother checking that the
     # running Rails app can see it (see below) — read it before the write.
@@ -877,7 +871,7 @@ def edit_file(
     except PathTraversalError as e:
         return Command(update={"messages": [ToolMessage(f"Error: {e}", tool_call_id=tool_call_id)]})
 
-    # NOTE: Auto-checkpoint disabled. Users create checkpoints manually via History panel.
+    # Saved once at the end of the turn, not here (LP-46, see the note above ls).
 
     # Read-modify-write, serialized per file: two edit_file calls in one message
     # run concurrently, and without this the second one replaces the first one's
@@ -3618,3 +3612,63 @@ def get_browser_js_logs(runtime: ToolRuntime) -> Command:
 def execute_browser_js(code: str, runtime: ToolRuntime) -> Command:
     """Execute JavaScript in the user's live Rails iframe and return the serialized result."""
     return _browser_command("execute_js", {"code": code}, runtime.tool_call_id)
+
+
+# ============================================================================
+# view_image (LP-44): actually look at an image in the app
+# ============================================================================
+
+VIEW_IMAGE_DESCRIPTION = """Look at an image file in the Rails app, e.g. one the user uploaded.
+
+Args: path — relative to the Rails app, like "app/assets/images/header.png". Images live
+under app/assets/images, app/imports or public. PNG, JPEG, GIF and WebP.
+
+Call this BEFORE describing, matching or building from any image. Never say you have
+looked at an image without calling it. Large images are shrunk before you see them."""
+
+
+@tool(description=VIEW_IMAGE_DESCRIPTION)
+def view_image(path: str, runtime: ToolRuntime) -> Command:
+    """Show the model an image from the app, under the LP-44 path and vision rules."""
+    from langchain_core.messages import HumanMessage
+    from app.lib import app_images
+    from app.agents.leonardo.model_policy import enabled_default_model
+
+    tool_call_id = runtime.tool_call_id
+    model = (runtime.state or {}).get("llm_model") or enabled_default_model()
+
+    def reply(text):
+        return Command(update={"messages": [ToolMessage(text, tool_call_id=tool_call_id)]})
+
+    reason = app_images.image_gate(model)
+    if reason:
+        app_images.log_skipped(path, model, reason)
+        if reason == "vision off":
+            return reply(f"Image viewing is not enabled on this workspace, so I can't look at {path}. "
+                         "Tell the user to email support@llamapress.ai to enable it.")
+        if reason == "zdr":
+            return reply(f"{model} is not approved under this workspace's zero data retention rules, "
+                         f"so I can't look at {path}. The user can pick an approved model.")
+        return reply(f"{model} cannot see images, so I can't look at {path}. Tell the user, and "
+                     "suggest switching to a model that can see images. Do not guess its contents.")
+
+    try:
+        image = app_images.load_app_image(path, model=model)
+    except app_images.ImageRefused as refused:
+        return reply(f"Can't open {path}: {refused}. Use a path under app/assets/images, "
+                     "app/imports or public.")
+
+    # Most providers (every OpenAI-compatible one) accept text only in a tool result,
+    # so the picture rides in the very next message. Flagged so the chat history hides
+    # it, and scrubbed like any image if the thread later moves to a text-only model.
+    return Command(update={"messages": [
+        ToolMessage(f"Opened {path}. The image is in the next message.", tool_call_id=tool_call_id),
+        HumanMessage(
+            content=[
+                {"type": "text", "text": f"[view_image: {path}]"},
+                {"type": "image_url",
+                 "image_url": {"url": f"data:{image['mime_type']};base64,{image['data']}"}},
+            ],
+            additional_kwargs={"view_image": True},
+        ),
+    ]})

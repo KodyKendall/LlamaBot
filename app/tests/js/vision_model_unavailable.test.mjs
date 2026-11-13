@@ -67,29 +67,18 @@ test('the auto-switch target is a backend-resolved vision model, not gpt-5-nano'
   );
 });
 
-test('the switch toast names the model the user is actually moved to', () => {
-  assert.doesNotMatch(
-    INDEX_JS,
-    /I switched to GPT-5 Nano/,
-    'the toast must not name a model we no longer switch to',
-  );
-  // Was the IMAGE_MODEL_LABEL constant; since the target is box-dependent, a
-  // constant label would name the wrong model on a DeepSeek box. modelLabel()
-  // reads it off the dropdown option actually being switched to.
-  assert.match(INDEX_JS, /this\.modelLabel\(imageModel\)/);
+test('no toast claims a model switch any more (LP-44)', () => {
+  // LP-44 replaced the automatic switch with a notice naming the models that can
+  // see images; nothing may say "I switched to ..." for an image.
+  assert.doesNotMatch(INDEX_JS, /I switched to/);
 });
 
-test('an unavailable image model refuses the send instead of falling through', () => {
-  // The regression guarded: the `if (imageModelAvailable)` block used to have no
-  // else, so an image on a no-vision box was sent to a text-only model.
-  const autoSwitch = INDEX_JS.slice(
-    INDEX_JS.indexOf('--- Auto-switch model when an image is attached'),
-    INDEX_JS.indexOf('--- end auto-switch ---'),
-  );
-  assert.ok(autoSwitch.length > 0, 'auto-switch block not found — did the markers move?');
-  assert.match(autoSwitch, /}\s*else\s*{/, 'the unavailable-image-model case must be handled');
-  assert.match(autoSwitch, /this\.refuseImageAttachment\(\)/);
-  assert.match(autoSwitch, /return;/);
+test('a box with no usable vision model still refuses an inline image at send', () => {
+  // The regression guarded: an image on a no-vision box reached a text-only model
+  // and 400ed mid-stream. The vision gate refuses it before anything is sent (and
+  // the server strips images for text-only models as the backstop, LP-44).
+  assert.match(INDEX_JS,
+    /if \(!this\.visionUsable\(\) && this\.hasImageAttachment\(attachments\)\) \{\s*this\.refuseImageAttachment\(\);\s*return;/);
 });
 
 test('the frontend no longer hardcodes the default model', () => {

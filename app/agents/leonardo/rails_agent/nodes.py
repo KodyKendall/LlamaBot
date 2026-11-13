@@ -24,7 +24,7 @@ from langchain_core.messages import SystemMessage
 from app.agents.leonardo.rails_agent.state import RailsAgentState
 from app.agents.leonardo.rails_agent.tools import (
     write_todos, ls, read_file, write_file, edit_file, check_page,
-    glob_files, grep_files,
+    glob_files, grep_files, view_image,
     bash_command, tail_rails_logs, hard_restart_rails, fix_permissions,
     git_status, git_commit, git_command, github_cli_command, internet_search,
     save_memory, list_memories, delete_memory,
@@ -57,6 +57,7 @@ from app.agents.utils.token_counter import (
     SUMMARIZATION_TOKEN_THRESHOLD,
 )
 from app.agents.leonardo.rails_agent.sub_agents import delegate_task, delegate_research
+from app.agents.leonardo.accessible_views import ACCESSIBLE_VIEWS_DIRECTIVE
 
 import logging
 logger = logging.getLogger(__name__)
@@ -70,7 +71,7 @@ def get_cached_system_prompt():
     full_prompt = with_friction_section(
         build_system_prompt_with_project_context(
             RAILS_AGENT_PROMPT,
-            suffix=SCHEDULED_RAILS_JOBS_DIRECTIVE + UPLOADED_FILES_DIRECTIVE,
+            suffix=SCHEDULED_RAILS_JOBS_DIRECTIVE + UPLOADED_FILES_DIRECTIVE + ACCESSIBLE_VIEWS_DIRECTIVE,
             agent_mode="rails_agent",
         )
     )
@@ -186,6 +187,7 @@ default_tools = [
     ls, read_file, write_file, edit_file, check_page,
     glob_files, grep_files,
     box_read_uploaded_file,  # read_uploaded_file: PDF/DOCX/XLSX/CSV text of chat uploads (LP-24)
+    view_image,  # look at an image in the app (LP-44)
     bash_command,
     tail_rails_logs,
     hard_restart_rails,
