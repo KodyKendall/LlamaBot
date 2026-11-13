@@ -152,6 +152,14 @@
     closer.click();
   }
 
+  // A panel with nothing to Tab to (the drawer on a box with no conversations yet)
+  // still takes focus, on its heading, so Escape and screen readers land inside it.
+  function focusInto(panel) {
+    const target = focusables(panel)[0] || panel.querySelector('h1,h2,h3,h4') || panel;
+    if (!target.matches(FOCUSABLE) && !target.hasAttribute('tabindex')) target.setAttribute('tabindex', '-1');
+    target.focus();
+  }
+
   function syncPopovers() {
     POPOVERS.forEach((popover) => {
       const els = popoverElements(popover);
@@ -165,7 +173,7 @@
       trigger.setAttribute('aria-expanded', String(open));
 
       if (open && !popover.wasOpen && popover.moveFocus && document.activeElement === trigger) {
-        focusables(panel)[0]?.focus();
+        focusInto(panel);
       }
       if (!open && popover.wasOpen) {
         const active = document.activeElement;

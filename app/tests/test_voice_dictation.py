@@ -340,3 +340,16 @@ def test_settings_toggle_live_with_a_key():
     on = voice_dictation_setting_row(enabled=True, key_configured=True)
     assert "disabled" not in off and "checked" not in off
     assert "checked" in on
+
+
+def test_greyed_out_row_keeps_its_label_readable():
+    """LP-34: axe flags the "Voice Dictation" label for colour contrast when the whole
+    row is faded with opacity. Only the switch may look dimmed; the text stays legible.
+    """
+    import re
+
+    from app.routers.ui import voice_dictation_setting_row
+
+    row = voice_dictation_setting_row(enabled=False, key_configured=False)
+    menu_item = re.search(r'<div class="menu-item"[^>]*>', row).group(0)
+    assert "opacity" not in menu_item

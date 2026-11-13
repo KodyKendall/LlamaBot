@@ -195,10 +195,10 @@ def voice_dictation_setting_row(*, enabled: bool, key_configured: bool) -> str:
         " and restart to turn this on."
     )
     return f"""
-            <div class="menu-item" style="cursor: default;{'' if key_configured else ' opacity: 0.45;'}">
+            <div class="menu-item" style="cursor: default;">
                 <i class="fa-solid fa-microphone"></i>
                 <span>Voice Dictation</span>
-                <label style="position: relative; display: inline-block; width: 44px; height: 24px;">
+                <label style="position: relative; display: inline-block; width: 44px; height: 24px;{'' if key_configured else ' opacity: 0.45;'}">
                     <input type="checkbox" id="voiceDictationToggle" aria-label="Voice dictation" style="opacity: 0; width: 0; height: 0;"
                         onchange="toggleVoiceDictation(this)"{' checked' if on else ''}{lock}>
                     <span style="position: absolute; cursor: {'pointer' if key_configured else 'not-allowed'}; top: 0; left: 0; right: 0; bottom: 0; background-color: {'#8b5cf6' if on else '#555'}; border-radius: 24px; transition: 0.3s;"></span>
