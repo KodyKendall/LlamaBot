@@ -27,6 +27,11 @@ logger = logging.getLogger(__name__)
 
 MAGIC_LINK_SECRET_ENV = "LLAMAPRESS_AI_LOGIN_SECRET"
 
+# Tokens on this secret minted for something other than signing in. The login
+# path refuses them, so a token handed to an API caller is never a login link.
+MCP_AUDIENCE = "llamabot_mcp"
+NON_LOGIN_AUDIENCES = frozenset({MCP_AUDIENCE})
+
 # 30 seconds of clock skew tolerance for the exp claim (standard JWT practice).
 CLOCK_SKEW_SECONDS = 30
 
@@ -52,11 +57,25 @@ def _b64url_decode(s: str) -> bytes:
 def verify_magic_link_token(token: str) -> str:
     """Verify a Rails-generated magic-link token. Returns the username on success.
 
+    A login link carries no ``aud``. A token minted for another purpose on the
+    same secret (the builder MCP token, ``aud: "llamabot_mcp"``) is refused
+    here, so it can never be replayed as a sign-in link.
+
     Raises:
         MagicLinkSecretMissing: LLAMAPRESS_AI_LOGIN_SECRET env var is unset.
             Caller should map this to a 503 with a clear operator-facing message.
         MagicLinkInvalid: malformed, bad signature, expired, or wrong shape.
             Caller should map this to a 401.
+    """
+    return verify_magic_link_claims(token, audience=None)["username"]
+
+
+def verify_magic_link_claims(token: str, audience=None) -> dict:
+    """Verify a token on the per-box login secret and return its claims.
+
+    Same format, secret and checks as the magic link. ``audience`` must match the
+    token's ``aud`` claim exactly; ``None`` means a plain login link, which must
+    not carry one of the ``NON_LOGIN_AUDIENCES``. Raises the same errors as ``verify_magic_link_token``.
     """
     secret = os.getenv(MAGIC_LINK_SECRET_ENV)
     if not secret:
@@ -102,4 +121,13 @@ def verify_magic_link_token(token: str) -> str:
     if time.time() > exp + CLOCK_SKEW_SECONDS:
         raise MagicLinkInvalid("token expired")
 
-    return username
+    aud = payload.get("aud")
+    if audience is None:
+        # A login link. Older mothership tokens may carry other claims, so only
+        # the audiences that are known NOT to be logins are refused.
+        if aud in NON_LOGIN_AUDIENCES:
+            raise MagicLinkInvalid("wrong audience")
+    elif aud != audience:
+        raise MagicLinkInvalid("wrong audience")
+
+    return payload
