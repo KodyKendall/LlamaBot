@@ -71,6 +71,9 @@ _ALLOWED_KEYS = (
     # Base plan (0.7.11): run only on the customer's own ChatGPT plan, never on
     # our keys. See app.agents.leonardo.customer_paid.
     "customer_paid_only",
+    # LP-50: false switches the builder MCP endpoint (/mcp) off on this box. Also
+    # honoured inside instance_overrides. See app.services.mcp_auth.is_enabled.
+    "mcp_enabled",
 )
 
 

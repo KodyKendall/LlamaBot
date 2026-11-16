@@ -442,6 +442,7 @@ async def startup_event():
         logger.warning("Signal handlers not supported on this platform/context")
 
 
-# Mount MCP Server (stubbed out for now - MCP not yet fully implemented)
-# from app.mcp_server import mcp
-# app.mount("/mcp", mcp.sse_app(mount_path=""))
+# The builder over MCP (LP-50): POST /mcp + /.well-known/oauth-protected-resource.
+# Bearer-only, off on ZDR boxes by default; see app/mcp_server.py.
+from app import mcp_server as _mcp_server
+_mcp_server.register(app)
