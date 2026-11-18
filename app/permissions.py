@@ -390,12 +390,13 @@ SYSTEM_ROUTES = (
     "/api/site-settings", "/api/vscode", "/api/skills", "/api/leonardo-md",
     "/api/write_files", "/api/setup", "/api/slash-commands", "/api/github",
     "/api/auto-backup", "/api/scheduled-jobs", "/api/checkpoints", "/api/git",
-    "/api/instance-lock", "/api/role-modes",
+    "/api/instance-lock", "/api/role-modes", "/api/versions",
 )
 # The ones among those that the chat UI also reads, so only writing them is refused.
 _SYSTEM_READS_ALLOWED = (
     "/api/site-settings", "/api/skills", "/api/slash-commands", "/api/checkpoints",
     "/api/git", "/api/instance-lock", "/api/leonardo-md", "/api/update", "/api/github/status",
+    "/api/versions",
 )
 SYSTEM_PAGES = ("/settings/environment", "/scheduled-jobs", "/git-history")
 

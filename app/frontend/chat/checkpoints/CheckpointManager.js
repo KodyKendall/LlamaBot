@@ -14,6 +14,7 @@ import { GitHubAuthModal } from './GitHubAuthModal.js';
 import { DiscardUndoCard } from './DiscardUndoCard.js';
 import { confirmLargeDiscard, needsStrongWarning } from './discardWarning.js';
 import { describeSaveStatus, undoChangesConfirmText, DOT_LABEL } from './saveStatus.js';
+import { VersionsSection } from './VersionsSection.js';
 
 export class CheckpointManager {
   constructor(chatApp) {
@@ -52,6 +53,9 @@ export class CheckpointManager {
 
     // Create checkpoint panel (hidden by default)
     this.checkpointPanel = this.createCheckpointPanel();
+
+    // Whole-app saved versions (LP-47), above the Git checkpoints.
+    this.versions = new VersionsSection(this.checkpointPanel.querySelector('.versions-mount'));
 
     // A discard still waiting for its undo shows in the chat after a reload.
     // Must run after this.checkpointPanel is set (it used to run inside
@@ -230,6 +234,7 @@ export class CheckpointManager {
           <select class="pull-branch-select"></select>
         </div>
       </div>
+      <div class="versions-mount"></div>
       <div class="save-status" data-llamabot="save-status" data-state="unknown">
         <div class="save-status-row">
           <i class="save-status-icon fa-solid fa-circle-notch" aria-hidden="true"></i>
@@ -474,6 +479,7 @@ export class CheckpointManager {
 
     if (this.isVisible) {
       this.checkpointPanel.classList.remove('hidden');
+      this.versions.refresh();
       this.fetchCheckpoints();
       this.refreshSaveStatus();
       this.checkUncommittedChanges();
@@ -481,6 +487,7 @@ export class CheckpointManager {
     } else {
       this.checkpointPanel.classList.add('hidden');
       this.checkpointPanel.querySelector('.pull-updates-panel').classList.add('hidden');
+      this.versions.stop();
     }
   }
 
