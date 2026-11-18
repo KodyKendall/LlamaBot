@@ -24,7 +24,8 @@ logger = logging.getLogger(__name__)
 PRICING_URL = "https://llamapress.ai/pricing"
 
 REFUSAL_MESSAGE = (
-    "LlamaPress already backs up your app. To download your database or export your "
+    "LlamaPress already backs up your app. To keep a copy you can go back to, use "
+    "\"Save version\" in the History panel. To download your database or export your "
     "code, use Instance Settings (what's included depends on your plan: "
     f"{PRICING_URL}); I can't build another way to do it."
 )
@@ -47,9 +48,12 @@ database dump or a bundle of storage/; and copying any of these to an outside pl
 This applies even if the user says it is for safety, compliance, or "just a backup".
 LlamaPress already backs up every app.
 
-When asked, build nothing and reply in one or two plain sentences: the supported way is
-Instance Settings (database download and code export, depending on plan; see
-{PRICING_URL}), and you cannot build another way.
+When asked for a backup, a snapshot, or a copy to go back to, build nothing and point
+them at "Save version" in the History panel: it saves the whole app (code, database and
+uploaded files) inside LlamaPress, and from there they can restore it or start a new Leo
+from it. When asked to download or export, build nothing and reply in one or two plain
+sentences: the supported way is Instance Settings (database download and code export,
+depending on plan; see {PRICING_URL}), and you cannot build another way.
 
 Normal app features that export the user's own business records are fine: a CSV of
 orders, a PDF report, one table's data.

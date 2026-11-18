@@ -11177,3 +11177,216 @@ body.instance-locked .lock-modal-overlay {
 .background-task-pill.hidden {
     display: none;
 }
+
+/* ------------------------------------------------------------------
+   LP-47: saved whole-app versions, top of the History panel
+   ------------------------------------------------------------------ */
+.versions-section {
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border-color, #333);
+    color: #e5e7eb;
+    font-size: 0.85rem;
+}
+
+.versions-section.hidden,
+.versions-section .hidden {
+    display: none;
+}
+
+.versions-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.versions-header h4 {
+    margin: 0;
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+
+.versions-help,
+.version-meta,
+.versions-empty {
+    margin: 4px 0 0;
+    color: #a1a1aa;
+    font-size: 0.75rem;
+}
+
+.btn-save-version,
+.save-version-actions button,
+.version-actions button,
+.version-confirm-actions button {
+    padding: 5px 10px;
+    border: 1px solid #a1a1aa;
+    border-radius: 4px;
+    background: transparent;
+    color: #e5e7eb;
+    font-size: 0.8rem;
+    cursor: pointer;
+}
+
+.btn-save-version:hover:not(:disabled),
+.save-version-actions button:hover,
+.version-actions button:hover:not(:disabled),
+.version-confirm-actions button:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.versions-section button:disabled,
+.version-confirm-actions button:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.save-version-form {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.save-version-form label,
+.version-confirm-card label {
+    font-size: 0.78rem;
+    color: #e5e7eb;
+}
+
+.save-version-form input,
+.version-confirm-card input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 6px 8px;
+    border: 1px solid #a1a1aa;
+    border-radius: 4px;
+    background: #121212;
+    color: #f4f4f5;
+    font-size: 0.85rem;
+}
+
+.save-version-actions,
+.version-actions,
+.version-confirm-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.versions-status {
+    margin-top: 6px;
+    font-size: 0.78rem;
+    color: #e5e7eb;
+}
+
+.versions-status:empty {
+    margin-top: 0;
+}
+
+.versions-upgrade-link {
+    margin-left: 6px;
+    color: #c4b5fd;
+    text-decoration: underline;
+}
+
+.versions-restoring {
+    margin-top: 8px;
+    padding: 10px;
+    border: 1px solid #93c5fd;
+    border-radius: 6px;
+    background: rgba(147, 197, 253, 0.08);
+    font-size: 0.82rem;
+}
+
+.versions-list {
+    list-style: none;
+    margin: 8px 0 0;
+    padding: 0;
+    max-height: 40vh;
+    overflow-y: auto;
+}
+
+.version-item {
+    padding: 8px 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.version-item-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.version-name {
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.version-badge {
+    flex-shrink: 0;
+    padding: 1px 6px;
+    border: 1px solid currentColor;
+    border-radius: 999px;
+    font-size: 0.7rem;
+    color: #e5e7eb;
+}
+
+.version-badge-saved {
+    color: #86efac;
+}
+
+.version-badge-failed {
+    color: #fca5a5;
+}
+
+.version-actions {
+    margin-top: 6px;
+}
+
+.version-confirm-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background: rgba(0, 0, 0, 0.6);
+}
+
+.version-confirm-card {
+    width: 100%;
+    max-width: 440px;
+    padding: 20px;
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    background: #241f3d;
+    color: var(--text-color);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.version-confirm-card h3 {
+    margin: 0;
+    font-size: 1rem;
+}
+
+.version-confirm-card p {
+    margin: 0;
+    line-height: 1.45;
+}
+
+.btn-version-confirm {
+    border-color: #c4b5fd !important;
+}
+
+.versions-section button:focus-visible,
+.versions-section input:focus-visible,
+.versions-section a:focus-visible,
+.version-confirm-card button:focus-visible,
+.version-confirm-card input:focus-visible {
+    outline: 2px solid #93c5fd;
+    outline-offset: 2px;
+}

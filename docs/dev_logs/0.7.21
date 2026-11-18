@@ -1,0 +1,4 @@
+0.7.21:
+[x] - Save, restore and clone whole-app versions from History.
+[x] - Leo points backup requests at Save version, not scripts.
+[x] - Opt-in image pulls from our registry, Docker Hub fallback.

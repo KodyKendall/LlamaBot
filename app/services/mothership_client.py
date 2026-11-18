@@ -887,3 +887,54 @@ class MothershipClient:
         except Exception as e:
             logger.info(f"Overlay ad fetch failed (no promos will show): {e}")
             return None
+
+    async def versions_call(
+        self,
+        method: str,
+        path: str = "",
+        *,
+        user: Optional[dict] = None,
+        payload: Optional[dict] = None,
+        transport: Optional[httpx.AsyncBaseTransport] = None,
+    ) -> tuple:
+        """Call the mothership's /api/leonardo/versions{path} for the signed-in user (LP-47).
+
+        Saved whole-app versions live on the mothership; this box only forwards the
+        user's request with its own box token, naming the instance and the user so
+        the mothership can authorize them. Returns ``(status, body)`` so the caller
+        can show the mothership's own message (plan limit, feature off) verbatim,
+        or ``(None, None)`` when the mothership could not be reached.
+
+        Gated on ``enabled``, not ``reporting_enabled``: this is a product action
+        the user asked for, not telemetry.
+        """
+        if not self.enabled:
+            return None, None
+
+        url = f"{self.config['mothership_url']}/api/leonardo/versions{path}"
+        headers = {"Authorization": f"Bearer {self.config['mothership_api_token']}"}
+        try:
+            async with httpx.AsyncClient(timeout=self.TIMEOUT, transport=transport) as client:
+                if method.upper() == "GET":
+                    response = await client.get(
+                        url, params={"instance_name": self.config["instance_name"]}, headers=headers
+                    )
+                else:
+                    body = {"instance_name": self.config["instance_name"], "user": user}
+                    body.update(payload or {})
+                    response = await client.request(method.upper(), url, json=body, headers=headers)
+            try:
+                data = response.json()
+            except ValueError:
+                data = {}
+            if not isinstance(data, dict):
+                data = {}
+            if response.status_code >= 400:
+                logger.info(f"versions {method} {path or '/'} -> HTTP {response.status_code}")
+            return response.status_code, data
+        except httpx.RequestError as e:
+            logger.warning(f"versions {method} {path or '/'} request failed: {e}")
+            return None, None
+        except Exception as e:  # noqa: BLE001 - never 500 the History panel
+            logger.warning(f"versions {method} {path or '/'} unexpected error: {e}")
+            return None, None
