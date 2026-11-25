@@ -1,0 +1,4 @@
+0.8.0:
+[x] - LP-52: Read-only Rails 8 fleet scan, one CSV row per box.
+[x] - LP-52: bin/upgrade-to-0.8 upgrades a box and rolls itself back.
+[ ] - LP-52: First fleet CSV + qa-candidate upgrade run (needs mothership).
