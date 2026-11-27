@@ -1,0 +1,4 @@
+0.7.22:
+[x] - LP-57: Comment on any text or item, pinned on the page.
+[x] - LP-57: Leo sees open page comments before editing a page.
+[x] - Feedback bubble works again after Back/Forward.
